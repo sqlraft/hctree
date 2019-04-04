@@ -1,5 +1,5 @@
-C Provide\sa\sDBCONFIG\sto\senable\sor\sdisable\svirtual\stables\sthat\smatch\sa\nLIKE\spattern.
-D 2019-04-04T20:21:25.235
+C Add\sthe\svtab\senable/disable\soptions\sto\sthe\ssqlite3_db_config\sTCL\scommand\sin\nthe\stestfixture.
+D 2019-04-04T22:05:22.590
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -527,7 +527,7 @@ F src/sqliteLimit.h 1513bfb7b20378aa0041e7022d04acb73525de35b80b252f1b83fedb4de6
 F src/status.c 46e7aec11f79dad50965a5ca5fa9de009f7d6bde08be2156f1538a0a296d4d0e
 F src/table.c b46ad567748f24a326d9de40e5b9659f96ffff34
 F src/tclsqlite.c cfe7f93daf9d8787f65e099efb67d7cdfc2c35236dec5d3f6758520bd3519424
-F src/test1.c cfb303eeddd3670409af6b58d2ddb928b8e9e70822d681d3df88dfaabb7bea6a
+F src/test1.c 71d49c982e29667ac068d92ce838321389713753c9c70a912955b2827d23a8b4
 F src/test2.c 3efb99ab7f1fc8d154933e02ae1378bac9637da5
 F src/test3.c 61798bb0d38b915067a8c8e03f5a534b431181f802659a6616f9b4ff7d872644
 F src/test4.c 18ec393bb4d0ad1de729f0b94da7267270f3d8e6
@@ -1815,11 +1815,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P bf3cd9364fdfc951feb04f78728eb8e0dae12b3dc5702a36bb6e69c0abab8864
-R 14f6545bfed3ba8c16bf118c02d7c850
-T *branch * disable-vtab
-T *sym-disable-vtab *
-T -sym-trunk *
+P b40a4edcebe5d027840bf515a06f5743e20e728f71badb151b88b1cdc4e32143
+R 9f9927f1acb06810a732ad7975d521f3
 U drh
-Z d77f602453d764e40f9b4cd694929c42
+Z 81794e0282c735d39e46bda58078c2d5
 # Remove this line to create a well-formed Fossil manifest.
