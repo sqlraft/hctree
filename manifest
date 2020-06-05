@@ -1,5 +1,5 @@
-C Assign\sa\sfake\sname\sto\sthe\sephemeral\ssubquery\stables\sthat\sare\screated\nwhen\smaking\sparse-tree\schanges\sfor\swindow\sfunctions.
-D 2020-06-05T18:17:39.306
+C Improved\stracing\sof\swindow\sfunction\sparse\stree\srewrites.
+D 2020-06-05T21:36:07.256
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -531,7 +531,7 @@ F src/pragma.h 8168e588536bffd95319451f34e9a754dc37d205ebe433031a7813c5b286beae
 F src/prepare.c aeb3ba661e2666dab15c4b5c55f6eb816f01d20e35fa860bb807e4a3b36e1e27
 F src/printf.c 94b5419ad0a17269f76a9e968ca19cf9fa37617abed2e246fc48844e511b6bc6
 F src/random.c 80f5d666f23feb3e6665a6ce04c7197212a88384
-F src/resolve.c 66f149f309e67d6563374e284bb8439057cb970e47f23058d9e5270208d274be
+F src/resolve.c 29a6737f956539e3b36f839731e61199d1855d96be24afe7e750a9436344e7f9
 F src/rowset.c ba9515a922af32abe1f7d39406b9d35730ed65efab9443dc5702693b60854c92
 F src/select.c 1708c0ef6bc6c9b24ba74193a90e4aab11e90a1fe7287f0da5f7b5c072afbdb4
 F src/shell.c.in c6e26593f2738eefded08a39204bf6b48db135cdfaa458c26ffe57055b4fe365
@@ -1866,8 +1866,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P 2870d11720f00558755e70df049afe19079d7dad0f608ccdebc13c070e7b48dc
-R 38e7086e86db455856ed36df2983d1b9
+P c4072267dc870830aaf1b3d34b98230e9eda3bb7708af9b33be28966f6ddd493
+R edcbb0db58690ffa16add56977c5973a
 U drh
-Z 2c2d767b7dbcfecac1afa97e5763365d
+Z a1138f5ef3426384f184f90e8bf76504
 # Remove this line to create a well-formed Fossil manifest.
