@@ -1,5 +1,5 @@
-C In\sthe\squery\sflattener,\sdefer\sdeleting\scontent\suntil\safter\sassociated\sParse\nobject\sis\sdestroyed,\sin\scase\ssome\sof\sthe\sdeleted\sexpressions\shave\sbeen\ncollected\sfor\suse\sby\ssAggInfo.
-D 2020-06-06T18:34:12.351
+C Clearly\sdistinguish\sbetween\swindow\sfunctions\sand\sscalar\sfunctions\sin\sthe\ndebugging\sTreeView\soutput.
+D 2020-06-06T18:45:37.043
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -598,7 +598,7 @@ F src/test_window.c cdae419fdcea5bad6dcd9368c685abdad6deb59e9fc8b84b153de513d394
 F src/test_wsd.c 41cadfd9d97fe8e3e4e44f61a4a8ccd6f7ca8fe9
 F src/threads.c 4ae07fa022a3dc7c5beb373cf744a85d3c5c6c3c
 F src/tokenize.c eee7bae3ec0bc4abee951554bf46a8ba567c0f7752ac90c820ed8afff4c612dc
-F src/treeview.c c5691babcd558baa136474b57a4aede45cf68daa3ed6637b981dde4b256e5b67
+F src/treeview.c 3d267d39dcfa4528298fdd69aa6e84883dbce087c39cc9a137e5ec1a2b94992f
 F src/trigger.c 4ada1037cc99777f647a882cdacbd1a4deb6567b69daf02946286401b88cdc04
 F src/update.c 3199098455830fc2d8c8fc4ae3ec2ea513eef64339ae9a7048db62b21169bc7a
 F src/upsert.c 2920de71b20f04fe25eb00b655d086f0ba60ea133c59d7fa3325c49838818e78
@@ -1866,8 +1866,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P 3926ff1725710070c23148b2cafda357daaf4be97eb3840d3153eea5f653426a
-R b869bfaf8d6a9d0cd5b88a103cca6458
+P 03b32be44d9d278397d50c9a8d7aad7c07b92c10375113b261c7f610646d0717
+R a65648c5f0cfe3c8d050a8ed3189772f
 U drh
-Z db753fcd9655b59f514ccb4c012de85a
+Z a6a1333dda68e6e0c60a3ee11d5d1c28
 # Remove this line to create a well-formed Fossil manifest.
