@@ -54,7 +54,7 @@ THREADLIB += $(LIBS)
 #
 LIBOBJ+= vdbe.o parse.o \
          alter.o analyze.o attach.o auth.o \
-         backup.o bitvec.o btmutex.o btree.o build.o \
+         backup.o bitvec.o btmutex.o btree.o hctree.o build.o \
          callback.o complete.o ctime.o \
          date.o dbpage.o dbstat.o delete.o expr.o \
 	 fault.o fkey.o \
@@ -91,6 +91,7 @@ SRC = \
   $(TOP)/src/bitvec.c \
   $(TOP)/src/btmutex.c \
   $(TOP)/src/btree.c \
+  $(TOP)/src/hctree.c \
   $(TOP)/src/btree.h \
   $(TOP)/src/btreeInt.h \
   $(TOP)/src/build.c \
@@ -354,7 +355,8 @@ TESTSRC = \
   $(TOP)/src/test_vfs.c \
   $(TOP)/src/test_windirent.c \
   $(TOP)/src/test_window.c \
-  $(TOP)/src/test_wsd.c
+  $(TOP)/src/test_wsd.c    \
+  $(TOP)/src/hct_tree.c
 
 # Extensions to be statically loaded.
 #
@@ -384,7 +386,8 @@ TESTSRC += \
   $(TOP)/ext/misc/zipfile.c \
   $(TOP)/ext/fts5/fts5_tcl.c \
   $(TOP)/ext/fts5/fts5_test_mi.c \
-  $(TOP)/ext/fts5/fts5_test_tok.c
+  $(TOP)/ext/fts5/fts5_test_tok.c \
+  $(TOP)/ext/hct/hct_vtab.c
 
 
 #TESTSRC += $(TOP)/ext/fts2/fts2_tokenizer.c
@@ -394,6 +397,7 @@ TESTSRC2 = \
   $(TOP)/src/attach.c \
   $(TOP)/src/backup.c \
   $(TOP)/src/btree.c \
+  $(TOP)/src/hctree.c \
   $(TOP)/src/build.c \
   $(TOP)/src/date.c \
   $(TOP)/src/dbpage.c \
@@ -444,6 +448,7 @@ TESTSRC2 = \
 HDR = \
    $(TOP)/src/btree.h \
    $(TOP)/src/btreeInt.h \
+   $(TOP)/src/hctInt.h \
    $(TOP)/src/hash.h \
    $(TOP)/src/hwtime.h \
    keywordhash.h \

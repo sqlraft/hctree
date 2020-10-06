@@ -7286,6 +7286,7 @@ static int SQLITE_TCLAPI tclLoadStaticExtensionCmd(
   extern int sqlite3_ieee_init(sqlite3*,char**,const sqlite3_api_routines*);
   extern int sqlite3_nextchar_init(sqlite3*,char**,const sqlite3_api_routines*);
   extern int sqlite3_percentile_init(sqlite3*,char**,const sqlite3_api_routines*);
+  extern int sqlite3_hct_init(sqlite3*,char**,const sqlite3_api_routines*);
 #ifndef SQLITE_OMIT_VIRTUALTABLE
   extern int sqlite3_prefixes_init(sqlite3*,char**,const sqlite3_api_routines*);
 #endif
@@ -7328,6 +7329,7 @@ static int SQLITE_TCLAPI tclLoadStaticExtensionCmd(
 #ifdef SQLITE_HAVE_ZLIB
     { "zipfile",               sqlite3_zipfile_init              },
 #endif
+    { "hct",                   sqlite3_hct_init          },
   };
   sqlite3 *db;
   const char *zName;

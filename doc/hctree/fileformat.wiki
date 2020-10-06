@@ -1,0 +1,132 @@
+
+
+File format parameters:
+
+  *  Page size. Default 4KiB. This must be a power of 2.
+  *  Chunk size. Default 128K pages (1MB chunk-size, 512MB database file size
+     per chunk). This must be a power of 2.
+
+The database file begins with a pair of header pages. Each header page is
+the same size as every other page in the database.
+
+The two header pages do not have physical page numbers. The remainder of the
+file is divided into physical pages, numbered from 0 upwards. The byte offset 
+of a page is therefore:
+
+<verbatim>
+    offset = (iPg+2) * pgsz;
+</verbatim>
+
+Immediately following the header pages is the first page-map chunk,
+containing the first (nChunkSize/8) page-map entries, for pages from 0 
+to ((nChunkSize/8)-1).
+
+The byte offset of the page-map entry corresponding to page id iPg (logical or
+physical) is:
+
+<verbatim>
+  (2*pgsz) + (iPg*8)
+</verbatim>
+
+Physical page numbers that correspond to parts of the file used by the 
+page-map are never used. Nor are the first 32 logical page numbers.
+
+The first element of the page-map (page 0) is used to store the maximum
+transaction id.
+
+<h1> Header Pages </h1>
+
+<table border=1 cellpadding=5 width=90%>
+  <tr><th>Byte Offset <th>Size <th width=80%> Description
+  <tr><td>0  <td>32 <td>Magic string identifying an hctree database.
+  <tr><td>32 <td>8  <td>Checksum for header page.
+  <tr><td>40 <td>4  <td>Constant Value 1234. To identify endianness of database.
+  <tr><td>44 <td>4  <td>Page size in bytes.
+  <tr><td>48 <td>8  <td>Guaranteed safe recovery transaction id.
+</table>
+
+
+<h1> B-Tree Page format </h1>
+
+Each page begins with a 32-byte recovery header. Consisting of:
+
+<table border=1 cellpadding=5 width=90%>
+  <tr><th>Byte Offset <th>Size <th width=80%> Description
+  <tr><td>0 <td>8 <td> Checksum. Based on page content (including this header)
+                       and <i>TODO</i>
+  <tr><td>8 <td>8 <td>  Transaction id of transaction that wrote page.
+  <tr><td>16 <td>8 <td> Largest transaction id ever to have written this
+                        logical page.
+  <tr><td>24 <td>4 <td> Logical page id for this page.
+  <tr><td>28 <td>4 <td> Physical page id for previous page written by this
+                        transaction (or 0 if this is the first).
+</table>
+
+Followed by an 8-byte page header:
+
+<table border=1 cellpadding=5 width=90%>
+  <tr><th>Byte Offset <th>Size <th width=80%> Description
+  <tr><td>36 <td>1 <td> Page type:
+  *  0x01 - Intkey leaf pages.
+  *  0x02 - Intkey internal node pages.
+  *  0x03 - Index leaf pages.
+  *  0x04 - Index internal node pages.
+  *  0x05 - Overflow page. 
+  <tr><td>37 <td>1 <td> Unused.
+  <tr><td>38 <td>2 <td> Number of entries on page.
+</table>
+
+<h2> Intkey Leaf Pages </h2>
+
+The keys for an intkey table are the concatenation of a 64-bit rowid and a
+56-bit transaction id. 15 bytes in total. Associated with each key is an
+N byte SQLite record blob of data.
+
+The remaining page space is divided into three sections:
+
+  *  An nEntry array of 16-byte key/flags entries. The first 15 bytes of
+     the entry contains the key, the remaining 8 bits are used for flags.
+     There are two flags defined - IS_DELETED and HAS_OVERFLOW.
+  *  An nEntry array of 2-byte offsets. Offsets are relative to the start
+     of the page. The first entry corresponds to the first byte of the
+     second record, the last to one byte past the end of the last record.
+  *  An nEntry array of tightly packed records. Each record consists of:
+  <ul>
+    <li> If IS_DELETED is set, the transaction id of the transaction that
+         deleted the entry, encoded as an SQLite varint.
+    <li> The part of the record stored on the main page.
+    <li> If HAS_OVERFLOW is set, a 4 byte overflow page number.
+  </ul>
+
+The size of the part of the record stored on the main page is calculated as:
+
+<verbatim>
+        if( nRecord <= (pgsz-40-16-2-9) ){
+          nLocal = nRecord;
+        }else{ 
+          nLocal = MIN(pgsz-40-16-2-9-4, MAX(pgsz/4, nRecord % (pgsz-40)))
+        }
+</verbatim>
+
+The offset array may contain the special value 0 for the first key on the
+page only. In this case there is no record associated with the key.
+<span style=color:green>This happens when the record has been permanently
+deleted. But the key cannot be deleted because it is required to ensure
+the leaf list remains in sync with the parent list. We think...</span>
+
+<h2> Intkey Internal Node Pages </h2>
+
+The remaining page space is divided into two sections:
+
+  *  An nEntry array of 16-byte key/flags entries. The first 15 bytes of
+     the entry contains the key.
+  *  An nEntry array of 4-byte child page numbers.
+
+<h2> Overflow pages </h2>
+
+For an overflow page, the "peer node" field of the page header contains the
+next page in the overflow list, or 0 if there is no next page. The nEntry
+field is set to the number of bytes of data on the page following the page 
+header.
+
+

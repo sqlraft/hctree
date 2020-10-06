@@ -24,6 +24,7 @@ do_test select1-1.1 {
 } {1 {no such table: test1}}
 
 
+# execsql {PRAGMA vdbe_trace = 1}
 execsql {CREATE TABLE test1(f1 int, f2 int)}
 
 do_test select1-1.2 {
@@ -36,7 +37,6 @@ do_test select1-1.3 {
 } {1 {no such table: test2}}
 
 execsql {INSERT INTO test1(f1,f2) VALUES(11,22)}
-
 
 # Make sure the columns are extracted correctly.
 #

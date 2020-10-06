@@ -15,6 +15,8 @@
 */
 #include "btreeInt.h"
 
+#ifndef SQLITE_ENABLE_HCT
+
 /*
 ** The header string that appears at the beginning of every
 ** SQLite database.
@@ -10578,3 +10580,5 @@ int sqlite3BtreeConnectionCount(Btree *p){
   return p->pBt->nRef;
 }
 #endif
+
+#endif /* SQLITE_ENABLE_HCT */

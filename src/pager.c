@@ -20,6 +20,7 @@
 */
 #ifndef SQLITE_OMIT_DISKIO
 #include "sqliteInt.h"
+#ifndef SQLITE_ENABLE_HCT
 #include "wal.h"
 
 
@@ -6990,7 +6991,12 @@ sqlite3_vfs *sqlite3PagerVfs(Pager *pPager){
 ** not yet been opened.
 */
 sqlite3_file *sqlite3PagerFile(Pager *pPager){
+#ifndef SQLITE_ENABLE_HCT
   return pPager->fd;
+#else
+  static sqlite3_file s = { 0 };
+  return &s;
+#endif
 }
 
 /*
@@ -7689,4 +7695,5 @@ int sqlite3PagerWalFramesize(Pager *pPager){
 }
 #endif
 
+#endif /* SQLITE_ENABLE_HCT */
 #endif /* SQLITE_OMIT_DISKIO */
