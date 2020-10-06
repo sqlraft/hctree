@@ -22,15 +22,17 @@ struct Btree {
   void *pSchema;                  /* Schema memory from sqlite3BtreeSchema() */
   void(*xSchemaFree)(void*);      /* Function to free pSchema */
   int eTrans;                     /* SQLITE_TXN_NONE, READ or WRITE */
-
+  BtCursor *pCsrList;             /* List of all open cursors */
   u32 iNextRoot;                  /* Next root page to allocate */
   u32 aMeta[16];                  /* 16 database meta values */
 };
 
 struct BtCursor {
+  Btree *pBtree;
   HctTreeCsr *pHctTreeCsr;
   KeyInfo *pKeyInfo;              /* For non-intkey tables */
   int iNoop;                      /* +ve -> Next() is noop, -ve -> Prev() is */
+  BtCursor *pCsrNext;             /* Next element in Btree.pCsrList list */
 };
 
 
@@ -185,6 +187,13 @@ int sqlite3BtreeOpen(
 */
 int sqlite3BtreeClose(Btree *p){
   if( p ){
+    while(p->pCsrList){
+      sqlite3BtreeCloseCursor(p->pCsrList);
+    }
+    if( p->xSchemaFree ){
+      p->xSchemaFree(p->pSchema);
+    }
+    sqlite3_free(p->pSchema);
     sqlite3HctTreeFree(p->pHctTree);
     sqlite3_free(p);
   }
@@ -214,7 +223,6 @@ int sqlite3BtreeSetCacheSize(Btree *p, int mxPage){
 ** using mxPage of 0 is a way to query the current spill size.
 */
 int sqlite3BtreeSetSpillSize(Btree *p, int mxPage){
-  assert( 0 );
   return 1024;
 }
 
@@ -269,7 +277,6 @@ int sqlite3BtreeSetPagerFlags(
 */
 int sqlite3BtreeSetPageSize(Btree *p, int pageSize, int nReserve, int iFix){
   int rc = SQLITE_OK;
-  assert( 0 );
   return rc;
 }
 
@@ -306,7 +313,6 @@ int sqlite3BtreeGetReserveNoMutex(Btree *p){
 ** The amount of reserve can only grow - never shrink.
 */
 int sqlite3BtreeGetRequestedReserve(Btree *p){
-  assert( 0 );
   return 0;
 }
 
@@ -340,7 +346,6 @@ Pgno sqlite3BtreeMaxPageCount(Btree *p, Pgno mxPage){
 ** the amount of disk I/O.
 */
 int sqlite3BtreeSecureDelete(Btree *p, int newFlag){
-  assert( 0 );
   return 0;
 }
 
@@ -351,7 +356,6 @@ int sqlite3BtreeSecureDelete(Btree *p, int newFlag){
 ** determined by the SQLITE_DEFAULT_AUTOVACUUM macro.
 */
 int sqlite3BtreeSetAutoVacuum(Btree *p, int autoVacuum){
-  assert( 0 );
   return SQLITE_OK;
 }
 
@@ -360,7 +364,7 @@ int sqlite3BtreeSetAutoVacuum(Btree *p, int autoVacuum){
 ** enabled 1 is returned. Otherwise 0.
 */
 int sqlite3BtreeGetAutoVacuum(Btree *p){
-  assert( 0 );
+  /* hct is never in auto-vacuum mode */
   return 0;
 }
 
@@ -628,6 +632,14 @@ int sqlite3BtreeCursor(
   assert( pCur->pHctTreeCsr==0 );
   pCur->pKeyInfo = pKeyInfo;
   rc = sqlite3HctTreeCsrOpen(p->pHctTree, iTable, &pCur->pHctTreeCsr);
+  if( rc==SQLITE_OK ){
+    pCur->pCsrNext = p->pCsrList;
+    pCur->pBtree = p;
+    p->pCsrList = pCur;
+  }else{
+    assert( pCur->pHctTreeCsr==0 );
+    pCur->pKeyInfo = 0;
+  }
   return rc;
 }
 
@@ -661,8 +673,15 @@ void sqlite3BtreeCursorZero(BtCursor *p){
 ** when the last cursor is closed.
 */
 int sqlite3BtreeCloseCursor(BtCursor *pCur){
-  sqlite3HctTreeCsrClose(pCur->pHctTreeCsr);
-  pCur->pHctTreeCsr = 0;
+  if( pCur->pBtree ){
+    BtCursor **pp;
+    sqlite3HctTreeCsrClose(pCur->pHctTreeCsr);
+    for(pp=&pCur->pBtree->pCsrList; *pp!=pCur; pp=&(*pp)->pCsrNext);
+    *pp = pCur->pCsrNext;
+    pCur->pHctTreeCsr = 0;
+    pCur->pBtree = 0;
+    pCur->pCsrNext = 0;
+  }
   return SQLITE_OK;
 }
 
@@ -1222,7 +1241,7 @@ char *sqlite3BtreeIntegrityCheck(
   int mxErr,    /* Stop reporting errors after this many */
   int *pnErr    /* Write number of errors seen to this variable */
 ){
-  assert( 0 );
+  *pnErr = 0;
   return 0;
 }
 #endif /* SQLITE_OMIT_INTEGRITY_CHECK */
@@ -1427,6 +1446,10 @@ int sqlite3PagerExclusiveLock(Pager *pPager){
 int sqlite3PagerGetJournalMode(Pager *pPager){
   return PAGER_JOURNALMODE_OFF;
 }
+int sqlite3PagerLockingMode(Pager *pPager, int m){
+  /* no-op */
+  return SQLITE_OK;
+}
 
 
 int sqlite3PagerGet(Pager *pPager, Pgno pgno, DbPage **ppPage, int clrFlag){
@@ -1448,10 +1471,6 @@ void *sqlite3PagerGetExtra(DbPage *pPg){
 sqlite3_backup **sqlite3PagerBackupPtr(Pager *pPager){
   assert( 0 );
   return 0;
-}
-int sqlite3PagerLockingMode(Pager *pPager, int m){
-  assert( 0 );
-  return SQLITE_ERROR;
 }
 void sqlite3PagerUnref(DbPage *pPg){
   assert( 0 );
