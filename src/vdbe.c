@@ -683,6 +683,7 @@ int sqlite3VdbeExec(
 #ifdef VDBE_PROFILE
   u64 start;                 /* CPU clock count at start of opcode */
 #endif
+static int nCall = 0;
   /*** INSERT STACK UNION HERE ***/
 
   assert( p->magic==VDBE_MAGIC_RUN );  /* sqlite3_step() verifies this */
@@ -5848,6 +5849,7 @@ case OP_IdxDelete: {
   int res;
   UnpackedRecord r;
 
+nCall++;
   assert( pOp->p3>0 );
   assert( pOp->p2>0 && pOp->p2+pOp->p3<=(p->nMem+1 - p->nCursor)+1 );
   assert( pOp->p1>=0 && pOp->p1<p->nCursor );

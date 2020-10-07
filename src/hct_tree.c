@@ -31,11 +31,19 @@ struct HctTree {
   int iStmt;                      /* Current entry in apStmt (-1 == none) */
 };
 
+/*
+** pReseek:
+**   Set to non-NULL if the cursor was disrupted by a write. The cursor
+**   should be seeked to the key in node pReseek.
+*/
 struct HctTreeCsr {
   HctTree *pTree;
   HctTreeRoot *pRoot;
+  u8 bPin;                        /* True if cursor is pinned */
   int iNode;                      /* Current depth */
   HctTreeNode *apNode[HCT_TREE_MAX_DEPTH];
+  HctTreeNode *pReseek;
+  HctTreeCsr *pCsrNext;           /* Next item in HctTreeRoot.pCsrList list */
 };
 
 struct HctTreeNode {
@@ -58,6 +66,7 @@ struct HctTreeRoot {
   KeyInfo *pKeyInfo;
   HctTreeNode *pNode;             /* Root node of tree (or NULL) */
   HctTreeRoot *pHashNext;         /* Next entry in hash-chain */
+  HctTreeCsr *pCsrList;           /* Cursors open on this tree */
 };
 
 /*
@@ -165,7 +174,7 @@ static void hct_tree_check_subtree(HctTreeNode *pNode, int nDepth, int nExpect){
   hct_print_subtree(0);           /* no-op - just to avoid a warning */
 }
 static int hct_tree_check(HctTreeRoot *pRoot){
-  if( pRoot->pNode ){
+  if( 0 && pRoot->pNode ){
     int nBlack = 0;
     HctTreeNode *pNode = 0;
     assert( pRoot->pNode->bBlack );      /* 1. Root is black */
@@ -337,6 +346,127 @@ static void treeNodeDeref(HctTreeNode *pNode){
   }
 }
 
+static int hctSaveCursors(HctTreeRoot *pRoot, HctTreeCsr *pExcept){
+  int rc = SQLITE_OK;
+  HctTreeCsr *pCsr;
+  for(pCsr=pRoot->pCsrList; pCsr; pCsr=pCsr->pCsrNext){
+    if( pCsr!=pExcept && pCsr->pReseek==0 && pCsr->iNode>=0 ){
+      if( pCsr->bPin ){
+        return SQLITE_CONSTRAINT_PINNED;
+      }
+      pCsr->pReseek = pCsr->apNode[pCsr->iNode];
+      pCsr->pReseek->nRef++;
+    }
+  }
+  return rc;
+}
+
+static int hctTreeCsrSeekInt(
+  HctTreeCsr *pCsr, 
+  i64 iKey, 
+  int *pRes
+){
+  int rc = SQLITE_OK;             /* Return code */
+  int res = -1;                   /* Value to return via *pRes */
+  HctTreeNode *pNode = pCsr->pRoot->pNode;
+  pCsr->iNode = -1;
+  while( pNode ){
+    i64 iNodeKey = pNode->iKey;
+    pCsr->apNode[++pCsr->iNode] = pNode;
+    if( iNodeKey==iKey ){
+      res = 0;
+      break;
+    }
+    if( iKey<iNodeKey ){
+      res = +1;
+      pNode = pNode->pLeft;
+    }else{
+      res = -1;
+      pNode = pNode->pRight;
+    }
+    assert( pCsr->iNode<HCT_TREE_MAX_DEPTH );
+  }
+  if( pRes ) *pRes = res;
+  return rc;
+}
+
+static int hctTreeCsrSeekUnpacked(
+  HctTreeCsr *pCsr, 
+  UnpackedRecord *pRec,
+  int *pRes
+){
+  int rc = SQLITE_OK;             /* Return code */
+  int res = -1;                   /* Value to return via *pRes */
+  HctTreeNode *pNode = pCsr->pRoot->pNode;
+  pCsr->iNode = -1;
+  while( pNode ){
+    pCsr->apNode[++pCsr->iNode] = pNode;
+    res = sqlite3VdbeRecordCompare(pNode->nData, pNode->aData, pRec);
+    if( res==0 ) break;
+    if( res>0 ){
+      /* pRec is smaller than this node's key. Go left. */
+      pNode = pNode->pLeft;
+    }else{
+      /* pRec is larger than this node's key. Go left. */
+      pNode = pNode->pRight;
+    }
+    assert( pCsr->iNode<HCT_TREE_MAX_DEPTH );
+  }
+
+  if( pCsr->pRoot->pKeyInfo==0 ){
+    pCsr->pRoot->pKeyInfo = sqlite3KeyInfoRef(pRec->pKeyInfo);
+  }
+
+  if( pRes ) *pRes = res;
+  return rc;
+}
+
+static int hctTreeCsrSeekPacked(
+  HctTreeCsr *pCsr, 
+  int nKey,
+  const u8 *aKey,
+  int *pRes
+){
+  int rc;
+  KeyInfo *pKeyInfo = pCsr->pRoot->pKeyInfo;
+  UnpackedRecord *pRec;
+
+  assert( pKeyInfo );
+  pRec = sqlite3VdbeAllocUnpackedRecord(pKeyInfo);
+  if( pRec ){
+    sqlite3VdbeRecordUnpack(pKeyInfo, nKey, aKey, pRec);
+    rc = hctTreeCsrSeekUnpacked(pCsr, pRec, pRes);
+    sqlite3DbFree(pKeyInfo->db, pRec);
+  }else{
+    rc = SQLITE_NOMEM;
+  }
+  return rc;
+}
+
+
+static int hctRestoreCursor(HctTreeCsr *pCsr, int *pRes){
+  int rc = SQLITE_OK;
+  HctTreeNode *pReseek = pCsr->pReseek;
+  if( pReseek ){
+    if( pCsr->pRoot->pKeyInfo ){
+      rc = hctTreeCsrSeekPacked(pCsr, pReseek->nData, pReseek->aData, pRes);
+    }else{
+      rc = hctTreeCsrSeekInt(pCsr, pReseek->iKey, pRes);
+    }
+    treeNodeDeref(pReseek);
+    pCsr->pReseek = 0;
+  }
+  return rc;
+}
+
+static void hctRestoreDiscard(HctTreeCsr *pCsr){
+  if( pCsr->pReseek ){
+    treeNodeDeref(pCsr->pReseek);
+    pCsr->pReseek = 0;
+    pCsr->iNode = -1;
+  }
+}
+
 static int treeInsert(
   HctTree *pTree, 
   int bRollback, 
@@ -344,6 +474,7 @@ static int treeInsert(
   i64 iKey, 
   HctTreeNode *pNew
 ){
+  int rc;
   HctTreeRoot *pRoot = hctTreeFindRoot(pTree, pNew->iRoot);
   UnpackedRecord *pFree = 0;
   int res = 0;
@@ -351,6 +482,10 @@ static int treeInsert(
   memset(&csr, 0, sizeof(csr));
   csr.pRoot = pRoot;
   csr.pTree = pTree;
+
+  /* Save the positions of all cursors on this table */
+  rc = hctSaveCursors(pRoot, 0);
+  if( rc ) return rc;
 
   /* Special case. If this insert is to effect a rollback on an index
   ** tree, pKey will still be NULL. In this case construct a pKey value
@@ -431,8 +566,7 @@ int sqlite3HctTreeInsert(
     pNew->nRef = 1;
   }
 
-  (void)treeInsert(pTree, pTree->iStmt<=0, pKey, iKey, pNew);
-  return SQLITE_OK;
+  return treeInsert(pTree, pTree->iStmt<=0, pKey, iKey, pNew);
 }
 
 /*
@@ -524,6 +658,12 @@ static void hctTreeFixDelete(HctTreeCsr *pCsr){
 static int treeDelete(HctTreeCsr *pCsr, int bRollback){
   HctTreeNode *pDel = pCsr->apNode[pCsr->iNode];
   HctTreeNode *pU = 0;
+  HctTreeNode *pReseek = 0;
+  int rc;
+
+  /* Save the positions of all cursors on this table */
+  rc = hctSaveCursors(pCsr->pRoot, pCsr);
+  if( rc ) return rc;
 
   assert( pCsr->iNode>=0 );
 #if 0
@@ -541,6 +681,8 @@ static int treeDelete(HctTreeCsr *pCsr, int bRollback){
     pEntry->iRoot = pCsr->pRoot->iRoot;
     pDel->nRef++;
     pCsr->pTree->pRollback = pEntry;
+    pReseek = pDel;
+    pReseek->nRef++;
   }
 
   /* If node pDel has two children, swap it with its immediate successor
@@ -579,6 +721,8 @@ static int treeDelete(HctTreeCsr *pCsr, int bRollback){
   }
 
   treeNodeDeref(pDel);
+  assert( pCsr->pReseek==0 );
+  pCsr->pReseek = pReseek;
 
 #if 0
   fprintf(stdout, "finished deleting %lld\n", iKey);
@@ -589,8 +733,10 @@ static int treeDelete(HctTreeCsr *pCsr, int bRollback){
 }
 
 int sqlite3HctTreeDelete(HctTreeCsr *pCsr){
-  treeDelete(pCsr, 0);
-  return SQLITE_OK;
+  int rc;
+  assert( pCsr->pReseek==0 );
+  rc = treeDelete(pCsr, 0);
+  return rc;
 }
 
 int sqlite3HctTreeBegin(HctTree *pTree, int iStmt){
@@ -644,8 +790,7 @@ int sqlite3HctTreeRollbackTo(HctTree *pTree, int iStmt){
         assert( pNode->iKey==pNode->pClobber->iKey );
         pClobber->pLeft = pClobber->pRight = 0;
         pClobber->bBlack = 0;
-        if( treeInsert(pTree, 1, 0, pNode->iKey, pClobber) ){
-          rc = SQLITE_NOMEM;
+        if( (rc = treeInsert(pTree, 1, 0, pNode->iKey, pClobber)) ){
           pStop = pNode;
           break;
         }
@@ -682,98 +827,57 @@ int sqlite3HctTreeRollbackTo(HctTree *pTree, int iStmt){
 void sqlite3HctTreeClear(HctTree *pTree){
 }
 
-int sqlite3HctTreeClearOne(HctTree *pTree, u32 iRoot){
+int sqlite3HctTreeClearOne(HctTree *pTree, u32 iRoot, int *pnRow){
   HctTreeCsr csr;
   int rc = SQLITE_OK;
+  int nRow = 0;
+
   memset(&csr, 0, sizeof(csr));
   csr.pTree = pTree;
   csr.pRoot = hctTreeFindRoot(pTree, iRoot);
   csr.iNode = -1;
+  rc = hctSaveCursors(csr.pRoot, 0);
+  if( rc ) return rc;
   while( rc==SQLITE_OK && csr.pRoot->pNode ){
     sqlite3HctTreeCsrFirst(&csr);
     rc = sqlite3HctTreeDelete(&csr);
+    nRow++;
   }
+  if( pnRow ) *pnRow = nRow;
   return rc;
 }
 
 int sqlite3HctTreeCsrOpen(HctTree *pTree, u32 iRoot, HctTreeCsr **ppCsr){
   int rc = SQLITE_OK;
-  HctTreeCsr *pNew;
-  pNew = (HctTreeCsr*)hctMallocZero(sizeof(HctTreeCsr));
-  if( pNew==0 ){
+  HctTreeCsr *pNew = 0;
+  HctTreeRoot *pRoot = hctTreeFindRoot(pTree, iRoot);
+  if( pRoot==0 ){
     rc = SQLITE_NOMEM;
   }else{
-    pNew->pTree = pTree;
-    pNew->pRoot = hctTreeFindRoot(pTree, iRoot);
-    pNew->iNode = -1;
+    pNew = (HctTreeCsr*)hctMallocZero(sizeof(HctTreeCsr));
+    if( pNew==0 ){
+      rc = SQLITE_NOMEM;
+    }else{
+      pNew->pTree = pTree;
+      pNew->pRoot = pRoot;
+      pNew->iNode = -1;
+      pNew->pCsrNext = pRoot->pCsrList;
+      pRoot->pCsrList = pNew;
+    }
   }
   *ppCsr = pNew;
   return rc;
 }
 
 int sqlite3HctTreeCsrClose(HctTreeCsr *pCsr){
-  sqlite3_free(pCsr);
+  if( pCsr ){
+    HctTreeCsr **pp;
+    for(pp=&pCsr->pRoot->pCsrList; *pp!=pCsr; pp=&(*pp)->pCsrNext);
+    *pp = pCsr->pCsrNext;
+    if( pCsr->pReseek ) treeNodeDeref(pCsr->pReseek);
+    sqlite3_free(pCsr);
+  }
   return SQLITE_OK;
-}
-
-static int hctTreeCsrSeekInt(
-  HctTreeCsr *pCsr, 
-  i64 iKey, 
-  int *pRes
-){
-  int rc = SQLITE_OK;             /* Return code */
-  int res = -1;                   /* Value to return via *pRes */
-  HctTreeNode *pNode = pCsr->pRoot->pNode;
-  pCsr->iNode = -1;
-  while( pNode ){
-    i64 iNodeKey = pNode->iKey;
-    pCsr->apNode[++pCsr->iNode] = pNode;
-    if( iNodeKey==iKey ){
-      res = 0;
-      break;
-    }
-    if( iKey<iNodeKey ){
-      res = +1;
-      pNode = pNode->pLeft;
-    }else{
-      res = -1;
-      pNode = pNode->pRight;
-    }
-    assert( pCsr->iNode<HCT_TREE_MAX_DEPTH );
-  }
-  if( pRes ) *pRes = res;
-  return rc;
-}
-
-static int hctTreeCsrSeekUnpacked(
-  HctTreeCsr *pCsr, 
-  UnpackedRecord *pRec,
-  int *pRes
-){
-  int rc = SQLITE_OK;             /* Return code */
-  int res = -1;                   /* Value to return via *pRes */
-  HctTreeNode *pNode = pCsr->pRoot->pNode;
-  pCsr->iNode = -1;
-  while( pNode ){
-    pCsr->apNode[++pCsr->iNode] = pNode;
-    res = sqlite3VdbeRecordCompare(pNode->nData, pNode->aData, pRec);
-    if( res==0 ) break;
-    if( res>0 ){
-      /* pRec is smaller than this node's key. Go left. */
-      pNode = pNode->pLeft;
-    }else{
-      /* pRec is larger than this node's key. Go left. */
-      pNode = pNode->pRight;
-    }
-    assert( pCsr->iNode<HCT_TREE_MAX_DEPTH );
-  }
-
-  if( pCsr->pRoot->pKeyInfo==0 ){
-    pCsr->pRoot->pKeyInfo = sqlite3KeyInfoRef(pRec->pKeyInfo);
-  }
-
-  if( pRes ) *pRes = res;
-  return rc;
 }
 
 /*
@@ -798,6 +902,7 @@ int sqlite3HctTreeCsrSeek(
   i64 iKey, 
   int *pRes
 ){
+  hctRestoreDiscard(pCsr);
   if( pRec ){
     return hctTreeCsrSeekUnpacked(pCsr, pRec, pRes);
   }
@@ -805,7 +910,13 @@ int sqlite3HctTreeCsrSeek(
 }
 
 int sqlite3HctTreeCsrNext(HctTreeCsr *pCsr){
-  int iNode = pCsr->iNode;
+  int iNode;
+  int res = 0;
+
+  if( hctRestoreCursor(pCsr, &res) ) return SQLITE_NOMEM;
+  if( res>0 ) return SQLITE_OK;
+
+  iNode = pCsr->iNode;
   if( iNode>=0 ){
     HctTreeNode *pNode = pCsr->apNode[iNode];
     assert( iNode>=0 );
@@ -830,26 +941,33 @@ int sqlite3HctTreeCsrNext(HctTreeCsr *pCsr){
 }
 
 int sqlite3HctTreeCsrPrev(HctTreeCsr *pCsr){
-  int iNode = pCsr->iNode;
-  HctTreeNode *pNode = pCsr->apNode[iNode];
-  assert( iNode>=0 );
-  if( pNode->pLeft ){
-    pNode = pNode->pLeft;
-    while( pNode ){
-      iNode++;
-      pCsr->apNode[iNode] = pNode;
-      pNode = pNode->pRight;
-    }
-  }else{
-    while( (--iNode)>=0 ){
-      HctTreeNode *pParent = pCsr->apNode[iNode];
-      assert( pNode==pParent->pLeft || pNode==pParent->pRight );
-      if( pNode==pParent->pRight ) break;
-      pNode = pParent;
-    }
-  }
-  pCsr->iNode = iNode;
+  int iNode;
+  int res = 0;
 
+  if( hctRestoreCursor(pCsr, &res) ) return SQLITE_NOMEM;
+  if( res<0 ) return SQLITE_OK;
+
+  iNode = pCsr->iNode;
+  if( iNode>=0 ){
+    HctTreeNode *pNode = pCsr->apNode[iNode];
+    assert( iNode>=0 );
+    if( pNode->pLeft ){
+      pNode = pNode->pLeft;
+      while( pNode ){
+        iNode++;
+        pCsr->apNode[iNode] = pNode;
+        pNode = pNode->pRight;
+      }
+    }else{
+      while( (--iNode)>=0 ){
+        HctTreeNode *pParent = pCsr->apNode[iNode];
+        assert( pNode==pParent->pLeft || pNode==pParent->pRight );
+        if( pNode==pParent->pRight ) break;
+        pNode = pParent;
+      }
+    }
+    pCsr->iNode = iNode;
+  }
   return SQLITE_OK;
 }
 
@@ -857,6 +975,8 @@ int sqlite3HctTreeCsrPrev(HctTreeCsr *pCsr){
 ** Return false if cursor points to a valid entry, or true otherwise.
 */
 int sqlite3HctTreeCsrEof(HctTreeCsr *pCsr){
+  /* todo - fix OOM handling here */
+  (void)hctRestoreCursor(pCsr, 0);
   return (pCsr->iNode<0);
 }
 
@@ -864,6 +984,7 @@ static void hctTreeCursorEnd(HctTreeCsr *pCsr, int bLast){
   int iNode = -1;
   HctTreeNode *pNode = pCsr->pRoot->pNode;
 
+  hctRestoreDiscard(pCsr);
   while( pNode ){
     iNode++;
     assert( iNode<HCT_TREE_MAX_DEPTH );
@@ -885,16 +1006,23 @@ int sqlite3HctTreeCsrLast(HctTreeCsr *pCsr){
 
 int sqlite3HctTreeCsrKey(HctTreeCsr *pCsr, i64 *piKey){
   assert( pCsr->iNode>=0 );
+  assert( pCsr->pReseek==0 );
   *piKey = pCsr->apNode[pCsr->iNode]->iKey;
   return SQLITE_OK;
 }
 
 int sqlite3HctTreeCsrData(HctTreeCsr *pCsr, int *pnData, const u8 **paData){
   HctTreeNode *pNode = pCsr->apNode[pCsr->iNode];
+  assert( pCsr->pReseek==0 );
   *pnData = pNode->nData;
   *paData = pNode->aData;
   assert( pCsr->iNode>=0 );
   return SQLITE_OK;
 }
 
-
+void sqlite3HctTreeCsrPin(HctTreeCsr *pCsr){
+  pCsr->bPin = 1;
+}
+void sqlite3HctTreeCsrUnpin(HctTreeCsr *pCsr){
+  pCsr->bPin = 0;
+}

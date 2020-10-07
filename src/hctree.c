@@ -616,7 +616,7 @@ int sqlite3BtreeSavepoint(Btree *p, int op, int iSavepoint){
   if( op==SAVEPOINT_RELEASE ){
     sqlite3HctTreeRelease(p->pHctTree, iSavepoint+1);
   }else{
-    assert( 0 );
+    sqlite3HctTreeRollbackTo(p->pHctTree, iSavepoint+2);
   }
   return rc;
 }
@@ -715,10 +715,10 @@ i64 sqlite3BtreeIntegerKey(BtCursor *pCur){
 ** Pin or unpin a cursor.
 */
 void sqlite3BtreeCursorPin(BtCursor *pCur){
-  assert( 0 );
+  sqlite3HctTreeCsrPin(pCur->pHctTreeCsr);
 }
 void sqlite3BtreeCursorUnpin(BtCursor *pCur){
-  assert( 0 );
+  sqlite3HctTreeCsrUnpin(pCur->pHctTreeCsr);
 }
 
 #ifdef SQLITE_ENABLE_OFFSET_SQL_FUNC
@@ -1024,13 +1024,19 @@ int sqlite3BtreeInsert(
   int nData;
 
   if( pX->pKey ){
-    memset(&r, 0, sizeof(r));
-    r.pKeyInfo = pCur->pKeyInfo;
-    r.aMem = pX->aMem;
-    r.nField = pX->nMem;
-    pRec = &r;
     aData = pX->pKey;
     nData = pX->nKey;
+    if( pX->nMem ){
+      memset(&r, 0, sizeof(r));
+      r.pKeyInfo = pCur->pKeyInfo;
+      r.aMem = pX->aMem;
+      r.nField = pX->nMem;
+      pRec = &r;
+    }else{
+      pRec = sqlite3VdbeAllocUnpackedRecord(pCur->pKeyInfo);
+      if( pRec==0 ) return SQLITE_NOMEM_BKPT;
+      sqlite3VdbeRecordUnpack(pCur->pKeyInfo, nData, aData, pRec);
+    }
   }else{
     aData = pX->pData;
     nData = pX->nData;
@@ -1038,6 +1044,10 @@ int sqlite3BtreeInsert(
   rc = sqlite3HctTreeInsert(
       pCur->pHctTreeCsr, pRec, pX->nKey, nData, aData
   );
+
+  if( pRec && pRec!=&r ){
+    sqlite3DbFree(pCur->pKeyInfo->db, pRec);
+  }
   return rc;
 }
 
@@ -1060,15 +1070,7 @@ int sqlite3BtreeInsert(
 */
 int sqlite3BtreeDelete(BtCursor *pCur, u8 flags){
   int rc = SQLITE_OK;
-  i64 iKey = 0;
-  if( flags & BTREE_SAVEPOSITION ){
-    assert( pCur->pKeyInfo==0 );
-    sqlite3HctTreeCsrKey(pCur->pHctTreeCsr, &iKey);
-  }
   rc = sqlite3HctTreeDelete(pCur->pHctTreeCsr);
-  if( rc==SQLITE_OK && (flags & BTREE_SAVEPOSITION) ){
-    sqlite3HctTreeCsrSeek(pCur->pHctTreeCsr, 0, iKey, &pCur->iNoop);
-  }
   return rc;
 }
 
@@ -1104,7 +1106,7 @@ int sqlite3BtreeCreateTable(Btree *p, Pgno *piTable, int flags){
 */
 int sqlite3BtreeClearTable(Btree *p, int iTable, int *pnChange){
   int rc = SQLITE_OK;
-  sqlite3HctTreeClearOne(p->pHctTree, iTable);
+  sqlite3HctTreeClearOne(p->pHctTree, iTable, pnChange);
   return rc;
 }
 
