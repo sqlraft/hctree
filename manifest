@@ -1,5 +1,5 @@
-C Fix\sin-memory\stree\sissues\swith\swrites\sdisturbing\sother\scursors.\sAnd\swith\szeroblob()\ssupport.
-D 2020-10-08T17:43:56.274
+C Fix\smemory\sleak.
+D 2020-10-08T20:05:19.986
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -506,7 +506,7 @@ F src/global.c 943256ac44f333039d35a9830c18d075a81fa6b6bf2af05771494a9acfb9a40b
 F src/hash.c 8d7dda241d0ebdafb6ffdeda3149a412d7df75102cecfc1021c98d6219823b19
 F src/hash.h 9d56a9079d523b648774c1784b74b89bd93fac7b365210157482e4319a468f38
 F src/hctInt.h b84b05b67f7482e5839d5a0e40b39805653afbc54f5db99653195561bc3b49fe
-F src/hct_tree.c bc70c74b4f269399a201d547e06b88a09a2fbd8c980789f712e2bffe26272627
+F src/hct_tree.c 08b71cae2db6c2f997cbb5947f15bdefd4920bd46927b370a896bc486a441886
 F src/hctree.c 4c5d0e2a3dc4799e0d4c72315f10f7d7fd8fd094bf7bdc616994c4e2d86c3665
 F src/hwtime.h cb1d7e3e1ed94b7aa6fde95ae2c2daccc3df826be26fc9ed7fd90d1750ae6144
 F src/in-operator.md 10cd8f4bcd225a32518407c2fb2484089112fd71
@@ -1895,8 +1895,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P ccdedaa3f532adfcb644d78011a74835d9d64a3eeb894ec1d8be6b5a643abfc9
-R 2e152648a064ec53cfe6cf93e9ce7290
+P 6fb4c3a04d21abb6b6a82b357eeb3533da12588f8cf23e571c1df645ea074a59
+R eca87ab57b64aa25c75ce55216cb82fa
 U dan
-Z de397ca1a2c6cdbe640a4602a528d4ac
+Z b23a9986128d2a37ce26ad22a85835b7
 # Remove this line to create a well-formed Fossil manifest.

@@ -848,6 +848,10 @@ int sqlite3HctTreeClearOne(HctTree *pTree, u32 iRoot, int *pnRow){
     sqlite3HctTreeCsrFirst(&csr);
     rc = sqlite3HctTreeDelete(&csr);
     nRow++;
+    if( csr.pReseek ){
+      treeNodeUnref(csr.pReseek);
+      csr.pReseek = 0;
+    }
   }
   if( pnRow ) *pnRow = nRow;
   return rc;
