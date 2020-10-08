@@ -434,7 +434,7 @@ int hctVtabUpdate(
       iKey = sqlite3_value_int64(argv[2]);
       aData = sqlite3_value_blob(argv[3]);
       nData = sqlite3_value_bytes(argv[3]);
-      rc = sqlite3HctTreeInsert(pCsr, 0, iKey, nData, aData);
+      rc = sqlite3HctTreeInsert(pCsr, 0, iKey, nData, aData, 0);
     }
     sqlite3HctTreeCsrClose(pCsr);
   }

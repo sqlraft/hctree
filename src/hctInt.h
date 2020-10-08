@@ -12,7 +12,7 @@ typedef struct HctTreeCsr HctTreeCsr;
 int sqlite3HctTreeNew(HctTree **ppTree);
 void sqlite3HctTreeFree(HctTree *pTree);
 
-int sqlite3HctTreeInsert(HctTreeCsr*, UnpackedRecord*, i64, int, const u8*);
+int sqlite3HctTreeInsert(HctTreeCsr*, UnpackedRecord*, i64, int, const u8*,int);
 int sqlite3HctTreeDelete(HctTreeCsr *pCsr);
 
 /* 
@@ -63,3 +63,7 @@ int sqlite3HctTreeCsrData(HctTreeCsr *pCsr, int *pnData, const u8 **paData);
 void sqlite3HctTreeCsrPin(HctTreeCsr *pCsr);
 void sqlite3HctTreeCsrUnpin(HctTreeCsr *pCsr);
 
+int sqlite3HctTreeCsrHasMoved(HctTreeCsr *pCsr);
+int sqlite3HctTreeCsrRestore(HctTreeCsr *pCsr, int *pIsDifferent);
+
+u32 sqlite3HctTreeCsrRoot(HctTreeCsr *pCsr);

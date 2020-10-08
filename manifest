@@ -1,5 +1,5 @@
-C Fix\sfurther\sissues\swith\sin-memory\stree.
-D 2020-10-07T21:13:06.068
+C Fix\sin-memory\stree\sissues\swith\swrites\sdisturbing\sother\scursors.\sAnd\swith\szeroblob()\ssupport.
+D 2020-10-08T17:43:56.274
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -241,7 +241,7 @@ F ext/fts5/tool/fts5txt2db.tcl c0d43c8590656f8240e622b00957b3a0facc49482411a9fdc
 F ext/fts5/tool/loadfts5.tcl 95b03429ee6b138645703c6ca192c3ac96eaf093
 F ext/fts5/tool/mkfts5c.tcl d1c2a9ab8e0ec690a52316f33dd9b1d379942f45
 F ext/fts5/tool/showfts5.tcl d54da0e067306663e2d5d523965ca487698e722c
-F ext/hct/hct_vtab.c 1a657242d4b67dae16084528ff30580817c1e6d2e515c2a0d0544f092974730b
+F ext/hct/hct_vtab.c aaf907c3e0d0f21cd8f39169f31a18eda514034a3d9ad02028dd47cc0740645f
 F ext/icu/README.txt 1c48ffaf7f255bd73d00a35f68f6de357c2a6594f16cb00506a151be23694706
 F ext/icu/icu.c 91c021c7e3e8bbba286960810fa303295c622e323567b2e6def4ce58e4466e60
 F ext/icu/sqliteicu.h fa373836ed5a1ee7478bdf8a1650689294e41d0c89c1daab26e9ae78a32075a8
@@ -505,9 +505,9 @@ F src/func.c 2333eb4277f55a5efdc12ef754e7d7ec9105d257b2fd00301d23ce1e8fa67dc0
 F src/global.c 943256ac44f333039d35a9830c18d075a81fa6b6bf2af05771494a9acfb9a40b
 F src/hash.c 8d7dda241d0ebdafb6ffdeda3149a412d7df75102cecfc1021c98d6219823b19
 F src/hash.h 9d56a9079d523b648774c1784b74b89bd93fac7b365210157482e4319a468f38
-F src/hctInt.h 3282961205edc0b08472c18d21d13213a54b780a62672b835f823684ef612b7e
-F src/hct_tree.c 872c0d3c944c98c91e00b230844188813bdacc6d198170742bc7979d63405b87
-F src/hctree.c a3d0a11f2072cf11c1b8e18f9404d9be398e31df07dc180cdfc187ddd7ae0c0a
+F src/hctInt.h b84b05b67f7482e5839d5a0e40b39805653afbc54f5db99653195561bc3b49fe
+F src/hct_tree.c bc70c74b4f269399a201d547e06b88a09a2fbd8c980789f712e2bffe26272627
+F src/hctree.c 4c5d0e2a3dc4799e0d4c72315f10f7d7fd8fd094bf7bdc616994c4e2d86c3665
 F src/hwtime.h cb1d7e3e1ed94b7aa6fde95ae2c2daccc3df826be26fc9ed7fd90d1750ae6144
 F src/in-operator.md 10cd8f4bcd225a32518407c2fb2484089112fd71
 F src/insert.c 7e081d33aab4a9d761c39dccf3c3872c35501565d2ed9db66301918d23bc7901
@@ -1895,8 +1895,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P a001814587eef4cfa268ff542bbee2220b027eea354c9835a526afa0bfefeced
-R a5e546466e43d6fb9aedf5fe1e362649
+P ccdedaa3f532adfcb644d78011a74835d9d64a3eeb894ec1d8be6b5a643abfc9
+R 2e152648a064ec53cfe6cf93e9ce7290
 U dan
-Z a17e7dca8fbadd7ed56ef4b40c921dd4
+Z de397ca1a2c6cdbe640a4602a528d4ac
 # Remove this line to create a well-formed Fossil manifest.

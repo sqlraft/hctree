@@ -85,8 +85,7 @@ void sqlite3BtreeClearCursor(BtCursor *pCur){
 ** back to where it ought to be if this routine returns true.
 */
 int sqlite3BtreeCursorHasMoved(BtCursor *pCur){
-  /* HCT - this needs fixing */
-  return 0;
+  return sqlite3HctTreeCsrHasMoved(pCur->pHctTreeCsr);
 }
 
 /*
@@ -113,8 +112,7 @@ BtCursor *sqlite3BtreeFakeValidCursor(void){
 ** TRUE from sqlite3BtreeCursorHasMoved().
 */
 int sqlite3BtreeCursorRestore(BtCursor *pCur, int *pDifferentRow){
-  assert( 0 );
-  return SQLITE_OK;
+  return sqlite3HctTreeCsrRestore(pCur->pHctTreeCsr, pDifferentRow);
 }
 
 /*
@@ -1022,10 +1020,12 @@ int sqlite3BtreeInsert(
   UnpackedRecord *pRec = 0;
   const u8 *aData;
   int nData;
+  int nZero;
 
   if( pX->pKey ){
     aData = pX->pKey;
     nData = pX->nKey;
+    nZero = 0;
     if( pX->nMem ){
       memset(&r, 0, sizeof(r));
       r.pKeyInfo = pCur->pKeyInfo;
@@ -1040,9 +1040,10 @@ int sqlite3BtreeInsert(
   }else{
     aData = pX->pData;
     nData = pX->nData;
+    nZero = pX->nZero;
   }
   rc = sqlite3HctTreeInsert(
-      pCur->pHctTreeCsr, pRec, pX->nKey, nData, aData
+      pCur->pHctTreeCsr, pRec, pX->nKey, nData, aData, nZero
   );
 
   if( pRec && pRec!=&r ){
@@ -1105,9 +1106,7 @@ int sqlite3BtreeCreateTable(Btree *p, Pgno *piTable, int flags){
 ** entries in the table.
 */
 int sqlite3BtreeClearTable(Btree *p, int iTable, int *pnChange){
-  int rc = SQLITE_OK;
-  sqlite3HctTreeClearOne(p->pHctTree, iTable, pnChange);
-  return rc;
+  return sqlite3HctTreeClearOne(p->pHctTree, iTable, pnChange);
 }
 
 /*
@@ -1116,8 +1115,9 @@ int sqlite3BtreeClearTable(Btree *p, int iTable, int *pnChange){
 ** This routine only work for pCur on an ephemeral table.
 */
 int sqlite3BtreeClearTableOfCursor(BtCursor *pCur){
-  assert( 0 );
-  return SQLITE_OK;
+  return sqlite3HctTreeClearOne(
+      pCur->pBtree->pHctTree, sqlite3HctTreeCsrRoot(pCur->pHctTreeCsr), 0
+  );
 }
 
 /*
