@@ -1,5 +1,5 @@
-C Fix\smemory\sleak.
-D 2020-10-08T20:05:19.986
+C Fix\sproblems\ssurrounding\ssavepoint\srollback.
+D 2020-10-09T16:37:43.108
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -506,8 +506,8 @@ F src/global.c 943256ac44f333039d35a9830c18d075a81fa6b6bf2af05771494a9acfb9a40b
 F src/hash.c 8d7dda241d0ebdafb6ffdeda3149a412d7df75102cecfc1021c98d6219823b19
 F src/hash.h 9d56a9079d523b648774c1784b74b89bd93fac7b365210157482e4319a468f38
 F src/hctInt.h b84b05b67f7482e5839d5a0e40b39805653afbc54f5db99653195561bc3b49fe
-F src/hct_tree.c 08b71cae2db6c2f997cbb5947f15bdefd4920bd46927b370a896bc486a441886
-F src/hctree.c 4c5d0e2a3dc4799e0d4c72315f10f7d7fd8fd094bf7bdc616994c4e2d86c3665
+F src/hct_tree.c 2f8c0b86a4b26233947aef40326e5678eb9c52b78173b893ebacc205ff09ddd0
+F src/hctree.c cb32cf282705d0d57ed0ec108b0249e3a2036c98ff5d6ec8fe10b518136a3592
 F src/hwtime.h cb1d7e3e1ed94b7aa6fde95ae2c2daccc3df826be26fc9ed7fd90d1750ae6144
 F src/in-operator.md 10cd8f4bcd225a32518407c2fb2484089112fd71
 F src/insert.c 7e081d33aab4a9d761c39dccf3c3872c35501565d2ed9db66301918d23bc7901
@@ -1057,7 +1057,8 @@ F test/gcfault.test dd28c228a38976d6336a3fc42d7e5f1ad060cb8c
 F test/gencol1.test b05e6c5edb9b10d48efb634ed07342441bddc89d225043e17095c36e567521a0
 F test/genesis.tcl 1e2e2e8e5cc4058549a154ff1892fe5c9de19f98
 F test/having.test e4098a4b8962f9596035c3b87a8928a10648acc509f1bb8d6f96413bbf79a1b3
-F test/hct_vtab1.test 1dfd1b8695f68478eac5d96bf627339aea2d0ef3bff2ffa2018dbc3570e99709
+F test/hct.test 98dc881d4db196ea6527c2f5b11ae135eb593afb5e97f1350aaf9c9d077f8bac
+F test/hct_vtab1.test a752443f1c214d3cb87eb6d25143dd9983813f1ad43381d9603d802b9c57ff24
 F test/hexlit.test 4a6a5f46e3c65c4bf1fa06f5dd5a9507a5627751
 F test/hidden.test 23c1393a79e846d68fd902d72c85d5e5dcf98711
 F test/hook.test e97382e68e4379838e888756d653afd159f5f14780315ff97b70360d3d8485bc
@@ -1258,7 +1259,7 @@ F test/parser1.test 6ccdf5e459a5dc4673d3273dc311a7e9742ca952dd0551a6a6320d27035c
 F test/pcache.test c8acbedd3b6fd0f9a7ca887a83b11d24a007972b
 F test/pcache2.test af7f3deb1a819f77a6d0d81534e97d1cf62cd442
 F test/percentile.test 4243af26b8f3f4555abe166f723715a1f74c77ff
-F test/permutations.test 661a4325a5717957a77836910ee164ba26594a502d7a3df0e1ae7b9cba829c5d
+F test/permutations.test 05ae605ef3fd2625696bba22b862eb8d9a6946e223961af4c176333f7f4bea2a
 F test/pg_common.tcl 3b27542224db1e713ae387459b5d117c836a5f6e328846922993b6d2b7640d9f
 F test/pragma.test 50b91bedea9324d3ab48e793f908ee7d2c7dcf84bfa2281e792838be59641ec8
 F test/pragma2.test e5d5c176360c321344249354c0c16aec46214c9f
@@ -1895,8 +1896,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P 6fb4c3a04d21abb6b6a82b357eeb3533da12588f8cf23e571c1df645ea074a59
-R eca87ab57b64aa25c75ce55216cb82fa
+P bc40af60b663b5083aba5af5444b01437402c9d295ca1ef723a1261dc5462d75
+R 6d236440dc13d71ed9b2dc6edbfb6fb3
 U dan
-Z b23a9986128d2a37ce26ad22a85835b7
+Z 1d61af2e4fc6f3e07a656af2d30ad41d
 # Remove this line to create a well-formed Fossil manifest.

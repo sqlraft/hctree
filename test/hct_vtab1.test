@@ -233,7 +233,7 @@ do_execsql_test 3.6.1 {
 
 #-------------------------------------------------------------------------
 reset_db
-load_hct db
+load_static_extension db hct
 
 set nTest 50
 set nStmt 100

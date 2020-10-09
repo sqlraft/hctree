@@ -769,15 +769,17 @@ int sqlite3HctTreeBegin(HctTree *pTree, int iStmt){
 
 int sqlite3HctTreeRelease(HctTree *pTree, int iStmt){
   if( iStmt<pTree->iStmt ){
-    HctTreeNode *pStop = pTree->apStmt[iStmt+1];
-    HctTreeNode *pNode;
-    HctTreeNode *pPrev;
-    for(pNode=pTree->pRollback; pNode!=pStop; pNode=pPrev){
-      pPrev = pNode->pPrev;
-      if( pNode->pClobber ) treeNodeUnref(pNode->pClobber);
-      treeNodeUnref(pNode);
+    if( iStmt==0 ){
+      HctTreeNode *pStop = pTree->apStmt[iStmt+1];
+      HctTreeNode *pNode;
+      HctTreeNode *pPrev;
+      for(pNode=pTree->pRollback; pNode!=pStop; pNode=pPrev){
+        pPrev = pNode->pPrev;
+        if( pNode->pClobber ) treeNodeUnref(pNode->pClobber);
+        treeNodeUnref(pNode);
+      }
+      pTree->pRollback = pStop;
     }
-    pTree->pRollback = pStop;
     pTree->iStmt = iStmt;
   }
   return SQLITE_OK;

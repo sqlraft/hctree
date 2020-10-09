@@ -18,6 +18,7 @@
 #ifdef SQLITE_ENABLE_HCT
 
 struct Btree {
+  sqlite3 *db;
   HctTree *pHctTree;
   void *pSchema;                  /* Schema memory from sqlite3BtreeSchema() */
   void(*xSchemaFree)(void*);      /* Function to free pSchema */
@@ -32,6 +33,8 @@ struct BtCursor {
   HctTreeCsr *pHctTreeCsr;
   KeyInfo *pKeyInfo;              /* For non-intkey tables */
   int iNoop;                      /* +ve -> Next() is noop, -ve -> Prev() is */
+  int errCode;
+  int wrFlag;                     /* Value of wrFlag when cursor opened */
   BtCursor *pCsrNext;             /* Next element in Btree.pCsrList list */
 };
 
@@ -167,6 +170,7 @@ int sqlite3BtreeOpen(
   if( pNew ){
     memset(pNew, 0, sizeof(Btree));
     pNew->iNextRoot = 2;
+    pNew->db = db;
     rc = sqlite3HctTreeNew(&pNew->pHctTree);
   }else{
     rc = SQLITE_NOMEM;
@@ -417,13 +421,11 @@ int sqlite3BtreeBeginTrans(Btree *p, int wrflag, int *pSchemaVersion){
   int req = wrflag ? SQLITE_TXN_WRITE : SQLITE_TXN_READ;
 
   if( pSchemaVersion ) *pSchemaVersion = p->aMeta[1];
-  if( p->eTrans<req ){
-    if( wrflag ){
-      rc = sqlite3HctTreeBegin(p->pHctTree, 1);
-    }
-    if( rc==SQLITE_OK ){
-      p->eTrans = req;
-    }
+  if( wrflag ){
+    rc = sqlite3HctTreeBegin(p->pHctTree, 1 + p->db->nSavepoint);
+  }
+  if( rc==SQLITE_OK && p->eTrans<req ){
+    p->eTrans = req;
   }
   return rc;
 }
@@ -549,7 +551,16 @@ int sqlite3BtreeCommit(Btree *p){
 */
 int sqlite3BtreeTripAllCursors(Btree *pBtree, int errCode, int writeOnly){
   int rc = SQLITE_OK;
-  assert( 0 );
+  if( pBtree ){
+    BtCursor *p;
+    for(p=pBtree->pCsrList; p; p=p->pCsrNext){
+      if( writeOnly==0 || p->wrFlag ){
+        sqlite3HctTreeCsrClose(p->pHctTreeCsr);
+        p->pHctTreeCsr = 0;
+        p->errCode = errCode;
+      }
+    }
+  }
   return rc;
 }
 
@@ -610,11 +621,13 @@ int sqlite3BtreeBeginStmt(Btree *p, int iStatement){
 */
 int sqlite3BtreeSavepoint(Btree *p, int op, int iSavepoint){
   int rc = SQLITE_OK;
-  assert( op==SAVEPOINT_ROLLBACK || op==SAVEPOINT_RELEASE );
-  if( op==SAVEPOINT_RELEASE ){
-    sqlite3HctTreeRelease(p->pHctTree, iSavepoint+1);
-  }else{
-    sqlite3HctTreeRollbackTo(p->pHctTree, iSavepoint+2);
+  if( p && p->eTrans==SQLITE_TXN_WRITE ){
+    assert( op==SAVEPOINT_ROLLBACK || op==SAVEPOINT_RELEASE );
+    if( op==SAVEPOINT_RELEASE ){
+      sqlite3HctTreeRelease(p->pHctTree, iSavepoint+1);
+    }else{
+      sqlite3HctTreeRollbackTo(p->pHctTree, iSavepoint+2);
+    }
   }
   return rc;
 }
@@ -633,6 +646,7 @@ int sqlite3BtreeCursor(
   if( rc==SQLITE_OK ){
     pCur->pCsrNext = p->pCsrList;
     pCur->pBtree = p;
+    pCur->wrFlag = wrFlag;
     p->pCsrList = pCur;
   }else{
     assert( pCur->pHctTreeCsr==0 );
