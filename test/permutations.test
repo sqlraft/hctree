@@ -183,6 +183,9 @@ test_suite "hct" -prefix "" -description {
   trans2.test 
   delete2.test delete3.test
   update.test
+  select2.test select3.test select4.test select5.test
+  select6.test select7.test select8.test select9.test
+  selectA.test
 }
 
 test_suite "veryquick" -prefix "" -description {

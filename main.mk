@@ -76,7 +76,8 @@ LIBOBJ+= vdbe.o parse.o \
          vdbeapi.o vdbeaux.o vdbeblob.o vdbemem.o vdbesort.o \
 	 vdbetrace.o vdbevtab.o \
          wal.o walker.o where.o wherecode.o whereexpr.o \
-         utf.o vtab.o window.o
+         utf.o vtab.o window.o \
+         hct_tree.o hct_file.o hct_database.o
 
 LIBOBJ += sqlite3session.o
 
@@ -355,8 +356,7 @@ TESTSRC = \
   $(TOP)/src/test_vfs.c \
   $(TOP)/src/test_windirent.c \
   $(TOP)/src/test_window.c \
-  $(TOP)/src/test_wsd.c    \
-  $(TOP)/src/hct_tree.c
+  $(TOP)/src/test_wsd.c
 
 # Extensions to be statically loaded.
 #
