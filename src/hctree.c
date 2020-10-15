@@ -20,6 +20,7 @@
 struct Btree {
   sqlite3 *db;
   HctTree *pHctTree;
+  HctDatabase *pHctDb;
   void *pSchema;                  /* Schema memory from sqlite3BtreeSchema() */
   void(*xSchemaFree)(void*);      /* Function to free pSchema */
   int eTrans;                     /* SQLITE_TXN_NONE, READ or WRITE */
@@ -176,6 +177,10 @@ int sqlite3BtreeOpen(
     rc = SQLITE_NOMEM;
   }
 
+  if( rc==SQLITE_OK && zFilename && zFilename[0] ){
+    rc = sqlite3HctDbOpen(zFilename, &pNew->pHctDb);
+  }
+
   if( rc!=SQLITE_OK ){
     sqlite3BtreeClose(pNew);
     pNew = 0;
@@ -197,6 +202,7 @@ int sqlite3BtreeClose(Btree *p){
     }
     sqlite3_free(p->pSchema);
     sqlite3HctTreeFree(p->pHctTree);
+    sqlite3HctDbClose(p->pHctDb);
     sqlite3_free(p);
   }
   return SQLITE_OK;

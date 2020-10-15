@@ -19,15 +19,35 @@
 typedef struct HctDatabase HctDatabase;
 
 struct HctDatabase {
-
-  int dummy;
+  HctFile *pFile;
 };
 
 int sqlite3HctDbOpen(const char *zFile, HctDatabase **ppDb){
-  return SQLITE_OK;
+  int rc = SQLITE_OK;
+  HctDatabase *pNew;
+
+  pNew = (HctDatabase*)sqlite3MallocZero(sizeof(*pNew));
+  if( pNew ){
+    rc = sqlite3HctFileOpen(zFile, &pNew->pFile);
+  }else{
+    rc = SQLITE_NOMEM_BKPT;
+  }
+
+  if( rc!=SQLITE_OK ){
+    sqlite3HctDbClose(pNew);
+    pNew = 0;
+  }
+
+  *ppDb = pNew;
+  return rc;
 }
 
-void sqlite3HctDbClose(HctDatabase *pFile){
+void sqlite3HctDbClose(HctDatabase *p){
+  if( p ){
+    sqlite3HctFileClose(p->pFile);
+    p->pFile = 0;
+    sqlite3_free(p);
+  }
 }
 
 
