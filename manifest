@@ -1,5 +1,5 @@
-C Add\scode\sto\screate\sinitial\sdatabase\sfiles.
-D 2020-10-15T21:13:13.261
+C More\sprogress\son\screating\snew\sdatabases\son\sdisk.
+D 2020-10-16T21:14:46.633
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -41,7 +41,7 @@ F doc/F2FS.txt c1d4a0ae9711cfe0e1d8b019d154f1c29e0d3abfe820787ba1e9ed7691160fcd
 F doc/hctree/btree_merge1.png 850d83122906431143a3ec302d12ab219a172283fe9cf3e90c820c8767faee8d
 F doc/hctree/btree_redistribute1.png 1666cf0e3a24d3f792a09081665307f79d469f4d10a9f2e08526544c75644a2c
 F doc/hctree/btree_split1.png c90032107fbcb0333f8770d94f5c6102155aa3abb6a2f769f55529969f67ab6d
-F doc/hctree/fileformat.wiki f6371cc449e90e2e013e267dd55d47b4281b0fca0f445fbfab51ed29579941f1
+F doc/hctree/fileformat.wiki b0e785cb48f0aca01524eb7f00b1197d74cf1768886821b6fac12e525af8a66d
 F doc/hctree/hcfigures.odg 1caebdd7e8bc545ac5a1a0186e2669091dcc64769ae7918f23925edbff654f31
 F doc/hctree/index.wiki 8e0948decc43b0146005e0ccbe095b1b9dcbdccbefdf2b41e263f72c93a06081
 F doc/hctree/list1.png 85bb3c77acf9e3135f156852ce71b1de825e51b1dc6cc889810069685816682d
@@ -507,7 +507,7 @@ F src/hash.c 8d7dda241d0ebdafb6ffdeda3149a412d7df75102cecfc1021c98d6219823b19
 F src/hash.h 9d56a9079d523b648774c1784b74b89bd93fac7b365210157482e4319a468f38
 F src/hctInt.h eb9c5d498b4c7c50504b7dbd5607fc84674788380299a0b1daab7ec6931ee936
 F src/hct_database.c e61c52827b87e0386fa594a2ffe3a5d996ea793900e50f2a8d75f13b3265316c
-F src/hct_file.c 92fa07f17e232d21a86194d92447a9de1f978ee7f48589748d82e4acfaeb0dea
+F src/hct_file.c 410f57e6d9498f8bd79667e424f7487dc8ffb125491add8af277b122b894671b
 F src/hct_tree.c 2f8c0b86a4b26233947aef40326e5678eb9c52b78173b893ebacc205ff09ddd0
 F src/hctree.c e5c6f28d0d82e0d52e5b5d8622ffd17feda218da69dbc96fbf0d67aba1565949
 F src/hwtime.h cb1d7e3e1ed94b7aa6fde95ae2c2daccc3df826be26fc9ed7fd90d1750ae6144
@@ -1898,8 +1898,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P 3cc3d8f275a3517c2ad93dd67cb90b989b1124d25e784a27b4c2234e4399edfc
-R 5b37062575accb2b48fd6e694c48db65
+P 7b29a92a1f3685856456fab488222e423cd27b5eccb0f30c1a5674814409c092
+R 4d659188e1a9b6fa73e76acde78f9370
 U dan
-Z 31756eaa6a35c937356d78510578f089
+Z c9ea29cb2734fab5f9cab306d698a81a
 # Remove this line to create a well-formed Fossil manifest.

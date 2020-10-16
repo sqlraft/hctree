@@ -8,8 +8,8 @@ File format parameters:
   *  Chunk size. Default 128K pages (1MB chunk-size, 512MB database file size
      per chunk). This must be a power of 2 greater than the page size.
 
-The database file begins with a pair of header pages. Each header page is
-the same size as every other page in the database.
+The database file begins with a pair of header pages. Header pages are always
+4KiB each in size.
 
 Immediately following the header pages is the first page-map chunk, 
 containing the first (chunksize/8) page-map entries. Following this,
@@ -164,4 +164,13 @@ field is set to the number of bytes of data on the page following the page
 header.
 
 <h1> Page-Map Format </h1>
+
+Page-map slots 2-32, inclusive, are not used for a logical-to-physical page
+mapping. Instead, the lower 32-bits of these slots are used as follows:
+
+<table border=1 cellpadding=5 width=90%>
+  <tr><th>Slot<th>Use 
+  <tr><td>2   <td>Largest logical page number allocated in database.
+  <tr><td>3   <td>Largest physical page number allocated in database.
+</table>
 
