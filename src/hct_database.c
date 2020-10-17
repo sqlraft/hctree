@@ -50,4 +50,14 @@ void sqlite3HctDbClose(HctDatabase *p){
   }
 }
 
+int sqlite3HctDbRootNew(HctDatabase *p, u32 *piRoot){
+  return sqlite3HctFileRootNew(p->pFile, piRoot);
+}
+
+int sqlite3HctDbRootFree(HctDatabase *p, u32 iRoot){
+  return sqlite3HctFileRootFree(p->pFile, iRoot);
+}
+int sqlite3HctDbRootInit(HctDatabase *p, u32 iRoot){
+  return sqlite3HctDbRootInit(p->pFile, iRoot);
+}
 

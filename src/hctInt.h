@@ -80,6 +80,10 @@ typedef struct HctDatabase HctDatabase;
 int sqlite3HctDbOpen(const char *zFile, HctDatabase **ppDb);
 void sqlite3HctDbClose(HctDatabase *pDb);
 
+int sqlite3HctDbRootNew(HctDatabase *p, u32 *piRoot);
+int sqlite3HctDbRootFree(HctDatabase *p, u32 iRoot);
+int sqlite3HctDbRootInit(HctDatabase *p, u32 iRoot);
+
 /*************************************************************************
 ** Interface to code in hct_file.c
 */
@@ -98,6 +102,7 @@ int sqlite3HctFilePagesize(HctFile *pFile);
 */
 int sqlite3HctFileRootNew(HctFile *pFile, u32 *piRoot);
 int sqlite3HctFileRootFree(HctFile *pFile, u32 iRoot);
+int sqlite3HctFileRootInit(HctDatabase *p, u32 iRoot);
 
 typedef struct HctFilePage HctFilePage;
 struct HctFilePage {

@@ -833,6 +833,7 @@ int sqlite3HctTreeRollbackTo(HctTree *pTree, int iStmt){
 }
 
 void sqlite3HctTreeClear(HctTree *pTree){
+  assert( 0 );
 }
 
 int sqlite3HctTreeClearOne(HctTree *pTree, u32 iRoot, int *pnRow){

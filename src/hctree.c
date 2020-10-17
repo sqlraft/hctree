@@ -17,16 +17,35 @@
 
 #ifdef SQLITE_ENABLE_HCT
 
+typedef struct BtNewRoot BtNewRoot;
+
+/*
+** aNewRoot[]:
+**   Array of nNewRoot BtNewRoot structures. Each such structure represents
+**   a new table or index created by the current transaction. 
+**   aNewRoot[x].iSavepoint contains the open savepoint count when the table
+**   with root page aNewRoot[x].pgnoRoot was created. The value 
+**   Btree.db->nSavepoint.
+*/
 struct Btree {
   sqlite3 *db;
-  HctTree *pHctTree;
-  HctDatabase *pHctDb;
+  HctTree *pHctTree;              /* In-memory part of database */
+  HctDatabase *pHctDb;            /* On-disk part of db, if any */
   void *pSchema;                  /* Schema memory from sqlite3BtreeSchema() */
   void(*xSchemaFree)(void*);      /* Function to free pSchema */
   int eTrans;                     /* SQLITE_TXN_NONE, READ or WRITE */
   BtCursor *pCsrList;             /* List of all open cursors */
-  u32 iNextRoot;                  /* Next root page to allocate */
+
+  int nNewRoot;
+  BtNewRoot *aNewRoot;
+
+  u32 iNextRoot;                  /* Next root page to allocate if pHctDb==0 */
   u32 aMeta[16];                  /* 16 database meta values */
+};
+
+struct BtNewRoot {
+  int iSavepoint;
+  u32 pgnoRoot;
 };
 
 struct BtCursor {
@@ -203,6 +222,7 @@ int sqlite3BtreeClose(Btree *p){
     sqlite3_free(p->pSchema);
     sqlite3HctTreeFree(p->pHctTree);
     sqlite3HctDbClose(p->pHctDb);
+    sqlite3_free(p->aNewRoot);
     sqlite3_free(p);
   }
   return SQLITE_OK;
@@ -482,6 +502,18 @@ int sqlite3BtreeCommitPhaseOne(Btree *p, const char *zSuperJrnl){
 }
 
 /*
+** Flush the contents of Btree.pHctTree to Btree.pHctDb.
+*/
+static int btreeFlushToDisk(Btree *p){
+  int i;
+
+  /* Initialize any root pages created by this transaction */
+  for(i=0; i<p->nNewRoot; i++){
+    sqlite3HctDbRootInit(p->pHctDb, p->aNewRoot[i].pgnoRoot);
+  }
+}
+
+/*
 ** Commit the transaction currently in progress.
 **
 ** This routine implements the second phase of a 2-phase commit.  The
@@ -508,11 +540,17 @@ int sqlite3BtreeCommitPhaseOne(Btree *p, const char *zSuperJrnl){
 ** are no active cursors, it also releases the read lock.
 */
 int sqlite3BtreeCommitPhaseTwo(Btree *p, int bCleanup){
+  int rc = SQLITE_OK;
   if( p->eTrans==SQLITE_TXN_WRITE ){
     sqlite3HctTreeRelease(p->pHctTree, 0);
+    if( p->pHctDb ){
+      rc = btreeFlushToDisk(p);
+      sqlite3HctTreeClear(p->pHctTree);
+      p->nNewRoot = 0;
+    }
     p->eTrans = SQLITE_TXN_READ;
   }
-  return SQLITE_OK;
+  return rc;
 }
 
 /*
@@ -584,7 +622,11 @@ int sqlite3BtreeTripAllCursors(Btree *pBtree, int errCode, int writeOnly){
 int sqlite3BtreeRollback(Btree *p, int tripCode, int writeOnly){
   if( p->eTrans==SQLITE_TXN_WRITE ){
     sqlite3HctTreeRollbackTo(p->pHctTree, 0);
+    if( p->pHctDb ){
+      sqlite3HctTreeClear(p->pHctTree);
+    }
     p->eTrans = SQLITE_TXN_READ;
+    p->nNewRoot = 0;
   }
   return SQLITE_OK;
 }
@@ -613,6 +655,17 @@ int sqlite3BtreeBeginStmt(Btree *p, int iStatement){
   return rc;
 }
 
+static int btreeRollbackRoot(Btree *p, int iSavepoint){
+  int i;
+  int rc = SQLITE_OK;
+  for(i=p->nNewRoot-1; rc==SQLITE_OK && i>=0; i--){
+    if( p->aNewRoot[i].iSavepoint<=iSavepoint ) break;
+    rc = sqlite3HctDbRootFree(p->pHctDb, p->aNewRoot[i].pgnoRoot);
+  }
+  p->nNewRoot = i+1;
+  return rc;
+}
+
 /*
 ** The second argument to this function, op, is always SAVEPOINT_ROLLBACK
 ** or SAVEPOINT_RELEASE. This function either releases or rolls back the
@@ -628,11 +681,18 @@ int sqlite3BtreeBeginStmt(Btree *p, int iStatement){
 int sqlite3BtreeSavepoint(Btree *p, int op, int iSavepoint){
   int rc = SQLITE_OK;
   if( p && p->eTrans==SQLITE_TXN_WRITE ){
+    int i;
     assert( op==SAVEPOINT_ROLLBACK || op==SAVEPOINT_RELEASE );
     if( op==SAVEPOINT_RELEASE ){
+      for(i=0; i<p->nNewRoot; i++){
+        if( p->aNewRoot[i].iSavepoint>iSavepoint ){
+          p->aNewRoot[i].iSavepoint = iSavepoint;
+        }
+      }
       sqlite3HctTreeRelease(p->pHctTree, iSavepoint+1);
     }else{
       sqlite3HctTreeRollbackTo(p->pHctTree, iSavepoint+2);
+      btreeRollbackRoot(p, iSavepoint);
     }
   }
   return rc;
@@ -1107,8 +1167,29 @@ int sqlite3BtreeDelete(BtCursor *pCur, u8 flags){
 **     BTREE_ZERODATA                  Used for SQL indices
 */
 int sqlite3BtreeCreateTable(Btree *p, Pgno *piTable, int flags){
+  Pgno iNew = 0;
   int rc = SQLITE_OK;
-  *piTable = p->iNextRoot++;
+  if( p->pHctDb ){
+    BtNewRoot *aNewRoot;
+
+    /* Grow the Btree.aNewRoot array */
+    aNewRoot = (BtNewRoot*)sqlite3_realloc(
+        p->aNewRoot, sizeof(BtNewRoot)*(p->nNewRoot+1)
+    );
+    if( aNewRoot==0 ) return SQLITE_NOMEM_BKPT;
+    p->aNewRoot = aNewRoot;
+
+    /* Allocate a new root page and add it to the array. */
+    rc = sqlite3HctDbRootNew(p->pHctDb, &iNew);
+    if( rc==SQLITE_OK ){
+      p->aNewRoot[p->nNewRoot].pgnoRoot = iNew;
+      p->aNewRoot[p->nNewRoot].iSavepoint = p->db->nSavepoint;
+      p->nNewRoot++;
+    }
+  }else{
+    iNew = p->iNextRoot++;
+  }
+  *piTable = iNew;
   return rc;
 }
 
