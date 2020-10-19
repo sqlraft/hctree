@@ -45,6 +45,7 @@ struct Btree {
 
 struct BtNewRoot {
   int iSavepoint;
+  int bIndex;
   u32 pgnoRoot;
 };
 
@@ -52,7 +53,6 @@ struct BtCursor {
   Btree *pBtree;
   HctTreeCsr *pHctTreeCsr;
   KeyInfo *pKeyInfo;              /* For non-intkey tables */
-  int iNoop;                      /* +ve -> Next() is noop, -ve -> Prev() is */
   int errCode;
   int wrFlag;                     /* Value of wrFlag when cursor opened */
   BtCursor *pCsrNext;             /* Next element in Btree.pCsrList list */
@@ -501,16 +501,49 @@ int sqlite3BtreeCommitPhaseOne(Btree *p, const char *zSuperJrnl){
   return rc;
 }
 
+static int btreeFlushOneToDisk(void *pCtx, u32 iRoot, KeyInfo *pKeyInfo){
+  Btree *p = (Btree*)pCtx;
+  HctTreeCsr *pCsr = 0;
+  int rc;
+
+  rc = sqlite3HctTreeCsrOpen(p->pHctTree, iRoot, &pCsr);
+  if( rc==SQLITE_OK ){
+    for(rc=sqlite3HctTreeCsrFirst(pCsr);
+        rc==SQLITE_OK && sqlite3HctTreeCsrEof(pCsr)==0;
+        rc=sqlite3HctTreeCsrNext(pCsr)
+    ){
+      i64 iKey = 0;
+      int nData = 0;
+      const u8 *aData = 0;
+      sqlite3HctTreeCsrKey(pCsr, &iKey);
+      sqlite3HctTreeCsrData(pCsr, &nData, &aData);
+      if( pKeyInfo ){
+      }
+    }
+  }
+
+  return rc;
+}
+
 /*
 ** Flush the contents of Btree.pHctTree to Btree.pHctDb.
 */
 static int btreeFlushToDisk(Btree *p){
   int i;
+  int rc;
 
   /* Initialize any root pages created by this transaction */
-  for(i=0; i<p->nNewRoot; i++){
-    sqlite3HctDbRootInit(p->pHctDb, p->aNewRoot[i].pgnoRoot);
+  for(i=0; rc==SQLITE_OK && i<p->nNewRoot; i++){
+    BtNewRoot *pRoot = &p->aNewRoot[i];
+    rc = sqlite3HctDbRootInit(p->pHctDb, pRoot->bIndex, pRoot->pgnoRoot);
   }
+
+  if( rc==SQLITE_OK ){
+    rc = sqlite3HctTreeForeach(p->pHctTree, (void*)p, btreeFlushOneToDisk);
+  }
+
+  sqlite3HctDbCommit(p->pHctDb);
+  return rc;
 }
 
 /*
@@ -908,7 +941,6 @@ int sqlite3BtreeFirst(BtCursor *pCur, int *pRes){
   int rc = SQLITE_OK;
   sqlite3HctTreeCsrFirst(pCur->pHctTreeCsr);
   *pRes = sqlite3HctTreeCsrEof(pCur->pHctTreeCsr);
-  pCur->iNoop = 0;
   return rc;
 }
 
@@ -920,7 +952,6 @@ int sqlite3BtreeLast(BtCursor *pCur, int *pRes){
   int rc = SQLITE_OK;
   sqlite3HctTreeCsrLast(pCur->pHctTreeCsr);
   *pRes = sqlite3HctTreeCsrEof(pCur->pHctTreeCsr);
-  pCur->iNoop = 0;
   return rc;
 }
 
@@ -962,7 +993,6 @@ int sqlite3BtreeMovetoUnpacked(
   int *pRes                /* Write search results here */
 ){
   int rc = SQLITE_OK;
-  pCur->iNoop = 0;
   rc = sqlite3HctTreeCsrSeek(pCur->pHctTreeCsr, pIdxKey, intKey, pRes);
   return rc;
 }
@@ -1015,14 +1045,10 @@ i64 sqlite3BtreeRowCountEst(BtCursor *pCur){
 */
 int sqlite3BtreeNext(BtCursor *pCur, int flags){
   int rc = SQLITE_OK;
-  /* This operation is a no-op if (pCur->iNoop>0) */
-  if( pCur->iNoop<=0 ){
-    rc = sqlite3HctTreeCsrNext(pCur->pHctTreeCsr);
-    if( rc==SQLITE_OK && sqlite3HctTreeCsrEof(pCur->pHctTreeCsr) ){
-      rc = SQLITE_DONE;
-    }
+  rc = sqlite3HctTreeCsrNext(pCur->pHctTreeCsr);
+  if( rc==SQLITE_OK && sqlite3HctTreeCsrEof(pCur->pHctTreeCsr) ){
+    rc = SQLITE_DONE;
   }
-  pCur->iNoop = 0;
   return rc;
 }
 
@@ -1048,14 +1074,10 @@ int sqlite3BtreeNext(BtCursor *pCur, int flags){
 */
 int sqlite3BtreePrevious(BtCursor *pCur, int flags){
   int rc = SQLITE_OK;
-  /* This operation is a no-op if (pCur->iNoop<0) */
-  if( pCur->iNoop>=0 ){
-    rc = sqlite3HctTreeCsrPrev(pCur->pHctTreeCsr);
-    if( rc==SQLITE_OK && sqlite3HctTreeCsrEof(pCur->pHctTreeCsr) ){
-      rc = SQLITE_DONE;
-    }
+  rc = sqlite3HctTreeCsrPrev(pCur->pHctTreeCsr);
+  if( rc==SQLITE_OK && sqlite3HctTreeCsrEof(pCur->pHctTreeCsr) ){
+    rc = SQLITE_DONE;
   }
-  pCur->iNoop = 0;
   return rc;
 }
 
@@ -1182,8 +1204,10 @@ int sqlite3BtreeCreateTable(Btree *p, Pgno *piTable, int flags){
     /* Allocate a new root page and add it to the array. */
     rc = sqlite3HctDbRootNew(p->pHctDb, &iNew);
     if( rc==SQLITE_OK ){
+      int bIndex = (flags & BTREE_INTKEY)==0;
       p->aNewRoot[p->nNewRoot].pgnoRoot = iNew;
       p->aNewRoot[p->nNewRoot].iSavepoint = p->db->nSavepoint;
+      p->aNewRoot[p->nNewRoot].bIndex = bIndex;
       p->nNewRoot++;
     }
   }else{

@@ -35,19 +35,9 @@
 */
 #define HCT_PAGEMAP_LOGICAL_EOF      2
 #define HCT_PAGEMAP_PHYSICAL_EOF     3
+#define HCT_PAGEMAP_TRANSID_EOF      4
 
-#define HCT_PGMAPFLAG_PHYSICAL_USED  (((u64)0x00000001)<<32)
-
-
-/*
-** Page types. These are the values that may appear in the page-type
-** field of a page header.
-*/
-#define HCT_PAGETYPE_INTKEY_LEAF 0x01
-#define HCT_PAGETYPE_INTKEY_NODE 0x02
-#define HCT_PAGETYPE_INDEX_LEAF  0x03
-#define HCT_PAGETYPE_INDEX_NODE  0x04
-#define HCT_PAGETYPE_OVERFLOW    0x05
+#define HCT_PGMAPFLAG_PHYSINUSE  (((u64)0x00000001)<<32)
 
 
 typedef struct HctFileServer HctFileServer;
@@ -57,7 +47,7 @@ typedef struct HctDatabasePage HctDatabasePage;
 /* 
 ** Structure used to create root page of sqlite_schema.
 */
-typedef struct HctDatabasePage {
+struct HctDatabasePage {
   /* Recovery header fields */
   u64 iCksum;
   u64 iTid;
@@ -206,6 +196,25 @@ static u64 hctFilePagemapGet(HctMapping *p, u32 iSlot){
   return *(hctPagemapPtr(p, iSlot));
 }
 
+static int hctFilePagemapSetLogical(
+  HctMapping *p, 
+  u32 iSlot, 
+  u64 iOld, 
+  u64 iNew
+){
+  while( 1 ){
+    u64 i1 = hctFilePagemapGet(p, iSlot);
+    u64 iOld1 = (iOld&~HCT_PGMAPFLAG_PHYSINUSE) | (i1&HCT_PGMAPFLAG_PHYSINUSE);
+    u64 iNew1 = (iNew&~HCT_PGMAPFLAG_PHYSINUSE) | (i1&HCT_PGMAPFLAG_PHYSINUSE);
+
+    if( hctFilePagemapSet(p, iSlot, iOld1, iNew1) ) return 1;
+    if( i1!=iOld1 ) return 0;
+  }
+
+  assert( !"unreachable" );
+  return 0;
+}
+
 static int hctFileServerInit(HctFileServer *p){
   int rc = SQLITE_OK;
   int bNew = 0;
@@ -278,7 +287,7 @@ static int hctFileServerInit(HctFileServer *p){
   if( rc==SQLITE_OK && bNew ){
     hctFilePagemapSet(pMapping, HCT_PAGEMAP_LOGICAL_EOF, 0, 32);
     hctFilePagemapSet(pMapping, HCT_PAGEMAP_PHYSICAL_EOF, 0, 1);
-    hctFilePagemapSet(pMapping, 1, 0, 1|HCT_PGMAPFLAG_PHYSICAL_USED);
+    hctFilePagemapSet(pMapping, 1, 0, 1|HCT_PGMAPFLAG_PHYSINUSE);
     hctFileInitRootpage(pMapping, 1, HCT_PAGETYPE_INTKEY_LEAF);
   }
 
@@ -422,7 +431,10 @@ int sqlite3HctFilePagesize(HctFile *pFile){
 static int hctFileTmpAllocate(HctFile *pFile, int eType, u32 *piNew){
   HctMapping *pMapping = pFile->pMapping;
   u64 iVal;
-  assert( eType==HCT_PAGEMAP_LOGICAL_EOF || eType==HCT_PAGEMAP_PHYSICAL_EOF );
+  assert( eType==HCT_PAGEMAP_LOGICAL_EOF 
+       || eType==HCT_PAGEMAP_PHYSICAL_EOF 
+       || eType==HCT_PAGEMAP_TRANSID_EOF 
+  );
   while( 1 ){
     iVal = hctFilePagemapGet(pMapping, eType);
     if( (iVal & 0xFFFFFFFF)==0xFFFFFFFF ){
@@ -436,6 +448,14 @@ static int hctFileTmpAllocate(HctFile *pFile, int eType, u32 *piNew){
   return SQLITE_OK;
 }
 
+static void hctFileSetFlag(HctFile *pFile, u32 iSlot, u64 mask){
+  HctMapping *pMapping = pFile->pMapping;
+  while( 1 ){
+    u64 iVal = hctFilePagemapGet(pMapping, iSlot);
+    if( hctFilePagemapSet(pMapping, iSlot, iVal, iVal | mask) ) break;
+  }
+}
+
 
 int sqlite3HctFileRootNew(HctFile *pFile, u32 *piRoot){
   return hctFileTmpAllocate(pFile, HCT_PAGEMAP_LOGICAL_EOF, piRoot);
@@ -446,38 +466,33 @@ int sqlite3HctFileRootFree(HctFile *pFile, u32 iRoot){
   return SQLITE_OK;
 }
 
-/*
-** Argument iRoot is a logical page id allocated by an earlier call to
-** sqlite3HctFileRootNew(). This function allocates and populates a 
-** physical page to use to store it.
-*/
-int sqlite3HctFileRootInit(HctFile *pFile, u32 iRoot){
-  u32 iPg;
-  int rc;
-
-  rc = hctFileTmpAllocate(pFile, HCT_PAGEMAP_PHYSICAL_EOF, &iPg);
-  if( rc==SQLITE_OK ){
-    u64 iVal;
-    HctDatabasePage *pDbPage = (HctDatabasePage*)hctPagePtr(p, iPg);
-    memset(pDbPage, 0, p->szPage);
-    pDbPage->ePagetype = HCT_PAGETYPE_INTKEY_LEAF;
-
-    while( 1 ){
-      u64 iVal = hctFilePagemapGet(pFile->pMapping, iRoot);
-      u64 iNew = (iVal&HCT_PGMAPFLAG_PHYSICAL_USED) | iPg;
-      if( hctFilePagemapSet(pFile->pMapping, iRoot, iVal, iNew) ) break;
-    }
-  }
-}
-
 int sqlite3HctFilePageGet(HctFile *pFile, u32 iPg, HctFilePage *pPg){
   assert( 0 );
   return SQLITE_OK;
 }
 
-int sqlite3HctFilePageNew(HctFile *pFile, HctFilePage *pPg){
-  assert( 0 );
-  return SQLITE_OK;
+/*
+** Allocate a new logical page. If parameter iPg is zero, then a new
+** logical page number is allocated. Otherwise, it must be a logical page
+** number obtained by an earlier call to sqlite3HctFileRootNew().
+*/
+int sqlite3HctFilePageNew(HctFile *pFile, u32 iPg, HctFilePage *pPg){
+  int rc;                         /* Return code */
+  u32 iNewPg;                     /* New physical page id */
+
+  assert( iPg!=0 );
+  memset(pPg, 0, sizeof(*pPg));
+  rc = hctFileTmpAllocate(pFile, HCT_PAGEMAP_PHYSICAL_EOF, &iNewPg);
+  if( rc==SQLITE_OK ){
+    hctFileSetFlag(pFile, iNewPg, HCT_PGMAPFLAG_PHYSINUSE);
+    pPg->iPg = iPg;
+    pPg->iNewPg = iNewPg;
+    pPg->aNew = (u8*)hctPagePtr(pFile->pMapping, iNewPg);
+    pPg->iPagemap = hctFilePagemapGet(pFile->pMapping, iNewPg);
+    pPg->pFile = pFile;
+  }
+
+  return rc;
 }
 
 int sqlite3HctFilePageWrite(HctFilePage *pPg){
@@ -491,7 +506,23 @@ int sqlite3HctFilePageDelete(HctFilePage *pPg){
 }
 
 int sqlite3HctFilePageRelease(HctFilePage *pPg){
-  assert( 0 );
+  int rc = SQLITE_OK;
+  if( pPg->aNew ){
+    HctMapping *pMap = pPg->pFile->pMapping;
+    rc = hctFilePagemapSetLogical(pMap, pPg->iPg, pPg->iPagemap, pPg->iNewPg);
+  }
+  return rc;
+}
+
+u64 sqlite3HctFileStartTrans(HctFile *pFile){
+  u64 iRet = 0;
+  hctFileTmpAllocate(pFile, HCT_PAGEMAP_TRANSID_EOF, &iRet);
+  assert( iRet>0 );
+  return iRet;
+}
+
+int sqlite3HctFileFinishTrans(HctFile *pFile){
   return SQLITE_OK;
 }
+
 

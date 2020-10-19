@@ -833,7 +833,6 @@ int sqlite3HctTreeRollbackTo(HctTree *pTree, int iStmt){
 }
 
 void sqlite3HctTreeClear(HctTree *pTree){
-  assert( 0 );
 }
 
 int sqlite3HctTreeClearOne(HctTree *pTree, u32 iRoot, int *pnRow){
@@ -1065,4 +1064,23 @@ int sqlite3HctTreeCsrRestore(HctTreeCsr *pCsr, int *pIsDifferent){
 u32 sqlite3HctTreeCsrRoot(HctTreeCsr *pCsr){
   return pCsr->pRoot->iRoot;
 }
+
+int sqlite3HctTreeForeach(
+  HctTree *pTree,
+  void *pCtx,
+  int (*x)(void *, u32, KeyInfo*)
+){
+  int i;
+  int rc = SQLITE_OK;
+  for(i=0; rc==SQLITE_OK && i<pTree->nRootHash; i++){
+    HctTreeRoot *p;
+    for(p=pTree->apRootHash[i]; rc==SQLITE_OK && p; p=p->pHashNext){
+      if( p->pNode ){
+        rc = x(pCtx, p->iRoot, p->pKeyInfo);
+      }
+    }
+  }
+  return rc;
+}
+
 

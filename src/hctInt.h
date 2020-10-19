@@ -5,6 +5,15 @@ typedef sqlite3_int64 i64;
 typedef unsigned char u8;
 typedef unsigned int u32;
 
+/*
+** Page types. These are the values that may appear in the page-type
+** field of a page header.
+*/
+#define HCT_PAGETYPE_INTKEY_LEAF 0x01
+#define HCT_PAGETYPE_INTKEY_NODE 0x02
+#define HCT_PAGETYPE_INDEX_LEAF  0x03
+#define HCT_PAGETYPE_INDEX_NODE  0x04
+#define HCT_PAGETYPE_OVERFLOW    0x05
 
 /*************************************************************************
 ** Interface to code in hct_tree.c
@@ -46,7 +55,6 @@ int sqlite3HctTreeBegin(HctTree *pTree, int iStmt);
 int sqlite3HctTreeRelease(HctTree *pTree, int iStmt);
 int sqlite3HctTreeRollbackTo(HctTree *pTree, int iStmt);
 
-void sqlite3HctTreeClear(HctTree *pTree);
 int sqlite3HctTreeClearOne(HctTree *pTree, u32 iRoot, int *pnRow);
 
 int sqlite3HctTreeCsrOpen(HctTree *pTree, u32 iRoot, HctTreeCsr **ppCsr);
@@ -71,10 +79,18 @@ int sqlite3HctTreeCsrRestore(HctTreeCsr *pCsr, int *pIsDifferent);
 
 u32 sqlite3HctTreeCsrRoot(HctTreeCsr *pCsr);
 
+/* Iterate through non-empty tables/indexes within an HctTree structure. Used
+** when flushing contents to disk.  */
+int sqlite3HctTreeForeach(
+  HctTree *pTree,
+  void *pCtx,
+  int (*x)(void *, u32, KeyInfo*)
+);
+void sqlite3HctTreeClear(HctTree *pTree);
+
 /*************************************************************************
 ** Interface to code in hct_database.c
 */
-
 typedef struct HctDatabase HctDatabase;
 
 int sqlite3HctDbOpen(const char *zFile, HctDatabase **ppDb);
@@ -82,7 +98,15 @@ void sqlite3HctDbClose(HctDatabase *pDb);
 
 int sqlite3HctDbRootNew(HctDatabase *p, u32 *piRoot);
 int sqlite3HctDbRootFree(HctDatabase *p, u32 iRoot);
-int sqlite3HctDbRootInit(HctDatabase *p, u32 iRoot);
+
+int sqlite3HctDbRootInit(HctDatabase *p, int bIndex, u32 iRoot);
+
+int sqlite3HctTreeInsert(HctTreeCsr*, UnpackedRecord*, i64, int, const u8*,int);
+int sqlite3HctTreeDelete(HctTreeCsr *pCsr);
+
+int sqlite3HctDbInsert(HctDatabase*, u32, UnpackedRecord*, i64, int, const u8*);
+int sqlite3HctDbDelete(HctDatabase*, u32, UnpackedRecord*, i64);
+int sqlite3HctDbCommit(HctDatabase *p);
 
 /*************************************************************************
 ** Interface to code in hct_file.c
@@ -102,7 +126,6 @@ int sqlite3HctFilePagesize(HctFile *pFile);
 */
 int sqlite3HctFileRootNew(HctFile *pFile, u32 *piRoot);
 int sqlite3HctFileRootFree(HctFile *pFile, u32 iRoot);
-int sqlite3HctFileRootInit(HctDatabase *p, u32 iRoot);
 
 typedef struct HctFilePage HctFilePage;
 struct HctFilePage {
@@ -114,17 +137,20 @@ struct HctFilePage {
   u32 iNewPg;                     /* New physical page number */
   u64 iPagemap;                   /* Value read from page-map slot */
   int bDelete;                    /* True when page marked for deletion */
+  HctFile *pFile;
 };
 
 /*
 ** Read, write and allocate database pages.
 */
 int sqlite3HctFilePageGet(HctFile *pFile, u32 iPg, HctFilePage *pPg);
-int sqlite3HctFilePageNew(HctFile *pFile, HctFilePage *pPg);
+int sqlite3HctFilePageNew(HctFile *pFile, u32 iPg, HctFilePage *pPg);
 int sqlite3HctFilePageWrite(HctFilePage *pPg);
 int sqlite3HctFilePageDelete(HctFilePage *pPg);
 int sqlite3HctFilePageRelease(HctFilePage *pPg);
 
+u64 sqlite3HctFileStartTrans(HctFile *pFile);
+int sqlite3HctFileFinishTrans(HctFile *pFile);
 
 
 
