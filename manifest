@@ -1,5 +1,5 @@
-C Work\son\spage\sallocations\srequired\swhen\sflushing\sto\sdisk.
-D 2020-10-19T21:00:55.954
+C Work\son\screating\sintkey\stables\son\sdisk.
+D 2020-10-20T21:12:06.330
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -505,11 +505,11 @@ F src/func.c 2333eb4277f55a5efdc12ef754e7d7ec9105d257b2fd00301d23ce1e8fa67dc0
 F src/global.c 943256ac44f333039d35a9830c18d075a81fa6b6bf2af05771494a9acfb9a40b
 F src/hash.c 8d7dda241d0ebdafb6ffdeda3149a412d7df75102cecfc1021c98d6219823b19
 F src/hash.h 9d56a9079d523b648774c1784b74b89bd93fac7b365210157482e4319a468f38
-F src/hctInt.h 5e8a023d63dad8ed25ff73dba77e67e5b4fd22059f92e399ec081ea0c8600395
-F src/hct_database.c 48008f00e373079ca0d42946c04885c1a85111150f8a2aeb22af8be06f5cffaf
-F src/hct_file.c a3b9ee8eff6a90e18eda84f08baf22787f65c4034195e1a4ba60dca953d607e3
+F src/hctInt.h 7d62dc31081fa20369512592df3e1197855eeeb4b753aee990ed2589d55026b3
+F src/hct_database.c 22a9368397ba9dc4e0e3e8ec071a9d48675863ae4811c53c7f501ca7f0a8a694
+F src/hct_file.c f797e93fb9e2d23d60d164cc3b465a685ad6f5dc550e2c9cd8ad24eb206ea5d2
 F src/hct_tree.c cbe8477a3beddc70ced92787b0d2218fd53877699ee9a0d7638c611e2d3f2f61
-F src/hctree.c 2bc2e72c9e6e1326c8a7f4b545667428824042c767797c7c4832b0fa776d763b
+F src/hctree.c 43bf01136eac6e4ba441ca527c952cb6df052f4d3204f44a8b022d7d4b2236cc
 F src/hwtime.h cb1d7e3e1ed94b7aa6fde95ae2c2daccc3df826be26fc9ed7fd90d1750ae6144
 F src/in-operator.md 10cd8f4bcd225a32518407c2fb2484089112fd71
 F src/insert.c 7e081d33aab4a9d761c39dccf3c3872c35501565d2ed9db66301918d23bc7901
@@ -1898,8 +1898,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P 7242f2bdc8eb74920f7c48fe1df56fe373824431ce1bb4ba3a64aabcbc727e02
-R c3442ed2cbb510c6473220489a3b6d00
+P 69ab205388be3f550cdca13c33d4bfab225072df2dd932885a3bea3135ac016b
+R c85f4edb2e5b4c5efc1ac26a810e42af
 U dan
-Z ce70ec1208abefbf1c795871ccff5dc1
+Z eed554d452a62967ac5b7ab25f4bd24e
 # Remove this line to create a well-formed Fossil manifest.

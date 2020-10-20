@@ -467,7 +467,12 @@ int sqlite3HctFileRootFree(HctFile *pFile, u32 iRoot){
 }
 
 int sqlite3HctFilePageGet(HctFile *pFile, u32 iPg, HctFilePage *pPg){
-  assert( 0 );
+  assert( iPg!=0 );
+  memset(pPg, 0, sizeof(*pPg));
+  pPg->pFile = pFile;
+  pPg->iPg = iPg;
+  pPg->iPagemap = hctFilePagemapGet(pFile->pMapping, iPg);
+  pPg->aOld = (u8*)hctPagePtr(pFile->pMapping, (pPg->iPagemap & 0xFFFFFFFF));
   return SQLITE_OK;
 }
 
@@ -515,10 +520,11 @@ int sqlite3HctFilePageRelease(HctFilePage *pPg){
 }
 
 u64 sqlite3HctFileStartTrans(HctFile *pFile){
-  u64 iRet = 0;
+  u32 iRet = 0;
+  /* TODO - support 56-bit tids */
   hctFileTmpAllocate(pFile, HCT_PAGEMAP_TRANSID_EOF, &iRet);
   assert( iRet>0 );
-  return iRet;
+  return (u64)iRet;
 }
 
 int sqlite3HctFileFinishTrans(HctFile *pFile){

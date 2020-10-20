@@ -518,8 +518,13 @@ static int btreeFlushOneToDisk(void *pCtx, u32 iRoot, KeyInfo *pKeyInfo){
       sqlite3HctTreeCsrKey(pCsr, &iKey);
       sqlite3HctTreeCsrData(pCsr, &nData, &aData);
       if( pKeyInfo ){
+        assert( 0 );
+      }else{
+        rc = sqlite3HctDbInsert(p->pHctDb, iRoot, 0, iKey, nData, aData);
       }
+      if( rc ) break;
     }
+    sqlite3HctTreeCsrClose(pCsr);
   }
 
   return rc;

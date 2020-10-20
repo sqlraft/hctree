@@ -92,6 +92,7 @@ void sqlite3HctTreeClear(HctTree *pTree);
 ** Interface to code in hct_database.c
 */
 typedef struct HctDatabase HctDatabase;
+typedef struct HctDbCsr HctDbCsr;
 
 int sqlite3HctDbOpen(const char *zFile, HctDatabase **ppDb);
 void sqlite3HctDbClose(HctDatabase *pDb);
@@ -101,12 +102,11 @@ int sqlite3HctDbRootFree(HctDatabase *p, u32 iRoot);
 
 int sqlite3HctDbRootInit(HctDatabase *p, int bIndex, u32 iRoot);
 
-int sqlite3HctTreeInsert(HctTreeCsr*, UnpackedRecord*, i64, int, const u8*,int);
-int sqlite3HctTreeDelete(HctTreeCsr *pCsr);
-
 int sqlite3HctDbInsert(HctDatabase*, u32, UnpackedRecord*, i64, int, const u8*);
 int sqlite3HctDbDelete(HctDatabase*, u32, UnpackedRecord*, i64);
 int sqlite3HctDbCommit(HctDatabase *p);
+
+int sqlite3HctDbCsrSeek(HctDbCsr*, UnpackedRecord*, i64 iKey, int *pRes);
 
 /*************************************************************************
 ** Interface to code in hct_file.c
