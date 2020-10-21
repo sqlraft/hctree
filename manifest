@@ -1,5 +1,5 @@
-C Rework\sformat\sof\sintkey\sleaf\spages.
-D 2020-10-21T20:30:04.620
+C Fix\sa\sfew\sbugs.
+D 2020-10-21T21:04:19.294
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -506,8 +506,8 @@ F src/global.c 943256ac44f333039d35a9830c18d075a81fa6b6bf2af05771494a9acfb9a40b
 F src/hash.c 8d7dda241d0ebdafb6ffdeda3149a412d7df75102cecfc1021c98d6219823b19
 F src/hash.h 9d56a9079d523b648774c1784b74b89bd93fac7b365210157482e4319a468f38
 F src/hctInt.h 8685d727bc1ad62b577ca00f3cebadc98d3eb4d74c0bce103e758b1f6b8650f9
-F src/hct_database.c a826792cf3d29d5e8f7ed87c98b7719c8c14c1717f5361d315cf126185bbe88e
-F src/hct_file.c 9979b4f3e01250340f0fadfceae243d850bba9f2c5761d2a0a1588e82bdf76c9
+F src/hct_database.c 386f59ee1b7d5cc816c49147be36ac99b65af3dcd90628483e8fbd4f970f361b
+F src/hct_file.c 2bb38d48fe8463b4edfd0c324e3702f44e3c8ce488e826bbb9640455dec474b1
 F src/hct_tree.c cbe8477a3beddc70ced92787b0d2218fd53877699ee9a0d7638c611e2d3f2f61
 F src/hctree.c 43bf01136eac6e4ba441ca527c952cb6df052f4d3204f44a8b022d7d4b2236cc
 F src/hwtime.h cb1d7e3e1ed94b7aa6fde95ae2c2daccc3df826be26fc9ed7fd90d1750ae6144
@@ -1898,8 +1898,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P d78713f93843e39d1850671d8a82173259a46d637a3ef9d4b5ad6963edf11aa1
-R bd9a035d4599df7d88cb0c94bdece6ab
+P ec056a025864507c1c7e90d296a989bb0228b110751f844dccd8c849fbb7269e
+R 9e6816aec99e05f9c6a53ed6e67004df
 U dan
-Z c2c77653cbb534a6e9ceb76cc6e7b64b
+Z cf9ff8fbc0f6572e9056cb51297a0986
 # Remove this line to create a well-formed Fossil manifest.

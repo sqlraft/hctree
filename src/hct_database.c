@@ -274,36 +274,36 @@ int sqlite3HctDbInsert(
     int nReq = 16 + 2 + sqlite3VarintLen(nData) + nData;
 
     /* Check if there is enough space for the new entry on the page. */
-
     if( pOld->nFree>=nReq ){
+      int iOff;
       if( pOld->nFreeSpace<nReq ){
         /* shuffle up entries on page to make room */
         assert( 0 );
-      }else{
-        int iOff;
-
-        /* Create the new database page header */
-        memcpy(pNew, pOld, sizeof(HctDatabasePage));
-        pNew->nEntry++;
-        pNew->nFreeSpace -= nReq;
-        pNew->nFree -= nReq;
-
-        /* Create the new key/tidflags array */
-        hctDbSplitcopy(aNewKey, aOldKey, pOld->nEntry, 16, iNewCell);
-        aNewKey[iNewCell].iKey = iKey;
-        aNewKey[iNewCell].iTidFlags = pDb->iTid;
-
-        /* Create the new offset array (new entry populated below) */
-        hctDbSplitcopy(aNewOff, aOldOff, pOld->nEntry, 2, iNewCell);
-
-        /* Create the new record body area */
-        iOff = (16+2) * pOld->nEntry + pOld->nFree;
-        memcpy(&csr.pg.aNew[iOff], &csr.pg.aOld[iOff], pDb->pgsz - iOff);
-        iOff -= (nReq - (16+2));
-        aNewOff[iNewCell] = (u16)iOff;
-        iOff += sqlite3PutVarint(&csr.pg.aNew[iOff], nData);
-        memcpy(&csr.pg.aNew[iOff], aData, nData);
       }
+
+      /* Create the new database page header */
+      memcpy(pNew, pOld, sizeof(HctDatabasePage));
+      pNew->nEntry++;
+      pNew->nFreeSpace -= nReq;
+      pNew->nFree -= nReq;
+
+      /* Create the new key/tidflags array */
+      hctDbSplitcopy(aNewKey, aOldKey, pOld->nEntry, 16, iNewCell);
+      aNewKey[iNewCell].iKey = iKey;
+      aNewKey[iNewCell].iTidFlags = pDb->iTid;
+
+      /* Create the new offset array (new entry populated below) */
+      hctDbSplitcopy(aNewOff, aOldOff, pOld->nEntry, 2, iNewCell);
+
+      /* Create the new record body area */
+      iOff = sizeof(HctDatabasePage) + (16+2) * pOld->nEntry + pOld->nFreeSpace;
+      if( pDb->pgsz>iOff ){
+        memcpy(&csr.pg.aNew[iOff], &csr.pg.aOld[iOff], pDb->pgsz - iOff);
+      }
+      iOff -= (nReq - (16+2));
+      aNewOff[iNewCell] = (u16)iOff;
+      iOff += sqlite3PutVarint(&csr.pg.aNew[iOff], nData);
+      memcpy(&csr.pg.aNew[iOff], aData, nData);
     }else{
       /* split page */
       assert( 0 );

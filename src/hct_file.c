@@ -172,11 +172,8 @@ static void *hctPagePtr(HctMapping *p, u32 iPhys){
 }
 
 static void hctFileInitRootpage(HctMapping *p, u32 iPg, u8 eType){
-  void *pPage;
-  HctDatabasePage *pDbPage;
   assert( eType==HCT_PAGETYPE_INTKEY_LEAF || eType==HCT_PAGETYPE_INDEX_LEAF );
-  pPage = hctPagePtr(p, iPg);
-  sqlite3HctDbRootPageInit(0, pPage, p->szPage);
+  sqlite3HctDbRootPageInit(0, hctPagePtr(p, iPg), p->szPage);
 }
 
 /*
@@ -489,7 +486,7 @@ int sqlite3HctFilePageNew(HctFile *pFile, u32 iPg, HctFilePage *pPg){
     pPg->iPg = iPg;
     pPg->iNewPg = iNewPg;
     pPg->aNew = (u8*)hctPagePtr(pFile->pMapping, iNewPg);
-    pPg->iPagemap = hctFilePagemapGet(pFile->pMapping, iNewPg);
+    pPg->iPagemap = hctFilePagemapGet(pFile->pMapping, iPg);
     pPg->pFile = pFile;
   }
 
@@ -521,7 +518,9 @@ int sqlite3HctFilePageRelease(HctFilePage *pPg){
   int rc = SQLITE_OK;
   if( pPg->aNew ){
     HctMapping *pMap = pPg->pFile->pMapping;
-    rc = hctFilePagemapSetLogical(pMap, pPg->iPg, pPg->iPagemap, pPg->iNewPg);
+    if( !hctFilePagemapSetLogical(pMap, pPg->iPg, pPg->iPagemap, pPg->iNewPg) ){
+      rc = SQLITE_BUSY;
+    }
   }
   return rc;
 }
