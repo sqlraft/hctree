@@ -175,12 +175,8 @@ static void hctFileInitRootpage(HctMapping *p, u32 iPg, u8 eType){
   void *pPage;
   HctDatabasePage *pDbPage;
   assert( eType==HCT_PAGETYPE_INTKEY_LEAF || eType==HCT_PAGETYPE_INDEX_LEAF );
-
   pPage = hctPagePtr(p, iPg);
-  memset(pPage, 0, p->szPage);
-  pDbPage = (HctDatabasePage*)pPage;
-  /* TODO: Initialize recovery header fields! */
-  pDbPage->ePagetype = eType;
+  sqlite3HctDbRootPageInit(0, pPage, p->szPage);
 }
 
 /*
@@ -501,8 +497,19 @@ int sqlite3HctFilePageNew(HctFile *pFile, u32 iPg, HctFilePage *pPg){
 }
 
 int sqlite3HctFilePageWrite(HctFilePage *pPg){
-  assert( 0 );
-  return SQLITE_OK;
+  int rc = SQLITE_OK;             /* Return code */
+
+  if( pPg->aNew==0 ){
+    u32 iNewPg;                     /* New physical page id */
+    rc = hctFileTmpAllocate(pPg->pFile, HCT_PAGEMAP_PHYSICAL_EOF, &iNewPg);
+    if( rc==SQLITE_OK ){
+      hctFileSetFlag(pPg->pFile, iNewPg, HCT_PGMAPFLAG_PHYSINUSE);
+      pPg->iNewPg = iNewPg;
+      pPg->aNew = (u8*)hctPagePtr(pPg->pFile->pMapping, iNewPg);
+    }
+  }
+
+  return rc;
 }
 
 int sqlite3HctFilePageDelete(HctFilePage *pPg){

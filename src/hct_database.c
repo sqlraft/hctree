@@ -48,6 +48,11 @@ struct HctDatabasePage {
   u8 unused;
   u16 nEntry;
   u32 iPeerPg;
+
+  /* Second page header - for index leaf and node pages and intkey leaves. */
+  u16 nFreeSpace;                 /* Size of free space area */
+  u16 nFree;                      /* Total free bytes on page */
+  u32 unused2;                    /* Padding to multiple of 8 bytes */
 };
 
 typedef struct HctIntkeyTid HctIntkeyTid;
@@ -71,6 +76,7 @@ int sqlite3HctDbOpen(const char *zFile, HctDatabase **ppDb){
 
   pNew = (HctDatabase*)sqlite3MallocZero(sizeof(*pNew));
   if( pNew ){
+    pNew->pgsz = 4096;
     rc = sqlite3HctFileOpen(zFile, &pNew->pFile);
   }else{
     rc = SQLITE_NOMEM_BKPT;
@@ -107,6 +113,13 @@ static void hctDbStartTrans(HctDatabase *p){
   }
 }
 
+void sqlite3HctDbRootPageInit(int bIndex, u8 *aPage, int szPage){
+  HctDatabasePage *pPg = (HctDatabasePage*)aPage;
+  memset(aPage, 0, szPage);
+  pPg->ePagetype = bIndex?HCT_PAGETYPE_INDEX_LEAF:HCT_PAGETYPE_INTKEY_LEAF;
+  pPg->nFree = pPg->nFreeSpace = szPage - sizeof(HctDatabasePage);
+}
+
 int sqlite3HctDbRootInit(HctDatabase *p, int bIndex, u32 iRoot){
   HctFilePage pg;
   int rc;
@@ -114,10 +127,7 @@ int sqlite3HctDbRootInit(HctDatabase *p, int bIndex, u32 iRoot){
   hctDbStartTrans(p);
   rc = sqlite3HctFilePageNew(p->pFile, iRoot, &pg);
   if( rc==SQLITE_OK ){
-    HctDatabasePage *pPg = (HctDatabasePage*)pg.aNew;
-    assert( pg.aOld==0 && pg.aNew!=0 );
-    memset(pg.aNew, 0, p->pgsz);
-    pPg->ePagetype = bIndex?HCT_PAGETYPE_INDEX_LEAF:HCT_PAGETYPE_INTKEY_LEAF;
+    sqlite3HctDbRootPageInit(bIndex, pg.aNew, p->pgsz);
     rc = sqlite3HctFilePageRelease(&pg);
   }
   return rc;
@@ -205,13 +215,32 @@ int sqlite3HctDbCsrSeek(
   }
 
   if( pRes ) *pRes = res;
-  return SQLITE_OK;
+  return rc;
 }
 
 static void hctDbCsrInit(HctDatabase *pDb, u32 iRoot, HctDbCsr *pCsr){
   memset(pCsr, 0, sizeof(HctDbCsr));
   pCsr->pDb = pDb;
   pCsr->iRoot = iRoot;
+}
+
+
+static void hctDbSplitcopy(
+  void *pTo,                      /* Target buffer */
+  void *pFrom,                    /* Source buffer */
+  int nEntry,                     /* Number of entries in source array */
+  int szEntry,                    /* Size of each array entry in bytes */
+  int iNew                        /* Index at which to insert gap */
+){
+  u8 *pDest = (u8*)pTo;
+  u8 *pSrc = (u8*)pFrom;
+  if( iNew>0 ){
+    memcpy(pDest, pSrc, iNew*szEntry);
+  }
+  if( iNew<nEntry ){
+    int nByte = (nEntry-iNew) * szEntry;
+    memcpy(&pDest[(iNew+1)*szEntry], &pSrc[iNew*szEntry], nByte);
+  }
 }
 
 int sqlite3HctDbInsert(
@@ -234,66 +263,55 @@ int sqlite3HctDbInsert(
   }
   if( rc==SQLITE_OK ){
     /* Create the new version of the page */
-    int i;
-    int iOld;
-    int iNewOff;
-    int iNewCell = csr.pg.iCell+1;
+    int iNewCell = csr.iCell+1;
     HctDatabasePage *pOld = (HctDatabasePage*)csr.pg.aOld;
     HctDatabasePage *pNew = (HctDatabasePage*)csr.pg.aNew;
     HctIntkeyTid *aNewKey = (HctIntkeyTid*)&pNew[1];
     HctIntkeyTid *aOldKey = (HctIntkeyTid*)&pOld[1];
     u16 *aNewOff = (u16*)&aNewKey[pOld->nEntry+1];
     u16 *aOldOff = (u16*)&aOldKey[pOld->nEntry];
-    u8 *aNewBody = (u8*)&aNewOff[pOld->nEntry+1];
-    u8 *aOldBody = (u8*)&aOldOff[pOld->nEntry];
 
-    /* Create the new database page header */
-    memcpy(pNew, pOld, sizeof(HctDatabasePage));
-    pNew->nEntry++;
+    int nReq = 16 + 2 + sqlite3VarintLen(nData) + nData;
 
-    /* Create the key/tidflags array for the new page */
-    if( iNewCell>0 ){
-      memcpy(aNewKey, aOldKey, sizeof(HctIntkeyTid)*iNewCell);
-    }
-    aNewKey[iNewCell].iKey = iKey;
-    aNewKey[iNewCell].iTidFlags = pDb->iTid;
-    if( iNewCell<pOld->nEntry ){
-      int nCopy = sizeof(HctIntkeyTid) * (pOld->nEntry - iNewCell);
-      memcpy(&aNewKey[iNewCell+1], &aOldKey[iNewCell], nCopy);
-    }
+    /* Check if there is enough space for the new entry on the page. */
 
-    iNewOff = aNewBody - csr.pg.aNew;
-    for(i=0, iOld=0; i<pNew->nEntry; i++){
-      if( i==iNewCell ){
-        memcpy(iNewOff, aData, nData);
-        iNewOff += nData;
+    if( pOld->nFree>=nReq ){
+      if( pOld->nFreeSpace<nReq ){
+        /* shuffle up entries on page to make room */
+        assert( 0 );
       }else{
-        u8 *aOld = iOld==0 ? aOldBody : csr.pg.aOld[
+        int iOff;
+
+        /* Create the new database page header */
+        memcpy(pNew, pOld, sizeof(HctDatabasePage));
+        pNew->nEntry++;
+        pNew->nFreeSpace -= nReq;
+        pNew->nFree -= nReq;
+
+        /* Create the new key/tidflags array */
+        hctDbSplitcopy(aNewKey, aOldKey, pOld->nEntry, 16, iNewCell);
+        aNewKey[iNewCell].iKey = iKey;
+        aNewKey[iNewCell].iTidFlags = pDb->iTid;
+
+        /* Create the new offset array (new entry populated below) */
+        hctDbSplitcopy(aNewOff, aOldOff, pOld->nEntry, 2, iNewCell);
+
+        /* Create the new record body area */
+        iOff = (16+2) * pOld->nEntry + pOld->nFree;
+        memcpy(&csr.pg.aNew[iOff], &csr.pg.aOld[iOff], pDb->pgsz - iOff);
+        iOff -= (nReq - (16+2));
+        aNewOff[iNewCell] = (u16)iOff;
+        iOff += sqlite3PutVarint(&csr.pg.aNew[iOff], nData);
+        memcpy(&csr.pg.aNew[iOff], aData, nData);
       }
-      aNewOff[i] = iNewOff-1;
-    }
-
-    /* Create the offset array for the new page */
-    for(i=0; i<iNewCell; i++){
-      aNewOff[i] = aOldOff[i] + 2;
-    }
-    if( iNewCell>0 ){
-      aNewOff[iNewCell] = aNewOff[iNewCell-1] + nData;
     }else{
-      aNewOff[0] = (aNewBody - csr.pg.aNew) + nData - 1;
-    }
-    for(i=iNewCell+1; i<pNew->nEntry; i++){
-      aNewOff[i] = aOldOff[i-1] + nData + 2;
+      /* split page */
+      assert( 0 );
     }
 
-    /* Populate the body of the new page */
-    if( iNewCell>0 ){
-      memcpy(aNewBody, aOldBody, aOldOff[iNewCell]+1-(aOldBody-csr.pg.aOld));
-      memcpy(&csr.pg.aNew[aNewOff[iNewCell-1]+1], aData, nData);
-    }else{
-      memcpy(aNewBody, aData, nData);
-    }
-
+    rc = sqlite3HctFilePageRelease(&csr.pg);
+  }else{
+    sqlite3HctFilePageRelease(&csr.pg);
   }
 
   return rc;

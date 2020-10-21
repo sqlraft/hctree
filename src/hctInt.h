@@ -101,6 +101,7 @@ int sqlite3HctDbRootNew(HctDatabase *p, u32 *piRoot);
 int sqlite3HctDbRootFree(HctDatabase *p, u32 iRoot);
 
 int sqlite3HctDbRootInit(HctDatabase *p, int bIndex, u32 iRoot);
+void sqlite3HctDbRootPageInit(int bIndex, u8 *aPage, int szPage);
 
 int sqlite3HctDbInsert(HctDatabase*, u32, UnpackedRecord*, i64, int, const u8*);
 int sqlite3HctDbDelete(HctDatabase*, u32, UnpackedRecord*, i64);
