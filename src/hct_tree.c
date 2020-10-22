@@ -832,7 +832,31 @@ int sqlite3HctTreeRollbackTo(HctTree *pTree, int iStmt){
   return rc;
 }
 
+/*
+** Clear the contents of the entire tree.
+*/
 void sqlite3HctTreeClear(HctTree *pTree){
+  int i;
+  for(i=0; i<pTree->nRootHash; i++){
+    HctTreeRoot **pp = &pTree->apRootHash[i];
+    while( *pp ){
+      HctTreeRoot *p = *pp;
+      hctSaveCursors(p, 0);
+      hctTreeFreeNode(p->pNode);
+      p->pNode = 0;
+      sqlite3KeyInfoUnref(p->pKeyInfo);
+      p->pKeyInfo = 0;
+      if( p->pCsrList==0 ){
+        /* If the cursor-list is empty, also delete the HctTreeRoot 
+        ** structure itself. */
+        *pp = p->pHashNext;
+        sqlite3_free(p);
+        pTree->nRootEntry--;
+      }else{
+        pp = &p->pHashNext;
+      }
+    }
+  }
 }
 
 int sqlite3HctTreeClearOne(HctTree *pTree, u32 iRoot, int *pnRow){
@@ -1037,7 +1061,7 @@ int sqlite3HctTreeCsrData(HctTreeCsr *pCsr, int *pnData, const u8 **paData){
   HctTreeNode *pNode = pCsr->apNode[pCsr->iNode];
   assert( pCsr->pReseek==0 );
   *pnData = pNode->nData;
-  *paData = pNode->aData;
+  if( paData ) *paData = pNode->aData;
   assert( pCsr->iNode>=0 );
   return SQLITE_OK;
 }

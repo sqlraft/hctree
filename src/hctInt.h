@@ -107,7 +107,18 @@ int sqlite3HctDbInsert(HctDatabase*, u32, UnpackedRecord*, i64, int, const u8*);
 int sqlite3HctDbDelete(HctDatabase*, u32, UnpackedRecord*, i64);
 int sqlite3HctDbCommit(HctDatabase *p);
 
+int sqlite3HctDbCsrOpen(HctDatabase *pDb, u32 iRoot, HctDbCsr **ppCsr);
+void sqlite3HctDbCsrClose(HctDbCsr *pCsr);
+
 int sqlite3HctDbCsrSeek(HctDbCsr*, UnpackedRecord*, i64 iKey, int *pRes);
+
+int sqlite3HctDbCsrEof(HctDbCsr*);
+int sqlite3HctDbCsrFirst(HctDbCsr*);
+int sqlite3HctDbCsrLast(HctDbCsr*);
+int sqlite3HctDbCsrNext(HctDbCsr*);
+
+void sqlite3HctDbCsrKey(HctDbCsr*, i64 *piKey);
+int sqlite3HctDbCsrData(HctDbCsr *pCsr, int *pnData, const u8 **paData);
 
 /*************************************************************************
 ** Interface to code in hct_file.c
@@ -152,6 +163,5 @@ int sqlite3HctFilePageRelease(HctFilePage *pPg);
 
 u64 sqlite3HctFileStartTrans(HctFile *pFile);
 int sqlite3HctFileFinishTrans(HctFile *pFile);
-
 
 

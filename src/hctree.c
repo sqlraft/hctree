@@ -51,7 +51,12 @@ struct BtNewRoot {
 
 struct BtCursor {
   Btree *pBtree;
+
   HctTreeCsr *pHctTreeCsr;
+  HctDbCsr *pHctDbCsr;
+  int bUseTree;                   /* 1 if tree-csr is current entry, else 0 */
+  int bReverse;                   /* Cursor iterates in reverse order */
+
   KeyInfo *pKeyInfo;              /* For non-intkey tables */
   int errCode;
   int wrFlag;                     /* Value of wrFlag when cursor opened */
@@ -736,6 +741,9 @@ int sqlite3BtreeSavepoint(Btree *p, int op, int iSavepoint){
   return rc;
 }
 
+/*
+** Open a new cursor
+*/
 int sqlite3BtreeCursor(
   Btree *p,                                   /* The btree */
   Pgno iTable,                                /* Root page of table to open */
@@ -747,6 +755,9 @@ int sqlite3BtreeCursor(
   assert( pCur->pHctTreeCsr==0 );
   pCur->pKeyInfo = pKeyInfo;
   rc = sqlite3HctTreeCsrOpen(p->pHctTree, iTable, &pCur->pHctTreeCsr);
+  if( rc==SQLITE_OK && p->pHctDb ){
+    rc = sqlite3HctDbCsrOpen(p->pHctDb, iTable, &pCur->pHctDbCsr);
+  }
   if( rc==SQLITE_OK ){
     pCur->pCsrNext = p->pCsrList;
     pCur->pBtree = p;
@@ -792,6 +803,7 @@ int sqlite3BtreeCloseCursor(BtCursor *pCur){
   if( pCur->pBtree ){
     BtCursor **pp;
     sqlite3HctTreeCsrClose(pCur->pHctTreeCsr);
+    sqlite3HctDbCsrClose(pCur->pHctDbCsr);
     for(pp=&pCur->pBtree->pCsrList; *pp!=pCur; pp=&(*pp)->pCsrNext);
     *pp = pCur->pCsrNext;
     pCur->pHctTreeCsr = 0;
@@ -808,11 +820,17 @@ int sqlite3BtreeCloseCursor(BtCursor *pCur){
 ** This is a verification routine is used only within assert() statements.
 */
 int sqlite3BtreeCursorIsValid(BtCursor *pCur){
-  return pCur && !sqlite3HctTreeCsrEof(pCur->pHctTreeCsr);
+  return pCur && (
+      !sqlite3HctTreeCsrEof(pCur->pHctTreeCsr)
+   || !sqlite3HctDbCsrEof(pCur->pHctDbCsr)
+  );
 }
 #endif /* NDEBUG */
 int sqlite3BtreeCursorIsValidNN(BtCursor *pCur){
-  return !sqlite3HctTreeCsrEof(pCur->pHctTreeCsr);
+  return (
+      !sqlite3HctTreeCsrEof(pCur->pHctTreeCsr)
+   || !sqlite3HctDbCsrEof(pCur->pHctDbCsr)
+  );
 }
 
 /*
@@ -823,7 +841,11 @@ int sqlite3BtreeCursorIsValidNN(BtCursor *pCur){
 */
 i64 sqlite3BtreeIntegerKey(BtCursor *pCur){
   i64 iKey;
-  sqlite3HctTreeCsrKey(pCur->pHctTreeCsr, &iKey);
+  if( pCur->bUseTree ){
+    sqlite3HctTreeCsrKey(pCur->pHctTreeCsr, &iKey);
+  }else{
+    sqlite3HctDbCsrKey(pCur->pHctDbCsr, &iKey);
+  }
   return iKey;
 }
 
@@ -858,9 +880,12 @@ i64 sqlite3BtreeOffset(BtCursor *pCur){
 ** that the cursor has Cursor.eState==CURSOR_VALID.
 */
 u32 sqlite3BtreePayloadSize(BtCursor *pCur){
-  const u8 *aData;
   int nData;
-  sqlite3HctTreeCsrData(pCur->pHctTreeCsr, &nData, &aData);
+  if( pCur->bUseTree ){
+    sqlite3HctTreeCsrData(pCur->pHctTreeCsr, &nData, 0);
+  }else{
+    sqlite3HctDbCsrData(pCur->pHctDbCsr, &nData, 0);
+  }
   return nData;
 }
 
@@ -933,9 +958,37 @@ int sqlite3BtreePayloadChecked(BtCursor *pCur, u32 offset, u32 amt, void *pBuf){
 const void *sqlite3BtreePayloadFetch(BtCursor *pCur, u32 *pAmt){
   const u8 *aData;
   int nData;
-  sqlite3HctTreeCsrData(pCur->pHctTreeCsr, &nData, &aData);
+  if( pCur->bUseTree ){
+    sqlite3HctTreeCsrData(pCur->pHctTreeCsr, &nData, &aData);
+  }else{
+    sqlite3HctDbCsrData(pCur->pHctDbCsr, &nData, &aData);
+  }
   *pAmt = (u32)nData;
   return aData;
+}
+
+static void btreeSetUseTree(BtCursor *pCur){
+  int bTreeEof = sqlite3HctTreeCsrEof(pCur->pHctTreeCsr);
+  int bDbEof = sqlite3HctDbCsrEof(pCur->pHctDbCsr);
+
+  if( bTreeEof ){
+    pCur->bUseTree = 0;
+  }else if( bDbEof ){
+    pCur->bUseTree = 1;
+  }else if( pCur->pKeyInfo==0 ){
+    i64 iKeyTree;
+    i64 iKeyDb;
+
+    sqlite3HctTreeCsrKey(pCur->pHctTreeCsr, &iKeyTree);
+    sqlite3HctDbCsrKey(pCur->pHctDbCsr, &iKeyDb);
+
+    /* TODO - reverse scans */
+    pCur->bUseTree = (iKeyTree < iKeyDb);
+    if( pCur->bReverse ) pCur->bUseTree = !pCur->bUseTree;
+  }else{
+    /* TODO - index cursors */
+    assert( 0 );
+  }
 }
 
 /* Move the cursor to the first entry in the table.  Return SQLITE_OK
@@ -944,8 +997,17 @@ const void *sqlite3BtreePayloadFetch(BtCursor *pCur, u32 *pAmt){
 */
 int sqlite3BtreeFirst(BtCursor *pCur, int *pRes){
   int rc = SQLITE_OK;
+
   sqlite3HctTreeCsrFirst(pCur->pHctTreeCsr);
-  *pRes = sqlite3HctTreeCsrEof(pCur->pHctTreeCsr);
+  rc = sqlite3HctDbCsrFirst(pCur->pHctDbCsr);
+
+  if( rc==SQLITE_OK ){
+    int bTreeEof = sqlite3HctTreeCsrEof(pCur->pHctTreeCsr);
+    int bDbEof = sqlite3HctDbCsrEof(pCur->pHctDbCsr);
+    *pRes = (bTreeEof && bDbEof);
+    btreeSetUseTree(pCur);
+  }
+
   return rc;
 }
 
@@ -956,7 +1018,16 @@ int sqlite3BtreeFirst(BtCursor *pCur, int *pRes){
 int sqlite3BtreeLast(BtCursor *pCur, int *pRes){
   int rc = SQLITE_OK;
   sqlite3HctTreeCsrLast(pCur->pHctTreeCsr);
-  *pRes = sqlite3HctTreeCsrEof(pCur->pHctTreeCsr);
+  rc = sqlite3HctDbCsrLast(pCur->pHctDbCsr);
+
+  if( rc==SQLITE_OK ){
+    int bTreeEof = sqlite3HctTreeCsrEof(pCur->pHctTreeCsr);
+    int bDbEof = sqlite3HctDbCsrEof(pCur->pHctDbCsr);
+    *pRes = (bTreeEof && bDbEof);
+    pCur->bReverse = 1;
+    btreeSetUseTree(pCur);
+  }
+
   return rc;
 }
 
@@ -999,6 +1070,8 @@ int sqlite3BtreeMovetoUnpacked(
 ){
   int rc = SQLITE_OK;
   rc = sqlite3HctTreeCsrSeek(pCur->pHctTreeCsr, pIdxKey, intKey, pRes);
+  /* TODO - fix seeks for case when db is not empty */
+  pCur->bUseTree = 1;
   return rc;
 }
 
@@ -1015,7 +1088,10 @@ int sqlite3BtreeEof(BtCursor *pCur){
   ** have been deleted? This API will need to change to return an error code
   ** as well as the boolean result value.
   */
-  return sqlite3HctTreeCsrEof(pCur->pHctTreeCsr);
+  return (
+      sqlite3HctTreeCsrEof(pCur->pHctTreeCsr)
+   && sqlite3HctDbCsrEof(pCur->pHctDbCsr)
+  );
 }
 
 /*
@@ -1045,14 +1121,23 @@ i64 sqlite3BtreeRowCountEst(BtCursor *pCur){
 ** If bit 0x01 of the F argument in sqlite3BtreeNext(C,F) is 1, then the
 ** cursor corresponds to an SQL index and this routine could have been
 ** skipped if the SQL index had been a unique index.  The F argument
-** is a hint to the implement.  SQLite btree implementation does not use
+** is a hint to the implement. SQLite btree implementation does not use
 ** this hint, but COMDB2 does.
 */
 int sqlite3BtreeNext(BtCursor *pCur, int flags){
   int rc = SQLITE_OK;
-  rc = sqlite3HctTreeCsrNext(pCur->pHctTreeCsr);
-  if( rc==SQLITE_OK && sqlite3HctTreeCsrEof(pCur->pHctTreeCsr) ){
-    rc = SQLITE_DONE;
+  assert( pCur->bReverse==0 );
+  if( pCur->bUseTree ){
+    rc = sqlite3HctTreeCsrNext(pCur->pHctTreeCsr);
+  }else{
+    rc = sqlite3HctDbCsrNext(pCur->pHctDbCsr);
+  }
+  if( rc==SQLITE_OK ){
+    if( sqlite3BtreeEof(pCur) ){
+      rc = SQLITE_DONE;
+    }else{
+      btreeSetUseTree(pCur);
+    }
   }
   return rc;
 }

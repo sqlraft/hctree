@@ -522,6 +522,7 @@ int sqlite3HctFilePageRelease(HctFilePage *pPg){
       rc = SQLITE_BUSY;
     }
   }
+  memset(pPg, 0, sizeof(*pPg));
   return rc;
 }
 

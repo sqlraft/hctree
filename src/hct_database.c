@@ -165,11 +165,12 @@ int sqlite3HctDbCsrSeek(
   while( rc==SQLITE_OK ){
     HctDatabasePage *pPg = (HctDatabasePage*)pCsr->pg.aOld;
     HctIntkeyTid *aKey = (HctIntkeyTid*)&pPg[1];
-    int i1 = 0;
+    int i1 = -1;
     int i2 = pPg->nEntry-1;
 
     /* Seek within the page. Goal is to find the entry that is less than or
-    ** equal to (iKey/iTid).  */
+    ** equal to (iKey/iTid). If all entries on the page are larger than
+    ** (iKey/iTid), find the "entry" -1. */
     while( i2>i1 ){
       int iTest = (i1+i2+1)/2;
       i64 iPageKey = aKey[iTest].iKey;
@@ -192,7 +193,7 @@ int sqlite3HctDbCsrSeek(
     }
 
     /* Assert that we appear to have landed on the correct entry. */
-    assert( i1==i2 || (pPg->nEntry==0 && i2==-1) );
+    assert( i1==i2 );
     assert( i2==-1 || aKey[i2].iKey<iKey 
         || (aKey[i2].iKey==iKey && (aKey[i2].iTidFlags & HCT_TID_MASK)<=iTid) 
     );
@@ -329,6 +330,114 @@ int sqlite3HctDbDelete(
 
 int sqlite3HctDbCommit(HctDatabase *p){
   p->iTid = 0;
+  return SQLITE_OK;
+}
+
+/*
+** Open a cursor.
+*/
+int sqlite3HctDbCsrOpen(HctDatabase *pDb, u32 iRoot, HctDbCsr **ppCsr){
+  int rc = SQLITE_OK;
+  HctDbCsr *p;
+
+  p = (HctDbCsr*)sqlite3MallocZero(sizeof(HctDbCsr));
+  if( p==0 ){
+    rc = SQLITE_NOMEM_BKPT;
+  }else{
+    p->pDb = pDb;
+    p->iRoot = iRoot;
+    p->iCell = -1;
+  }
+  *ppCsr = p;
+  return rc;
+}
+
+void sqlite3HctDbCsrClose(HctDbCsr *pCsr){
+  if( pCsr ){
+    sqlite3_free(pCsr);
+  }
+}
+
+void sqlite3HctDbCsrKey(HctDbCsr *pCsr, i64 *piKey){
+  HctDatabasePage *pPg = (HctDatabasePage*)pCsr->pg.aOld;
+  HctIntkeyTid *aTid = (HctIntkeyTid*)&pPg[1];
+
+  assert( pCsr->iCell>=0 && pCsr->iCell<pPg->nEntry );
+  assert( pPg->ePagetype==HCT_PAGETYPE_INTKEY_LEAF );
+
+  *piKey = aTid[pCsr->iCell].iKey;
+}
+
+int sqlite3HctDbCsrEof(HctDbCsr *pCsr){
+  return pCsr->iCell<0;
+}
+
+int sqlite3HctDbCsrFirst(HctDbCsr *pCsr){
+  int rc;
+  HctFile *pFile = pCsr->pDb->pFile;
+
+  rc = sqlite3HctFilePageGet(pFile, pCsr->iRoot, &pCsr->pg);
+  if( rc==SQLITE_OK ){
+    HctDatabasePage *pPg = (HctDatabasePage*)pCsr->pg.aOld;
+    assert( pPg->ePagetype==HCT_PAGETYPE_INTKEY_LEAF );
+
+    pCsr->iCell = 0;
+    if( pPg->nEntry==0 ){
+      pCsr->iCell = -1;
+    }
+  }
+
+  return rc;
+}
+
+int sqlite3HctDbCsrLast(HctDbCsr *pCsr){
+  int rc;
+  HctFile *pFile = pCsr->pDb->pFile;
+
+  rc = sqlite3HctFilePageGet(pFile, pCsr->iRoot, &pCsr->pg);
+  if( rc==SQLITE_OK ){
+    HctDatabasePage *pPg = (HctDatabasePage*)pCsr->pg.aOld;
+    assert( pPg->ePagetype==HCT_PAGETYPE_INTKEY_LEAF );
+    assert( pPg->iPeerPg==0 );
+    pCsr->iCell = pPg->nEntry-1;;
+  }
+
+  return rc;
+}
+
+int sqlite3HctDbCsrNext(HctDbCsr *pCsr){
+  HctDatabasePage *pPg = (HctDatabasePage*)pCsr->pg.aOld;
+
+  assert( pCsr->iCell>=0 && pCsr->iCell<pPg->nEntry );
+  assert( pPg->ePagetype==HCT_PAGETYPE_INTKEY_LEAF );
+
+  pCsr->iCell++;
+  if( pCsr->iCell==pPg->nEntry ){
+    /* TODO - jump to peer page */
+    assert( pPg->iPeerPg==0 );
+    pCsr->iCell = -1;
+  }
+  return SQLITE_OK;
+}
+
+
+int sqlite3HctDbCsrData(HctDbCsr *pCsr, int *pnData, const u8 **paData){
+  HctDatabasePage *pPg = (HctDatabasePage*)pCsr->pg.aOld;
+  int iOff;
+  int nData;
+  u16 *aOff;
+
+  assert( pCsr->iCell>=0 && pCsr->iCell<pPg->nEntry );
+  assert( pPg->ePagetype==HCT_PAGETYPE_INTKEY_LEAF );
+
+  aOff = (u16*)&pCsr->pg.aOld[sizeof(HctDatabasePage) + 16*pPg->nEntry];
+  iOff = (int)aOff[pCsr->iCell];
+  iOff += getVarint32(&pCsr->pg.aOld[iOff], nData);
+  if( paData ){
+    *paData = &pCsr->pg.aOld[iOff];
+  }
+
+  *pnData = nData;
   return SQLITE_OK;
 }
 
