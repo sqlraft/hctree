@@ -1,8 +1,74 @@
 
+<h1> Context </h1>
+
+This page describes the data structures and algorithms used to implement
+the database on-disk.
+
+The database contains one or more tree structures identified by root page
+number, each of which is either an intkey or index tree structure, as required
+by SQLite. The special root page number 1 identifies the sqlite3_schema
+table.
+
+By the time a client begins writing entries to the database, the transaction
+has been reduced to a list of keys and delete-keys that must be written into
+the various tree structures within the db. It has already been determined that
+the transaction will be committed, and that it does not conflict with any other
+concurrently committing transaction. There is no chance rollback will be
+required. Any number of non-conflicting transactions may be concurrently
+writing to the database.
+
+Each key and delete-key written to the database has an associated 
+transaction id. Each reader carries with it a record of the transactions
+that were completely written (committed) to the db when its read transaction
+started. Keys or delete-keys with transaction ids for transactions that were
+not committed when the read transaction was opened are ignored. This means that
+it is not a problem if a reader reads a page that contains keys written since
+its transaction was opened, so long as it never reads a version of a page too
+old to contain keys that are part of transactions that were already completely
+committed. There may be any number of readers.
+
+The remainder of this page describes how multiple readers and writers 
+proceed concurrently without resorting to locks.
+
+<h1 id=overview> Overview of Database </h1>
+
+The distinguishing feature of the database format is the <b>page-map</b>. The
+page-map is a massive array large enough to contain an entry for each
+logical page in the database. It's primary purpose is to map between
+logical and physical page numbers (locations in the database file). In order
+to read the data from a page from disk given a logical page number, a client
+must first look up the physical page number within the page-map.
+
+The page-map is stored as part of the database file itself and memory mapped
+into the database process address space for client access. Clients always 
+write to the page-map using atomic compare-and-swap (CAS) instructions.
+
+This arrangements means that clients effectively have a <b>CAS primitive for
+entire pages</b>. In order to safely update an existing page, a client:
+
+  #  Reads the current value from the page-map, and then the data from
+     the physical page on disk.
+  #  Allocates an entirely new physical page and writes the new version
+     of the page data into it.
+  #  Attempts to modify the page-map entry for the logical page number to
+     point to the new physical page on disk using a CAS instruction. If
+     the page has been written since step 1, this will fail (as the
+     page-map entry will have been modified). 
+
+For the purposes of most of this page, we assume that logical and physical
+page numbers are never reused. In practice they must be, because both are
+32-bit unsigned integers, and also to avoid the database file growing
+indefinitely.
+
+Page-map slots are 64-bits in size, but physical page numbers are just 
+32-bits. 1 of the remaining bits is used to store the <b>PAGE_EVICTED flag</b>.
+The PAGE_EVICTED is set on a logical page as part of removing it from the
+database (see below). Because it is part of the page-map entry, setting
+the PAGE_EVICTED flag and the page data may both be considered part of the
+thing that is Compared-And-Swapped by the method above.
 
 
-
-<h1> Lists Instead Of Trees </h1>
+<h1> B-Tree Data Structure </h1>
 
 Technically, the data structure is a "b-link tree" - a b-tree where each node
 has a pointer to its right-hand peer, if any. In some variants, including this
@@ -10,8 +76,45 @@ one, some parent-child pointers may at times be missing from the tree
 structure. Readers use the peer-peer pointers to navigate to child pages for
 which the parent-child pointer is missing.
 
-In our opinion though, the data structure is more easily understood as a
-series of loosely coupled linked-lists.
+<verbatim type="pikchr center">
+boxht=0.2 ; boxwid=0.5 ; linewid=0.2
+
+A1: box ; arrow ; A2: box ; arrow ; A3: box ; arrow ; A4: box ; arrow
+A5: box ; arrow ; A6: box ; arrow ; A7: box ; arrow ; A8: box
+B1: box at A3 + (0.35, 0.5) ; arrow ; B2: box ; arrow ; B3: box
+C1: box at B2 + (0,0.5) 
+
+arrow from B1.s to A1.n
+arrow from B1.s to A2.n
+arrow from B2.s to A4.n
+arrow from B2.s to A5.n
+arrow from B3.s to A6.n
+arrow from B3.s to A7.n
+arrow from C1.s to B1.n
+arrow from C1.s to B3.n
+</verbatim>
+
+The first key on a page - either a leaf or internal node - is called the
+<b>fencepost key</b>. Once a page has been written to disk, its fencepost key
+never changes and the page will never contain a key smaller than the fencepost.
+The logical page number and the fencepost key value are indelibly coupled for
+all time. Even if the database entry itself is removed, the fencepost key is
+left on the page. The only exception is the leftmost peer node at each level of
+the tree structure - the fencepost key for this node is implicitly the smallest
+possible value in the keyspace.
+
+For both intkey and index trees, all entries are stored on leaf nodes.
+
+Each child pointer in a parent node is accompanied by a copy of the fencepost
+key for the child node.
+
+<h1> B-Tree Leaf Node Operations </h1>
+
+The data structure is best analyzed as a series of loosely coupled
+linked-lists. Consider, to begin with, just the leaves of a b-tree 
+structure - logical pages 1, 2, 3 and 4. The linked-list is being
+updated, possibly by multiple concurrent writers, and is also being
+traversed from start to finish by multiple readers.
 
 <verbatim type="pikchr center">
 boxht=0.2 ; boxwid=0.5
@@ -19,13 +122,41 @@ boxht=0.2 ; boxwid=0.5
 box "1" ; arrow ; box "2" ; arrow ; box "3" ; arrow ; box "4" ;
 </verbatim>
 
-Adding a node:
+Writing a new key to such a list when the destination page has enough
+room for the new entry is easy. The writer locates the page to update,
+and uses the <a href=#overview>CAS primitive</a> to write the new version
+containing the new key.
+
+If another writer is trying to simultaneously update the same page,
+one of the writes will fail. The failed writer restarts its operation to 
+write its key. Such a write does not interfere with readers either. Readers
+either see the old or new version of the page, and both contain the 
+data they require. If the reader sees the new version of the page, it 
+ignores the new key based on its transaction id.
+
+There are three slightly more complicated cases:
+
+  #  Splitting a linked-list page in two,
+  #  Consolidating two linked-list pages into one, and
+  #  Redistributing keys between two linked-list pages.
+
+If there is insufficient space within a node to accommodate a new key, the
+node may be <b>split in two</b>. This is a two step procedure:
+
+  #  A new node is allocated and populated with the keys destined for the
+     right-hand node of the new pair. The peer node pointer of the new
+     node is a copy of the peer node pointer of the node being split. Node 
+     5 in the diagram below.
+  #  A new version of the node being split (node 1 in the diagram below)
+     is written containing with the keys destined for the left-hand node
+     of the new pair. The peer node pointer of the new version points to
+     the node allocated in the previous step.
 
 <verbatim type="pikchr center">
 boxht=0.2 ; boxwid=0.5
 
-box "1" ; arrow ; TWO: box "2" ; arrow ; box "3" ; arrow ; box "4" ;
-
+ONE: box "1" ; arrow ; TWO: box "2" ; arrow ; box "3" ; arrow ; box "4" ;
+text "Step 1:" with e at ONE + (-0.5, 0)
 FIVE: box at TWO + (-0.5, -0.3) "5" color red
 arrow from FIVE.e to TWO.s color red
 </verbatim>
@@ -34,27 +165,97 @@ arrow from FIVE.e to TWO.s color red
 boxht=0.2 ; boxwid=0.5
 
 ONE: box "1" color red ; move ; TWO: box "2" ; arrow ; box "3" ; arrow ; box "4"
+text "Step 2:" with e at ONE + (-0.5, 0)
 
 FIVE: box at TWO + (-0.5, -0.3) "5"
 arrow from FIVE.e to TWO.s
 arrow from ONE.s to FIVE.w color red
 </verbatim>
+<center><i>Splitting a node in two</i></center>
 
-Removing a node:
+The new version of the page written in step 2 is of course written using
+the CAS primitive. If this fails because some other writer has written
+the page being split since it was read, the writer must reclaim the resources
+in step 1 and restart the write operation that required the split.
+
+It's not described above, but data must of course sometimes be removed from
+a node. This may result in the node becoming so underfull that the keys from
+it and its right-hand peer may be <b>consolidated into a single node</b>. 
+
+The diagram below shows the keys in nodes 2 and 3 being consolidated into a
+new version of node 2, removing 3 from the tree. This is a two step procedure:
+
+  #  The PAGE_EVICTED flag is set on the right-hand node of the pair
+     being consolidated (node 3 in the diagram). This tells other writers 
+     that the page may not be written - it is being removed from the tree.
+  #  A new version of page 2 is written, containing all keys from 
+     pages 2 and 3, with the peer node set to point to page 4.
 
 <verbatim type="pikchr center">
 boxht=0.2 ; boxwid=0.5
 
-box "1" ; arrow ; box "2" ; arrow ; THREE: box "3" color red; arrow color red; box "4" 
+ONE: box "1" ; arrow ; box "2" ; arrow ; THREE: box "3" color red; arrow color red; box "4" 
 circle "X" radius 0.05 color red at THREE.ne fill white
+text "Step 1:" with e at ONE + (-0.5, 0)
 </verbatim>
 
 <verbatim type="pikchr center">
 boxht=0.2 ; boxwid=0.5
 
-box "1" ; arrow ; TWO: box "2" color red; move ; THREE: box "3"; arrow; FOUR: box "4" 
+ONE: box "1" ; arrow ; TWO: box "2" color red; move ; THREE: box "3"; arrow; FOUR: box "4" 
 circle "X" radius 0.05 at THREE.ne fill white
+text "Step 2:" with e at ONE + (-0.5, 0)
 
 arrow from TWO.e right 0.1 then right 0.3 down 0.3 then right until even with FOUR.w then to FOUR.s color red
 </verbatim>
+<center><i>Consolidating two nodes</i></center>
+
+Once the PAGE_EVICTED flag has been set on a page, it may not be cleared.
+
+Setting the PAGE_EVICTED flag on a node does not count as a lock, as it need
+not block another writer. If a writer determines that a new key should be
+written to a node with the PAGE_EVICTED flag already set, it may perform step
+2 of the procedure above (or steps 2 and 3 of the one below) to correct the
+problem before restarting its write operation. It does not have to wait on the
+writer that set the PAGE_EVICTED flag.
+
+The final case is <b>redistributing keys between two peer nodes</b>. This
+cannot be done literally, as it would necessitate modifying the fencepost
+key of the right-hand peer, which is not allowed. Instead, the right-hand
+peer is removed from the tree and a newly allocated node used in its place.
+The following figure shows the three step process to redistribute the keys
+in nodes 2 and 3:
+
+<verbatim type="pikchr center">
+boxht=0.2 ; boxwid=0.5
+ONE: box "1" ; arrow ; box "2" ; arrow ; THREE: box "3" color red; arrow color red; box "4" 
+circle "X" radius 0.05 color red at THREE.ne fill white
+text "Step 1:" with e at ONE + (-0.5, 0)
+</verbatim>
+<verbatim type="pikchr center">
+boxht=0.2 ; boxwid=0.5
+ONE: box "1" ; arrow ; TWO: box "2" ; arrow ; THREE: box "3" ; arrow ; FOUR: box "4" ;
+circle "X" radius 0.05 at THREE.ne fill white
+text "Step 2:" with e at ONE + (-0.5, 0)
+FIVE: box at THREE + (0.0, -0.3) "5" color red
+arrow from FIVE.e to FOUR.s color red
+</verbatim>
+<verbatim type="pikchr center">
+boxht=0.2 ; boxwid=0.5
+ONE: box "1" ; arrow ; TWO: box "2" color red; move ; THREE: box "3" ; arrow ; FOUR: box "4" ;
+circle "X" radius 0.05 at THREE.ne fill white
+text "Step 3:" with e at ONE + (-0.5, 0)
+FIVE: box at THREE + (0.0, -0.3) "5"
+arrow from FIVE.e to FOUR.s
+arrow from TWO.e to FIVE.w color red
+</verbatim>
+<center><i>Redistributing keys between two nodes</i></center>
+
+In the consolidating two nodes case above, it may be that by the time the
+writer gets to step 2, it finds that some other writer has added keys to
+the left-hand peer (node 2 in the diagram) such that the two nodes now
+collectively contain too much data to consolidate. In this case the writer
+must change tack and proceed with step 2 of the "redistributing keys" case.
+
+
 
