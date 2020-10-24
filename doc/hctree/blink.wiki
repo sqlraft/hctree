@@ -6,6 +6,7 @@
   *  <a href=#btree>B-Tree Structure Overview</a>
   *  <a href=#leaves>B-Tree Leaf Node Operations</a>
   *  <a href=#interior>B-Tree Interior Node Operations</a>
+  *  <a href=#other> Changing the Height of the Tree</a>
 
 <h1 id=context> Component Context </h1>
 
@@ -118,12 +119,12 @@ key for the child node. This is different from the usual b-tree approach of N
 pointers and N-1 keys per internal node page - in this system an internal
 node with N pointer contains N keys.
 
-Another difference is that the key sorting order is reversed for each tier
-of the tree structure. On nodes that are parents of leaf nodes, keys are 
-sorted in reverse order. For nodes that are grandparents of the leaf nodes,
-keys sorting is in the same order as on leaves. For great-grandparents,
-reversed. And so on. The advantages of this are <a href=#interior>described 
-below</a>.
+Another departure from conventionality is that the key sorting order is
+reversed for each tier of the tree structure. On nodes that are parents of leaf
+nodes, keys are sorted in reverse order. For nodes that are grandparents of the
+leaf nodes, keys sorting is in the same order as on leaves. For
+great-grandparents, reversed. And so on. The advantages of this are <a
+href=#interior>described below</a>.
 
 <h1 id=leaves> B-Tree Leaf Node Operations </h1>
 
@@ -142,7 +143,7 @@ box "1" ; arrow ; box "2" ; arrow ; box "3" ; arrow ; box "4" ;
 Writing a new key to such a list when the destination page has enough
 room for the new entry is easy. The writer locates the page to update,
 and uses the <a href=#overview>CAS primitive</a> to write the new version
-containing the new key.
+of the page containing the new key.
 
 If another writer is trying to simultaneously update the same page,
 one of the writes will fail. The failed writer restarts its operation to 
@@ -423,5 +424,33 @@ arrow from B3.s left 0.2 then to A6.n
 arrow from B3.s to A7.n
 arrow from B3.s right 0.2 then to A8.n
 </verbatim>
+
+<h1 id=other> Changing the Height of the Tree</h1>
+
+Each tree structure is initially created as a single leaf node that is also 
+the root of the tree. Once the root node is full, it is not split in two
+as any other node would be, but instead:
+
+  #  Two new leaf nodes are allocated and populated with all the keys from
+     the root node.
+  #  The root node is rewritten so as to be the parent of the two new leaves.
+
+This occurs any time the root node is full, just as it does in a regular
+b-tree. When it does, the height of the tree has increased by 1.
+
+If the root node has only a single child, the height of the tree can be
+decreased by 1. This is done as follows:
+
+  #  The child node is marked as PAGE_EVICTED.
+  #  The contents of the child node are copied into the parent.
+
+Step 1 of the above is a special case - it is the only case in which the 
+first node in a linked-list is marked as PAGE_EVICTED. As a result, special
+rules apply. It is still not possible to write to the page once it is marked
+as PAGE_EVICTED, but readers are allowed to traverse the parent-child pointer.
+This allows readers (and other writers) to continue while the height of the
+tree is being decreased.
+
+
 
 
