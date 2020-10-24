@@ -1,5 +1,5 @@
-C Expand\son\stheory\sin\sblink.wiki.
-D 2020-10-23T18:19:23.227
+C Further\supdates\sto\sblink.wiki.
+D 2020-10-24T17:14:38.716
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -38,7 +38,7 @@ F configure 63af83d31b9fdf304f2dbb1e1638530d4ceff31702d1e19550d1fbf3bdf9471e x
 F configure.ac 40d01e89cb325c28b33f5957e61fede0bd17da2b5e37d9b223a90c8a318e88d4
 F contrib/sqlitecon.tcl 210a913ad63f9f991070821e599d600bd913e0ad
 F doc/F2FS.txt c1d4a0ae9711cfe0e1d8b019d154f1c29e0d3abfe820787ba1e9ed7691160fcd
-F doc/hctree/blink.wiki c25ed19ffc8cb81bb37153287880aff776b875c2fda52a9489386ba32618becf
+F doc/hctree/blink.wiki ff7e2417d7a9a5a387caeca1c54d5b1c5c85d6b53b72156ce8cdf779d89f84fc
 F doc/hctree/btree_merge1.png 850d83122906431143a3ec302d12ab219a172283fe9cf3e90c820c8767faee8d
 F doc/hctree/btree_redistribute1.png 1666cf0e3a24d3f792a09081665307f79d469f4d10a9f2e08526544c75644a2c
 F doc/hctree/btree_split1.png c90032107fbcb0333f8770d94f5c6102155aa3abb6a2f769f55529969f67ab6d
@@ -1899,8 +1899,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P f56c1558f4afc69d24a9815216c5a4e21807c884cf9f614a723578d1d9b7973d
-R 624ca9b5de6d68c8ef19b4db71deecb5
+P bd7b05ab5a1cdb93dd4d7d19103ef32bf1e7601fca3275ca62f16d9aa52c4567
+R 26be46eaf228607e6d9417c2813151b0
 U dan
-Z 1544af788451e7d6d589bbf03014289e
+Z 77dcdea274c0042a05c917b72db219c3
 # Remove this line to create a well-formed Fossil manifest.

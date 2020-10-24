@@ -1,8 +1,16 @@
 
-<h1> Context </h1>
+<title> Database Design </title>
+
+  *  <a href=#context>Component Context</a>
+  *  <a href=#overview>Design Overview</a>
+  *  <a href=#btree>B-Tree Structure Overview</a>
+  *  <a href=#leaves>B-Tree Leaf Node Operations</a>
+  *  <a href=#interior>B-Tree Interior Node Operations</a>
+
+<h1 id=context> Component Context </h1>
 
 This page describes the data structures and algorithms used to implement
-the database on-disk.
+the on-disk part of the database system.
 
 The database contains one or more tree structures identified by root page
 number, each of which is either an intkey or index tree structure, as required
@@ -30,7 +38,7 @@ committed. There may be any number of readers.
 The remainder of this page describes how multiple readers and writers 
 proceed concurrently without resorting to locks.
 
-<h1 id=overview> Overview of Database </h1>
+<h1 id=overview> Design Overview </h1>
 
 The distinguishing feature of the database format is the <b>page-map</b>. The
 page-map is a massive array large enough to contain an entry for each
@@ -68,11 +76,11 @@ the PAGE_EVICTED flag and the page data may both be considered part of the
 thing that is Compared-And-Swapped by the method above.
 
 
-<h1> B-Tree Data Structure </h1>
+<h1 id=btree> B-Tree Data Structure </h1>
 
-Technically, the data structure is a "b-link tree" - a b-tree where each node
-has a pointer to its right-hand peer, if any. In some variants, including this
-one, some parent-child pointers may at times be missing from the tree
+The tree data structure is similar to a "b-link tree" - a b-tree where each
+node has a pointer to its right-hand peer, if any. In some variants, including
+this one, some parent-child pointers may at times be missing from the tree
 structure. Readers use the peer-peer pointers to navigate to child pages for
 which the parent-child pointer is missing.
 
@@ -81,7 +89,7 @@ boxht=0.2 ; boxwid=0.5 ; linewid=0.2
 
 A1: box ; arrow ; A2: box ; arrow ; A3: box ; arrow ; A4: box ; arrow
 A5: box ; arrow ; A6: box ; arrow ; A7: box ; arrow ; A8: box
-B1: box at A3 + (0.35, 0.5) ; arrow ; B2: box ; arrow ; B3: box
+B1: box at A3 + (0.35, 0.5) ; arrow <- ; B2: box ; arrow <- ; B3: box
 C1: box at B2 + (0,0.5) 
 
 arrow from B1.s to A1.n
@@ -106,9 +114,18 @@ possible value in the keyspace.
 For both intkey and index trees, all entries are stored on leaf nodes.
 
 Each child pointer in a parent node is accompanied by a copy of the fencepost
-key for the child node.
+key for the child node. This is different from the usual b-tree approach of N
+pointers and N-1 keys per internal node page - in this system an internal
+node with N pointer contains N keys.
 
-<h1> B-Tree Leaf Node Operations </h1>
+Another difference is that the key sorting order is reversed for each tier
+of the tree structure. On nodes that are parents of leaf nodes, keys are 
+sorted in reverse order. For nodes that are grandparents of the leaf nodes,
+keys sorting is in the same order as on leaves. For great-grandparents,
+reversed. And so on. The advantages of this are <a href=#interior>described 
+below</a>.
+
+<h1 id=leaves> B-Tree Leaf Node Operations </h1>
 
 The data structure is best analyzed as a series of loosely coupled
 linked-lists. Consider, to begin with, just the leaves of a b-tree 
@@ -257,5 +274,154 @@ the left-hand peer (node 2 in the diagram) such that the two nodes now
 collectively contain too much data to consolidate. In this case the writer
 must change tack and proceed with step 2 of the "redistributing keys" case.
 
+<h1 id=interior> Btree Interior Node Operations </h1>
+
+Linked-lists are fine for scanning through in a forwards direction. But
+SQLite also requires support for efficiently (a) iterating backwards and
+(b) seeking within a tree structure for a nominated key. Singly linked
+lists can be used for both of these operations of course, but inefficiently.
+For efficient operation, b-tree interior nodes are required.
+
+Each tier of b-tree interior nodes (parents of leaves, grandparents of leaves,
+etc.) may be thought of as a separate linked list data structure, just as
+the leaf nodes were in the previous section. Each tier is populated with the
+fencepost keys and associated logical page numbers from its child pages. After
+a writer splits a leaf node into two nodes, it adds the new fencepost key/page
+number entry to the parent linked-list. After it marks a leaf page with the
+PAGE_EVICTED flag, it removes the corresponding entry from the parent
+linked-list. There is no real hurry to perform either of these operations, 
+they may be deferred in order to consolidate multiple writes to the same page
+of the parent linked-list.
+
+Obviously, this means that when seeking for a key within a tree structure, a
+reader may encounter a parent linked-list that does not reflect the latest
+update to the child list. Specifically:
+
+<ol>
+<li> the parent list may contain entries for pages that have been removed from
+     the child list, and
+<li> the parent list may be missing entries for pages that have been added
+     to the child list.
+</ol>
+
+Readers avoid these hazards as follows:
+
+<ol>
+<li> a reader never follows a child pointer if the destination logical page
+     has already been marked as PAGE_EVICTED. Instead, it moves to the previous
+     entry in the parent list and follows that pointer instead. If it turns
+     out that the PAGE_EVICTED child actually is still part of the child
+     list, and the pointer should have been followed, this transforms this
+     case into the following one (missing entry in parent page).
+
+<li> when searching within a page, if the key being seeked to is greater than
+     all keys on the page, the reader loads the right-hand peer node and
+     determines based on the fencepost key whether or not the peer node
+     should be searched as well. This way, if the pointer for the peer node 
+     is missing from the parent page, it is searched anyway.
+</ol>
+
+In the worst case, a parent list might contain no child pointers not marked
+PAGE_EVICTED except for the pointer to the leftmost page of the child
+linked-list. In this case performance falls back to the linked-list case.
+Otherwise, even if the parent list contains only a few non-PAGE_EVICTED keys,
+they may be used to jump to a better position within the child list at 
+which to start the search. Since the fencepost key of a logical page never
+changes, it is not possible for a non-PAGE_EVICTED entry within a parent
+list to be invalid or out of date.
+
+Another quirk is that sorting order is reversed for each successive tier
+of the b-tree. That is to say, keys in each parent list are sorted in the
+opposite order to those in its child list. This is for two reasons:
+
+  *  If a seek operation would otherwise follow a pointer to a page marked
+     PAGE_EVICTED, the reader needs to follow the pointer associated with
+     the previous entry to the child list. But iterating backwards can be
+     tricky - if the PAGE_EVICTED key is the first on its page, this 
+     essentially means retraversing parent nodes. But if the parent list
+     is in reverse order, the pointer to follow is the that associated with
+     the next entry, which is simple in all cases.
+
+  *  Efficiently iterating backwards through leaf nodes while accounting for
+     possible writers is complicated, requiring extra memory and extra seek
+     operations within the tree. It is made simpler, as well as more efficient,
+     if the parent list is in reverse order.
+
+The following diagram shows a tree structure containing keys from a keyspace
+consisting of 8-bit numbers, rendered in hexadecimal. The largest and smallest
+possible keys, respectively, are FF and 00. The middle tier of the b-tree
+is sorted in the opposite order than the leaf or root tier.
+
+<verbatim type="pikchr center">
+boxht=0.2 ; boxwid=0.6 ; linewid=0.2
+
+A1:  box "09  13  19" ; arrow
+A2:  box "21  2A  2A" ; arrow
+A3:  box "38  3C  43" ; arrow
+A4:  box "45  4F  50" ; arrow
+A5:  box "51  5E  69" ; arrow
+A6:  box "7A  BD  C2" ; arrow
+A7:  box "CE  E0  F6" ; arrow
+A8:  box "F7  F7  F8"
+
+B1: box "F7  CE  7A" with c at A3 + (0.35, 0.5) ; arrow
+B2: box "51  45" ; arrow
+B3: box "38  21  00"
+
+C:  box "38  51  FF" with c at B2 + (0, 0.5)
+
+arrow from C.s to B2.n
+arrow from C.s left 0.2 then to B3.n
+arrow from C.s right 0.2 then to B1.n
+
+arrow from B1.s left 0.2 then to A8.n
+arrow from B1.s to A7.n
+arrow from B1.s right 0.2 then to A6.n
+
+arrow from B2.s left 0.1 then to A5.n
+arrow from B2.s right 0.1 then to A4.n
+
+arrow from B3.s left 0.2 then to A3.n
+arrow from B3.s to A2.n
+arrow from B3.s right 0.2 then to A1.n
+</verbatim>
+
+Alternative rendering of the same tree. Rendered this way, the fencepost
+keys for each node in the middle tier of the tree structure appear on the
+right-hand-side of each box.
+
+<verbatim type="pikchr center">
+boxht=0.2 ; boxwid=0.6 ; linewid=0.2
+
+A1:  box "09  13  19" ; arrow
+A2:  box "21  2A  2A" ; arrow
+A3:  box "38  3C  43" ; arrow
+A4:  box "45  4F  50" ; arrow
+A5:  box "51  5E  69" ; arrow
+A6:  box "7A  BD  C2" ; arrow
+A7:  box "CE  E0  F6" ; arrow
+A8:  box "F7  F7  F8"
+
+B1: box "00  21  38" with c at A3 + (0.35, 0.5) ; arrow <-
+B2: box "45  51" ; arrow <-
+B3: box "7A  CE  F7"
+
+C:  box "38  51  FF" with c at B2 + (0, 0.5)
+
+arrow from C.s to B2.n
+arrow from C.s left 0.2 then to B1.n
+arrow from C.s right 0.2 then to B3.n
+
+arrow from B1.s left 0.2 then to A1.n
+arrow from B1.s to A2.n
+arrow from B1.s right 0.2 then to A3.n
+
+arrow from B2.s left 0.1 then to A4.n
+arrow from B2.s right 0.1 then to A5.n
+
+arrow from B3.s left 0.2 then to A6.n
+arrow from B3.s to A7.n
+arrow from B3.s right 0.2 then to A8.n
+</verbatim>
 
 
