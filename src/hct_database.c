@@ -244,6 +244,15 @@ static void hctDbSplitcopy(
   }
 }
 
+static int hctDbSplitPage(
+  HctDbCsr *pCsr,
+  UnpackedRecord *pRec, 
+  i64 iKey, 
+  int nData, const u8 *aData
+){
+  return SQLITE_OK;
+}
+
 int sqlite3HctDbInsert(
   HctDatabase *pDb,
   u32 iRoot, 
@@ -264,19 +273,20 @@ int sqlite3HctDbInsert(
   }
   if( rc==SQLITE_OK ){
     /* Create the new version of the page */
-    int iNewCell = csr.iCell+1;
     HctDatabasePage *pOld = (HctDatabasePage*)csr.pg.aOld;
-    HctDatabasePage *pNew = (HctDatabasePage*)csr.pg.aNew;
-    HctIntkeyTid *aNewKey = (HctIntkeyTid*)&pNew[1];
-    HctIntkeyTid *aOldKey = (HctIntkeyTid*)&pOld[1];
-    u16 *aNewOff = (u16*)&aNewKey[pOld->nEntry+1];
-    u16 *aOldOff = (u16*)&aOldKey[pOld->nEntry];
-
-    int nReq = 16 + 2 + sqlite3VarintLen(nData) + nData;
-
+    int nReq;                     /* Required space on page in bytes */
+    
     /* Check if there is enough space for the new entry on the page. */
+    nReq = 16 + 2 + sqlite3VarintLen(nData) + nData;
     if( pOld->nFree>=nReq ){
+      int iNewCell = csr.iCell+1; /* Position of new entry in cell array */
+      HctDatabasePage *pNew = (HctDatabasePage*)csr.pg.aNew;
+      HctIntkeyTid *aNewKey = (HctIntkeyTid*)&pNew[1];
+      HctIntkeyTid *aOldKey = (HctIntkeyTid*)&pOld[1];
+      u16 *aNewOff = (u16*)&aNewKey[pOld->nEntry+1];
+      u16 *aOldOff = (u16*)&aOldKey[pOld->nEntry];
       int iOff;
+
       if( pOld->nFreeSpace<nReq ){
         /* shuffle up entries on page to make room */
         assert( 0 );
@@ -307,7 +317,7 @@ int sqlite3HctDbInsert(
       memcpy(&csr.pg.aNew[iOff], aData, nData);
     }else{
       /* split page */
-      assert( 0 );
+      rc = hctDbSplitPage(&csr, pRec, iKey, nData, aData);
     }
 
     rc = sqlite3HctFilePageRelease(&csr.pg);

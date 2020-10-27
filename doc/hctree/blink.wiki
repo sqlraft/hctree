@@ -7,6 +7,7 @@
   *  <a href=#leaves>B-Tree Leaf Node Operations</a>
   *  <a href=#interior>B-Tree Interior Node Operations</a>
   *  <a href=#other> Changing the Height of the Tree</a>
+  *  <a href=#pages> Page Management</a>
 
 <h1 id=context> Component Context </h1>
 
@@ -52,7 +53,7 @@ The page-map is stored as part of the database file itself and memory mapped
 into the database process address space for client access. Clients always 
 write to the page-map using atomic compare-and-swap (CAS) instructions.
 
-This arrangements means that clients effectively have a <b>CAS primitive for
+This arrangement means that clients effectively have a <b>CAS primitive for
 entire pages</b>. In order to safely update an existing page, a client:
 
   #  Reads the current value from the page-map, and then the data from
@@ -427,7 +428,7 @@ arrow from B3.s right 0.2 then to A8.n
 
 <h1 id=other> Changing the Height of the Tree</h1>
 
-Each tree structure is initially created as a single leaf node that is also 
+Each tree structure is initially created as a single leaf node that is also
 the root of the tree. Once the root node is full, it is not split in two
 as any other node would be, but instead:
 
@@ -450,6 +451,101 @@ rules apply. It is still not possible to write to the page once it is marked
 as PAGE_EVICTED, but readers are allowed to traverse the parent-child pointer.
 This allows readers (and other writers) to continue while the height of the
 tree is being decreased.
+
+<h1 id=pages> Page Management</h1>
+
+The description in the sections above assume that there is an infinite supply
+of both physical pages and logical page ids, and that those used and no longer
+required may be carelessly discarded. Unfortunately, this is not the case.
+
+For both physical and logical pages, we accept that a process failure at
+an inopportune moment might cause a resource leak. These are not expected
+to amount to much.
+
+<b>Physical Pages</b>
+
+Free physical pages are identified within the database file using the 
+following mechanisms:
+
+  *  A header field contains the largest physical page allocated so far.
+  *  For each page that is in use, the PHYSICAL_IN_USE flag is set in the
+     corresponding page-map slot.
+
+Internally, clients allocate physical pages N (say 128) at a time. To allocate
+a set of N physical pages, the client first takes a database-wide mutex. It
+assigns itself N new physical page ids either by incrementing the header
+field or by removing elements from an in-memory table of eligible free physical
+pages.  
+
+When a client needs to write a physical page that has already been allocated 
+to it, it:
+
+  #  Sets the PHYSICAL_IN_USE flag in the page-map,
+  #  Writes data to the database page.
+  #  Attempts to set the page-map entry for the logical page to point to
+     the new physical page.
+  #  The above may fail if another client has already written to the logical 
+     page. If it does, the PHYSICAL_IN_USE flag set in step 1 is cleared
+     and the client retains the physical page id for use in subsequent writes.
+
+In order to populate the in-memory table of free physical pages, the page-map
+is scanned for entries with clear PHYSICAL_IN_USE flags on system startup.
+This is no trivial undertaking - in a database with 4KiB pages, there is 2MB of
+page-map for each 1GB of database file. A 16TB database contains a 32GB
+page-map. It might be done lazily, allowing clients to proceed by allocating
+pages only by incrementing the header file until the scan is complete. 
+
+Pages that are free when the system starts may be written immediately. Pages 
+that have been made free since system startup may only be reused once it
+is sure that no reader will attempt to access the old version of the page.
+In other words, once all readers are reading from a snapshot that includes
+the transaction that removed the page from the tree.
+
+When a client writes a new version of a logical page, freeing an old 
+physical page id, it clears the PHYSICAL_IN_USE flag in the page-map
+immediately. It stores the freed page id and current transaction id
+locally in a private table. If the private table grows sufficiently large,
+or if the client is closed, it transfers the contents of the private table
+to the database-wide in-memory table, under cover of the mutex mentioned
+above. The transaction id remains associated with each page id within the
+database-wide in-memory table.
+
+Physical pages may be reused either from a clients private table or by
+taking the mutex and allocating them from the database-wide table, so long
+as it can be determined that there are no readers old enough to be reading
+a snapshot that does not include the transaction that freed the page.
+<i style=color:green>See elsewhere for how this is determined.</i>
+
+<b>Logical Pages</b>
+
+Logical page id are managed quite similarly to physical page ids. They
+are slightly more complicated because a logical page id might be present
+in the parent list.
+
+To manage this we add another flag - LOGICAL_IN_PARENT - that must be
+set if the logical page id is present in the parent list. It may not
+be set if PAGE_EVICTED is already set. When a client needs to insert
+the entry into a parent list, it:
+
+  #  Sets the LOGICAL_IN_PARENT flag. Or abandon the insert if PAGE_EVICTED
+     is already set.
+  #  Inserts the new entry into the parent list.
+
+When a page is removed from its list (by writing a new version of its
+predecessor in the list, after having set PAGE_EVICTED), its physical
+page mapping is set to 0. A page is free if its physical page mapping
+is 0 and the LOGICAL_IN_PARENT flag is clear.
+
+When an entry is removed from any list except the list of leaves, a client:
+
+  #  Removes the entry from the list, then
+  #  Clears the LOGICAL_IN_PARENT flag.
+
+The client that causes the logical page id to become free, either by clearing
+the LOGICAL_IN_PARENT flag or by setting the mapped physical page id to 0
+takes ownership of the freed page id and adds it to its private table of
+free logical page ids. As with physical page ids, this logical page id
+is associated with the current transaction id.
 
 
 
