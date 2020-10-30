@@ -55,7 +55,7 @@ struct BtCursor {
   HctTreeCsr *pHctTreeCsr;
   HctDbCsr *pHctDbCsr;
   int bUseTree;                   /* 1 if tree-csr is current entry, else 0 */
-  int bReverse;                   /* Cursor iterates in reverse order */
+  int eDir;                       /* One of BTREE_DIR_NONE, FORWARD, REVERSE */
 
   KeyInfo *pKeyInfo;              /* For non-intkey tables */
   int errCode;
@@ -540,7 +540,7 @@ static int btreeFlushOneToDisk(void *pCtx, u32 iRoot, KeyInfo *pKeyInfo){
 */
 static int btreeFlushToDisk(Btree *p){
   int i;
-  int rc;
+  int rc = SQLITE_OK;
 
   /* Initialize any root pages created by this transaction */
   for(i=0; rc==SQLITE_OK && i<p->nNewRoot; i++){
@@ -971,6 +971,8 @@ static void btreeSetUseTree(BtCursor *pCur){
   int bTreeEof = sqlite3HctTreeCsrEof(pCur->pHctTreeCsr);
   int bDbEof = sqlite3HctDbCsrEof(pCur->pHctDbCsr);
 
+  assert( pCur->eDir==BTREE_DIR_FORWARD || pCur->eDir==BTREE_DIR_REVERSE );
+
   if( bTreeEof ){
     pCur->bUseTree = 0;
   }else if( bDbEof ){
@@ -984,7 +986,7 @@ static void btreeSetUseTree(BtCursor *pCur){
 
     /* TODO - reverse scans */
     pCur->bUseTree = (iKeyTree < iKeyDb);
-    if( pCur->bReverse ) pCur->bUseTree = !pCur->bUseTree;
+    if( pCur->eDir==BTREE_DIR_REVERSE ) pCur->bUseTree = !pCur->bUseTree;
   }else{
     /* TODO - index cursors */
     assert( 0 );
@@ -1005,6 +1007,7 @@ int sqlite3BtreeFirst(BtCursor *pCur, int *pRes){
     int bTreeEof = sqlite3HctTreeCsrEof(pCur->pHctTreeCsr);
     int bDbEof = sqlite3HctDbCsrEof(pCur->pHctDbCsr);
     *pRes = (bTreeEof && bDbEof);
+    pCur->eDir = BTREE_DIR_FORWARD;
     btreeSetUseTree(pCur);
   }
 
@@ -1024,7 +1027,7 @@ int sqlite3BtreeLast(BtCursor *pCur, int *pRes){
     int bTreeEof = sqlite3HctTreeCsrEof(pCur->pHctTreeCsr);
     int bDbEof = sqlite3HctDbCsrEof(pCur->pHctDbCsr);
     *pRes = (bTreeEof && bDbEof);
-    pCur->bReverse = 1;
+    pCur->eDir = BTREE_DIR_REVERSE;
     btreeSetUseTree(pCur);
   }
 
@@ -1069,12 +1072,57 @@ int sqlite3BtreeMovetoUnpacked(
   int *pRes                /* Write search results here */
 ){
   int rc = SQLITE_OK;
-  rc = sqlite3HctTreeCsrSeek(pCur->pHctTreeCsr, pIdxKey, intKey, pRes);
-  /* TODO - fix seeks for case when db is not empty */
-  pCur->bUseTree = 1;
+  int res1 = 0;
+  int res2 = 0;
+
+
+  rc = sqlite3HctTreeCsrSeek(pCur->pHctTreeCsr, pIdxKey, intKey, &res1);
+  if( rc==SQLITE_OK ){
+    rc = sqlite3HctDbCsrSeek(pCur->pHctDbCsr, pIdxKey, intKey, &res2);
+  }
+
+  if( pCur->eDir==BTREE_DIR_NONE ){
+    if( res1==0 ){
+      *pRes = 0;
+      pCur->bUseTree = 1;
+    }else{
+      pCur->bUseTree = 0;
+      *pRes = res2;
+    }
+  }else{
+    if( pCur->eDir==BTREE_DIR_FORWARD ){
+      if( rc==SQLITE_OK && res2<0 && !sqlite3HctDbCsrEof(pCur->pHctDbCsr) ){
+        rc = sqlite3HctDbCsrNext(pCur->pHctDbCsr);
+      }
+      if( rc==SQLITE_OK && res1<0 && !sqlite3HctTreeCsrEof(pCur->pHctTreeCsr) ){
+        rc = sqlite3HctDbCsrNext(pCur->pHctDbCsr);
+      }
+
+      if( res1==0 || res2==0 ){
+        *pRes = 0;
+      }else if( sqlite3HctTreeCsrEof(pCur->pHctTreeCsr)
+             && sqlite3HctDbCsrEof(pCur->pHctDbCsr)
+      ){
+        *pRes = -1;
+      }else{
+        *pRes = +1;
+      }
+    }else{
+      assert( 0 );
+    }
+    btreeSetUseTree(pCur);
+  }
+
   return rc;
 }
 
+void sqlite3BtreeCursorDir(BtCursor *pCur, int eDir){
+  assert( eDir==BTREE_DIR_NONE 
+       || eDir==BTREE_DIR_FORWARD 
+       || eDir==BTREE_DIR_REVERSE
+  );
+  pCur->eDir = eDir;
+}
 
 /*
 ** Return TRUE if the cursor is not pointing at an entry of the table.
@@ -1126,7 +1174,7 @@ i64 sqlite3BtreeRowCountEst(BtCursor *pCur){
 */
 int sqlite3BtreeNext(BtCursor *pCur, int flags){
   int rc = SQLITE_OK;
-  assert( pCur->bReverse==0 );
+  assert( pCur->eDir==BTREE_DIR_FORWARD );
   if( pCur->bUseTree ){
     rc = sqlite3HctTreeCsrNext(pCur->pHctTreeCsr);
   }else{

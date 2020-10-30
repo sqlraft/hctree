@@ -401,5 +401,14 @@ void sqlite3BtreeCursorList(Btree*);
 # define sqlite3SchemaMutexHeld(X,Y,Z) 1
 #endif
 
+#define BTREE_DIR_NONE    0
+#define BTREE_DIR_FORWARD 1
+#define BTREE_DIR_REVERSE 2
+
+#ifdef SQLITE_ENABLE_HCT
+void sqlite3BtreeCursorDir(BtCursor*, int eDir);
+#else
+# define sqlite3BtreeCursorDir(a,b)
+#endif
 
 #endif /* SQLITE_BTREE_H */

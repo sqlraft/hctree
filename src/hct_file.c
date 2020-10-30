@@ -475,19 +475,24 @@ int sqlite3HctFilePageGet(HctFile *pFile, u32 iPg, HctFilePage *pPg){
 ** number obtained by an earlier call to sqlite3HctFileRootNew().
 */
 int sqlite3HctFilePageNew(HctFile *pFile, u32 iPg, HctFilePage *pPg){
-  int rc;                         /* Return code */
+  int rc = SQLITE_OK;             /* Return code */
   u32 iNewPg;                     /* New physical page id */
+  u32 iLPg = iPg;
 
-  assert( iPg!=0 );
-  memset(pPg, 0, sizeof(*pPg));
-  rc = hctFileTmpAllocate(pFile, HCT_PAGEMAP_PHYSICAL_EOF, &iNewPg);
+  if( iPg==0 ){
+    rc = hctFileTmpAllocate(pFile, HCT_PAGEMAP_LOGICAL_EOF, &iLPg);
+  }
   if( rc==SQLITE_OK ){
-    hctFileSetFlag(pFile, iNewPg, HCT_PGMAPFLAG_PHYSINUSE);
-    pPg->iPg = iPg;
-    pPg->iNewPg = iNewPg;
-    pPg->aNew = (u8*)hctPagePtr(pFile->pMapping, iNewPg);
-    pPg->iPagemap = hctFilePagemapGet(pFile->pMapping, iPg);
-    pPg->pFile = pFile;
+    memset(pPg, 0, sizeof(*pPg));
+    rc = hctFileTmpAllocate(pFile, HCT_PAGEMAP_PHYSICAL_EOF, &iNewPg);
+    if( rc==SQLITE_OK ){
+      hctFileSetFlag(pFile, iNewPg, HCT_PGMAPFLAG_PHYSINUSE);
+      pPg->iPg = iLPg;
+      pPg->iNewPg = iNewPg;
+      pPg->aNew = (u8*)hctPagePtr(pFile->pMapping, iNewPg);
+      pPg->iPagemap = hctFilePagemapGet(pFile->pMapping, iLPg);
+      pPg->pFile = pFile;
+    }
   }
 
   return rc;
@@ -532,6 +537,10 @@ u64 sqlite3HctFileStartTrans(HctFile *pFile){
   hctFileTmpAllocate(pFile, HCT_PAGEMAP_TRANSID_EOF, &iRet);
   assert( iRet>0 );
   return (u64)iRet;
+}
+
+u64 sqlite3HctFileGetTransid(HctFile *pFile){
+  return hctFilePagemapGet(pFile->pMapping, HCT_PAGEMAP_TRANSID_EOF);
 }
 
 int sqlite3HctFileFinishTrans(HctFile *pFile){

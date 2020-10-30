@@ -683,7 +683,6 @@ int sqlite3VdbeExec(
 #ifdef VDBE_PROFILE
   u64 start;                 /* CPU clock count at start of opcode */
 #endif
-static int nCall = 0;
   /*** INSERT STACK UNION HERE ***/
 
   assert( p->magic==VDBE_MAGIC_RUN );  /* sqlite3_step() verifies this */
@@ -4278,6 +4277,9 @@ case OP_SeekGT: {       /* jump, in3, group */
         if( (oc & 0x0001)==(OP_SeekLT & 0x0001) ) oc++;
       }
     }
+    sqlite3BtreeCursorDir(pC->uc.pCursor, 
+        (oc==OP_SeekGE || oc==OP_SeekGT) ? BTREE_DIR_FORWARD : BTREE_DIR_REVERSE
+    );
     rc = sqlite3BtreeMovetoUnpacked(pC->uc.pCursor, 0, (u64)iKey, 0, &res);
     pC->movetoTarget = iKey;  /* Used by OP_Delete */
     if( rc!=SQLITE_OK ){
@@ -4837,6 +4839,7 @@ notExistsWithKey:
   pCrsr = pC->uc.pCursor;
   assert( pCrsr!=0 );
   res = 0;
+  sqlite3BtreeCursorDir(pCrsr, 0);
   rc = sqlite3BtreeMovetoUnpacked(pCrsr, 0, iKey, 0, &res);
   assert( rc==SQLITE_OK || res==0 );
   pC->movetoTarget = iKey;  /* Used by OP_Delete */
@@ -5849,7 +5852,6 @@ case OP_IdxDelete: {
   int res;
   UnpackedRecord r;
 
-nCall++;
   assert( pOp->p3>0 );
   assert( pOp->p2>0 && pOp->p2+pOp->p3<=(p->nMem+1 - p->nCursor)+1 );
   assert( pOp->p1>=0 && pOp->p1<p->nCursor );

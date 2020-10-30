@@ -164,4 +164,5 @@ int sqlite3HctFilePageRelease(HctFilePage *pPg);
 u64 sqlite3HctFileStartTrans(HctFile *pFile);
 int sqlite3HctFileFinishTrans(HctFile *pFile);
 
+u64 sqlite3HctFileGetTransid(HctFile *pFile);
 

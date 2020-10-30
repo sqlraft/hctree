@@ -23,12 +23,14 @@ struct HctDatabase {
   HctFile *pFile;
   int pgsz;                       /* Page size in bytes */
   u64 iTid;                       /* Current transaction id (or zero) */
+  HctDbCsr *pCsrList;
 };
 
 struct HctDbCsr {
   HctDatabase *pDb;               /* Database that owns this cursor */
   u32 iRoot;                      /* Root page cursor is opened on */
   int iCell;                      /* Current cell within page */
+  HctDbCsr *pCsrNext;
   HctFilePage pg;                 /* Current database page */
 };
 
@@ -133,32 +135,30 @@ int sqlite3HctDbRootInit(HctDatabase *p, int bIndex, u32 iRoot){
   return rc;
 }
 
+static void hctDbIntkeyLeaf(
+  HctDatabasePage *pPg, 
+  HctIntkeyTid **paKey,
+  u16 **paOff
+){
+  *paKey = (HctIntkeyTid*)&pPg[1];
+  *paOff = (u16*)&(*paKey)[pPg->nEntry];
+}
+
+
 /*
-** An integer is written into *pRes which is the result of
-** comparing the key with the entry to which the cursor is 
-** pointing.  The meaning of the integer written into
-** *pRes is as follows:
-**
-**     *pRes<0      The cursor is left pointing at an entry that
-**                  is smaller than iKey/pRec or if the table is empty
-**                  and the cursor is therefore left point to nothing.
-**
-**     *pRes==0     The cursor is left pointing at an entry that
-**                  exactly matches iKey/pRec.
-**
-**     *pRes>0      The cursor is left pointing at an entry that
-**                  is larger than iKey/pRec.
+** Seek for key iKey (if pRec is null) or pRec within the table opened
+** by cursor pCsr.
 */
-int sqlite3HctDbCsrSeek(
+int hctDbCsrSeek(
   HctDbCsr *pCsr,                 /* Cursor to seek */
   UnpackedRecord *pRec,           /* Key for index tables */
   i64 iKey,                       /* Key for intkey tables */
-  int *pRes                       /* Result of seek (see above) */
+  int *pbMatch                    /* Result of seek (see above) */
 ){
   HctFile *pFile = pCsr->pDb->pFile;
   u64 iTid = pCsr->pDb->iTid;
-  int res = -1;
   int rc;
+  int res = 0;
 
   assert( pRec==0 ); /* TODO! Support index tables! */
   rc = sqlite3HctFilePageGet(pFile, pCsr->iRoot, &pCsr->pg);
@@ -171,6 +171,7 @@ int sqlite3HctDbCsrSeek(
     /* Seek within the page. Goal is to find the entry that is less than or
     ** equal to (iKey/iTid). If all entries on the page are larger than
     ** (iKey/iTid), find the "entry" -1. */
+    res = 0;
     while( i2>i1 ){
       int iTest = (i1+i2+1)/2;
       i64 iPageKey = aKey[iTest].iKey;
@@ -181,6 +182,7 @@ int sqlite3HctDbCsrSeek(
         i2 = iTest-1;
       }else{
         /* Keys match. Compare tid values. */
+        res = 1;
         u64 iPageTid = (aKey[iTest].iTidFlags & HCT_TID_MASK);
         if( iPageTid<iTid ){
           i1 = iTest;
@@ -203,7 +205,20 @@ int sqlite3HctDbCsrSeek(
 
     /* Test if it is necessary to skip to the peer node. */
     if( i2>=0 && i2==pPg->nEntry-1 && pPg->iPeerPg!=0 ){
-      assert( 0 );
+      HctFilePage peer;
+      rc = sqlite3HctFilePageGet(pFile, pPg->iPeerPg, &peer);
+      if( rc==SQLITE_OK ){
+        HctIntkeyTid *aPKey;
+        u16 *aPOff;
+        hctDbIntkeyLeaf((HctDatabasePage*)peer.aOld, &aPKey, &aPOff);
+        if( aPKey[0].iKey<iKey 
+        || (aPKey[0].iKey==iKey && (aPKey[0].iTidFlags & HCT_TID_MASK)<=iTid) ){
+          SWAP(HctFilePage, pCsr->pg, peer);
+          sqlite3HctFilePageRelease(&peer);
+          continue;
+        }
+        sqlite3HctFilePageRelease(&peer);
+      }
     }
 
     if( pPg->ePagetype==HCT_PAGETYPE_INTKEY_LEAF ){
@@ -215,7 +230,51 @@ int sqlite3HctDbCsrSeek(
     }
   }
 
-  if( pRes ) *pRes = res;
+  if( pbMatch ) *pbMatch = res;
+  return rc;
+}
+
+
+/*
+** An integer is written into *pRes which is the result of
+** comparing the key with the entry to which the cursor is 
+** pointing.  The meaning of the integer written into
+** *pRes is as follows:
+**
+**     *pRes<0      The cursor is left pointing at an entry that
+**                  is smaller than iKey/pRec or if the table is empty
+**                  and the cursor is therefore left point to nothing.
+**
+**     *pRes==0     The cursor is left pointing at an entry that
+**                  exactly matches iKey/pRec.
+**
+**     *pRes>0      The cursor is left pointing at an entry that
+**                  is larger than iKey/pRec.
+*/
+int sqlite3HctDbCsrSeek(
+  HctDbCsr *pCsr,                 /* Cursor to seek */
+  UnpackedRecord *pRec,           /* Key for index tables */
+  i64 iKey,                       /* Key for intkey tables */
+  int *pRes                       /* Result of seek (see above) */
+){
+  int rc;
+  int bMatch;
+  rc = hctDbCsrSeek(pCsr, pRec, iKey, &bMatch);
+  if( rc==SQLITE_OK ){
+    if( bMatch ){
+      *pRes = 0;
+    }else if( pCsr->iCell>=0 ){
+      *pRes = -1;
+    }else{
+      HctDatabasePage *pPg = (HctDatabasePage*)pCsr->pg.aOld;
+      if( pPg->nEntry>0 ){
+        pCsr->iCell = 0;
+        *pRes = +1;
+      }else{
+        *pRes = -1;
+      }
+    }
+  }
   return rc;
 }
 
@@ -244,14 +303,140 @@ static void hctDbSplitcopy(
   }
 }
 
+/*
+** Return number of bytes required by a cell...
+**
+** TODO: Add more parameters to support other types of cells.
+*/
+static int hctDbCellSize(int nData){
+  return sqlite3VarintLen(nData) + nData;
+}
+
+static int hctDbCellPut(u8 *aBuf, int nData, const u8 *aData){
+  int iOff;
+  iOff = sqlite3PutVarint(aBuf, nData);
+  memcpy(&aBuf[iOff], aData, nData);
+  return iOff+nData;
+}
+
 static int hctDbSplitPage(
   HctDbCsr *pCsr,
   UnpackedRecord *pRec, 
   i64 iKey, 
   int nData, const u8 *aData
 ){
+  HctDatabase *pDb = pCsr->pDb;
+  int pgsz = pDb->pgsz;
+  int iNewCell = pCsr->iCell+1;     /* Position of new entry in cell array */
+  HctDatabasePage *pOld = (HctDatabasePage*)pCsr->pg.aOld;
+  int nTotal = 0;                 /* Total bytes of data to distribute */
+  int nLeft = 0;                  /* Number of cells on left-hand-page */
+  HctIntkeyTid *aOldKey;
+  u16 *aOldOff;
+  int iNew;
+  int iOld;
+  HctFilePage peer;               /* New peer page */
+  int rc;
+
+  hctDbIntkeyLeaf(pOld, &aOldKey, &aOldOff);
+
+  /* Figure out how much content, in total, there is. */
+  nTotal = (pgsz - pOld->nFreeSpace - sizeof(*pOld));
+  nTotal += hctDbCellSize(nData) + (16+2);
+
+  /* Work out how many cells to store on the left-hand-page. Store this 
+  ** number in stack variable nLeft. */
+  nLeft = sizeof(HctDatabasePage);
+  for(iNew=0, iOld=0; nLeft<=(nTotal/2); iNew++){
+    nLeft += (16+2);
+    if( iNew==iNewCell ){
+      nLeft += hctDbCellSize(nData);
+    }else{
+      int nCellData;
+      getVarint32(&pCsr->pg.aOld[aOldOff[iOld]], nCellData);
+      nLeft += hctDbCellSize(nCellData);
+      iOld++;
+    }
+    if( nLeft>pgsz ) break;
+  }
+  nLeft = iNew;
+
+// printf("splitting page %d (%d/%d)\n", pCsr->pg.iPg, nLeft, pOld->nEntry+1-nLeft);
+
+  /* Allocate the peer page */
+  rc = sqlite3HctFilePageNew(pDb->pFile, 0, &peer);
+  if( rc==SQLITE_OK ){
+    int iOff;
+    HctDatabasePage *pLeft = (HctDatabasePage*)pCsr->pg.aNew;
+    HctDatabasePage *pRight = (HctDatabasePage*)peer.aNew;
+    HctIntkeyTid *aLeftKey, *aRightKey;
+    u16 *aLeftOff, *aRightOff;
+
+    memset(pLeft, 0, sizeof(*pLeft));
+    pLeft->ePagetype = HCT_PAGETYPE_INTKEY_LEAF;
+    pLeft->nEntry = nLeft;
+    pLeft->iPeerPg = peer.iPg;
+    hctDbIntkeyLeaf(pLeft, &aLeftKey, &aLeftOff);
+
+    memset(pRight, 0, sizeof(*pRight));
+    pRight->ePagetype = HCT_PAGETYPE_INTKEY_LEAF;
+    pRight->nEntry = pOld->nEntry+1-nLeft;
+    pRight->iPeerPg = pOld->iPeerPg;
+    hctDbIntkeyLeaf(pRight, &aRightKey, &aRightOff);
+
+    iOff = pgsz;
+    for(iNew=0, iOld=0; iNew<pOld->nEntry+1; iNew++){
+      int iCellOff;
+      HctIntkeyTid newKey;
+      int nNewData;
+      const u8 *aNewData;
+      if( iNew==iNewCell ){
+        newKey.iKey = iKey;
+        newKey.iTidFlags = pDb->iTid;
+        nNewData = nData;
+        aNewData = aData;
+      }else{
+        int iCellOff = aOldOff[iOld];
+        newKey = aOldKey[iOld];
+        iCellOff += getVarint32(&pCsr->pg.aOld[iCellOff], nNewData);
+        aNewData = &pCsr->pg.aOld[iCellOff];
+        iOld++;
+      }
+
+      if( iNew<nLeft ){
+        int iCellOff;
+        aLeftKey[iNew] = newKey;
+        iOff -= hctDbCellSize(nNewData);
+        iCellOff = iOff + sqlite3PutVarint(&pCsr->pg.aNew[iOff], nNewData);
+        memcpy(&pCsr->pg.aNew[iCellOff], aNewData, nNewData);
+        aLeftOff[iNew] = (u16)iOff;
+      }else{
+        if( iNew==nLeft ) iOff = pgsz;
+        aRightKey[iNew-nLeft] = newKey;
+        iOff -= hctDbCellSize(nNewData);
+        iCellOff = iOff + sqlite3PutVarint(&peer.aNew[iOff], nNewData);
+        memcpy(&peer.aNew[iCellOff], aNewData, nNewData);
+        aRightOff[iNew-nLeft] = (u16)iOff;
+      }
+    }
+
+    pLeft->nFree = pLeft->nFreeSpace = 
+      aLeftOff[pLeft->nEntry-1] - sizeof(*pLeft) - (16+2)*pLeft->nEntry;
+    pRight->nFree = pRight->nFreeSpace = 
+      aRightOff[pRight->nEntry-1] - sizeof(*pRight) - (16+2)*pRight->nEntry;
+
+    /* Release peer and original pages */
+    rc = sqlite3HctFilePageRelease(&peer);
+    if( rc==SQLITE_OK ){
+      rc = sqlite3HctFilePageRelease(&pCsr->pg);
+      /* TODO: If this fails - reclaim the allocated peer page */
+    }
+  }
+
   return SQLITE_OK;
 }
+
+
 
 int sqlite3HctDbInsert(
   HctDatabase *pDb,
@@ -267,7 +452,7 @@ int sqlite3HctDbInsert(
   hctDbStartTrans(pDb);
 
   hctDbCsrInit(pDb, iRoot, &csr);
-  rc = sqlite3HctDbCsrSeek(&csr, pRec, iKey, 0);
+  rc = hctDbCsrSeek(&csr, pRec, iKey, 0);
   if( rc==SQLITE_OK ){
     rc = sqlite3HctFilePageWrite(&csr.pg);
   }
@@ -277,7 +462,7 @@ int sqlite3HctDbInsert(
     int nReq;                     /* Required space on page in bytes */
     
     /* Check if there is enough space for the new entry on the page. */
-    nReq = 16 + 2 + sqlite3VarintLen(nData) + nData;
+    nReq = 16 + 2 + hctDbCellSize(nData);
     if( pOld->nFree>=nReq ){
       int iNewCell = csr.iCell+1; /* Position of new entry in cell array */
       HctDatabasePage *pNew = (HctDatabasePage*)csr.pg.aNew;
@@ -313,8 +498,7 @@ int sqlite3HctDbInsert(
       }
       iOff -= (nReq - (16+2));
       aNewOff[iNewCell] = (u16)iOff;
-      iOff += sqlite3PutVarint(&csr.pg.aNew[iOff], nData);
-      memcpy(&csr.pg.aNew[iOff], aData, nData);
+      hctDbCellPut(&csr.pg.aNew[iOff], nData, aData);
     }else{
       /* split page */
       rc = hctDbSplitPage(&csr, pRec, iKey, nData, aData);
@@ -357,6 +541,11 @@ int sqlite3HctDbCsrOpen(HctDatabase *pDb, u32 iRoot, HctDbCsr **ppCsr){
     p->pDb = pDb;
     p->iRoot = iRoot;
     p->iCell = -1;
+    p->pCsrNext = pDb->pCsrList;
+    pDb->pCsrList = p;
+    if( pDb->iTid==0 ){
+      pDb->iTid = sqlite3HctFileGetTransid(pDb->pFile);
+    }
   }
   *ppCsr = p;
   return rc;
@@ -364,7 +553,14 @@ int sqlite3HctDbCsrOpen(HctDatabase *pDb, u32 iRoot, HctDbCsr **ppCsr){
 
 void sqlite3HctDbCsrClose(HctDbCsr *pCsr){
   if( pCsr ){
+    HctDatabase *pDb = pCsr->pDb;
+    HctDbCsr **pp;
+    for(pp=&pDb->pCsrList; *pp!=pCsr; pp=&(*pp)->pCsrNext);
+    *pp = pCsr->pCsrNext;
     sqlite3_free(pCsr);
+    if( pDb->pCsrList==0 ){
+      pDb->iTid = 0;
+    }
   }
 }
 
@@ -409,13 +605,14 @@ int sqlite3HctDbCsrLast(HctDbCsr *pCsr){
     HctDatabasePage *pPg = (HctDatabasePage*)pCsr->pg.aOld;
     assert( pPg->ePagetype==HCT_PAGETYPE_INTKEY_LEAF );
     assert( pPg->iPeerPg==0 );
-    pCsr->iCell = pPg->nEntry-1;;
+    pCsr->iCell = pPg->nEntry-1;
   }
 
   return rc;
 }
 
 int sqlite3HctDbCsrNext(HctDbCsr *pCsr){
+  int rc = SQLITE_OK;
   HctDatabasePage *pPg = (HctDatabasePage*)pCsr->pg.aOld;
 
   assert( pCsr->iCell>=0 && pCsr->iCell<pPg->nEntry );
@@ -423,11 +620,19 @@ int sqlite3HctDbCsrNext(HctDbCsr *pCsr){
 
   pCsr->iCell++;
   if( pCsr->iCell==pPg->nEntry ){
+    u32 iPeerPg = pPg->iPeerPg;
     /* TODO - jump to peer page */
-    assert( pPg->iPeerPg==0 );
-    pCsr->iCell = -1;
+    if( iPeerPg==0 ){
+      pCsr->iCell = -1;
+    }else{
+      rc = sqlite3HctFilePageRelease(&pCsr->pg);
+      if( rc==SQLITE_OK ){
+        rc = sqlite3HctFilePageGet(pCsr->pDb->pFile, iPeerPg, &pCsr->pg);
+        pCsr->iCell = 0;
+      }
+    }
   }
-  return SQLITE_OK;
+  return rc;
 }
 
 
