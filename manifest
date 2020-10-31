@@ -1,5 +1,5 @@
-C Fix\svarious\sissues\swith\scursor\soperations.
-D 2020-10-30T21:17:24.058
+C Ignore\sdb\sentries\snot\scommitted\suntil\safter\scurrent\stransaction\sstarted.
+D 2020-10-31T21:10:26.137
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -506,11 +506,11 @@ F src/func.c 2333eb4277f55a5efdc12ef754e7d7ec9105d257b2fd00301d23ce1e8fa67dc0
 F src/global.c 943256ac44f333039d35a9830c18d075a81fa6b6bf2af05771494a9acfb9a40b
 F src/hash.c 8d7dda241d0ebdafb6ffdeda3149a412d7df75102cecfc1021c98d6219823b19
 F src/hash.h 9d56a9079d523b648774c1784b74b89bd93fac7b365210157482e4319a468f38
-F src/hctInt.h 905e833f1fbbf9839b205ce264b1b558a0fc92ef0de35a0e107e6374b0b574b8
-F src/hct_database.c 89f7ed4e6adcc641739d3b9ec716f6525803af0935f72d260d0fd89c23bef482
-F src/hct_file.c 9c2ad7bfbbedbb74f211796e4502f63ca1d39b9787c33d4d822058725a043739
+F src/hctInt.h a024671384ed7338257115603a5cfa8fc2a64da4fd7d563178c5a1ab5332ffdd
+F src/hct_database.c 25f3aedd8a6810d7249f7fbc34a5921f6f15a0ada922878fc73fa9db926a92f0
+F src/hct_file.c 86e2f2e45dbfceff603cf7ab07e004aed3d5fbf92a37c8a4ae6ebd31de1eecfc
 F src/hct_tree.c 1b8f9fec5910c29fa3b26cffe298e4e1df416da32c825eea06ab34a6ed82c81c
-F src/hctree.c c85839a3fcb11e20433c2d6b4cbcab195a05a9b850e8def6e1cca32d76e9a378
+F src/hctree.c 07bdedd8cfe20830db0a03643be585ea02d481fbea637dd7399bd844cf0a19db
 F src/hwtime.h cb1d7e3e1ed94b7aa6fde95ae2c2daccc3df826be26fc9ed7fd90d1750ae6144
 F src/in-operator.md 10cd8f4bcd225a32518407c2fb2484089112fd71
 F src/insert.c 7e081d33aab4a9d761c39dccf3c3872c35501565d2ed9db66301918d23bc7901
@@ -1899,8 +1899,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P 30b22251a3ffb6086de34cede9a32e051f73aa79caf652fe69f58b188f592e8c
-R 26973a23558dbf82443efdf9dfb71499
+P b9e2c01fac9c036b9436eb9420a1770d3a79f642128cbbd872de451f326f4bb5
+R 0ad8096aff099ab26d3e9fe2decf6b68
 U dan
-Z 7e887fc5e0559a69e1fdc8000c4b5de5
+Z 5e2f9fee807feb0e50d31c41656d0b07
 # Remove this line to create a well-formed Fossil manifest.

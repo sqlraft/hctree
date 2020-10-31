@@ -30,6 +30,10 @@
 #define HCT_HEADER_PAGESIZE      4096
 
 
+#ifndef HCT_TID_MASK
+# define HCT_TID_MASK     ((((u64)0x00FFFFFF)<<32)|0xFFFFFFFF)
+#endif
+
 /*
 ** Pagemap slots used for special purposes.
 */
@@ -37,7 +41,7 @@
 #define HCT_PAGEMAP_PHYSICAL_EOF     3
 #define HCT_PAGEMAP_TRANSID_EOF      4
 
-#define HCT_PGMAPFLAG_PHYSINUSE  (((u64)0x00000001)<<32)
+#define HCT_PGMAPFLAG_PHYSINUSE  (((u64)0x00000001)<<56)
 
 
 typedef struct HctFileServer HctFileServer;
@@ -540,7 +544,8 @@ u64 sqlite3HctFileStartTrans(HctFile *pFile){
 }
 
 u64 sqlite3HctFileGetTransid(HctFile *pFile){
-  return hctFilePagemapGet(pFile->pMapping, HCT_PAGEMAP_TRANSID_EOF);
+  u64 iVal = hctFilePagemapGet(pFile->pMapping, HCT_PAGEMAP_TRANSID_EOF);
+  return iVal & HCT_TID_MASK;
 }
 
 int sqlite3HctFileFinishTrans(HctFile *pFile){

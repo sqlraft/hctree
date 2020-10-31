@@ -141,7 +141,7 @@ static void hctDbIntkeyLeaf(
   u16 **paOff
 ){
   *paKey = (HctIntkeyTid*)&pPg[1];
-  *paOff = (u16*)&(*paKey)[pPg->nEntry];
+  if( paOff ) *paOff = (u16*)&(*paKey)[pPg->nEntry];
 }
 
 
@@ -266,13 +266,8 @@ int sqlite3HctDbCsrSeek(
     }else if( pCsr->iCell>=0 ){
       *pRes = -1;
     }else{
-      HctDatabasePage *pPg = (HctDatabasePage*)pCsr->pg.aOld;
-      if( pPg->nEntry>0 ){
-        pCsr->iCell = 0;
-        *pRes = +1;
-      }else{
-        *pRes = -1;
-      }
+      rc = sqlite3HctDbCsrFirst(pCsr);
+      *pRes = sqlite3HctDbCsrEof(pCsr) ? -1 : +1;
     }
   }
   return rc;
@@ -522,7 +517,7 @@ int sqlite3HctDbDelete(
   assert( 0 );
 }
 
-int sqlite3HctDbCommit(HctDatabase *p){
+int sqlite3HctDbEndTransaction(HctDatabase *p){
   p->iTid = 0;
   return SQLITE_OK;
 }
@@ -545,6 +540,7 @@ int sqlite3HctDbCsrOpen(HctDatabase *pDb, u32 iRoot, HctDbCsr **ppCsr){
     pDb->pCsrList = p;
     if( pDb->iTid==0 ){
       pDb->iTid = sqlite3HctFileGetTransid(pDb->pFile);
+      assert( pDb->iTid<50000 );
     }
   }
   *ppCsr = p;
@@ -558,9 +554,6 @@ void sqlite3HctDbCsrClose(HctDbCsr *pCsr){
     for(pp=&pDb->pCsrList; *pp!=pCsr; pp=&(*pp)->pCsrNext);
     *pp = pCsr->pCsrNext;
     sqlite3_free(pCsr);
-    if( pDb->pCsrList==0 ){
-      pDb->iTid = 0;
-    }
   }
 }
 
@@ -578,6 +571,23 @@ int sqlite3HctDbCsrEof(HctDbCsr *pCsr){
   return pCsr->iCell<0;
 }
 
+/*
+** Return true if the entry that pCsr currently points at should be 
+** visible to the user. Or false if it should not. If the cursor already
+** points at EOF, return true.
+*/
+static int hctDbCsrVisible(HctDbCsr *pCsr){
+  if( pCsr->iCell>=0 ){
+    HctDatabasePage *pPg = (HctDatabasePage*)pCsr->pg.aOld;
+    HctIntkeyTid *aTid;
+    hctDbIntkeyLeaf(pPg, &aTid, 0);
+    if( (aTid[pCsr->iCell].iTidFlags & HCT_TID_MASK)>pCsr->pDb->iTid ){
+      return 0;
+    }
+  }
+  return 1;
+}
+
 int sqlite3HctDbCsrFirst(HctDbCsr *pCsr){
   int rc;
   HctFile *pFile = pCsr->pDb->pFile;
@@ -590,6 +600,10 @@ int sqlite3HctDbCsrFirst(HctDbCsr *pCsr){
     pCsr->iCell = 0;
     if( pPg->nEntry==0 ){
       pCsr->iCell = -1;
+    }
+
+    if( hctDbCsrVisible(pCsr)==0 ){
+      rc = sqlite3HctDbCsrNext(pCsr);
     }
   }
 
@@ -618,20 +632,23 @@ int sqlite3HctDbCsrNext(HctDbCsr *pCsr){
   assert( pCsr->iCell>=0 && pCsr->iCell<pPg->nEntry );
   assert( pPg->ePagetype==HCT_PAGETYPE_INTKEY_LEAF );
 
-  pCsr->iCell++;
-  if( pCsr->iCell==pPg->nEntry ){
-    u32 iPeerPg = pPg->iPeerPg;
-    /* TODO - jump to peer page */
-    if( iPeerPg==0 ){
-      pCsr->iCell = -1;
-    }else{
-      rc = sqlite3HctFilePageRelease(&pCsr->pg);
-      if( rc==SQLITE_OK ){
-        rc = sqlite3HctFilePageGet(pCsr->pDb->pFile, iPeerPg, &pCsr->pg);
-        pCsr->iCell = 0;
+  do {
+    pCsr->iCell++;
+    if( pCsr->iCell==pPg->nEntry ){
+      u32 iPeerPg = pPg->iPeerPg;
+      /* TODO - jump to peer page */
+      if( iPeerPg==0 ){
+        pCsr->iCell = -1;
+      }else{
+        rc = sqlite3HctFilePageRelease(&pCsr->pg);
+        if( rc==SQLITE_OK ){
+          rc = sqlite3HctFilePageGet(pCsr->pDb->pFile, iPeerPg, &pCsr->pg);
+          pCsr->iCell = 0;
+        }
       }
     }
-  }
+  }while( rc==SQLITE_OK && hctDbCsrVisible(pCsr)==0 );
+
   return rc;
 }
 

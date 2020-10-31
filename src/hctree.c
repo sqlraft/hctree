@@ -501,8 +501,11 @@ int sqlite3BtreeIncrVacuum(Btree *p){
 ** the write-transaction for this database file is to delete the journal.
 */
 int sqlite3BtreeCommitPhaseOne(Btree *p, const char *zSuperJrnl){
-  /* no-op for hct? */
   int rc = SQLITE_OK;
+  if( p->pHctDb ){
+    sqlite3HctDbEndTransaction(p->pHctDb);
+    /* TODO: Invalidate any existing cursors */
+  }
   return rc;
 }
 
@@ -552,7 +555,7 @@ static int btreeFlushToDisk(Btree *p){
     rc = sqlite3HctTreeForeach(p->pHctTree, (void*)p, btreeFlushOneToDisk);
   }
 
-  sqlite3HctDbCommit(p->pHctDb);
+  sqlite3HctDbEndTransaction(p->pHctDb);
   return rc;
 }
 
