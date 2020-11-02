@@ -110,6 +110,7 @@ int sqlite3HctDbEndTransaction(HctDatabase *p);
 int sqlite3HctDbCsrOpen(HctDatabase *pDb, u32 iRoot, HctDbCsr **ppCsr);
 void sqlite3HctDbCsrClose(HctDbCsr *pCsr);
 
+void sqlite3HctDbCsrDir(HctDbCsr*, int eDir);
 int sqlite3HctDbCsrSeek(HctDbCsr*, UnpackedRecord*, i64 iKey, int *pRes);
 
 int sqlite3HctDbCsrEof(HctDbCsr*);

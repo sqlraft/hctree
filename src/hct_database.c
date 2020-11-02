@@ -30,6 +30,7 @@ struct HctDbCsr {
   HctDatabase *pDb;               /* Database that owns this cursor */
   u32 iRoot;                      /* Root page cursor is opened on */
   int iCell;                      /* Current cell within page */
+  int eDir;                       /* Direction cursor will step after Seek() */
   HctDbCsr *pCsrNext;
   HctFilePage pg;                 /* Current database page */
 };
@@ -234,6 +235,33 @@ int hctDbCsrSeek(
   return rc;
 }
 
+void sqlite3HctDbCsrDir(HctDbCsr *pCsr, int eDir){
+  pCsr->eDir = eDir;
+}
+
+
+/*
+** Return true if the entry that pCsr currently points at should be 
+** visible to the user. Or false if it should not. If the cursor already
+** points at EOF, return true.
+*/
+static int hctDbCsrVisible(HctDbCsr *pCsr){
+  if( pCsr->iCell>=0 ){
+    HctDatabasePage *pPg = (HctDatabasePage*)pCsr->pg.aOld;
+    HctIntkeyTid *aTid;
+    hctDbIntkeyLeaf(pPg, &aTid, 0);
+    if( (aTid[pCsr->iCell].iTidFlags & HCT_TID_MASK)>pCsr->pDb->iTid ){
+      return 0;
+    }
+  }
+  return 1;
+}
+
+static void hctDbCsrReset(HctDbCsr *pCsr){
+  sqlite3HctFilePageRelease(&pCsr->pg);
+  pCsr->iCell = -1;
+  pCsr->eDir = 0;
+}
 
 /*
 ** An integer is written into *pRes which is the result of
@@ -260,16 +288,41 @@ int sqlite3HctDbCsrSeek(
   int rc;
   int bMatch;
   rc = hctDbCsrSeek(pCsr, pRec, iKey, &bMatch);
+
+  /* Cursor now points to the largest entry less than or equal to the
+  ** supplied key (pRec or iKey). If the supplied key is smaller than all
+  ** entries in the table, then pCsr->iCell is set to -1.  */
   if( rc==SQLITE_OK ){
-    if( bMatch ){
-      *pRes = 0;
-    }else if( pCsr->iCell>=0 ){
-      *pRes = -1;
+
+    if( pCsr->iCell<0 ){
+      /* If the cursor is BTREE_DIR_REVERSE or NONE, then leave it as it is
+      ** at EOF. Otherwise, if the cursor is BTREE_DIR_FORWARD, attempt
+      ** to move it to the first valid entry. */
+      if( pCsr->eDir==BTREE_DIR_FORWARD ){
+        rc = sqlite3HctDbCsrFirst(pCsr);
+        *pRes = sqlite3HctDbCsrEof(pCsr) ? -1 : +1;
+      }else{
+        *pRes = -1;
+      }
+    }else if( 0==hctDbCsrVisible(pCsr) ){
+      switch( pCsr->eDir ){
+        case BTREE_DIR_FORWARD:
+          *pRes = 1;
+          rc = sqlite3HctDbCsrNext(pCsr);
+          break;
+        case BTREE_DIR_REVERSE:
+          assert( 0 );
+          break;
+        default: assert( pCsr->eDir==BTREE_DIR_NONE );
+          hctDbCsrReset(pCsr);
+          *pRes = -1;
+          break;
+      }
     }else{
-      rc = sqlite3HctDbCsrFirst(pCsr);
-      *pRes = sqlite3HctDbCsrEof(pCsr) ? -1 : +1;
+      *pRes = bMatch ? 0 : -1;
     }
   }
+
   return rc;
 }
 
@@ -278,7 +331,6 @@ static void hctDbCsrInit(HctDatabase *pDb, u32 iRoot, HctDbCsr *pCsr){
   pCsr->pDb = pDb;
   pCsr->iRoot = iRoot;
 }
-
 
 static void hctDbSplitcopy(
   void *pTo,                      /* Target buffer */
@@ -568,24 +620,7 @@ void sqlite3HctDbCsrKey(HctDbCsr *pCsr, i64 *piKey){
 }
 
 int sqlite3HctDbCsrEof(HctDbCsr *pCsr){
-  return pCsr->iCell<0;
-}
-
-/*
-** Return true if the entry that pCsr currently points at should be 
-** visible to the user. Or false if it should not. If the cursor already
-** points at EOF, return true.
-*/
-static int hctDbCsrVisible(HctDbCsr *pCsr){
-  if( pCsr->iCell>=0 ){
-    HctDatabasePage *pPg = (HctDatabasePage*)pCsr->pg.aOld;
-    HctIntkeyTid *aTid;
-    hctDbIntkeyLeaf(pPg, &aTid, 0);
-    if( (aTid[pCsr->iCell].iTidFlags & HCT_TID_MASK)>pCsr->pDb->iTid ){
-      return 0;
-    }
-  }
-  return 1;
+  return pCsr==0 || pCsr->iCell<0;
 }
 
 int sqlite3HctDbCsrFirst(HctDbCsr *pCsr){
@@ -611,15 +646,27 @@ int sqlite3HctDbCsrFirst(HctDbCsr *pCsr){
 }
 
 int sqlite3HctDbCsrLast(HctDbCsr *pCsr){
-  int rc;
+  int rc = SQLITE_OK;
   HctFile *pFile = pCsr->pDb->pFile;
+  u32 iPg = pCsr->iRoot;
+  HctDatabasePage *pPg = 0;
 
-  rc = sqlite3HctFilePageGet(pFile, pCsr->iRoot, &pCsr->pg);
+  hctDbCsrReset(pCsr);
+  while( rc==SQLITE_OK && iPg ) {
+    sqlite3HctFilePageRelease(&pCsr->pg);
+    rc = sqlite3HctFilePageGet(pFile, iPg, &pCsr->pg);
+    if( rc==SQLITE_OK ){
+      pPg = (HctDatabasePage*)pCsr->pg.aOld;
+      iPg = pPg->iPeerPg;
+    }
+  }
+
   if( rc==SQLITE_OK ){
-    HctDatabasePage *pPg = (HctDatabasePage*)pCsr->pg.aOld;
     assert( pPg->ePagetype==HCT_PAGETYPE_INTKEY_LEAF );
     assert( pPg->iPeerPg==0 );
     pCsr->iCell = pPg->nEntry-1;
+    /* TODO - avoid landing on an invisible entry. Deal with this after
+    ** parent lists and xPrev() are working properly. */
   }
 
   return rc;

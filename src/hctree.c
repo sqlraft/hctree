@@ -1004,8 +1004,9 @@ int sqlite3BtreeFirst(BtCursor *pCur, int *pRes){
   int rc = SQLITE_OK;
 
   sqlite3HctTreeCsrFirst(pCur->pHctTreeCsr);
-  rc = sqlite3HctDbCsrFirst(pCur->pHctDbCsr);
-
+  if( pCur->pHctDbCsr ){
+    rc = sqlite3HctDbCsrFirst(pCur->pHctDbCsr);
+  }
   if( rc==SQLITE_OK ){
     int bTreeEof = sqlite3HctTreeCsrEof(pCur->pHctTreeCsr);
     int bDbEof = sqlite3HctDbCsrEof(pCur->pHctDbCsr);
@@ -1023,9 +1024,11 @@ int sqlite3BtreeFirst(BtCursor *pCur, int *pRes){
 */
 int sqlite3BtreeLast(BtCursor *pCur, int *pRes){
   int rc = SQLITE_OK;
-  sqlite3HctTreeCsrLast(pCur->pHctTreeCsr);
-  rc = sqlite3HctDbCsrLast(pCur->pHctDbCsr);
 
+  sqlite3HctTreeCsrLast(pCur->pHctTreeCsr);
+  if( pCur->pHctDbCsr ){
+    rc = sqlite3HctDbCsrLast(pCur->pHctDbCsr);
+  }
   if( rc==SQLITE_OK ){
     int bTreeEof = sqlite3HctTreeCsrEof(pCur->pHctTreeCsr);
     int bDbEof = sqlite3HctDbCsrEof(pCur->pHctDbCsr);
@@ -1125,6 +1128,9 @@ void sqlite3BtreeCursorDir(BtCursor *pCur, int eDir){
        || eDir==BTREE_DIR_REVERSE
   );
   pCur->eDir = eDir;
+  if( pCur->pHctDbCsr ){
+    sqlite3HctDbCsrDir(pCur->pHctDbCsr, eDir);
+  }
 }
 
 /*
