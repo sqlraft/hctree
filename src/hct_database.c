@@ -48,7 +48,7 @@ struct HctDatabasePage {
 
   /* Page header fields */
   u8 ePagetype;
-  u8 unused;
+  u8 pgflags;
   u16 nEntry;
   u32 iPeerPg;
 
@@ -58,11 +58,17 @@ struct HctDatabasePage {
   u32 unused2;                    /* Padding to multiple of 8 bytes */
 };
 
+
 typedef struct HctIntkeyTid HctIntkeyTid;
 struct HctIntkeyTid {
   i64 iKey;
   u64 iTidFlags;
 };
+
+/*
+** Flags used in HctDatabasePage.pgflags 
+*/
+#define HCT_PGFLAG_REVERSE 0x01
 
 /*
 ** Flags used in the spare 8-bits of the transaction-id fields on each
@@ -145,6 +151,40 @@ static void hctDbIntkeyLeaf(
   if( paOff ) *paOff = (u16*)&(*paKey)[pPg->nEntry];
 }
 
+static void hctDbIntkeyNode(
+  HctDatabasePage *pPg, 
+  HctIntkeyTid **paKey,
+  u32 **paChild
+){
+  *paKey = (HctIntkeyTid*)&pPg->nFreeSpace;
+  if( paChild ) *paChild = (u32*)&(*paKey)[pPg->nEntry];
+}
+
+/*
+** Return (*p1 - *p2).
+*/
+static int hctDbIntkeyCmp(
+  int bReverse,
+  HctIntkeyTid *p1, 
+  i64 iKey,
+  u64 iTid
+){
+  int ret = 0;
+  if( p1->iKey<iKey ){
+    ret = -1;
+  }else if( p1->iKey>iKey ){
+    ret = 1;
+  }else{
+    u64 iP1Tid = (p1->iTidFlags & HCT_TID_MASK);
+    if( iP1Tid<iTid ){
+      ret = -1;
+    }else if( iP1Tid>iTid ){
+      ret = 1;
+    }
+  }
+
+  return ret * (bReverse ? -1 : 1);
+}
 
 /*
 ** Seek for key iKey (if pRec is null) or pRec within the table opened
@@ -153,18 +193,17 @@ static void hctDbIntkeyLeaf(
 int hctDbCsrSeek(
   HctDbCsr *pCsr,                 /* Cursor to seek */
   UnpackedRecord *pRec,           /* Key for index tables */
-  i64 iKey,                       /* Key for intkey tables */
-  int *pbMatch                    /* Result of seek (see above) */
+  i64 iKey                        /* Key for intkey tables */
 ){
   HctFile *pFile = pCsr->pDb->pFile;
   u64 iTid = pCsr->pDb->iTid;
   int rc;
-  int res = 0;
 
   assert( pRec==0 ); /* TODO! Support index tables! */
   rc = sqlite3HctFilePageGet(pFile, pCsr->iRoot, &pCsr->pg);
   while( rc==SQLITE_OK ){
     HctDatabasePage *pPg = (HctDatabasePage*)pCsr->pg.aOld;
+    int bReverse = (pPg->pgflags & HCT_PGFLAG_REVERSE);
     HctIntkeyTid *aKey = (HctIntkeyTid*)&pPg[1];
     int i1 = -1;
     int i2 = pPg->nEntry-1;
@@ -172,37 +211,26 @@ int hctDbCsrSeek(
     /* Seek within the page. Goal is to find the entry that is less than or
     ** equal to (iKey/iTid). If all entries on the page are larger than
     ** (iKey/iTid), find the "entry" -1. */
-    res = 0;
     while( i2>i1 ){
       int iTest = (i1+i2+1)/2;
-      i64 iPageKey = aKey[iTest].iKey;
-      assert( iTest>i1 );
-      if( iPageKey<iKey ){
+      int ret = hctDbIntkeyCmp(bReverse, &aKey[iTest], iKey, iTid);
+      if( ret<0 ){
         i1 = iTest;
-      }else if( iPageKey>iKey ){
+      }else if( ret>0 ){
         i2 = iTest-1;
       }else{
-        /* Keys match. Compare tid values. */
-        res = 1;
-        u64 iPageTid = (aKey[iTest].iTidFlags & HCT_TID_MASK);
-        if( iPageTid<iTid ){
-          i1 = iTest;
-        }else if( iPageTid>iTid ){
-          i2 = iTest-1;
-        }else{
-          i1 = i2 = iTest;
-        }
+        i1 = i2 = iTest;
       }
     }
 
     /* Assert that we appear to have landed on the correct entry. */
-    assert( i1==i2 );
-    assert( i2==-1 || aKey[i2].iKey<iKey 
-        || (aKey[i2].iKey==iKey && (aKey[i2].iTidFlags & HCT_TID_MASK)<=iTid) 
-    );
-    assert( i2+1==pPg->nEntry || aKey[i2+1].iKey>iKey 
-        || (aKey[i2+1].iKey==iKey && (aKey[i2+1].iTidFlags & HCT_TID_MASK)>iTid)
-    );
+    if( bReverse==0 ){
+      assert( i1==i2 );
+      assert( i2==-1 || hctDbIntkeyCmp(bReverse, &aKey[i2], iKey, iTid)<=0 );
+      assert( i2+1==pPg->nEntry 
+          || hctDbIntkeyCmp(bReverse, &aKey[i2+1], iKey, iTid)>0 
+      );
+    }
 
     /* Test if it is necessary to skip to the peer node. */
     if( i2>=0 && i2==pPg->nEntry-1 && pPg->iPeerPg!=0 ){
@@ -212,8 +240,7 @@ int hctDbCsrSeek(
         HctIntkeyTid *aPKey;
         u16 *aPOff;
         hctDbIntkeyLeaf((HctDatabasePage*)peer.aOld, &aPKey, &aPOff);
-        if( aPKey[0].iKey<iKey 
-        || (aPKey[0].iKey==iKey && (aPKey[0].iTidFlags & HCT_TID_MASK)<=iTid) ){
+        if( hctDbIntkeyCmp(bReverse, &aPKey[0], iKey, iTid)<=0 ){
           SWAP(HctFilePage, pCsr->pg, peer);
           sqlite3HctFilePageRelease(&peer);
           continue;
@@ -231,7 +258,6 @@ int hctDbCsrSeek(
     }
   }
 
-  if( pbMatch ) *pbMatch = res;
   return rc;
 }
 
@@ -286,8 +312,7 @@ int sqlite3HctDbCsrSeek(
   int *pRes                       /* Result of seek (see above) */
 ){
   int rc;
-  int bMatch;
-  rc = hctDbCsrSeek(pCsr, pRec, iKey, &bMatch);
+  rc = hctDbCsrSeek(pCsr, pRec, iKey);
 
   /* Cursor now points to the largest entry less than or equal to the
   ** supplied key (pRec or iKey). If the supplied key is smaller than all
@@ -319,7 +344,9 @@ int sqlite3HctDbCsrSeek(
           break;
       }
     }else{
-      *pRes = bMatch ? 0 : -1;
+      i64 iCsrKey;
+      sqlite3HctDbCsrKey(pCsr, &iCsrKey);
+      *pRes = iCsrKey<iKey ? -1 : 0;
     }
   }
 
@@ -366,11 +393,13 @@ static int hctDbCellPut(u8 *aBuf, int nData, const u8 *aData){
   return iOff+nData;
 }
 
-static int hctDbSplitPage(
+static int hctDbRedistribute(
   HctDbCsr *pCsr,
   UnpackedRecord *pRec, 
   i64 iKey, 
-  int nData, const u8 *aData
+  int nData, const u8 *aData,
+  HctFilePage *pPg1,
+  HctFilePage *pPg2
 ){
   HctDatabase *pDb = pCsr->pDb;
   int pgsz = pDb->pgsz;
@@ -382,8 +411,12 @@ static int hctDbSplitPage(
   u16 *aOldOff;
   int iNew;
   int iOld;
-  HctFilePage peer;               /* New peer page */
-  int rc;
+
+  int iOff;
+  HctDatabasePage *pLeft = (HctDatabasePage*)pPg1->aNew;
+  HctDatabasePage *pRight = (HctDatabasePage*)pPg2->aNew;
+  HctIntkeyTid *aLeftKey, *aRightKey;
+  u16 *aLeftOff, *aRightOff;
 
   hctDbIntkeyLeaf(pOld, &aOldKey, &aOldOff);
 
@@ -410,80 +443,124 @@ static int hctDbSplitPage(
 
 // printf("splitting page %d (%d/%d)\n", pCsr->pg.iPg, nLeft, pOld->nEntry+1-nLeft);
 
-  /* Allocate the peer page */
-  rc = sqlite3HctFilePageNew(pDb->pFile, 0, &peer);
-  if( rc==SQLITE_OK ){
-    int iOff;
-    HctDatabasePage *pLeft = (HctDatabasePage*)pCsr->pg.aNew;
-    HctDatabasePage *pRight = (HctDatabasePage*)peer.aNew;
-    HctIntkeyTid *aLeftKey, *aRightKey;
-    u16 *aLeftOff, *aRightOff;
+  memset(pLeft, 0, sizeof(*pLeft));
+  pLeft->ePagetype = HCT_PAGETYPE_INTKEY_LEAF;
+  pLeft->nEntry = nLeft;
+  pLeft->iPeerPg = pPg2->iPg;
+  hctDbIntkeyLeaf(pLeft, &aLeftKey, &aLeftOff);
 
-    memset(pLeft, 0, sizeof(*pLeft));
-    pLeft->ePagetype = HCT_PAGETYPE_INTKEY_LEAF;
-    pLeft->nEntry = nLeft;
-    pLeft->iPeerPg = peer.iPg;
-    hctDbIntkeyLeaf(pLeft, &aLeftKey, &aLeftOff);
+  memset(pRight, 0, sizeof(*pRight));
+  pRight->ePagetype = HCT_PAGETYPE_INTKEY_LEAF;
+  pRight->nEntry = pOld->nEntry+1-nLeft;
+  pRight->iPeerPg = pOld->iPeerPg;
+  hctDbIntkeyLeaf(pRight, &aRightKey, &aRightOff);
 
-    memset(pRight, 0, sizeof(*pRight));
-    pRight->ePagetype = HCT_PAGETYPE_INTKEY_LEAF;
-    pRight->nEntry = pOld->nEntry+1-nLeft;
-    pRight->iPeerPg = pOld->iPeerPg;
-    hctDbIntkeyLeaf(pRight, &aRightKey, &aRightOff);
-
-    iOff = pgsz;
-    for(iNew=0, iOld=0; iNew<pOld->nEntry+1; iNew++){
-      int iCellOff;
-      HctIntkeyTid newKey;
-      int nNewData;
-      const u8 *aNewData;
-      if( iNew==iNewCell ){
-        newKey.iKey = iKey;
-        newKey.iTidFlags = pDb->iTid;
-        nNewData = nData;
-        aNewData = aData;
-      }else{
-        int iCellOff = aOldOff[iOld];
-        newKey = aOldKey[iOld];
-        iCellOff += getVarint32(&pCsr->pg.aOld[iCellOff], nNewData);
-        aNewData = &pCsr->pg.aOld[iCellOff];
-        iOld++;
-      }
-
-      if( iNew<nLeft ){
-        int iCellOff;
-        aLeftKey[iNew] = newKey;
-        iOff -= hctDbCellSize(nNewData);
-        iCellOff = iOff + sqlite3PutVarint(&pCsr->pg.aNew[iOff], nNewData);
-        memcpy(&pCsr->pg.aNew[iCellOff], aNewData, nNewData);
-        aLeftOff[iNew] = (u16)iOff;
-      }else{
-        if( iNew==nLeft ) iOff = pgsz;
-        aRightKey[iNew-nLeft] = newKey;
-        iOff -= hctDbCellSize(nNewData);
-        iCellOff = iOff + sqlite3PutVarint(&peer.aNew[iOff], nNewData);
-        memcpy(&peer.aNew[iCellOff], aNewData, nNewData);
-        aRightOff[iNew-nLeft] = (u16)iOff;
-      }
+  iOff = pgsz;
+  for(iNew=0, iOld=0; iNew<pOld->nEntry+1; iNew++){
+    int iCellOff;
+    HctIntkeyTid newKey;
+    int nNewData;
+    const u8 *aNewData;
+    if( iNew==iNewCell ){
+      newKey.iKey = iKey;
+      newKey.iTidFlags = pDb->iTid;
+      nNewData = nData;
+      aNewData = aData;
+    }else{
+      int iCellOff = aOldOff[iOld];
+      newKey = aOldKey[iOld];
+      iCellOff += getVarint32(&pCsr->pg.aOld[iCellOff], nNewData);
+      aNewData = &pCsr->pg.aOld[iCellOff];
+      iOld++;
     }
 
-    pLeft->nFree = pLeft->nFreeSpace = 
-      aLeftOff[pLeft->nEntry-1] - sizeof(*pLeft) - (16+2)*pLeft->nEntry;
-    pRight->nFree = pRight->nFreeSpace = 
-      aRightOff[pRight->nEntry-1] - sizeof(*pRight) - (16+2)*pRight->nEntry;
-
-    /* Release peer and original pages */
-    rc = sqlite3HctFilePageRelease(&peer);
-    if( rc==SQLITE_OK ){
-      rc = sqlite3HctFilePageRelease(&pCsr->pg);
-      /* TODO: If this fails - reclaim the allocated peer page */
+    if( iNew<nLeft ){
+      int iCellOff;
+      aLeftKey[iNew] = newKey;
+      iOff -= hctDbCellSize(nNewData);
+      iCellOff = iOff + sqlite3PutVarint(&pPg1->aNew[iOff], nNewData);
+      memcpy(&pPg1->aNew[iCellOff], aNewData, nNewData);
+      aLeftOff[iNew] = (u16)iOff;
+    }else{
+      if( iNew==nLeft ) iOff = pgsz;
+      aRightKey[iNew-nLeft] = newKey;
+      iOff -= hctDbCellSize(nNewData);
+      iCellOff = iOff + sqlite3PutVarint(&pPg2->aNew[iOff], nNewData);
+      memcpy(&pPg2->aNew[iCellOff], aNewData, nNewData);
+      aRightOff[iNew-nLeft] = (u16)iOff;
     }
   }
+
+  pLeft->nFree = pLeft->nFreeSpace = 
+    aLeftOff[pLeft->nEntry-1] - sizeof(*pLeft) - (16+2)*pLeft->nEntry;
+  pRight->nFree = pRight->nFreeSpace = 
+    aRightOff[pRight->nEntry-1] - sizeof(*pRight) - (16+2)*pRight->nEntry;
 
   return SQLITE_OK;
 }
 
+static int hctDbSplitPage(
+  HctDbCsr *pCsr,
+  UnpackedRecord *pRec, 
+  i64 iKey, 
+  int nData, const u8 *aData
+){
+  HctDatabase *pDb = pCsr->pDb;
+  HctDatabasePage *pOld = (HctDatabasePage*)pCsr->pg.aOld;
+  HctFilePage peer;               /* New peer page */
+  int rc;
 
+  assert( pOld->ePagetype==HCT_PAGETYPE_INTKEY_LEAF );
+
+  /* Allocate a peer page. This is required whether or not this is a split
+  ** of the root node.  */
+  rc = sqlite3HctFilePageNew(pDb->pFile, 0, &peer);
+  if( rc!=SQLITE_OK ) return rc;
+
+  if( 0 && pCsr->iRoot==pCsr->pg.iPg ){
+    HctFilePage peer1;               /* New peer page */
+    /* This is a split the root page. Allocate a second peer. */
+    rc = sqlite3HctFilePageNew(pDb->pFile, 0, &peer1);
+    if( rc==SQLITE_OK ){
+      rc = hctDbRedistribute(pCsr, pRec, iKey, nData, aData, &peer1, &peer);
+    }
+    if( rc==SQLITE_OK ){
+      HctIntkeyTid *aKey = 0;
+      HctIntkeyTid *aRightKey = 0;
+      u32 *aChild = 0;
+      HctDatabasePage *pRoot = (HctDatabasePage*)pCsr->pg.aNew;
+      HctDatabasePage *pRight = (HctDatabasePage*)peer.aNew;
+
+      memset(pCsr->pg.aNew, 0, pDb->pgsz);
+      pRoot->ePagetype = HCT_PAGETYPE_INTKEY_NODE;
+      pRoot->pgflags = HCT_PGFLAG_REVERSE;
+      pRoot->nEntry = 2;
+      hctDbIntkeyNode(pRoot, &aKey, &aChild);
+      hctDbIntkeyLeaf(pRoot, &aRightKey, 0);
+
+      aKey[0].iKey = aRightKey[0].iKey;
+      aKey[0].iTidFlags = (aRightKey[0].iTidFlags & HCT_TID_MASK);
+      aChild[0] = peer.iPg;
+      aKey[1].iKey = SMALLEST_INT64;
+      aKey[1].iTidFlags = 0;
+      aChild[1] = peer1.iPg;
+
+      rc = sqlite3HctFilePageRelease(&peer1);
+    }
+  }else{
+    rc = hctDbRedistribute(pCsr, pRec, iKey, nData, aData, &pCsr->pg, &peer);
+  }
+
+  if( rc==SQLITE_OK ){
+    rc = sqlite3HctFilePageRelease(&peer);
+  }
+  if( rc==SQLITE_OK ){
+    rc = sqlite3HctFilePageRelease(&pCsr->pg);
+    /* TODO: If this fails - reclaim the allocated peer page(s) */
+  }
+
+  return rc;
+}
 
 int sqlite3HctDbInsert(
   HctDatabase *pDb,
@@ -499,7 +576,7 @@ int sqlite3HctDbInsert(
   hctDbStartTrans(pDb);
 
   hctDbCsrInit(pDb, iRoot, &csr);
-  rc = hctDbCsrSeek(&csr, pRec, iKey, 0);
+  rc = hctDbCsrSeek(&csr, pRec, iKey);
   if( rc==SQLITE_OK ){
     rc = sqlite3HctFilePageWrite(&csr.pg);
   }

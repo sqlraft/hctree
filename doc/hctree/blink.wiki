@@ -437,7 +437,23 @@ as any other node would be, but instead:
   #  The root node is rewritten so as to be the parent of the two new leaves.
 
 This occurs any time the root node is full, just as it does in a regular
-b-tree. When it does, the height of the tree has increased by 1.
+b-tree. A root node is not allowed to have a peer node. Each time this
+occurs, the height of the tree has increased by 1.
+
+<verbatim type="pikchr center">
+boxht=0.2 ; boxwid=0.5
+R1: box "1"
+L1: box "2" with c at R1 + (-0.5, -0.5) color red; 
+arrow color red; box "3" color red
+text "Step 1:" with e at L1 + (-0.5, 0.25)
+
+R2: box "1" with c at R1 + (2.5, 0) color red
+L2: box "2" with c at R2 + (-0.5, -0.5); arrow ; L3: box "3"
+arrow color red from R2.s left 0.1 then to L2.n
+arrow color red from R2.s right 0.1 then to L3.n
+text "Step 2:" with e at L2 + (-0.5, 0.25)
+
+</verbatim>
 
 If the root node has only a single child, the height of the tree can be
 decreased by 1. This is done as follows:
