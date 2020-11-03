@@ -1617,6 +1617,9 @@ int sqlite3BtreeSchemaLocked(Btree *p){
   return SQLITE_OK;
 }
 
+HctDatabase *sqlite3HctDbFind(sqlite3 *db, int iDb){
+  return db->aDb[iDb].pBt->pHctDb;
+}
 
 #ifndef SQLITE_OMIT_SHARED_CACHE
 /*

@@ -420,6 +420,11 @@ int sqlite3HctFilePagesize(HctFile *pFile){
   return pFile->szPage;
 }
 
+u32 sqlite3HctFileMaxpage(HctFile *pFile){
+  u64 iVal = hctFilePagemapGet(pFile->pMapping, HCT_PAGEMAP_LOGICAL_EOF);
+  return (iVal & 0xFFFFFFFF);
+}
+
 /*
 ** Allocate a new logical or physical page id by incrementing the page-map
 ** field. This is a stop-gap only - we already know allocating pages this 

@@ -407,6 +407,7 @@ void sqlite3BtreeCursorList(Btree*);
 
 #ifdef SQLITE_ENABLE_HCT
 void sqlite3BtreeCursorDir(BtCursor*, int eDir);
+int sqlite3HctVtabInit(sqlite3*);
 #else
 # define sqlite3BtreeCursorDir(a,b)
 #endif

@@ -96,6 +96,9 @@ static int (*const sqlite3BuiltinExtensions[])(sqlite3*) = {
 #ifdef SQLITE_ENABLE_BYTECODE_VTAB
   sqlite3VdbeBytecodeVtabInit,
 #endif
+#ifdef SQLITE_ENABLE_HCT
+  sqlite3HctVtabInit,
+#endif
 };
 
 #ifndef SQLITE_AMALGAMATION

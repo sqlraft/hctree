@@ -48,7 +48,7 @@ struct HctDatabasePage {
 
   /* Page header fields */
   u8 ePagetype;
-  u8 pgflags;
+  u8 unused;
   u16 nEntry;
   u32 iPeerPg;
 
@@ -64,11 +64,6 @@ struct HctIntkeyTid {
   i64 iKey;
   u64 iTidFlags;
 };
-
-/*
-** Flags used in HctDatabasePage.pgflags 
-*/
-#define HCT_PGFLAG_REVERSE 0x01
 
 /*
 ** Flags used in the spare 8-bits of the transaction-id fields on each
@@ -203,7 +198,7 @@ int hctDbCsrSeek(
   rc = sqlite3HctFilePageGet(pFile, pCsr->iRoot, &pCsr->pg);
   while( rc==SQLITE_OK ){
     HctDatabasePage *pPg = (HctDatabasePage*)pCsr->pg.aOld;
-    int bReverse = (pPg->pgflags & HCT_PGFLAG_REVERSE);
+    int bReverse = (pPg->ePagetype & HCT_PAGETYPE_REVERSE)!=0;
     HctIntkeyTid *aKey = (HctIntkeyTid*)&pPg[1];
     int i1 = -1;
     int i2 = pPg->nEntry-1;
@@ -224,13 +219,11 @@ int hctDbCsrSeek(
     }
 
     /* Assert that we appear to have landed on the correct entry. */
-    if( bReverse==0 ){
-      assert( i1==i2 );
-      assert( i2==-1 || hctDbIntkeyCmp(bReverse, &aKey[i2], iKey, iTid)<=0 );
-      assert( i2+1==pPg->nEntry 
-          || hctDbIntkeyCmp(bReverse, &aKey[i2+1], iKey, iTid)>0 
-      );
-    }
+    assert( i1==i2 );
+    assert( i2==-1 || hctDbIntkeyCmp(bReverse, &aKey[i2], iKey, iTid)<=0 );
+    assert( i2+1==pPg->nEntry 
+        || hctDbIntkeyCmp(bReverse, &aKey[i2+1], iKey, iTid)>0 
+    );
 
     /* Test if it is necessary to skip to the peer node. */
     if( i2>=0 && i2==pPg->nEntry-1 && pPg->iPeerPg!=0 ){
@@ -517,7 +510,7 @@ static int hctDbSplitPage(
   rc = sqlite3HctFilePageNew(pDb->pFile, 0, &peer);
   if( rc!=SQLITE_OK ) return rc;
 
-  if( 0 && pCsr->iRoot==pCsr->pg.iPg ){
+  if( pCsr->iRoot==pCsr->pg.iPg ){
     HctFilePage peer1;               /* New peer page */
     /* This is a split the root page. Allocate a second peer. */
     rc = sqlite3HctFilePageNew(pDb->pFile, 0, &peer1);
@@ -532,11 +525,11 @@ static int hctDbSplitPage(
       HctDatabasePage *pRight = (HctDatabasePage*)peer.aNew;
 
       memset(pCsr->pg.aNew, 0, pDb->pgsz);
-      pRoot->ePagetype = HCT_PAGETYPE_INTKEY_NODE;
-      pRoot->pgflags = HCT_PGFLAG_REVERSE;
+      pRoot->ePagetype = HCT_PAGETYPE_INTKEY_NODE|HCT_PAGETYPE_REVERSE;
+      /* TODO: Allow for trees with more than one level of internal node */
       pRoot->nEntry = 2;
       hctDbIntkeyNode(pRoot, &aKey, &aChild);
-      hctDbIntkeyLeaf(pRoot, &aRightKey, 0);
+      hctDbIntkeyLeaf(pRight, &aRightKey, 0);
 
       aKey[0].iKey = aRightKey[0].iKey;
       aKey[0].iTidFlags = (aRightKey[0].iTidFlags & HCT_TID_MASK);
@@ -797,3 +790,309 @@ int sqlite3HctDbCsrData(HctDbCsr *pCsr, int *pnData, const u8 **paData){
   return SQLITE_OK;
 }
 
+/*************************************************************************
+**************************************************************************
+** Below is the virtual table implementation.
+*/
+
+typedef struct hctdb_vtab hctdb_vtab;
+struct hctdb_vtab {
+  sqlite3_vtab base;              /* Base class - must be first */
+  sqlite3 *db;
+};
+
+/* templatevtab_cursor is a subclass of sqlite3_vtab_cursor which will
+** serve as the underlying representation of a cursor that scans
+** over rows of the result
+*/
+typedef struct hctdb_cursor hctdb_cursor;
+struct hctdb_cursor {
+  sqlite3_vtab_cursor base;  /* Base class - must be first */
+  HctDatabase *pDb;          /* Database to report on */
+  u64 iMaxPgno;              /* Maximum page number for this scan */
+
+  u64 pgno;                  /* The page-number/rowid value */
+  const char *zPgtype;
+  u32 iPeerPg;
+  u32 nEntry;
+  char *zKeys;
+  char *zData;
+};
+
+/*
+** The hctdbConnect() method is invoked to create a new
+** template virtual table.
+**
+** Think of this routine as the constructor for hctdb_vtab objects.
+**
+** All this routine needs to do is:
+**
+**    (1) Allocate the hctdb_vtab object and initialize all fields.
+**
+**    (2) Tell SQLite (via the sqlite3_declare_vtab() interface) what the
+**        result set of queries against the virtual table will look like.
+*/
+static int hctdbConnect(
+  sqlite3 *db,
+  void *pAux,
+  int argc, const char *const*argv,
+  sqlite3_vtab **ppVtab,
+  char **pzErr
+){
+  hctdb_vtab *pNew;
+  int rc;
+
+  rc = sqlite3_declare_vtab(db,
+      "CREATE TABLE x("
+        "pgno INTEGER, pgtype TEXT, peer INTEGER, nentry INTEGER, keys TEXT,"
+        "data TEXT"
+      ")"
+  );
+
+  if( rc==SQLITE_OK ){
+    pNew = sqlite3MallocZero( sizeof(*pNew) );
+    *ppVtab = (sqlite3_vtab*)pNew;
+    if( pNew==0 ) return SQLITE_NOMEM;
+    pNew->db = db;
+  }
+  return rc;
+}
+
+/*
+** This method is the destructor for hctdb_vtab objects.
+*/
+static int hctdbDisconnect(sqlite3_vtab *pVtab){
+  hctdb_vtab *p = (hctdb_vtab*)pVtab;
+  sqlite3_free(p);
+  return SQLITE_OK;
+}
+
+/*
+** Constructor for a new hctdb_cursor object.
+*/
+static int hctdbOpen(sqlite3_vtab *p, sqlite3_vtab_cursor **ppCursor){
+  hctdb_cursor *pCur;
+  pCur = sqlite3MallocZero(sizeof(*pCur));
+  if( pCur==0 ) return SQLITE_NOMEM;
+  *ppCursor = &pCur->base;
+  return SQLITE_OK;
+}
+
+/*
+** Destructor for a hctdb_cursor.
+*/
+static int hctdbClose(sqlite3_vtab_cursor *cur){
+  hctdb_cursor *pCur = (hctdb_cursor*)cur;
+  sqlite3_free(pCur->zKeys);
+  sqlite3_free(pCur->zData);
+  sqlite3_free(pCur);
+  return SQLITE_OK;
+}
+
+/*
+** Load the values for xColumn() associated with the current value of
+** hctdb_cursor.pgno into memory.
+*/
+static int hctdbLoadPage(hctdb_cursor *pCur){
+  HctFilePage pg;
+  int rc;
+
+  sqlite3_free(pCur->zKeys);
+  pCur->zKeys = 0;
+  sqlite3_free(pCur->zData);
+  pCur->zData = 0;
+
+  rc = sqlite3HctFilePageGet(pCur->pDb->pFile, pCur->pgno, &pg);
+  if( rc==SQLITE_OK ){
+    static const char *azType[] = {
+      0,                          /* 0x00 */
+      "intkey leaf",              /* 0x01 */
+      "intkey node",              /* 0x02 */
+      "index leaf",               /* 0x03 */
+      "index node",               /* 0x04 */
+      "overflow",                 /* 0x05 */
+      0,                          /* 0x06 */
+      0,                          /* 0x07 */
+      0,                          /* 0x00|0x08 */
+      0,                          /* 0x01|0x08 */
+      "intkey rnode",             /* 0x02|0x08 */
+      0,                          /* 0x03|0x08 */
+      "index rnode",              /* 0x04|0x08 */
+      0,                          /* 0x05|0x08 */
+      0,                          /* 0x06|0x08 */
+      0,                          /* 0x07|0x08 */
+    };
+    HctDatabasePage *pPg = (HctDatabasePage*)pg.aOld;
+    HctIntkeyTid *aKey = 0;
+
+    pCur->zPgtype = azType[pPg->ePagetype];
+    pCur->iPeerPg = pPg->iPeerPg;
+    pCur->nEntry = pPg->nEntry;
+
+    if( pPg->ePagetype==HCT_PAGETYPE_INTKEY_LEAF ){
+      hctDbIntkeyLeaf(pPg, &aKey, 0);
+    }else
+    if( (pPg->ePagetype&0x07)==HCT_PAGETYPE_INTKEY_NODE ){
+      u32 *aChild = 0;
+      hctDbIntkeyNode(pPg, &aKey, &aChild);
+      char *zData = 0;
+      int i;
+      for(i=0; rc==SQLITE_OK && i<pPg->nEntry; i++){
+        zData = sqlite3_mprintf("%z%s%lld",
+            zData, zData ? " " : "", (i64)aChild[i]
+        );
+        if( zData==0 ) rc = SQLITE_NOMEM_BKPT;
+      }
+      pCur->zData = zData;
+    }
+
+    if( aKey ){
+      char *zKeys = 0;
+      int i;
+      for(i=0; rc==SQLITE_OK && i<pPg->nEntry; i++){
+        zKeys = sqlite3_mprintf("%z%s{%lld %lld}",
+            zKeys, zKeys ? " " : "", aKey[i].iKey, 
+            (aKey[i].iTidFlags & HCT_TID_MASK)
+        );
+        if( zKeys==0 ) rc = SQLITE_NOMEM_BKPT;
+      }
+      pCur->zKeys = zKeys;
+    }
+  }
+  return rc;
+}
+
+
+/*
+** Return TRUE if the cursor has been moved off of the last
+** row of output.
+*/
+static int hctdbEof(sqlite3_vtab_cursor *cur){
+  hctdb_cursor *pCur = (hctdb_cursor*)cur;
+  return pCur->pgno>pCur->iMaxPgno;
+}
+
+/*
+** Advance a hctdb_cursor to its next row of output.
+*/
+static int hctdbNext(sqlite3_vtab_cursor *cur){
+  hctdb_cursor *pCur = (hctdb_cursor*)cur;
+  if( pCur->pgno==1 ){
+    pCur->pgno = 33;
+  }else{
+    pCur->pgno++;
+  }
+  return hctdbEof(cur) ? SQLITE_OK : hctdbLoadPage(pCur);
+}
+
+/*
+** Return values of columns for the row at which the hctdb_cursor
+** is currently pointing.
+*/
+static int hctdbColumn(
+  sqlite3_vtab_cursor *cur,   /* The cursor */
+  sqlite3_context *ctx,       /* First argument to sqlite3_result_...() */
+  int i                       /* Which column to return */
+){
+  hctdb_cursor *pCur = (hctdb_cursor*)cur;
+  switch( i ){
+    case 0: /* pgno */
+      sqlite3_result_int64(ctx, (i64)pCur->pgno);
+      break;
+    case 1: /* pgtype */
+      sqlite3_result_text(ctx, pCur->zPgtype, -1, SQLITE_TRANSIENT);
+      break;
+    case 2: /* peer */
+      sqlite3_result_int64(ctx, (i64)pCur->iPeerPg);
+      break;
+    case 3: /* nEntry */
+      sqlite3_result_int64(ctx, (i64)pCur->nEntry);
+      break;
+    case 4: /* keys */
+      sqlite3_result_text(ctx, pCur->zKeys, -1, SQLITE_TRANSIENT);
+      break;
+    case 5: /* data */
+      sqlite3_result_text(ctx, pCur->zData, -1, SQLITE_TRANSIENT);
+      break;
+  }
+  return SQLITE_OK;
+}
+
+/*
+** Return the rowid for the current row.  In this implementation, the
+** rowid is the same as the output value.
+*/
+static int hctdbRowid(sqlite3_vtab_cursor *cur, sqlite_int64 *pRowid){
+  hctdb_cursor *pCur = (hctdb_cursor*)cur;
+  *pRowid = pCur->pgno;
+  return SQLITE_OK;
+}
+
+/*
+** This method is called to "rewind" the hctdb_cursor object back
+** to the first row of output.  This method is always called at least
+** once prior to any call to hctdbColumn() or hctdbRowid() or 
+** hctdbEof().
+*/
+static int hctdbFilter(
+  sqlite3_vtab_cursor *pVtabCursor, 
+  int idxNum, const char *idxStr,
+  int argc, sqlite3_value **argv
+){
+  hctdb_cursor *pCur = (hctdb_cursor*)pVtabCursor;
+  hctdb_vtab *pTab = (hctdb_vtab*)(pCur->base.pVtab);
+  int rc;
+ 
+  pCur->pDb = sqlite3HctDbFind(pTab->db, 0);
+  pCur->pgno = 1;
+  pCur->iMaxPgno = sqlite3HctFileMaxpage(pCur->pDb->pFile);
+  rc = hctdbLoadPage(pCur);
+
+  return rc;
+}
+
+/*
+** SQLite will invoke this method one or more times while planning a query
+** that uses the virtual table.  This routine needs to create
+** a query plan for each invocation and compute an estimated cost for that
+** plan.
+*/
+static int hctdbBestIndex(
+  sqlite3_vtab *tab,
+  sqlite3_index_info *pIdxInfo
+){
+  pIdxInfo->estimatedCost = (double)10;
+  pIdxInfo->estimatedRows = 10;
+  return SQLITE_OK;
+}
+
+int sqlite3HctVtabInit(sqlite3 *db){
+  static sqlite3_module hctdbModule = {
+    /* iVersion    */ 0,
+    /* xCreate     */ 0,
+    /* xConnect    */ hctdbConnect,
+    /* xBestIndex  */ hctdbBestIndex,
+    /* xDisconnect */ hctdbDisconnect,
+    /* xDestroy    */ 0,
+    /* xOpen       */ hctdbOpen,
+    /* xClose      */ hctdbClose,
+    /* xFilter     */ hctdbFilter,
+    /* xNext       */ hctdbNext,
+    /* xEof        */ hctdbEof,
+    /* xColumn     */ hctdbColumn,
+    /* xRowid      */ hctdbRowid,
+    /* xUpdate     */ 0,
+    /* xBegin      */ 0,
+    /* xSync       */ 0,
+    /* xCommit     */ 0,
+    /* xRollback   */ 0,
+    /* xFindMethod */ 0,
+    /* xRename     */ 0,
+    /* xSavepoint  */ 0,
+    /* xRelease    */ 0,
+    /* xRollbackTo */ 0,
+    /* xShadowName */ 0
+  };
+
+  return sqlite3_create_module(db, "hctdb", &hctdbModule, 0);
+}

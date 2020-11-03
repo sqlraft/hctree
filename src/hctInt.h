@@ -15,6 +15,10 @@ typedef unsigned int u32;
 #define HCT_PAGETYPE_INDEX_NODE  0x04
 #define HCT_PAGETYPE_OVERFLOW    0x05
 
+/* This bit may be set if (ePagetype & 0x07) is HCT_PAGETYPE_INTKEY_NODE
+** or HCT_PAGETYPE_INDEX_NODE.  */
+#define HCT_PAGETYPE_REVERSE     0x08
+
 /*************************************************************************
 ** Interface to code in hct_tree.c
 */
@@ -132,6 +136,7 @@ void sqlite3HctFileClose(HctFile *pFile);
 
 /* Return the page-size in bytes */
 int sqlite3HctFilePagesize(HctFile *pFile);
+u32 sqlite3HctFileMaxpage(HctFile *pFile);
 
 /*
 ** Allocate logical root page numbers. And free the same (required if the
@@ -166,4 +171,6 @@ u64 sqlite3HctFileStartTrans(HctFile *pFile);
 int sqlite3HctFileFinishTrans(HctFile *pFile);
 
 u64 sqlite3HctFileGetTransid(HctFile *pFile);
+
+HctDatabase *sqlite3HctDbFind(sqlite3*, int);
 
