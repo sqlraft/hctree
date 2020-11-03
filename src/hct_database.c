@@ -199,9 +199,16 @@ int hctDbCsrSeek(
   while( rc==SQLITE_OK ){
     HctDatabasePage *pPg = (HctDatabasePage*)pCsr->pg.aOld;
     int bReverse = (pPg->ePagetype & HCT_PAGETYPE_REVERSE)!=0;
-    HctIntkeyTid *aKey = (HctIntkeyTid*)&pPg[1];
+    HctIntkeyTid *aKey = 0;
+    u32 *aChild = 0;
     int i1 = -1;
     int i2 = pPg->nEntry-1;
+
+    if( (pPg->ePagetype&0x07)==HCT_PAGETYPE_INTKEY_NODE ){
+      hctDbIntkeyNode(pPg, &aKey, &aChild);
+    }else{
+      hctDbIntkeyLeaf(pPg, &aKey, 0);
+    }
 
     /* Seek within the page. Goal is to find the entry that is less than or
     ** equal to (iKey/iTid). If all entries on the page are larger than
@@ -242,12 +249,17 @@ int hctDbCsrSeek(
       }
     }
 
-    if( pPg->ePagetype==HCT_PAGETYPE_INTKEY_LEAF ){
-      pCsr->iCell = i2;
-      break;
-    }else{
-      /* Descend to the next list */
-      assert( 0 );
+    if( rc==SQLITE_OK ){
+      if( pPg->ePagetype==HCT_PAGETYPE_INTKEY_LEAF ){
+        pCsr->iCell = i2;
+        break;
+      }else{
+        /* Descend to the next list */
+        u32 iPg = aChild[i2+1];
+        assert( (i2+1)>=0 && (i2+1)<pPg->nEntry );
+        sqlite3HctFilePageRelease(&pCsr->pg);
+        rc = sqlite3HctFilePageGet(pFile, iPg, &pCsr->pg);
+      }
     }
   }
 
@@ -694,19 +706,38 @@ int sqlite3HctDbCsrEof(HctDbCsr *pCsr){
 }
 
 int sqlite3HctDbCsrFirst(HctDbCsr *pCsr){
-  int rc;
   HctFile *pFile = pCsr->pDb->pFile;
+  int rc;
+  HctFilePage pg;
+  HctDatabasePage *pPg;
+  u32 iPg = pCsr->iRoot;
 
-  rc = sqlite3HctFilePageGet(pFile, pCsr->iRoot, &pCsr->pg);
+  hctDbCsrReset(pCsr);
+
+  while( 1 ){
+    HctIntkeyTid *aDummy;
+    u32 *aChild;
+    rc = sqlite3HctFilePageGet(pFile, iPg, &pg);
+    if( rc!=SQLITE_OK ) break;
+    pPg = (HctDatabasePage*)pg.aOld;
+    if( pPg->ePagetype==HCT_PAGETYPE_INTKEY_LEAF ) break;
+    hctDbIntkeyNode(pPg, &aDummy, &aChild);
+    if( pPg->ePagetype & HCT_PAGETYPE_REVERSE ){
+      /* TODO - goto peer node if it exists... */
+      iPg = aChild[pPg->nEntry-1];
+    }else{
+      iPg = aChild[0];
+    }
+    sqlite3HctFilePageRelease(&pg);
+  }
+
   if( rc==SQLITE_OK ){
-    HctDatabasePage *pPg = (HctDatabasePage*)pCsr->pg.aOld;
+    memcpy(&pCsr->pg, &pg, sizeof(pg));
     assert( pPg->ePagetype==HCT_PAGETYPE_INTKEY_LEAF );
-
     pCsr->iCell = 0;
     if( pPg->nEntry==0 ){
       pCsr->iCell = -1;
     }
-
     if( hctDbCsrVisible(pCsr)==0 ){
       rc = sqlite3HctDbCsrNext(pCsr);
     }
@@ -720,20 +751,36 @@ int sqlite3HctDbCsrLast(HctDbCsr *pCsr){
   HctFile *pFile = pCsr->pDb->pFile;
   u32 iPg = pCsr->iRoot;
   HctDatabasePage *pPg = 0;
+  HctFilePage pg;
 
   hctDbCsrReset(pCsr);
-  while( rc==SQLITE_OK && iPg ) {
-    sqlite3HctFilePageRelease(&pCsr->pg);
-    rc = sqlite3HctFilePageGet(pFile, iPg, &pCsr->pg);
-    if( rc==SQLITE_OK ){
-      pPg = (HctDatabasePage*)pCsr->pg.aOld;
+  while( 1 ){
+    HctIntkeyTid *aDummy;
+    u32 *aChild;
+
+    rc = sqlite3HctFilePageGet(pFile, iPg, &pg);
+    if( rc!=SQLITE_OK ) break;
+
+    pPg = (HctDatabasePage*)pg.aOld;
+    if( pPg->iPeerPg && (pPg->ePagetype & HCT_PAGETYPE_REVERSE)==0 ){
       iPg = pPg->iPeerPg;
+    }else if( pPg->ePagetype==HCT_PAGETYPE_INTKEY_LEAF ){
+      break;
+    }else{
+      hctDbIntkeyNode(pPg, &aDummy, &aChild);
+      if( pPg->ePagetype & HCT_PAGETYPE_REVERSE ){
+        iPg = aChild[0];
+      }else{
+        iPg = aChild[pPg->nEntry-1];
+      }
     }
+    sqlite3HctFilePageRelease(&pg);
   }
 
   if( rc==SQLITE_OK ){
     assert( pPg->ePagetype==HCT_PAGETYPE_INTKEY_LEAF );
     assert( pPg->iPeerPg==0 );
+    memcpy(&pCsr->pg, &pg, sizeof(pg));
     pCsr->iCell = pPg->nEntry-1;
     /* TODO - avoid landing on an invisible entry. Deal with this after
     ** parent lists and xPrev() are working properly. */

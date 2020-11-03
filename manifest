@@ -1,5 +1,5 @@
-C Add\svirtual\stable\sto\sinspect\spage\scontents.
-D 2020-11-03T18:53:37.566
+C Fixes\sfor\stree\soperations.
+D 2020-11-03T20:45:26.791
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -507,7 +507,7 @@ F src/global.c 943256ac44f333039d35a9830c18d075a81fa6b6bf2af05771494a9acfb9a40b
 F src/hash.c 8d7dda241d0ebdafb6ffdeda3149a412d7df75102cecfc1021c98d6219823b19
 F src/hash.h 9d56a9079d523b648774c1784b74b89bd93fac7b365210157482e4319a468f38
 F src/hctInt.h cfae4f9986ed1f556eca31abf234498cbbafea1d583ff96b3639a671270bcf5a
-F src/hct_database.c 53d9bbf00bc627f8811d6a8a682c262a491cdc1af399333a17b3396b359c9ac4
+F src/hct_database.c a968cdd924d3e059f404b917315b2809de5c105312dfefb360ce689c4036e9d5
 F src/hct_file.c 97dd142183086eec5592ebfc98c03c5d8221771120a07db1a408bb8dca4c665e
 F src/hct_tree.c 1b8f9fec5910c29fa3b26cffe298e4e1df416da32c825eea06ab34a6ed82c81c
 F src/hctree.c c44c4078a7dbdddd68a63121ef8d6507234e6610850c4684019564961bf1439a
@@ -1899,8 +1899,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P 0eab8fa3c63cc5d35e098c061505d6af9af0e74f47609ac3675ac9f1dec30c14
-R e87e4a2beff359b79402d948aa94b565
+P 1c26cfcda7a9051c1e7c46aae5c1d567500ac992005fbe67c2ab61179cb8b623
+R 01755856ec1a6ec2caa42e241fd245be
 U dan
-Z c630dd279d547b10a0202c0cfbc9a8b6
+Z c8a737d3d682b9a6a13be171c5727f2f
 # Remove this line to create a well-formed Fossil manifest.
