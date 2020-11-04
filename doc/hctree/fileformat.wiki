@@ -62,12 +62,11 @@ Followed by an 8-byte page header:
 <table border=1 cellpadding=5 width=90%>
   <tr><th>Byte Offset <th>Size <th width=80%> Description
   <tr><td>32 <td>1 <td> Page type:
-  *  0x01 - Intkey leaf pages.
-  *  0x02 - Intkey internal node pages.
-  *  0x03 - Index leaf pages.
-  *  0x04 - Index internal node pages.
-  *  0x05 - Overflow page. 
-  <tr><td>33 <td>1 <td> Unused.
+  *  0x01 - Intkey pages.
+  *  0x02 - Index pages.
+  *  0x03 - Overflow page. 
+  <tr><td>33 <td>1 <td> Distance between list and leaves. For leaves, 0, for
+                        parents of leaves, 1, and so on)
   <tr><td>34 <td>2 <td> Number of entries on page.
   <tr><td>36 <td>4 <td> Peer page number.
 </table>

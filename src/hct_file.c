@@ -175,9 +175,8 @@ static void *hctPagePtr(HctMapping *p, u32 iPhys){
   ];
 }
 
-static void hctFileInitRootpage(HctMapping *p, u32 iPg, u8 eType){
-  assert( eType==HCT_PAGETYPE_INTKEY_LEAF || eType==HCT_PAGETYPE_INDEX_LEAF );
-  sqlite3HctDbRootPageInit(0, hctPagePtr(p, iPg), p->szPage);
+static void hctFileInitRootpage(HctMapping *p, u32 iPg, u8 bIndex){
+  sqlite3HctDbRootPageInit(bIndex, hctPagePtr(p, iPg), p->szPage);
 }
 
 /*
@@ -285,9 +284,56 @@ static int hctFileServerInit(HctFileServer *p){
     hctFilePagemapSet(pMapping, HCT_PAGEMAP_LOGICAL_EOF, 0, 32);
     hctFilePagemapSet(pMapping, HCT_PAGEMAP_PHYSICAL_EOF, 0, 1);
     hctFilePagemapSet(pMapping, 1, 0, 1|HCT_PGMAPFLAG_PHYSINUSE);
-    hctFileInitRootpage(pMapping, 1, HCT_PAGETYPE_INTKEY_LEAF);
+    hctFileInitRootpage(pMapping, 1, 0);
   }
 
+  return rc;
+}
+
+static int hctFileGrowMapping(HctFile *pFile, int nChunk){
+  int rc = SQLITE_OK;
+  if( pFile->pMapping->n<nChunk ){
+    HctFileServer *p = pFile->pServer;
+    HctMapping *pOld;
+    sqlite3_mutex_enter(p->pMutex);
+    hctMappingUnref(pFile->pMapping);
+    pFile->pMapping = 0;
+    pOld = p->pMapping;
+    if( pOld->n<nChunk ){
+      HctMapping *pNew = hctMappingNew(pOld, nChunk);
+      if( pNew==0 ){
+        rc = SQLITE_NOMEM_BKPT;
+      }else{
+        i64 szChunk = hctFileChunksize(p);
+        i64 sz = nChunk * szChunk + 2*HCT_HEADER_PAGESIZE;
+
+        if( ftruncate(p->fd, sz) ){
+          rc = SQLITE_IOERR_TRUNCATE;
+        }else{
+          int i;
+          for(i=pOld->n; i<pNew->n; i++){
+            sz = i*szChunk + 2*HCT_HEADER_PAGESIZE;
+            pNew->ap[i] = mmap(
+                0, szChunk, PROT_READ|PROT_WRITE, MAP_SHARED, p->fd,sz
+            );
+            if( pNew->ap[i]==MAP_FAILED ){
+              rc = SQLITE_IOERR_MMAP;
+            }
+          }
+        }
+
+        if( rc==SQLITE_OK ){
+          p->pMapping = pNew;
+          hctMappingUnref(pOld);
+        }else{
+          hctMappingUnref(pNew);
+        }
+      }
+    }
+    pFile->pMapping = p->pMapping;
+    pFile->pMapping->nRef++;
+    sqlite3_mutex_leave(p->pMutex);
+  }
   return rc;
 }
 
@@ -451,13 +497,19 @@ static int hctFileTmpAllocate(HctFile *pFile, int eType, u32 *piNew){
 }
 
 static void hctFileSetFlag(HctFile *pFile, u32 iSlot, u64 mask){
-  HctMapping *pMapping = pFile->pMapping;
-  while( 1 ){
-    u64 iVal = hctFilePagemapGet(pMapping, iSlot);
-    if( hctFilePagemapSet(pMapping, iSlot, iVal, iVal | mask) ) break;
-  }
-}
+  int rc;
 
+  assert( iSlot>0 );
+  rc = hctFileGrowMapping(pFile, 1 + ((iSlot-1) / HCT_DEFAULT_PAGEPERCHUNK));
+  if( rc==SQLITE_OK ){
+    HctMapping *pMapping = pFile->pMapping;
+    while( 1 ){
+      u64 iVal = hctFilePagemapGet(pMapping, iSlot);
+      if( hctFilePagemapSet(pMapping, iSlot, iVal, iVal | mask) ) break;
+    }
+  }
+  return rc;
+}
 
 int sqlite3HctFileRootNew(HctFile *pFile, u32 *piRoot){
   return hctFileTmpAllocate(pFile, HCT_PAGEMAP_LOGICAL_EOF, piRoot);

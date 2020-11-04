@@ -9,15 +9,9 @@ typedef unsigned int u32;
 ** Page types. These are the values that may appear in the page-type
 ** field of a page header.
 */
-#define HCT_PAGETYPE_INTKEY_LEAF 0x01
-#define HCT_PAGETYPE_INTKEY_NODE 0x02
-#define HCT_PAGETYPE_INDEX_LEAF  0x03
-#define HCT_PAGETYPE_INDEX_NODE  0x04
-#define HCT_PAGETYPE_OVERFLOW    0x05
-
-/* This bit may be set if (ePagetype & 0x07) is HCT_PAGETYPE_INTKEY_NODE
-** or HCT_PAGETYPE_INDEX_NODE.  */
-#define HCT_PAGETYPE_REVERSE     0x08
+#define HCT_PAGETYPE_INTKEY   0x01
+#define HCT_PAGETYPE_INDEX    0x02
+#define HCT_PAGETYPE_OVERFLOW 0x03
 
 /*************************************************************************
 ** Interface to code in hct_tree.c
