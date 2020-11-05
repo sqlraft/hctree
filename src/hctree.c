@@ -1083,7 +1083,7 @@ int sqlite3BtreeMovetoUnpacked(
 
 
   rc = sqlite3HctTreeCsrSeek(pCur->pHctTreeCsr, pIdxKey, intKey, &res1);
-  if( rc==SQLITE_OK ){
+  if( rc==SQLITE_OK && pCur->pHctDbCsr ){
     rc = sqlite3HctDbCsrSeek(pCur->pHctDbCsr, pIdxKey, intKey, &res2);
   }
 

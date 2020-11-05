@@ -16,19 +16,25 @@ source $testdir/tester.tcl
 set testprefix hct_misc2
 
 do_execsql_test 1.0 {
-  CREATE TABLE tx(a INTEGER PRIMARY KEY, b);
+  CREATE TABLE tx(a INTEGER PRIMARY KEY, b TEXT);
 }
 
 expr srand(0)
+unset -nocomplain data
 
-do_test 1.1 {
-  for {set i 0} {$i < 5000} {incr i} {
-    set a  [expr int(rand()*100000000)]
-    set nb [expr int(rand()*1000)]
+for {set i 0} {$i < 10000} {incr i} {
+  set a  [expr int(rand()*100000000)]
+  set nb [expr int(rand()*100)]
+  set txt [db one { SELECT hex(randomblob($nb)) }]
+  execsql { INSERT INTO tx VALUES($a, $txt) }
+  set data($a) $txt
+}
 
-    execsql { INSERT INTO tx VALUES($a, randomblob($nb)) }
-  }
-} {}
+foreach k [array names data] {
+  do_execsql_test 1.$i.$k {
+    SELECT a, b FROM tx WHERE a=$k
+  } [list $k $data($k)]
+}
 
 finish_test
 

@@ -80,7 +80,6 @@ int sqlite3HctDbOpen(const char *zFile, HctDatabase **ppDb){
 
   pNew = (HctDatabase*)sqlite3MallocZero(sizeof(*pNew));
   if( pNew ){
-    pNew->pgsz = 4096;
     rc = sqlite3HctFileOpen(zFile, &pNew->pFile);
   }else{
     rc = SQLITE_NOMEM_BKPT;
@@ -89,6 +88,8 @@ int sqlite3HctDbOpen(const char *zFile, HctDatabase **ppDb){
   if( rc!=SQLITE_OK ){
     sqlite3HctDbClose(pNew);
     pNew = 0;
+  }else{
+    pNew->pgsz = sqlite3HctFilePgsz(pNew->pFile);
   }
 
   *ppDb = pNew;
@@ -260,7 +261,9 @@ int hctDbCsrSeek(
         HctIntkeyTid *aPKey;
         u16 *aPOff;
         hctDbIntkeyLeaf((HctDatabasePage*)peer.aOld, &aPKey, &aPOff);
-        if( hctDbIntkeyCmp(bReverse, &aPKey[0], iKey, iTid)<=0 ){
+        if( pPg->nHeight 
+         || hctDbIntkeyCmp(bReverse, &aPKey[0], iKey, iTid)<=0 
+        ){
           SWAP(HctFilePage, pCsr->pg, peer);
           sqlite3HctFilePageRelease(&peer);
           continue;
@@ -779,12 +782,23 @@ static int hctDbSplitNode(HctDbCsr *pCsr, HctIntkeyTid *pKey, u32 iChild){
       hctDbIntkeyNode(pRoot, &aKey, &aChild);
       hctDbIntkeyNode(pRight, &aRightKey, 0);
 
-      aKey[0].iKey = aRightKey[0].iKey;
-      aKey[0].iTidFlags = (aRightKey[0].iTidFlags & HCT_TID_MASK);
-      aChild[0] = peer.iPg;
-      aKey[1].iKey = (pRight->nHeight % 1) ? SMALLEST_INT64 : LARGEST_INT64;
-      aKey[1].iTidFlags = 0;
-      aChild[1] = peer1.iPg;
+      if( (pRight->nHeight % 2) ){
+        aKey[0].iKey = aRightKey[0].iKey;
+        aKey[0].iTidFlags = (aRightKey[0].iTidFlags & HCT_TID_MASK);
+        aChild[0] = peer.iPg;
+
+        aKey[1].iKey = LARGEST_INT64;
+        aKey[1].iTidFlags = (LARGEST_INT64 & HCT_TID_MASK);
+        aChild[1] = peer1.iPg;
+      }else{
+        aKey[0].iKey = aRightKey[0].iKey;
+        aKey[0].iTidFlags = (aRightKey[0].iTidFlags & HCT_TID_MASK);
+        aChild[0] = peer.iPg;
+
+        aKey[1].iKey = SMALLEST_INT64;
+        aKey[1].iTidFlags = 0;
+        aChild[1] = peer1.iPg;
+      }
 
       rc = sqlite3HctFilePageRelease(&peer1);
     }

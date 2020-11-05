@@ -168,3 +168,5 @@ u64 sqlite3HctFileGetTransid(HctFile *pFile);
 
 HctDatabase *sqlite3HctDbFind(sqlite3*, int);
 
+int sqlite3HctFilePgsz(HctFile *pFile);
+

@@ -22,6 +22,7 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 
+// #define HCT_DEFAULT_PAGESIZE     512
 #define HCT_DEFAULT_PAGESIZE     4096
 
 // #define HCT_DEFAULT_PAGEPERCHUNK (128*1024)
@@ -46,25 +47,6 @@
 
 typedef struct HctFileServer HctFileServer;
 typedef struct HctMapping HctMapping;
-typedef struct HctDatabasePage HctDatabasePage;
-
-/* 
-** Structure used to create root page of sqlite_schema.
-*/
-struct HctDatabasePage {
-  /* Recovery header fields */
-  u64 iCksum;
-  u64 iTid;
-  u64 iLargestTid;
-  u32 iLogicId;
-  u32 iPrevId;
-
-  /* Page header fields */
-  u8 ePagetype;
-  u8 unused;
-  u16 nEntry;
-  u32 iPeerPg;
-};
 
 /*
 ** Global variables for this module. Access is protected by
@@ -607,6 +589,10 @@ u64 sqlite3HctFileGetTransid(HctFile *pFile){
 
 int sqlite3HctFileFinishTrans(HctFile *pFile){
   return SQLITE_OK;
+}
+
+int sqlite3HctFilePgsz(HctFile *pFile){
+  return pFile->szPage;
 }
 
 
