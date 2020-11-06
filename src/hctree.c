@@ -522,13 +522,15 @@ static int btreeFlushOneToDisk(void *pCtx, u32 iRoot, KeyInfo *pKeyInfo){
     ){
       i64 iKey = 0;
       int nData = 0;
+      int bDel = 0;
       const u8 *aData = 0;
       sqlite3HctTreeCsrKey(pCsr, &iKey);
       sqlite3HctTreeCsrData(pCsr, &nData, &aData);
+      bDel = sqlite3HctTreeCsrIsDelete(pCsr);
       if( pKeyInfo ){
         assert( 0 );
       }else{
-        rc = sqlite3HctDbInsert(p->pHctDb, iRoot, 0, iKey, nData, aData);
+        rc = sqlite3HctDbInsert(p->pHctDb, iRoot, 0, iKey, bDel, nData, aData);
       }
       if( rc ) break;
     }
@@ -1320,7 +1322,12 @@ int sqlite3BtreeInsert(
 */
 int sqlite3BtreeDelete(BtCursor *pCur, u8 flags){
   int rc = SQLITE_OK;
-  rc = sqlite3HctTreeDelete(pCur->pHctTreeCsr);
+  if( pCur->pHctDbCsr==0 ){
+    rc = sqlite3HctTreeDelete(pCur->pHctTreeCsr);
+  }else{
+    i64 iKey = sqlite3BtreeIntegerKey(pCur);
+    rc = sqlite3HctTreeDeleteKey(pCur->pHctTreeCsr, 0, iKey);
+  }
   return rc;
 }
 

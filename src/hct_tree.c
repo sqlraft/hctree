@@ -51,6 +51,7 @@ struct HctTreeNode {
   i64 iKey;                       /* 64-bit key for this node */
   u8 bBlack;                      /* 1 for black node, 0 for red node */
   u8 nRef;                        /* Number of pointers to this node */
+  u8 bDelete;                     /* True if this is a delete key */
   int nData;                      /* Size of aData[] in bytes */
   u8 *aData;                      /* Pointer to associated data (or NULL) */
   u32 iRoot;                      /* Root id of table this node belongs to */
@@ -474,7 +475,7 @@ static void hctRestoreDiscard(HctTreeCsr *pCsr){
   pCsr->iSkip = 0;
 }
 
-static int treeInsert(
+static int treeInsertNode(
   HctTree *pTree, 
   int bRollback, 
   UnpackedRecord *pKey,
@@ -547,16 +548,19 @@ static int treeInsert(
   return SQLITE_OK;
 }
 
-int sqlite3HctTreeInsert(
+int treeInsert(
   HctTreeCsr *pCsr,
   UnpackedRecord *pKey,
   i64 iKey, 
+  int bDelete,
   int nData, 
   const u8 *aData,
   int nZero
 ){
   HctTree *pTree = pCsr->pTree;
   HctTreeNode *pNew;
+
+  assert( bDelete==0 || (nData==0 && aData==0 && nZero==0) );
 
   pNew = (HctTreeNode*)hctMallocZero(sizeof(HctTreeNode) + nData + nZero);
   if( pNew==0 ){
@@ -565,8 +569,11 @@ int sqlite3HctTreeInsert(
   pNew->iKey = iKey;
   pNew->nData = nData + nZero;
   pNew->iRoot = pCsr->pRoot->iRoot;
-  pNew->aData = (u8*)&pNew[1];
-  memcpy(pNew->aData, aData, nData);
+  pNew->bDelete = bDelete;
+  if( (nData+nZero)>0 ){
+    pNew->aData = (u8*)&pNew[1];
+    memcpy(pNew->aData, aData, nData);
+  }
 
   if( pTree->iStmt>0 ){
     pNew->pPrev = pTree->pRollback;
@@ -574,7 +581,26 @@ int sqlite3HctTreeInsert(
     pNew->nRef = 1;
   }
 
-  return treeInsert(pTree, pTree->iStmt<=0, pKey, iKey, pNew);
+  return treeInsertNode(pTree, pTree->iStmt<=0, pKey, iKey, pNew);
+}
+
+int sqlite3HctTreeInsert(
+  HctTreeCsr *pCsr,
+  UnpackedRecord *pKey,
+  i64 iKey, 
+  int nData, 
+  const u8 *aData,
+  int nZero
+){
+  return treeInsert(pCsr, pKey, iKey, 0, nData, aData, nZero);
+}
+
+int sqlite3HctTreeDeleteKey(
+  HctTreeCsr *pCsr,
+  UnpackedRecord *pKey,
+  i64 iKey
+){
+  return treeInsert(pCsr, pKey, iKey, 1, 0, 0, 0);
 }
 
 /*
@@ -798,7 +824,7 @@ int sqlite3HctTreeRollbackTo(HctTree *pTree, int iStmt){
         assert( pNode->iKey==pNode->pClobber->iKey );
         pClobber->pLeft = pClobber->pRight = 0;
         pClobber->bBlack = 0;
-        if( (rc = treeInsert(pTree, 1, 0, pNode->iKey, pClobber)) ){
+        if( (rc = treeInsertNode(pTree, 1, 0, pNode->iKey, pClobber)) ){
           pStop = pNode;
           break;
         }
@@ -1060,10 +1086,17 @@ int sqlite3HctTreeCsrKey(HctTreeCsr *pCsr, i64 *piKey){
 int sqlite3HctTreeCsrData(HctTreeCsr *pCsr, int *pnData, const u8 **paData){
   HctTreeNode *pNode = pCsr->apNode[pCsr->iNode];
   assert( pCsr->pReseek==0 );
+  assert( pCsr->iNode>=0 );
   *pnData = pNode->nData;
   if( paData ) *paData = pNode->aData;
-  assert( pCsr->iNode>=0 );
   return SQLITE_OK;
+}
+
+int sqlite3HctTreeCsrIsDelete(HctTreeCsr *pCsr){
+  HctTreeNode *pNode = pCsr->apNode[pCsr->iNode];
+  assert( pCsr->pReseek==0 );
+  assert( pCsr->iNode>=0 );
+  return pNode->bDelete;
 }
 
 void sqlite3HctTreeCsrPin(HctTreeCsr *pCsr){

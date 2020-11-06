@@ -19,11 +19,13 @@ do_execsql_test 1.0 {
   CREATE TABLE tx(a INTEGER PRIMARY KEY, b TEXT);
 }
 
+set nRow 103
+
 expr srand(0)
 unset -nocomplain data
 
-for {set i 0} {$i < 10000} {incr i} {
-  set a  [expr int(rand()*100000000)]
+for {set i 0} {$i < $nRow} {incr i} {
+  set a  [expr int(rand()*1000000000)]
   set nb [expr int(rand()*100)]
   set txt [db one { SELECT hex(randomblob($nb)) }]
   execsql { INSERT INTO tx VALUES($a, $txt) }
@@ -31,10 +33,25 @@ for {set i 0} {$i < 10000} {incr i} {
 }
 
 foreach k [array names data] {
-  do_execsql_test 1.$i.$k {
+  do_execsql_test 1.1.$k {
     SELECT a, b FROM tx WHERE a=$k
   } [list $k $data($k)]
 }
+
+while {[llength [array names data]]>0} {
+  set L [array names data]
+  set i [expr int(rand()*[llength $L])]
+  set k [lindex $L $i]
+  execsql { DELETE FROM tx WHERE a = $k }
+  unset data($k)
+  do_execsql_test 1.2.[llength $L] {
+    SELECT a FROM tx ORDER BY a
+  } [lsort -integer [array names data]]
+}
+
+do_execsql_test 1.x {
+  SELECT * FROM tx
+} {}
 
 finish_test
 

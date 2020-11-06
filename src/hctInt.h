@@ -24,6 +24,7 @@ void sqlite3HctTreeFree(HctTree *pTree);
 
 int sqlite3HctTreeInsert(HctTreeCsr*, UnpackedRecord*, i64, int, const u8*,int);
 int sqlite3HctTreeDelete(HctTreeCsr *pCsr);
+int sqlite3HctTreeDeleteKey(HctTreeCsr *pCsr, UnpackedRecord *pKey, i64 iKey);
 
 /* 
 ** These functions are used to open and close transactions and nested 
@@ -68,6 +69,7 @@ int sqlite3HctTreeCsrLast(HctTreeCsr *pCsr);
 
 int sqlite3HctTreeCsrKey(HctTreeCsr *pCsr, i64 *piKey);
 int sqlite3HctTreeCsrData(HctTreeCsr *pCsr, int *pnData, const u8 **paData);
+int sqlite3HctTreeCsrIsDelete(HctTreeCsr *pCsr);
 
 void sqlite3HctTreeCsrPin(HctTreeCsr *pCsr);
 void sqlite3HctTreeCsrUnpin(HctTreeCsr *pCsr);
@@ -101,7 +103,7 @@ int sqlite3HctDbRootFree(HctDatabase *p, u32 iRoot);
 int sqlite3HctDbRootInit(HctDatabase *p, int bIndex, u32 iRoot);
 void sqlite3HctDbRootPageInit(int bIndex, u8 *aPage, int szPage);
 
-int sqlite3HctDbInsert(HctDatabase*, u32, UnpackedRecord*, i64, int, const u8*);
+int sqlite3HctDbInsert(HctDatabase*, u32,UnpackedRecord*,i64,int,int,const u8*);
 int sqlite3HctDbDelete(HctDatabase*, u32, UnpackedRecord*, i64);
 int sqlite3HctDbEndTransaction(HctDatabase *p);
 
