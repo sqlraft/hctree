@@ -56,8 +56,6 @@ do_execsql_test 1.5 {
   six five four three two one
 }
 
-
-
 do_execsql_test 1.10 {
   DELETE FROM tx WHERE a IN (2, 5, 8);
   SELECT b FROM tx ORDER BY a DESC
@@ -88,6 +86,62 @@ do_execsql_test 2.3 {
   SELECT a FROM t2 WHERE a<10000 ORDER BY a DESC
 } $res
 
+#-------------------------------------------------------------------------
+do_execsql_test 3.1 {
+  CREATE TABLE t3(a INTEGER PRIMARY KEY, b TEXT);
+  INSERT INTO t3 VALUES(4, 'four');
+  INSERT INTO t3 VALUES(5, 'five');
+  INSERT INTO t3 VALUES(2, 'two');
+  INSERT INTO t3 VALUES(6, 'six');
+  INSERT INTO t3 VALUES(7, 'seven');
+  INSERT INTO t3 VALUES(3, 'three');
+  INSERT INTO t3 VALUES(1, 'one');
+  INSERT INTO t3 VALUES(8, 'eight');
+  INSERT INTO t3 VALUES(9, 'nine');
+  INSERT INTO t3 VALUES(10, 'ten');
+}
+
+do_execsql_test 3.2 {
+  BEGIN;
+    DELETE FROM t3 WHERE a = 4;
+    SELECT a FROM t3 ORDER BY a ASC
+} {1 2 3 5 6 7 8 9 10}
+do_execsql_test 3.3 {
+  COMMIT;
+  SELECT a FROM t3 ORDER BY a ASC
+} {1 2 3 5 6 7 8 9 10}
+do_execsql_test 3.3 {
+  BEGIN;
+    DELETE FROM t3 WHERE a = 1;
+    SELECT a FROM t3 ORDER BY a ASC;
+  COMMIT;
+} {2 3 5 6 7 8 9 10}
+do_execsql_test 3.4 {
+  BEGIN;
+    DELETE FROM t3 WHERE a = 7;
+    SELECT a FROM t3 ORDER BY a DESC;
+  COMMIT;
+} {10 9 8 6 5 3 2}
+do_execsql_test 3.5 {
+  BEGIN;
+    DELETE FROM t3 WHERE a = 10;
+    SELECT a FROM t3 ORDER BY a DESC;
+  COMMIT;
+} {9 8 6 5 3 2}
+do_execsql_test 3.6 {
+  BEGIN;
+    DELETE FROM t3 WHERE a = 5;
+    SELECT * FROM t3 WHERE a=5;
+  COMMIT;
+} {}
+do_execsql_test 3.7 {
+  BEGIN;
+    DELETE FROM t3 WHERE a = 6;
+    SELECT a FROM t3 WHERE a>5 ORDER BY a ASC;
+    SELECT '||';
+    SELECT a FROM t3 WHERE a<7 ORDER BY a DESC;
+  COMMIT;
+} {8 9 || 3 2}
 
 finish_test
 

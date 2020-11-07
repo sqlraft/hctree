@@ -403,7 +403,6 @@ int sqlite3HctDbCsrSeek(
     }
   }
 
-  assert( *pRes<=0 );
   return rc;
 }
 

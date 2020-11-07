@@ -989,9 +989,12 @@ static void btreeSetUseTree(BtCursor *pCur){
     sqlite3HctTreeCsrKey(pCur->pHctTreeCsr, &iKeyTree);
     sqlite3HctDbCsrKey(pCur->pHctDbCsr, &iKeyDb);
 
-    /* TODO - reverse scans */
-    pCur->bUseTree = (iKeyTree < iKeyDb);
-    if( pCur->eDir==BTREE_DIR_REVERSE ) pCur->bUseTree = !pCur->bUseTree;
+    if( iKeyTree==iKeyDb ){
+      pCur->bUseTree = 2;
+    }else{
+      pCur->bUseTree = (iKeyTree < iKeyDb);
+      if( pCur->eDir==BTREE_DIR_REVERSE ) pCur->bUseTree = !pCur->bUseTree;
+    }
   }else{
     /* TODO - index cursors */
     assert( 0 );
@@ -1015,6 +1018,10 @@ int sqlite3BtreeFirst(BtCursor *pCur, int *pRes){
     *pRes = (bTreeEof && bDbEof);
     pCur->eDir = BTREE_DIR_FORWARD;
     btreeSetUseTree(pCur);
+    if( pCur->bUseTree && sqlite3HctTreeCsrIsDelete(pCur->pHctTreeCsr) ){
+      rc = sqlite3BtreeNext(pCur, 0);
+      if( rc==SQLITE_DONE ) rc = SQLITE_OK;
+    }
   }
 
   return rc;
@@ -1037,6 +1044,13 @@ int sqlite3BtreeLast(BtCursor *pCur, int *pRes){
     *pRes = (bTreeEof && bDbEof);
     pCur->eDir = BTREE_DIR_REVERSE;
     btreeSetUseTree(pCur);
+    if( pCur->bUseTree && sqlite3HctTreeCsrIsDelete(pCur->pHctTreeCsr) ){
+      rc = sqlite3BtreePrevious(pCur, 0);
+      if( rc==SQLITE_DONE ){
+        *pRes = sqlite3BtreeEof(pCur);
+        rc = SQLITE_OK;
+      }
+    }
   }
 
   return rc;
@@ -1087,13 +1101,15 @@ int sqlite3BtreeMovetoUnpacked(
   rc = sqlite3HctTreeCsrSeek(pCur->pHctTreeCsr, pIdxKey, intKey, &res1);
   if( rc==SQLITE_OK && pCur->pHctDbCsr ){
     rc = sqlite3HctDbCsrSeek(pCur->pHctDbCsr, pIdxKey, intKey, &res2);
-    assert( res2<=0 );
   }
 
   if( pCur->eDir==BTREE_DIR_NONE ){
     if( res1==0 ){
       *pRes = 0;
       pCur->bUseTree = 1;
+      if( sqlite3HctTreeCsrIsDelete(pCur->pHctTreeCsr) ){
+        *pRes = -1;
+      }
     }else{
       pCur->bUseTree = 0;
       *pRes = res2;
@@ -1118,6 +1134,7 @@ int sqlite3BtreeMovetoUnpacked(
       }
     }else{
       assert( pCur->eDir==BTREE_DIR_REVERSE );
+      assert( res2<=0 );
       if( rc==SQLITE_OK && res2>0 && !sqlite3HctDbCsrEof(pCur->pHctDbCsr) ){
         rc = sqlite3HctDbCsrPrev(pCur->pHctDbCsr);
       }
@@ -1127,7 +1144,19 @@ int sqlite3BtreeMovetoUnpacked(
         *pRes = -1;
       }
     }
+
     btreeSetUseTree(pCur);
+    if( pCur->bUseTree && sqlite3HctTreeCsrIsDelete(pCur->pHctTreeCsr) ){
+      if( pCur->eDir==BTREE_DIR_FORWARD ){
+        rc = sqlite3BtreeNext(pCur, 0);
+        if( rc==SQLITE_DONE ) rc = SQLITE_OK;
+        *pRes = 1;
+      }else{
+        rc = sqlite3BtreePrevious(pCur, 0);
+        if( rc==SQLITE_DONE ) rc = SQLITE_OK;
+        *pRes = -1;
+      }
+    }
   }
 
   return rc;
@@ -1195,18 +1224,23 @@ i64 sqlite3BtreeRowCountEst(BtCursor *pCur){
 int sqlite3BtreeNext(BtCursor *pCur, int flags){
   int rc = SQLITE_OK;
   assert( pCur->eDir==BTREE_DIR_FORWARD );
-  if( pCur->bUseTree ){
-    rc = sqlite3HctTreeCsrNext(pCur->pHctTreeCsr);
-  }else{
-    rc = sqlite3HctDbCsrNext(pCur->pHctDbCsr);
-  }
-  if( rc==SQLITE_OK ){
-    if( sqlite3BtreeEof(pCur) ){
-      rc = SQLITE_DONE;
-    }else{
-      btreeSetUseTree(pCur);
+  do{
+    if( pCur->bUseTree ){
+      rc = sqlite3HctTreeCsrNext(pCur->pHctTreeCsr);
     }
-  }
+    if( rc==SQLITE_OK && (pCur->bUseTree==0 || pCur->bUseTree==2) ){
+      rc = sqlite3HctDbCsrNext(pCur->pHctDbCsr);
+    }
+    if( rc==SQLITE_OK ){
+      if( sqlite3BtreeEof(pCur) ){
+        rc = SQLITE_DONE;
+      }else{
+        btreeSetUseTree(pCur);
+      }
+    }
+  }while( rc==SQLITE_OK 
+      && pCur->bUseTree && sqlite3HctTreeCsrIsDelete(pCur->pHctTreeCsr) 
+  );
   return rc;
 }
 
@@ -1233,18 +1267,23 @@ int sqlite3BtreeNext(BtCursor *pCur, int flags){
 int sqlite3BtreePrevious(BtCursor *pCur, int flags){
   int rc = SQLITE_OK;
   assert( pCur->eDir==BTREE_DIR_REVERSE );
-  if( pCur->bUseTree ){
-    rc = sqlite3HctTreeCsrPrev(pCur->pHctTreeCsr);
-  }else{
-    rc = sqlite3HctDbCsrPrev(pCur->pHctDbCsr);
-  }
-  if( rc==SQLITE_OK ){
-    if( sqlite3BtreeEof(pCur) ){
-      rc = SQLITE_DONE;
-    }else{
-      btreeSetUseTree(pCur);
+  do{
+    if( pCur->bUseTree ){
+      rc = sqlite3HctTreeCsrPrev(pCur->pHctTreeCsr);
     }
-  }
+    if( rc==SQLITE_OK && (pCur->bUseTree==0 || pCur->bUseTree==2) ){
+      rc = sqlite3HctDbCsrPrev(pCur->pHctDbCsr);
+    }
+    if( rc==SQLITE_OK ){
+      if( sqlite3BtreeEof(pCur) ){
+        rc = SQLITE_DONE;
+      }else{
+        btreeSetUseTree(pCur);
+      }
+    }
+  }while( rc==SQLITE_OK 
+      && pCur->bUseTree && sqlite3HctTreeCsrIsDelete(pCur->pHctTreeCsr) 
+  );
   return rc;
 }
 
