@@ -448,6 +448,7 @@ static int hctDbCellPut(u8 *aBuf, int nData, const u8 *aData){
 
 static int hctDbRedistribute(
   HctDbCsr *pCsr,
+  int bClobber,
   UnpackedRecord *pRec, 
   i64 iKey, 
   int nData, const u8 *aData,
@@ -524,6 +525,9 @@ static int hctDbRedistribute(
     }else{
       int iCellOff = aOldOff[iOld];
       newKey = aOldKey[iOld];
+      if( iNew==iNewCell-1 && bClobber ){
+        newKey.iTidFlags |= HCT_IS_DELETED;
+      }
       if( iCellOff ){
         iCellOff += getVarint32(&pCsr->pg.aOld[iCellOff], nNewData);
         aNewData = &pCsr->pg.aOld[iCellOff];
@@ -567,6 +571,7 @@ static int hctDbRedistribute(
 static int hctDbInsertFP(HctDatabase*, u32, int, HctIntkeyTid*, u32);
 static int hctDbSplitPage(
   HctDbCsr *pCsr,
+  int bClobber,
   UnpackedRecord *pRec, 
   i64 iKey, 
   int nData, const u8 *aData
@@ -591,7 +596,9 @@ static int hctDbSplitPage(
     /* This is a split the root page. Allocate a second peer. */
     rc = sqlite3HctFilePageNew(pDb->pFile, 0, &peer1);
     if( rc==SQLITE_OK ){
-      rc = hctDbRedistribute(pCsr, pRec, iKey, nData, aData, &peer1, &peer);
+      rc = hctDbRedistribute(
+          pCsr, bClobber, pRec, iKey, nData, aData, &peer1, &peer
+      );
     }
     if( rc==SQLITE_OK ){
       HctIntkeyTid *aKey = 0;
@@ -620,7 +627,9 @@ static int hctDbSplitPage(
   }else{
     HctDatabasePage *pPg;
     HctIntkeyTid *aKey = 0;
-    rc = hctDbRedistribute(pCsr, pRec, iKey, nData, aData, &pCsr->pg, &peer);
+    rc = hctDbRedistribute(
+        pCsr, bClobber, pRec, iKey, nData, aData, &pCsr->pg, &peer
+    );
     pPg = hctDbIntkeyPage(peer.aNew, &aKey, 0, 0);
     fpk.iTidFlags = aKey[0].iTidFlags & HCT_TID_MASK;
     fpk.iKey = aKey[0].iKey;
@@ -655,6 +664,8 @@ int sqlite3HctDbInsert(
   int bClobber = 0;
   HctDbCsr csr;
 
+  assert( bDel==0 || bDel==1 );
+  assert( bDel==(aData==0) );
   assert( pRec==0 );
   hctDbStartTrans(pDb);
 
@@ -727,8 +738,7 @@ int sqlite3HctDbInsert(
       }
     }else{
       /* split page */
-      assert( bClobber==0 ); /* TODO */
-      rc = hctDbSplitPage(&csr, pRec, iKey, nData, aData);
+      rc = hctDbSplitPage(&csr, bClobber, pRec, iKey, nData, aData);
     }
 
     rc = sqlite3HctFilePageRelease(&csr.pg);

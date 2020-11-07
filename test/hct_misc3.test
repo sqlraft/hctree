@@ -1,0 +1,54 @@
+# 2020 November 7
+#
+# The author disclaims copyright to this source code.  In place of
+# a legal notice, here is a blessing:
+#
+#    May you do good and not evil.
+#    May you find forgiveness for yourself and forgive others.
+#    May you share freely, never taking more than you give.
+#
+#*************************************************************************
+# This file implements regression tests for SQLite library.
+#
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+set testprefix hct_misc2
+
+do_execsql_test 1.0 {
+  CREATE TABLE tx(a INTEGER PRIMARY KEY, b TEXT);
+}
+
+do_execsql_test 1.1 {
+  INSERT INTO tx VALUES(4, 'four');
+  INSERT INTO tx VALUES(5, 'five');
+  INSERT INTO tx VALUES(2, 'two');
+  INSERT INTO tx VALUES(6, 'six');
+  INSERT INTO tx VALUES(7, 'seven');
+  INSERT INTO tx VALUES(3, 'three');
+  INSERT INTO tx VALUES(1, 'one');
+  INSERT INTO tx VALUES(8, 'eight');
+  INSERT INTO tx VALUES(9, 'nine');
+  INSERT INTO tx VALUES(10, 'ten');
+}
+
+do_execsql_test 1.2 {
+  SELECT b FROM tx ORDER BY a ASC
+} {
+  one two three four five six seven eight nine ten
+}
+
+do_execsql_test 1.3 {
+  SELECT b FROM tx ORDER BY +a DESC
+} {
+  ten nine eight seven six five four three two one
+}
+
+do_execsql_test 1.4 {
+  SELECT b FROM tx ORDER BY a DESC
+} {
+  ten nine eight seven six five four three two one
+}
+
+finish_test
+
