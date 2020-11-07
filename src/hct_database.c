@@ -389,7 +389,7 @@ int sqlite3HctDbCsrSeek(
           rc = sqlite3HctDbCsrNext(pCsr);
           break;
         case BTREE_DIR_REVERSE:
-          assert( 0 );
+          rc = sqlite3HctDbCsrPrev(pCsr);
           break;
         default: assert( pCsr->eDir==BTREE_DIR_NONE );
           hctDbCsrReset(pCsr);
@@ -403,6 +403,7 @@ int sqlite3HctDbCsrSeek(
     }
   }
 
+  assert( *pRes<=0 );
   return rc;
 }
 
@@ -1125,6 +1126,25 @@ int sqlite3HctDbCsrNext(HctDbCsr *pCsr){
     }
   }while( rc==SQLITE_OK && hctDbCsrVisible(pCsr)==0 );
 
+  return rc;
+}
+
+int sqlite3HctDbCsrPrev(HctDbCsr *pCsr){
+  int rc = SQLITE_OK;
+  do {
+    pCsr->iCell--;
+    if( pCsr->iCell<0 ){
+      /* TODO: This can be made much faster by iterating through the 
+      ** parent list (which is in reverse order) instead of seeking 
+      ** for each new page.  */
+      HctIntkeyTid *pKey = hctDbCsrKey(pCsr->pg.aOld, 0);
+      i64 iKey = pKey->iKey;
+      i64 iTid = (pKey->iTidFlags & HCT_TID_MASK);
+      sqlite3HctFilePageRelease(&pCsr->pg);
+      assert( iTid>0 );
+      rc = hctDbCsrSeek(pCsr, 0, 0, iKey, iTid-1);
+    }
+  }while( rc==SQLITE_OK && hctDbCsrVisible(pCsr)==0 );
   return rc;
 }
 

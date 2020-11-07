@@ -117,6 +117,7 @@ int sqlite3HctDbCsrEof(HctDbCsr*);
 int sqlite3HctDbCsrFirst(HctDbCsr*);
 int sqlite3HctDbCsrLast(HctDbCsr*);
 int sqlite3HctDbCsrNext(HctDbCsr*);
+int sqlite3HctDbCsrPrev(HctDbCsr*);
 
 void sqlite3HctDbCsrKey(HctDbCsr*, i64 *piKey);
 int sqlite3HctDbCsrData(HctDbCsr *pCsr, int *pnData, const u8 **paData);

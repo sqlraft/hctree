@@ -1087,6 +1087,7 @@ int sqlite3BtreeMovetoUnpacked(
   rc = sqlite3HctTreeCsrSeek(pCur->pHctTreeCsr, pIdxKey, intKey, &res1);
   if( rc==SQLITE_OK && pCur->pHctDbCsr ){
     rc = sqlite3HctDbCsrSeek(pCur->pHctDbCsr, pIdxKey, intKey, &res2);
+    assert( res2<=0 );
   }
 
   if( pCur->eDir==BTREE_DIR_NONE ){
@@ -1116,7 +1117,15 @@ int sqlite3BtreeMovetoUnpacked(
         *pRes = +1;
       }
     }else{
-      assert( 0 );
+      assert( pCur->eDir==BTREE_DIR_REVERSE );
+      if( rc==SQLITE_OK && res2>0 && !sqlite3HctDbCsrEof(pCur->pHctDbCsr) ){
+        rc = sqlite3HctDbCsrPrev(pCur->pHctDbCsr);
+      }
+      if( res1==0 || res2==0 ){
+        *pRes = 0;
+      }else{
+        *pRes = -1;
+      }
     }
     btreeSetUseTree(pCur);
   }
@@ -1223,9 +1232,18 @@ int sqlite3BtreeNext(BtCursor *pCur, int flags){
 */
 int sqlite3BtreePrevious(BtCursor *pCur, int flags){
   int rc = SQLITE_OK;
-  rc = sqlite3HctTreeCsrPrev(pCur->pHctTreeCsr);
-  if( rc==SQLITE_OK && sqlite3HctTreeCsrEof(pCur->pHctTreeCsr) ){
-    rc = SQLITE_DONE;
+  assert( pCur->eDir==BTREE_DIR_REVERSE );
+  if( pCur->bUseTree ){
+    rc = sqlite3HctTreeCsrPrev(pCur->pHctTreeCsr);
+  }else{
+    rc = sqlite3HctDbCsrPrev(pCur->pHctDbCsr);
+  }
+  if( rc==SQLITE_OK ){
+    if( sqlite3BtreeEof(pCur) ){
+      rc = SQLITE_DONE;
+    }else{
+      btreeSetUseTree(pCur);
+    }
   }
   return rc;
 }

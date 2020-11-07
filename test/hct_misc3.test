@@ -13,7 +13,7 @@
 
 set testdir [file dirname $argv0]
 source $testdir/tester.tcl
-set testprefix hct_misc2
+set testprefix hct_misc3
 
 do_execsql_test 1.0 {
   CREATE TABLE tx(a INTEGER PRIMARY KEY, b TEXT);
@@ -49,6 +49,45 @@ do_execsql_test 1.4 {
 } {
   ten nine eight seven six five four three two one
 }
+
+do_execsql_test 1.5 {
+  SELECT b FROM tx WHERE a<7 ORDER BY a DESC
+} {
+  six five four three two one
+}
+
+
+
+do_execsql_test 1.10 {
+  DELETE FROM tx WHERE a IN (2, 5, 8);
+  SELECT b FROM tx ORDER BY a DESC
+} {
+  ten nine seven six four three one
+}
+
+#-------------------------------------------------------------------------
+do_execsql_test 2.0 {
+  CREATE TABLE t2(a INTEGER PRIMARY KEY, b TEXT);
+}
+
+set nRow [expr 10000]
+do_execsql_test 2.1 {
+  WITH s(i) AS (
+    SELECT 1 UNION ALL SELECT i+1 FROM s WHERE i<$nRow
+  )
+  REPLACE INTO t2 SELECT (random() & 0xFFFF), hex(randomblob(300)) FROM s;
+} {}
+
+set res [db eval { SELECT a FROM t2 ORDER BY +a DESC }]
+do_execsql_test 2.2 {
+  SELECT a FROM t2 ORDER BY a DESC
+} $res
+
+set res [db eval { SELECT a FROM t2 WHERE +a<10000 ORDER BY +a DESC }]
+do_execsql_test 2.3 {
+  SELECT a FROM t2 WHERE a<10000 ORDER BY a DESC
+} $res
+
 
 finish_test
 
