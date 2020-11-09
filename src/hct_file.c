@@ -478,7 +478,7 @@ static int hctFileTmpAllocate(HctFile *pFile, int eType, u32 *piNew){
   return SQLITE_OK;
 }
 
-static void hctFileSetFlag(HctFile *pFile, u32 iSlot, u64 mask){
+static int hctFileSetFlag(HctFile *pFile, u32 iSlot, u64 mask){
   int rc;
 
   assert( iSlot>0 );
@@ -529,7 +529,7 @@ int sqlite3HctFilePageNew(HctFile *pFile, u32 iPg, HctFilePage *pPg){
     memset(pPg, 0, sizeof(*pPg));
     rc = hctFileTmpAllocate(pFile, HCT_PAGEMAP_PHYSICAL_EOF, &iNewPg);
     if( rc==SQLITE_OK ){
-      hctFileSetFlag(pFile, iNewPg, HCT_PGMAPFLAG_PHYSINUSE);
+      rc = hctFileSetFlag(pFile, iNewPg, HCT_PGMAPFLAG_PHYSINUSE);
       pPg->iPg = iLPg;
       pPg->iNewPg = iNewPg;
       pPg->aNew = (u8*)hctPagePtr(pFile->pMapping, iNewPg);
