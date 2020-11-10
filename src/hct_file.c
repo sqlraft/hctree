@@ -35,6 +35,8 @@
 # define HCT_TID_MASK     ((((u64)0x00FFFFFF)<<32)|0xFFFFFFFF)
 #endif
 
+#define HCT_PGNO_MASK     (u64)0xFFFFFFFF
+
 /*
 ** Pagemap slots used for special purposes.
 */
@@ -593,6 +595,227 @@ int sqlite3HctFileFinishTrans(HctFile *pFile){
 
 int sqlite3HctFilePgsz(HctFile *pFile){
   return pFile->szPage;
+}
+
+
+typedef struct pgmap_vtab pgmap_vtab;
+struct pgmap_vtab {
+  sqlite3_vtab base;              /* Base class - must be first */
+  sqlite3 *db;
+};
+
+/* templatevtab_cursor is a subclass of sqlite3_vtab_cursor which will
+** serve as the underlying representation of a cursor that scans
+** over rows of the result
+*/
+typedef struct pgmap_cursor pgmap_cursor;
+struct pgmap_cursor {
+  sqlite3_vtab_cursor base;  /* Base class - must be first */
+  HctFile *pFile;            /* Database to report on */
+  u64 iMaxSlotno;            /* Maximum page number for this scan */
+  u64 slotno;                /* The page-number/rowid value */
+  u64 iVal;                  /* Value read from pagemap */
+};
+
+/*
+** The pgmapConnect() method is invoked to create a new
+** template virtual table.
+**
+** Think of this routine as the constructor for pgmap_vtab objects.
+**
+** All this routine needs to do is:
+**
+**    (1) Allocate the pgmap_vtab object and initialize all fields.
+**
+**    (2) Tell SQLite (via the sqlite3_declare_vtab() interface) what the
+**        result set of queries against the virtual table will look like.
+*/
+static int pgmapConnect(
+  sqlite3 *db,
+  void *pAux,
+  int argc, const char *const*argv,
+  sqlite3_vtab **ppVtab,
+  char **pzErr
+){
+  pgmap_vtab *pNew;
+  int rc;
+
+  rc = sqlite3_declare_vtab(db,
+      "CREATE TABLE x("
+        "slotno INTEGER, pgno INTEGER, physical_in_use BOOLEAN"
+      ")"
+  );
+
+  if( rc==SQLITE_OK ){
+    pNew = sqlite3MallocZero( sizeof(*pNew) );
+    *ppVtab = (sqlite3_vtab*)pNew;
+    if( pNew==0 ) return SQLITE_NOMEM;
+    pNew->db = db;
+  }
+  return rc;
+}
+
+/*
+** This method is the destructor for pgmap_vtab objects.
+*/
+static int pgmapDisconnect(sqlite3_vtab *pVtab){
+  pgmap_vtab *p = (pgmap_vtab*)pVtab;
+  sqlite3_free(p);
+  return SQLITE_OK;
+}
+
+/*
+** Constructor for a new pgmap_cursor object.
+*/
+static int pgmapOpen(sqlite3_vtab *p, sqlite3_vtab_cursor **ppCursor){
+  pgmap_cursor *pCur;
+  pCur = sqlite3MallocZero(sizeof(*pCur));
+  if( pCur==0 ) return SQLITE_NOMEM;
+  *ppCursor = &pCur->base;
+  return SQLITE_OK;
+}
+
+/*
+** Destructor for a pgmap_cursor.
+*/
+static int pgmapClose(sqlite3_vtab_cursor *cur){
+  pgmap_cursor *pCur = (pgmap_cursor*)cur;
+  sqlite3_free(pCur);
+  return SQLITE_OK;
+}
+
+/*
+** Return TRUE if the cursor has been moved off of the last
+** row of output.
+*/
+static int pgmapEof(sqlite3_vtab_cursor *cur){
+  pgmap_cursor *pCur = (pgmap_cursor*)cur;
+  return pCur->slotno>pCur->iMaxSlotno;
+}
+
+static int pgmapLoadSlot(pgmap_cursor *pCur){
+  pCur->iVal = hctFilePagemapGet(pCur->pFile->pMapping, pCur->slotno);
+  return SQLITE_OK;
+}
+
+/*
+** Advance a hctdb_cursor to its next row of output.
+*/
+static int pgmapNext(sqlite3_vtab_cursor *cur){
+  pgmap_cursor *pCur = (pgmap_cursor*)cur;
+  pCur->slotno++;
+  return pgmapEof(cur) ? SQLITE_OK : pgmapLoadSlot(pCur);
+}
+
+/*
+** Return values of columns for the row at which the pgmap_cursor
+** is currently pointing.
+*/
+static int pgmapColumn(
+  sqlite3_vtab_cursor *cur,   /* The cursor */
+  sqlite3_context *ctx,       /* First argument to sqlite3_result_...() */
+  int i                       /* Which column to return */
+){
+  pgmap_cursor *pCur = (pgmap_cursor*)cur;
+  switch( i ){
+    case 0: {  /* slotno */
+      sqlite3_result_int64(ctx, pCur->slotno);
+      break;
+    }
+    case 1: {  /* pgno */
+      sqlite3_result_int64(ctx, (pCur->iVal & 0xFFFFFFFF));
+      break;
+    }
+    case 2: {  /* physical_in_use */
+      sqlite3_result_int(ctx, (pCur->iVal & HCT_PGMAPFLAG_PHYSINUSE)?1:0);
+      break;
+    }
+  }
+  return SQLITE_OK;
+}
+
+/*
+** Return the rowid for the current row.  In this implementation, the
+** rowid is the same as the slotno value.
+*/
+static int pgmapRowid(sqlite3_vtab_cursor *cur, sqlite_int64 *pRowid){
+  pgmap_cursor *pCur = (pgmap_cursor*)cur;
+  *pRowid = pCur->slotno;
+  return SQLITE_OK;
+}
+
+/*
+** This method is called to "rewind" the pgmap_cursor object back
+** to the first row of output.  This method is always called at least
+** once prior to any call to pgmapColumn() or pgmapRowid() or 
+** pgmapEof().
+*/
+static int pgmapFilter(
+  sqlite3_vtab_cursor *pVtabCursor, 
+  int idxNum, const char *idxStr,
+  int argc, sqlite3_value **argv
+){
+  pgmap_cursor *pCur = (pgmap_cursor*)pVtabCursor;
+  pgmap_vtab *pTab = (pgmap_vtab*)(pCur->base.pVtab);
+  int rc;
+  u64 max1;
+  u64 max2;
+ 
+  pCur->pFile = sqlite3HctDbFile(sqlite3HctDbFind(pTab->db, 0));
+  pCur->slotno = 1;
+  max1 = hctFilePagemapGet(pCur->pFile->pMapping, HCT_PAGEMAP_PHYSICAL_EOF);
+  max2 = hctFilePagemapGet(pCur->pFile->pMapping, HCT_PAGEMAP_LOGICAL_EOF);
+  max1 &= HCT_PGNO_MASK;
+  max2 &= HCT_PGNO_MASK;
+  pCur->iMaxSlotno = max1>max2 ? max1 : max2;
+  rc = pgmapLoadSlot(pCur);
+  return rc;
+}
+
+/*
+** SQLite will invoke this method one or more times while planning a query
+** that uses the virtual table.  This routine needs to create
+** a query plan for each invocation and compute an estimated cost for that
+** plan.
+*/
+static int pgmapBestIndex(
+  sqlite3_vtab *tab,
+  sqlite3_index_info *pIdxInfo
+){
+  pIdxInfo->estimatedCost = (double)10;
+  pIdxInfo->estimatedRows = 10;
+  return SQLITE_OK;
+}
+
+int sqlite3HctFileVtabInit(sqlite3 *db){
+  static sqlite3_module pgmapModule = {
+    /* iVersion    */ 0,
+    /* xCreate     */ 0,
+    /* xConnect    */ pgmapConnect,
+    /* xBestIndex  */ pgmapBestIndex,
+    /* xDisconnect */ pgmapDisconnect,
+    /* xDestroy    */ 0,
+    /* xOpen       */ pgmapOpen,
+    /* xClose      */ pgmapClose,
+    /* xFilter     */ pgmapFilter,
+    /* xNext       */ pgmapNext,
+    /* xEof        */ pgmapEof,
+    /* xColumn     */ pgmapColumn,
+    /* xRowid      */ pgmapRowid,
+    /* xUpdate     */ 0,
+    /* xBegin      */ 0,
+    /* xSync       */ 0,
+    /* xCommit     */ 0,
+    /* xRollback   */ 0,
+    /* xFindMethod */ 0,
+    /* xRename     */ 0,
+    /* xSavepoint  */ 0,
+    /* xRelease    */ 0,
+    /* xRollbackTo */ 0,
+    /* xShadowName */ 0
+  };
+
+  return sqlite3_create_module(db, "hctpgmap", &pgmapModule, 0);
 }
 
 

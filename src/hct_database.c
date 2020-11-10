@@ -104,6 +104,10 @@ void sqlite3HctDbClose(HctDatabase *p){
   }
 }
 
+HctFile *sqlite3HctDbFile(HctDatabase *pDb){
+  return pDb->pFile;
+}
+
 int sqlite3HctDbRootNew(HctDatabase *p, u32 *piRoot){
   return sqlite3HctFileRootNew(p->pFile, piRoot);
 }
@@ -1467,6 +1471,11 @@ int sqlite3HctVtabInit(sqlite3 *db){
     /* xRollbackTo */ 0,
     /* xShadowName */ 0
   };
+  int rc;
 
-  return sqlite3_create_module(db, "hctdb", &hctdbModule, 0);
+  rc = sqlite3_create_module(db, "hctdb", &hctdbModule, 0);
+  if( rc==SQLITE_OK ){
+    rc = sqlite3HctFileVtabInit(db);
+  }
+  return rc;
 }

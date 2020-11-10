@@ -127,6 +127,7 @@ int sqlite3HctDbCsrData(HctDbCsr *pCsr, int *pnData, const u8 **paData);
 */
 
 typedef struct HctFile HctFile;
+HctFile *sqlite3HctDbFile(HctDatabase *pDb);
 
 int sqlite3HctFileOpen(const char *zFile, HctFile **ppFile);
 void sqlite3HctFileClose(HctFile *pFile);
@@ -172,4 +173,5 @@ u64 sqlite3HctFileGetTransid(HctFile *pFile);
 HctDatabase *sqlite3HctDbFind(sqlite3*, int);
 
 int sqlite3HctFilePgsz(HctFile *pFile);
+int sqlite3HctFileVtabInit(sqlite3 *db);
 
