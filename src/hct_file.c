@@ -515,6 +515,22 @@ int sqlite3HctFilePageGet(HctFile *pFile, u32 iPg, HctFilePage *pPg){
 }
 
 /*
+** Obtain a reference to physical page iPg. This is presently used by
+** the virtual table interfaces only.
+*/
+int sqlite3HctFilePageGetPhysical(HctFile *pFile, u32 iPg, HctFilePage *pPg){
+  u64 iVal;
+  assert( iPg!=0 );
+  memset(pPg, 0, sizeof(*pPg));
+  iVal = hctFilePagemapGet(pFile->pMapping, iPg);
+  if( iVal & HCT_PGMAPFLAG_PHYSINUSE ){
+    pPg->iPagemap = iVal;
+    pPg->aOld = (u8*)hctPagePtr(pFile->pMapping, iPg);
+  }
+  return SQLITE_OK;
+}
+
+/*
 ** Allocate a new logical page. If parameter iPg is zero, then a new
 ** logical page number is allocated. Otherwise, it must be a logical page
 ** number obtained by an earlier call to sqlite3HctFileRootNew().

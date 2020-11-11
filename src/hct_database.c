@@ -1277,62 +1277,59 @@ static int hctdbClose(sqlite3_vtab_cursor *cur){
 ** Load the values for xColumn() associated with the current value of
 ** hctdb_cursor.pgno into memory.
 */
-static int hctdbLoadPage(hctdb_cursor *pCur){
-  HctFilePage pg;
-  int rc;
+static int hctdbLoadPage(
+  hctdb_cursor *pCur,
+  HctDatabasePage *pPg
+){
+  static const char *azType[] = {
+    0,                          /* 0x00 */
+    "intkey",                   /* 0x01 */
+    "index",                    /* 0x02 */
+    "overflow",                 /* 0x03 */
+  };
+  int rc = SQLITE_OK;
+  HctIntkeyTid *aKey = 0;
 
   sqlite3_free(pCur->zKeys);
   pCur->zKeys = 0;
   sqlite3_free(pCur->zData);
   pCur->zData = 0;
 
-  rc = sqlite3HctFilePageGet(pCur->pDb->pFile, pCur->pgno, &pg);
-  if( rc==SQLITE_OK ){
-    static const char *azType[] = {
-      0,                          /* 0x00 */
-      "intkey",                   /* 0x01 */
-      "index",                    /* 0x02 */
-      "overflow",                 /* 0x03 */
-    };
-    HctDatabasePage *pPg = (HctDatabasePage*)pg.aOld;
-    HctIntkeyTid *aKey = 0;
+  pCur->zPgtype = azType[pPg->ePagetype];
+  pCur->iPeerPg = pPg->iPeerPg;
+  pCur->nEntry = pPg->nEntry;
+  pCur->nHeight = pPg->nHeight;
 
-    pCur->zPgtype = azType[pPg->ePagetype];
-    pCur->iPeerPg = pPg->iPeerPg;
-    pCur->nEntry = pPg->nEntry;
-    pCur->nHeight = pPg->nHeight;
-
-    if( pPg->ePagetype==HCT_PAGETYPE_INTKEY ){
-      if( pPg->nHeight==0 ){
-        hctDbIntkeyLeaf(pPg, &aKey, 0);
-      }else{
-        u32 *aChild = 0;
-        hctDbIntkeyNode(pPg, &aKey, &aChild);
-        char *zData = 0;
-        int i;
-        for(i=0; rc==SQLITE_OK && i<pPg->nEntry; i++){
-          zData = sqlite3_mprintf("%z%s%lld",
-              zData, zData ? " " : "", (i64)aChild[i]
-          );
-          if( zData==0 ) rc = SQLITE_NOMEM_BKPT;
-        }
-        pCur->zData = zData;
-      }
-    }
-
-    if( aKey ){
-      char *zKeys = 0;
+  if( pPg->ePagetype==HCT_PAGETYPE_INTKEY ){
+    if( pPg->nHeight==0 ){
+      hctDbIntkeyLeaf(pPg, &aKey, 0);
+    }else{
+      u32 *aChild = 0;
+      hctDbIntkeyNode(pPg, &aKey, &aChild);
+      char *zData = 0;
       int i;
       for(i=0; rc==SQLITE_OK && i<pPg->nEntry; i++){
-        zKeys = sqlite3_mprintf("%z%s{%lld %lld%s}",
-            zKeys, zKeys ? " " : "", aKey[i].iKey, 
-            (aKey[i].iTidFlags & HCT_TID_MASK),
-            (aKey[i].iTidFlags & HCT_IS_DELETED) ? "*" : ""
+        zData = sqlite3_mprintf("%z%s%lld",
+            zData, zData ? " " : "", (i64)aChild[i]
         );
-        if( zKeys==0 ) rc = SQLITE_NOMEM_BKPT;
+        if( zData==0 ) rc = SQLITE_NOMEM_BKPT;
       }
-      pCur->zKeys = zKeys;
+      pCur->zData = zData;
     }
+  }
+
+  if( aKey ){
+    char *zKeys = 0;
+    int i;
+    for(i=0; rc==SQLITE_OK && i<pPg->nEntry; i++){
+      zKeys = sqlite3_mprintf("%z%s{%lld %lld%s}",
+          zKeys, zKeys ? " " : "", aKey[i].iKey, 
+          (aKey[i].iTidFlags & HCT_TID_MASK),
+          (aKey[i].iTidFlags & HCT_IS_DELETED) ? "*" : ""
+      );
+      if( zKeys==0 ) rc = SQLITE_NOMEM_BKPT;
+    }
+    pCur->zKeys = zKeys;
   }
   return rc;
 }
@@ -1352,12 +1349,21 @@ static int hctdbEof(sqlite3_vtab_cursor *cur){
 */
 static int hctdbNext(sqlite3_vtab_cursor *cur){
   hctdb_cursor *pCur = (hctdb_cursor*)cur;
-  if( pCur->pgno==1 ){
-    pCur->pgno = 33;
-  }else{
+  int rc = SQLITE_OK;
+  HctFilePage pg;
+
+  memset(&pg, 0, sizeof(pg));
+  do {
+    sqlite3HctFilePageRelease(&pg);
     pCur->pgno++;
+    if( hctdbEof(cur) ) return SQLITE_OK;
+    rc = sqlite3HctFilePageGetPhysical(pCur->pDb->pFile, pCur->pgno, &pg);
+  }while( rc==SQLITE_OK && pg.aOld==0 );
+
+  if( pg.aOld ){
+    rc = hctdbLoadPage(pCur, (HctDatabasePage*)pg.aOld);
   }
-  return hctdbEof(cur) ? SQLITE_OK : hctdbLoadPage(pCur);
+  return rc;
 }
 
 /*
@@ -1419,14 +1425,11 @@ static int hctdbFilter(
 ){
   hctdb_cursor *pCur = (hctdb_cursor*)pVtabCursor;
   hctdb_vtab *pTab = (hctdb_vtab*)(pCur->base.pVtab);
-  int rc;
  
   pCur->pDb = sqlite3HctDbFind(pTab->db, 0);
-  pCur->pgno = 1;
+  pCur->pgno = 0;
   pCur->iMaxPgno = sqlite3HctFileMaxpage(pCur->pDb->pFile);
-  rc = hctdbLoadPage(pCur);
-
-  return rc;
+  return hctdbNext(pVtabCursor);
 }
 
 /*
