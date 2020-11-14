@@ -503,7 +503,7 @@ int sqlite3BtreeIncrVacuum(Btree *p){
 int sqlite3BtreeCommitPhaseOne(Btree *p, const char *zSuperJrnl){
   int rc = SQLITE_OK;
   if( p->pHctDb ){
-    sqlite3HctDbEndTransaction(p->pHctDb);
+    sqlite3HctDbEndRead(p->pHctDb);
     /* TODO: Invalidate any existing cursors */
   }
   return rc;
@@ -534,6 +534,9 @@ static int btreeFlushOneToDisk(void *pCtx, u32 iRoot, KeyInfo *pKeyInfo){
       }
       if( rc ) break;
     }
+    if( rc==SQLITE_OK ){
+      rc = sqlite3HctDbFlush(p->pHctDb);
+    }
     sqlite3HctTreeCsrClose(pCsr);
   }
 
@@ -557,7 +560,7 @@ static int btreeFlushToDisk(Btree *p){
     rc = sqlite3HctTreeForeach(p->pHctTree, (void*)p, btreeFlushOneToDisk);
   }
 
-  sqlite3HctDbEndTransaction(p->pHctDb);
+  sqlite3HctDbEndWrite(p->pHctDb);
   return rc;
 }
 

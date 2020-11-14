@@ -87,6 +87,7 @@ do_execsql_test 2.3 {
 } $res
 
 #-------------------------------------------------------------------------
+reset_db
 do_execsql_test 3.1 {
   CREATE TABLE t3(a INTEGER PRIMARY KEY, b TEXT);
   INSERT INTO t3 VALUES(4, 'four');

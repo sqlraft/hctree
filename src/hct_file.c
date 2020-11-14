@@ -463,6 +463,7 @@ u32 sqlite3HctFileMaxpage(HctFile *pFile){
 static int hctFileTmpAllocate(HctFile *pFile, int eType, u32 *piNew){
   HctMapping *pMapping = pFile->pMapping;
   u64 iVal;
+  int rc = SQLITE_OK;
   assert( eType==HCT_PAGEMAP_LOGICAL_EOF 
        || eType==HCT_PAGEMAP_PHYSICAL_EOF 
        || eType==HCT_PAGEMAP_TRANSID_EOF 
@@ -477,7 +478,10 @@ static int hctFileTmpAllocate(HctFile *pFile, int eType, u32 *piNew){
     }
   }
   *piNew = (iVal & 0xFFFFFFFF)+1;
-  return SQLITE_OK;
+  if( eType==HCT_PAGEMAP_LOGICAL_EOF || eType==HCT_PAGEMAP_PHYSICAL_EOF ){
+    rc = hctFileGrowMapping(pFile, 1 + ((*piNew-1) / HCT_DEFAULT_PAGEPERCHUNK));
+  }
+  return rc;
 }
 
 static int hctFileSetFlag(HctFile *pFile, u32 iSlot, u64 mask){
