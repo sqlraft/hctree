@@ -106,7 +106,6 @@ void sqlite3HctDbRootPageInit(int bIndex, u8 *aPage, int szPage);
 int sqlite3HctDbInsert(HctDatabase*, u32,UnpackedRecord*,i64,int,int,const u8*);
 int sqlite3HctDbEndWrite(HctDatabase*);
 int sqlite3HctDbEndRead(HctDatabase*);
-int sqlite3HctDbFlush(HctDatabase*);
 
 int sqlite3HctDbCsrOpen(HctDatabase *pDb, u32 iRoot, HctDbCsr **ppCsr);
 void sqlite3HctDbCsrClose(HctDbCsr *pCsr);

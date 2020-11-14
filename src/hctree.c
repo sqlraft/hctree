@@ -534,9 +534,6 @@ static int btreeFlushOneToDisk(void *pCtx, u32 iRoot, KeyInfo *pKeyInfo){
       }
       if( rc ) break;
     }
-    if( rc==SQLITE_OK ){
-      rc = sqlite3HctDbFlush(p->pHctDb);
-    }
     sqlite3HctTreeCsrClose(pCsr);
   }
 
@@ -560,7 +557,8 @@ static int btreeFlushToDisk(Btree *p){
     rc = sqlite3HctTreeForeach(p->pHctTree, (void*)p, btreeFlushOneToDisk);
   }
 
-  sqlite3HctDbEndWrite(p->pHctDb);
+  assert( rc==SQLITE_OK );        /* TODO: fix this */
+  rc = sqlite3HctDbEndWrite(p->pHctDb);
   return rc;
 }
 
