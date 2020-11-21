@@ -20,8 +20,14 @@ typedef struct HctDatabase HctDatabase;
 typedef struct HctDatabasePage HctDatabasePage;
 typedef struct HctIntkeyTid HctIntkeyTid;
 typedef struct HctWriteKey HctWriteKey;
+typedef struct HctWriteFP HctWriteFP;
 
 #define HCT_MAX_WRITEKEY 200
+
+struct HctIntkeyTid {
+  i64 iKey;
+  u64 iTidFlags;
+};
 
 struct HctWriteKey {
   i64 iKey;
@@ -31,6 +37,13 @@ struct HctWriteKey {
   const u8 *aData;
 };
 
+struct HctWriteFP {
+  HctIntkeyTid key;
+  u32 pgnoChild;
+  u32 pgnoRoot;
+  int iHeight;
+};
+
 struct HctDbCsr {
   HctDatabase *pDb;               /* Database that owns this cursor */
   u32 iRoot;                      /* Root page cursor is opened on */
@@ -38,11 +51,6 @@ struct HctDbCsr {
   int eDir;                       /* Direction cursor will step after Seek() */
   HctDbCsr *pCsrNext;
   HctFilePage pg;                 /* Current database page */
-};
-
-struct HctIntkeyTid {
-  i64 iKey;
-  u64 iTidFlags;
 };
 
 /*
@@ -64,6 +72,10 @@ struct HctDatabase {
   HctWriteKey aWriteKey[HCT_MAX_WRITEKEY];
   HctDbCsr writecsr;
   HctIntkeyTid writeFpKey;
+
+  int nWriteFP;
+  int nWriteFPAlloc;
+  HctWriteFP *aFP;
 };
 
 /* 
@@ -679,6 +691,15 @@ static int hctDbSplitPage(
   }
 
   return rc;
+}
+
+static int hctDbScheduleFPInsert(
+  HctDatabase *pDb, 
+  HctIntkeyTid *pKey, 
+  u32 pgnoChild, 
+  u32 pgnoRoot, 
+  int iHeight
+){
 }
 
 typedef struct HctDbInsertCtx HctDbInsertCtx;

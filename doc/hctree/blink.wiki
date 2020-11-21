@@ -3,11 +3,15 @@
 
   *  <a href=#context>Component Context</a>
   *  <a href=#overview>Design Overview</a>
-  *  <a href=#btree>B-Tree Structure Overview</a>
-  *  <a href=#leaves>B-Tree Leaf Node Operations</a>
-  *  <a href=#interior>B-Tree Interior Node Operations</a>
-  *  <a href=#other> Changing the Height of the Tree</a>
+  *  <a href=#btree>B-Tree Data Structure</a>
+    <ul>
+      <li><a href=#leaves>B-Tree Leaf Node Operations</a>
+      <li><a href=#interior>B-Tree Interior Node Operations</a>
+      <li><a href=#other> Changing the Height of the Tree</a>
+    </ul>
   *  <a href=#pages> Page Management</a>
+  *  <a href=#mvcc> MVCC Version Management </a>
+  *  <a href=#recovery> Disaster Recovery </a>
 
 <h1 id=context> Component Context </h1>
 
@@ -37,8 +41,8 @@ its transaction was opened, so long as it never reads a version of a page too
 old to contain keys that are part of transactions that were already completely
 committed. There may be any number of readers.
 
-The remainder of this page describes how multiple readers and writers 
-proceed concurrently without resorting to locks.
+The remainder of this page describes the database design at a high level. 
+There is also a <a href=fileformat.wiki>file format document</a>.
 
 <h1 id=overview> Design Overview </h1>
 
@@ -127,7 +131,7 @@ leaf nodes, keys sorting is in the same order as on leaves. For
 great-grandparents, reversed. And so on. The advantages of this are <a
 href=#interior>described below</a>.
 
-<h1 id=leaves> B-Tree Leaf Node Operations </h1>
+<h2 id=leaves> B-Tree Leaf Node Operations </h2>
 
 The data structure is best analyzed as a series of loosely coupled
 linked-lists. Consider, to begin with, just the leaves of a b-tree 
@@ -276,7 +280,7 @@ the left-hand peer (node 2 in the diagram) such that the two nodes now
 collectively contain too much data to consolidate. In this case the writer
 must change tack and proceed with step 2 of the "redistributing keys" case.
 
-<h1 id=interior> Btree Interior Node Operations </h1>
+<h2 id=interior> Btree Interior Node Operations </h2>
 
 Linked-lists are fine for scanning through in a forwards direction. But
 SQLite also requires support for efficiently (a) iterating backwards and
@@ -426,7 +430,7 @@ arrow from B3.s to A7.n
 arrow from B3.s right 0.2 then to A8.n
 </verbatim>
 
-<h1 id=other> Changing the Height of the Tree</h1>
+<h2 id=other> Changing the Height of the Tree</h2>
 
 Each tree structure is initially created as a single leaf node that is also
 the root of the tree. Once the root node is full, it is not split in two
@@ -563,6 +567,72 @@ takes ownership of the freed page id and adds it to its private table of
 free logical page ids. As with physical page ids, this logical page id
 is associated with the current transaction id.
 
+<h1 id=mvcc> MVCC Key Management </h1>
+
+When a new key/value pair is written to the database, the writer associates
+with it a transaction id. When a reader reads the page, it inspects the
+transaction id of each record and ignores those written by transactions
+that are not part of its database snapshot. If the new key/value has
+overwritten a previous version, the reader requires access to that previous
+version instead of the new one.
+
+To facilitate this, each key/value database entry has associated with it
+the physical page number of the last database page to contain the previous
+version (if any). As <a href=#pages>described above</a>, this page is
+guaranteed not to be reused until all readers are using a snapshot that
+includes the transaction that overwrote it, which is the same transaction
+id associated with the new key/value database entry (and so the pointer
+will never be followed after the page has become eligible for reuse).
+
+Deletes are handled similarly. When an entry is deleted, it is clobbered
+by a delete key. So a delete key entry consists of:
+
+  *  The key being deleted,
+  *  The transaction id of the transaction that did the deleting, and
+  *  The physical page id on which the deleted version of the key can be found.
+
+Whenever a page is rewritten, any delete keys with transaction ids so old that
+it is guaranteed that all extant and future readers read from snapshots that
+include it may be discarded. As may the transaction id and old page number (if
+any) from any other, non-delete, keys.
+
+<b>External Delete-Key Sets</b>
+
+In most scenarios, the above should be sufficient. But in the presence of 
+long running read transactions or large deletes, some database pages may come
+to contain a high percentage of delete-keys. Which is inefficient for new
+readers that do not require them. And, as the delete-keys remain in place 
+until at least the next time the page is written, this situation may persist
+indefinitely.
+
+The solution is to move delete keys to an <i>external delete-key set</i>. An
+external delete-key set is an immutable b-tree structure within the database
+file that contains only delete-keys. All pointers to and within the b-tree 
+are physical page numbers. When the EDKS is constructed, all pages are 
+immediately marked as eligible for reuse once all readers are reading from
+a snapshot including transaction T, where T is the largest transaction id 
+associated with any delete-key within the data structure. This way, space
+used by the entire EDKS and its delete keys is reclaimed "automatically"
+by the same mechanism that reuses physical page locations.
+
+Each leaf page in the database may contain pointers to one or more EDKS
+b-trees. Each pointer is made up of a physical page id (the root page of
+the EDKS b-tree) and the transaction id associated with it ("T" in the 
+paragraph above). When a reader using a snapshot that does not include
+transaction T reads the page, it must merge in the contents of the 
+indicated EDKS. It is not safe for a reader using a snapshot that does
+include T to follow the pointer, as the physical pages that make up the EDSK
+may already be eligible for reuse.
+
+Multiple leaf pages within the database may contain pointers to the same EDSK.
+This may occur, for example, when a leaf page containing an EDSK pointer is
+split into two or more pages. Readers use the fencepost keys on the current
+leaf and its peer to avoid merging any out-of-range keys from the EDSK into
+the page when it is read.
+
+<h1 id=recovery> Disaster Recovery </h1>
+
+<i style=color:green>TODO: Fill this in</i>
 
 
 
