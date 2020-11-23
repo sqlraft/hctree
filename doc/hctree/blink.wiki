@@ -11,7 +11,7 @@
     </ul>
   *  <a href=#pages> Page Management</a>
   *  <a href=#mvcc> MVCC Version Management </a>
-  *  <a href=#recovery> Disaster Recovery </a>
+  *  <a href=#recovery> Crash Recovery </a>
 
 <h1 id=context> Component Context </h1>
 
@@ -53,9 +53,9 @@ logical and physical page numbers (locations in the database file). In order
 to read the data from a page from disk given a logical page number, a client
 must first look up the physical page number within the page-map.
 
-The page-map is stored as part of the database file itself and memory mapped
-into the database process address space for client access. Clients always 
-write to the page-map using atomic compare-and-swap (CAS) instructions.
+The page-map is stored on disk and memory mapped into the database process
+address space for client access. Clients always write to the page-map using
+atomic compare-and-swap (CAS) instructions.
 
 This arrangement means that clients effectively have a <b>CAS primitive for
 entire pages</b>. In order to safely update an existing page, a client:
@@ -630,9 +630,99 @@ split into two or more pages. Readers use the fencepost keys on the current
 leaf and its peer to avoid merging any out-of-range keys from the EDSK into
 the page when it is read.
 
-<h1 id=recovery> Disaster Recovery </h1>
+<h1 id=recovery> Crash Recovery </h1>
 
-<i style=color:green>TODO: Fill this in</i>
+Recovery from application failure is handled differently from recovery from
+power, OS or other system failures (hereafter summarized as "power failures").
+In the first case it is assumed that any data written to the file-system before
+the crash, either via a system call or a memory mapping, is present and
+uncorrupted following the crash. In the latter case, it is assumed that any
+disk sector written but not synced when the failure occured may be corrupted.
+Following recovery, such a sector may contain the original data, the updated
+data, or any other values.
+
+Supporting recovery from power failure requires periodic calls to fsync(), and
+some extra processing from writers. Deployments that do not require recovery of
+this nature can omit these extra operations.
+
+<h2 id=recovery1> Recovery From Application Failure </h2>
+
+To support application failure, each writer client has a log file. Once
+it is known that a transaction does not conflict and is to be written into
+the database file, an entry is appended to the log file containing all
+the logical write operations that make up the transaction, along with the
+transaction id. Once the transaction has been completely written to the
+database, the log file entry is marked as committed.
+
+Upon recovery, the database process scans the log files for transactions
+not marked as committed. They are then written into the database, one
+key at a time, using the usual methods. This avoids partial transactions
+being left in the database following an application failure.
+
+<h2 id=recovery2> Recovery From Power/OS Failure </h2>
+
+In order to support recovery from power failure, each database has three
+separate page-map files - A, B and C. We refer to "files" in this section, but
+these could just as easily be three different parts of a single file, or three
+different parts of the database file itself.
+
+A database also has two header pages that occur at the start of the database
+file. Each header page is located on a different disk sector, so it can be
+synced to disk separately.
+
+Robustness in the face of power failures is achieved using database checkpoints
+and checksummed log files. A checkpoint is a version of the page-map and a set
+of pages within the database file that have been successfully synced to disk. A
+checkpoint contains all data for all transactions with transaction ids less
+than or equal to some value T, and no data for any transaction with a
+transaction greater than T. To recover the database following a power failure,
+as many transactions as possible are recovered from the checksummed log files
+and added to the checkpointed version of the database.
+
+Writers begin by writing transactions into the database and into page-map 
+file A. Each writer also writes its transactions into a log file (one log 
+file per writer), along with a checksum and transaction id for each. To
+checkpoint a version of the database:
+
+  *  the "next" page-map file (file B in this case) is populated entirely
+     with NULL entries.
+
+  *  new transactions are prevented from beginning to commit until all
+     currently committing transactions have finished committing. The 
+     checkpoint will contain all transactions up to and including the
+     transaction with the largest transaction id committed at this point.
+
+  *  when new transactions are permitted to begin committing again, new
+     values are written into page-map file B. When a value is read, an
+     attempt is first made to read it from file B. If file B contains a
+     NULL value, the real value is read from file A and copied into file B
+     using a CAS instruction. If the write fails, the value is reread
+     from file B.
+
+  *  The database file is synced to disk.
+
+  *  Page-map file A is synced to disk.
+
+  *  A header page in the database file is updated to indicate that page-map
+     file A now correspond to the latest checkpointed version of the database
+     file and the transaction id of the checkpointed snapshot. The database
+     file is synced to disk. Successive writes alternate back and forth 
+     between the two header pages.
+
+  *  The checkpointer thread loops through the entire page-map copying
+     values from file A to file B. File B is always written using the CAS
+     primitive, so there is no chance of accidentally clobbering a value
+     written by a writer following the transaction barrier.
+
+For this to work, writers must only recycle a physical page made eligible
+for recycling before the most recent completed checkpoint. Logical page
+ids may still be recycled as soon as they are eligible.
+
+<i style=color:green>Should the two "header pages" be moved to a separate
+file? So that writing and syncing them does not imply syncing whatever has
+been written to the database file in the meantime.</i>
+
+
 
 
 
