@@ -1,0 +1,17 @@
+
+<title> Transaction Queue Design </title>
+
+  *  <a href=#context>Component Context</a>
+
+<h1 id=context> Component Context </h1>
+
+
+
+<verbatim type="pikchr center">
+
+arrow ; box ; arrow ; box ; arrow ; box ; arrow ; box ; arrow ; box ;
+arrow
+
+</verbatim>
+
+

@@ -1,36 +1,25 @@
 
+  *   <a href=#overall>Overall Structure</a>
+  *   <a href=#header>Header File Format</a>
+  *   <a href=#pagemap>Page Map Format</a>
+  *   <a href=#db>Database File Format</a>
 
-<h1> Overall Structure </h1>
+<h1 id=overall> Overall Structure </h1>
 
-File format parameters:
+Each database consists of at least three files:
 
-  *  Page size. Default 4KiB. This must be a power of 2.
-  *  Chunk size. Default 128K pages (1MB chunk-size, 512MB database file size
-     per chunk). This must be a power of 2 greater than the page size.
+  *  A database file, containing database file pages,
+  *  A page-map file, containing the page-map, and
+  *  A header file, containing the two header pages.
 
-The database file begins with a pair of header pages. Header pages are always
-4KiB each in size.
+If the database is configured to be robust in the face of system or power
+failures, there are three page-map files instead of one.
 
-Immediately following the header pages is the first page-map chunk, 
-containing the first (chunksize/8) page-map entries. Following this,
-the first (chunksize/8) database pages. Then another page-map chunk, and 
-so on.
+Additionally, there may be one or more client log files.
 
-Physical pages are numbered starting from 1. Only database pages are assigned
-numbers - the two header pages and the parts of the file used for page-map
-chunks do not have page numbers. The offset of physical page iPg is therefore:
+<h1 id=header> Header File Format </h1>
 
-<verbatim>
-  offset = (2 * pagesize) + (((iPg-1) / (chunksize/8)) * chunksize) + ((iPg-1) * pagesize)
-</verbatim>
-
-Page numbers 2-32, inclusive, are not used. Page 1 must be used, as SQLite
-assumes it to be the root page of the sqlite_schema table.
-
-The second element of the page-map (the unused logical page 2) is used to 
-store the maximum assigned transaction id.
-
-<h1> Header Pages </h1>
+The header file consists of two pages using the same format.
 
 <table border=1 cellpadding=5 width=90%>
   <tr><th>Byte Offset <th>Size <th width=80%> Description
@@ -41,143 +30,7 @@ store the maximum assigned transaction id.
   <tr><td>48 <td>8  <td>Guaranteed safe recovery transaction id.
 </table>
 
-<h1> Database Page format </h1>
-
-Each page begins with a 32-byte recovery header. Consisting of:
-
-<table border=1 cellpadding=5 width=90%>
-  <tr><th>Byte Offset <th>Size <th width=80%> Description
-  <tr><td>0 <td>8 <td> Checksum. Based on page content (including this header)
-                       and <i>TODO</i>
-  <tr><td>8 <td>8 <td>  Transaction id of transaction that wrote page.
-  <tr><td>16 <td>8 <td> Largest transaction id ever to have written this
-                        logical page.
-  <tr><td>24 <td>4 <td> Logical page id for this page.
-  <tr><td>28 <td>4 <td> Physical page id for previous page written by this
-                        transaction (or 0 if this is the first).
-</table>
-
-Followed by an 8-byte page header:
-
-<table border=1 cellpadding=5 width=90%>
-  <tr><th>Byte Offset <th>Size <th width=80%> Description
-  <tr><td>32 <td>1 <td> Page type:
-  *  0x01 - Intkey pages.
-  *  0x02 - Index pages.
-  *  0x03 - Overflow page. 
-  <tr><td>33 <td>1 <td> Distance between list and leaves. For leaves, 0, for
-                        parents of leaves, 1, and so on)
-  <tr><td>34 <td>2 <td> Number of entries on page.
-  <tr><td>36 <td>4 <td> Peer page number.
-</table>
-
-Intkey and index leaf pages, as well as index internal node pages, then have
-the following 8-byte header:
-
-<table border=1 cellpadding=5 width=90%>
-  <tr><th>Byte Offset <th>Size <th width=80%> Description
-  <tr><td>40 <td>2 <td> offset of last free space byte on page.
-  <tr><td>42 <td>2 <td> number of bytes of free space (in total) on page.
-  <tr><td>44 <td>4 <td> Unused.
-</table>
-
-<h2> Intkey Leaf Pages </h2>
-
-The keys for an intkey table are the concatenation of a 64-bit rowid and a
-56-bit transaction id. 15 bytes in total. Associated with each key is an
-N byte SQLite record blob of data.
-
-Immediately following the second 8-byte header, an intkey leaf page contains:
-
-  *  An nEntry array of 16-byte key/flags entries. The first 8-byte field
-     contains the rowid value. The 7 least-significant bytes of the second
-     8-byte field the transaction id. The remaining 8 bits are used for flags.
-     There are two flags defined - IS_DELETED and HAS_OVERFLOW.
-
-  *  An nEntry array of 2-byte offsets. Offsets are relative to the start
-     of the page. The first entry corresponds to the last byte of the
-     first record, the last to the last byte of the last record.
-
-  *  The record area. The record area is itself broken into 0 or more bytes of
-     free space followed by the populated area. Each record consists of:
-  <ul>
-    <li> If IS_DELETED is set, the transaction id of the transaction that
-         deleted the entry, encoded as an SQLite varint.
-    <li> The total size of the record, in bytes, as an SQLite varint.
-    <li> The part of the record stored on the main page.
-    <li> If HAS_OVERFLOW is set, a 4 byte overflow page number.
-  </ul>
-
-The size of the part of the record stored on the main page is calculated as:
-
-<verbatim>
-        if( nRecord <= (pgsz-40-16-2-9) ){
-          nLocal = nRecord;
-        }else{ 
-          nLocal = MIN(pgsz-40-16-2-9-4, MAX(pgsz/4, nRecord % (pgsz-40)))
-        }
-</verbatim>
-
-The offset array may contain the special value 0 for the first key on the
-page only. In this case there is no record associated with the key.
-This happens when the record has been permanently deleted, but the key cannot
-be deleted because it is the fencepost key.
-
-<h2> Intkey Internal Node Pages </h2>
-
-The remaining page space is divided into two sections:
-
-  *  An nEntry array of 16-byte key/flags entries. The first 15 bytes of
-     the entry contains the key.
-  *  An nEntry array of 4-byte child page numbers.
-
-<h2> Index Leaf Pages </h2>
-
-The remaining page space is divided into two sections:
-
-  *  An nEntry array of 8-byte transaction-id/flags fields. Used in the
-     same way and with the same flags as the corresponding field on intkey
-     pages.
-  *  An nEntry array of 2-byte offsets. Offsets are relative to the start
-     of the page. The first entry corresponds to the last byte of the
-     first record, the last to the last byte of the last record.
-  *  An nEntry array of tightly packed records. Each record consists of:
-  <ul>
-    <li> If IS_DELETED is set, the transaction id of the transaction that
-         deleted the entry, encoded as an SQLite varint.
-    <li> The part of the record stored on the main page.
-    <li> If HAS_OVERFLOW is set, a 4 byte overflow page number.
-  </ul>
-
-The size of the part of the record stored on the main page is calculated as:
-
-<verbatim>
-        if( nRecord <= (pgsz/4) ){
-          nLocal = nRecord;
-        }else{ 
-          nLocal = pgsz/4;
-        }
-</verbatim>
-
-<h2> Index Internal Node Pages </h2>
-
-Same format as index leaf pages, except that immediately following the
-array of transaction-id/flags fields, there is:
-
-  *  An nEntry array of 4-byte logical child page numbers.
-
-The offset array may contain the special value 0 for the first key on the
-page only. In this case there is no fencepost record associated with the 
-child - the child page is the leftmost page in the tree.
-
-<h2> Overflow pages </h2>
-
-For an overflow page, the "peer node" field of the page header contains the
-next page in the overflow list, or 0 if there is no next page. The nEntry
-field is set to the number of bytes of data on the page following the page 
-header.
-
-<h1> Page-Map Format </h1>
+<h1 id=pagemap> Page Map Format </h1>
 
 Page-map slots 2-32, inclusive, are not used for a logical-to-physical page
 mapping. Instead, the lower 32-bits of these slots are used as follows:
@@ -187,4 +40,147 @@ mapping. Instead, the lower 32-bits of these slots are used as follows:
   <tr><td>2   <td>Largest logical page number allocated in database.
   <tr><td>3   <td>Largest physical page number allocated in database.
 </table>
+
+<h1 id=db> Database File Format </h1>
+
+Database pages are numbered starting from 1. Each database page is <i>pgsz</i>
+bytes in size, where <i>pgsz</i> is determined by the value stored in the
+header file.
+
+There are 5 types of database page:
+
+  *  Intkey Leaf Pages
+  *  Intkey Internal Node Pages
+  *  Index Leaf Pages
+  *  Index Internal Node Pages
+  *  Overflow Pages
+
+All pages begin with an 8 byte page header:
+
+<table border=1 cellpadding=5 width=90%>
+  <tr><th>Byte Offset <th>Size <th width=80%> Description
+  <tr><td>0 <td>1 <td> Page type:
+  *  0x01 - Intkey pages.
+  *  0x02 - Index pages.
+  *  0x03 - Overflow page. 
+  <tr><td>1 <td>1 <td> Distance between list and leaves. For leaves, 0, for
+                        parents of leaves, 1, and so on)
+  <tr><td>2 <td>2 <td> Number of entries on page (<i>nEntry</i> below).
+  <tr><td>4 <td>4 <td> Peer page number.
+</table>
+
+<h2 id=intkey_leaf> Intkey Leaf Page Format </h2>
+
+Following the page header, the free-space header:
+
+<table border=1 cellpadding=5 width=90%>
+  <tr><th>Byte Offset <th>Size <th width=80%> Description
+  <tr><td>8 <td>2 <td> number of bytes of free space between the end of 
+    header array and the first entry within the record area.
+  <tr><td>10 <td>2 <td> number of bytes of free space (in total) within
+    record area.
+  <tr><td>12 <td>4 <td> Unused.
+</table>
+
+Following the free-space header, an array of <i>nEntry</i> 16-byte entries. 
+Each 16-byte entry is comprised of the following:
+
+  *  8-byte rowid value.
+  *  4-byte record size (in bytes).
+  *  2-byte record offset (from start of page).
+  *  1-byte flags field. Flags are HAS_TID, HAS_OLD and HAS_OVFL.
+  *  1-byte unused.
+
+Each record within the record area consists of:
+
+  *  If HAS_TID is set, an 8-byte transaction id.
+  *  If HAS_OLD is set, a 4-byte "old" physical page number.
+  *  If HAS_OVFL is set, a 4-byte overflow page number.
+  *  The part of the record stored on the main page.
+
+The part of the record stored on the main page is calculated using:
+
+<verbatim>
+        if( nRecord <= (pgsz-16-16-12) ){
+          nLocal = nRecord;
+        }else{ 
+          nLocal = nRecord % (pgsz-8);
+          if( nLocal < (pgsz/16) || nLocal > (pgsz-16-16-16) ){
+            nLocal = pgsz/16;
+          }
+        }
+</verbatim>
+
+<h2> Intkey Internal Node Page Format </h2>
+
+Each entry on an intkey internal node page consists of an 8 byte rowid and
+a 4 byte page-id. Such a page may therefore contain up to <i>nMax</i> entries:
+
+<verbatim>
+        nMax = ((pgsz-8) / 12)
+</verbatim>
+
+The area immediately following the page header is divided into two arrays
+of <i>nMax</i> entries each. The first is of 8-byte rowids, the second
+of 4-byte page ids. Only the first <i>nEntry</i> entries in each array
+are valid.
+
+<h2> Overflow Page Format </h2>
+
+As in SQLite, overflow pages are a linked list, starting with the page
+identified in the b-tree page record. The number of overflow pages in
+the linked list, and the amount of data on the last of them, may be inferred
+from the record-size field on the b-tree page. The amount of data on each
+page, in bytes, is also stored in the <i>nEntry</i> field of the overflow
+page header.
+
+<i style=color:green>Idea: Overflow pages do not need logical page numbers. All
+pointers within the linked list, and the original page number on the b-tree
+page could just be physical page numbers.</i>
+
+<h2> Index Leaf Page Format </h2>
+
+Index leaf pages have a free-space header immediately following the page
+header. See the <a href=#intkey_leaf>intkey leaf page format</a> section for
+details.
+
+Immediately following the free-space header is an <i>nEntry</i> entry array
+of 8-byte entries. Each entry consists of:
+
+  *  A 4-byte record size value,
+  *  A 2-byte record offset, and
+  *  A 1-byte flags field (flags are HAS_TID, HAS_OLD and HAS_OVFL).
+
+Each record within the record area consist of:
+
+  *  If HAS_TID is set, an 8-byte transaction id.
+  *  If HAS_OLD is set, a 4-byte "old" physical page number.
+  *  If HAS_OVFL is set, a 4-byte overflow page number.
+  *  The part of the record stored on the main page.
+
+just as those on index leaf pages do. The part of the record stored on the
+main page is calculated using:
+
+<verbatim>
+        if( nRecord <= (pgsz-16-8-12) ){
+          nLocal = nRecord;
+        }else{ 
+          nLocal = nRecord % (pgsz-8);
+          if( nLocal < (pgsz/16) || nLocal > (pgsz-16-8-16) ){
+            nLocal = pgsz/16;
+          }
+        }
+</verbatim>
+
+<h2> Index Internal Node Page Format </h2>
+
+As for index leaf pages, except that the <i>nEntry</i> array consists of
+12-byte entries:
+
+  *  A 4-byte record size value,
+  *  A 4-byte child page number.
+  *  A 2-byte record offset, and
+  *  A 1-byte flags field (the only valid flag is HAS_OVFL).
+
+
 
