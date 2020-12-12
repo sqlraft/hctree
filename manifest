@@ -1,5 +1,5 @@
-C Split\sthe\sdatabase\sinto\sthree\sfiles\sat\sthe\shct_file.c\slevel.\sSo\sthat\sthey\scan\sbe\sfsync()ed\sseparately\sand\sto\sremove\sthe\schunksize\sparameter\sfrom\sthe\ssystem.
-D 2020-12-05T19:30:00.049
+C Fix\ssimple\sinserts\sagain.
+D 2020-12-12T17:48:06.356
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -507,11 +507,11 @@ F src/func.c 2333eb4277f55a5efdc12ef754e7d7ec9105d257b2fd00301d23ce1e8fa67dc0
 F src/global.c 943256ac44f333039d35a9830c18d075a81fa6b6bf2af05771494a9acfb9a40b
 F src/hash.c 8d7dda241d0ebdafb6ffdeda3149a412d7df75102cecfc1021c98d6219823b19
 F src/hash.h 9d56a9079d523b648774c1784b74b89bd93fac7b365210157482e4319a468f38
-F src/hctInt.h e3ecf757a5ebb8eb255e7c1270ba09709ae14c9fa3c64642127eda8361b52aa9
-F src/hct_database.c daa8ab86718de41f634c014f1fb89518018911e9193ea028dd65959ff10100c0
-F src/hct_file.c abfbf14e36b71bba7a606c84f79609dbb06b9a8b34034378f26652aaa940f315
+F src/hctInt.h 895c1f85465a101345a083d75f96525efc1430329d25e10fe8f814fb973f576a
+F src/hct_database.c 37ca7f212218692905e962b89aa734a1709c077ad53b2d074e3f2cd6fd6cb55b
+F src/hct_file.c 6a5e3a212a4264eb8009e0f20cad09d8394a968e050304b7046baa41efeeb2f8
 F src/hct_tree.c 49024e058fced83a12e87e7b69bae11091130cfa3c6f82f431306dac390be3f3
-F src/hctree.c 0c1421494db98793a59457bc05240d9c9de4ba1442ee79670d282736ab186ef5
+F src/hctree.c 3d56cc4f555e3e6f8e9f64704ccf12b601af048c55cb51c22c5ad8fef5971fe0
 F src/hwtime.h cb1d7e3e1ed94b7aa6fde95ae2c2daccc3df826be26fc9ed7fd90d1750ae6144
 F src/in-operator.md 10cd8f4bcd225a32518407c2fb2484089112fd71
 F src/insert.c 7e081d33aab4a9d761c39dccf3c3872c35501565d2ed9db66301918d23bc7901
@@ -1062,6 +1062,7 @@ F test/gencol1.test b05e6c5edb9b10d48efb634ed07342441bddc89d225043e17095c36e5675
 F test/genesis.tcl 1e2e2e8e5cc4058549a154ff1892fe5c9de19f98
 F test/having.test e4098a4b8962f9596035c3b87a8928a10648acc509f1bb8d6f96413bbf79a1b3
 F test/hct.test 98dc881d4db196ea6527c2f5b11ae135eb593afb5e97f1350aaf9c9d077f8bac
+F test/hct_misc1.test 61bddf6234776392818b78671ddbe3fad97163a166c599e817cba75ed0c4d22c
 F test/hct_misc2.test cc1ae700a334c5f3cad72d4e9acea51506ff263e33b9145c135b05ba0d07aeca
 F test/hct_misc3.test 137bd235e61345c8fca9b7a909f98f2735b055fb1e05802144d5fdc29c34d128
 F test/hct_vtab1.test a752443f1c214d3cb87eb6d25143dd9983813f1ad43381d9603d802b9c57ff24
@@ -1448,7 +1449,7 @@ F test/temptable.test d2c9b87a54147161bcd1822e30c1d1cd891e5b30
 F test/temptable2.test d2940417496e2b9548e01d09990763fbe88c316504033256d51493e1f1a5ce6a
 F test/temptable3.test d11a0974e52b347e45ee54ef1923c91ed91e4637
 F test/temptrigger.test 38f0ca479b1822d3117069e014daabcaacefffcc
-F test/tester.tcl 6417cbb60c4169804e2e1b36ce1a840c9f33d0b0d97956e058f3cc49ed3904f0
+F test/tester.tcl 5debbb4407b79c75fb20c7633f68e8e2b2246270121904a25aa8a9793570a93d
 F test/thread001.test b61a29dd87cf669f5f6ac96124a7c97d71b0c80d9012746072055877055cf9ef
 F test/thread002.test e630504f8a06c00bf8bbe68528774dd96aeb2e58
 F test/thread003.test ee4c9efc3b86a6a2767516a37bd64251272560a7
@@ -1903,8 +1904,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P 59943269f240ffa048d4fa7e032f2d741b5a22d0d14e3d82a6601bd4e9fbda37
-R 2e02b6baf103003343259b46fff8103f
+P dbcf6e19c7c978632a0c846824f42e7c567e7a60c14410b905bbf9db44129d0a
+R 66269d4ceb2fb4b7c0c93c6f54a1ae3e
 U dan
-Z c923c8e6c5333a9f86fedc234d65fa0c
+Z 1c025d310d55520fa129e446e1131c18
 # Remove this line to create a well-formed Fossil manifest.

@@ -706,15 +706,17 @@ int sqlite3HctFilePgsz(HctFile *pFile){
 }
 
 
+/* 
+** Virtual table type for "hctpgmap".
+*/
 typedef struct pgmap_vtab pgmap_vtab;
 struct pgmap_vtab {
   sqlite3_vtab base;              /* Base class - must be first */
   sqlite3 *db;
 };
 
-/* templatevtab_cursor is a subclass of sqlite3_vtab_cursor which will
-** serve as the underlying representation of a cursor that scans
-** over rows of the result
+/* 
+** Virtual cursor type for "hctpgmap".
 */
 typedef struct pgmap_cursor pgmap_cursor;
 struct pgmap_cursor {

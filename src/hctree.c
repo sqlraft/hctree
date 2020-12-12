@@ -547,6 +547,8 @@ static int btreeFlushToDisk(Btree *p){
   int i;
   int rc = SQLITE_OK;
 
+  sqlite3HctDbStartWrite(p->pHctDb);
+
   /* Initialize any root pages created by this transaction */
   for(i=0; rc==SQLITE_OK && i<p->nNewRoot; i++){
     BtNewRoot *pRoot = &p->aNewRoot[i];
