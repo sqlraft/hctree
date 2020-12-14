@@ -5,6 +5,8 @@ typedef sqlite3_int64 i64;
 typedef unsigned char u8;
 typedef unsigned int u32;
 
+# define HctAtomicStore(PTR,VAL)  __atomic_store_n((PTR),(VAL),__ATOMIC_RELAXED)
+
 /*
 ** Page types. These are the values that may appear in the page-type
 ** field of a page header.
@@ -130,8 +132,19 @@ int sqlite3HctDbCsrData(HctDbCsr *pCsr, int *pnData, const u8 **paData);
 typedef struct HctFile HctFile;
 HctFile *sqlite3HctDbFile(HctDatabase *pDb);
 
-int sqlite3HctFileOpen(const char *zFile, HctFile **ppFile);
+int sqlite3HctFileOpen(
+  const char *zFile, 
+  HctFile **ppFile
+);
 void sqlite3HctFileClose(HctFile *pFile);
+
+typedef struct HctFileGlobal HctFileGlobal;
+struct HctFileGlobal { sqlite3_mutex *pMutex; };
+HctFileGlobal *sqlite3HctFileGlobal(
+  HctFile *pFile,
+  int nGlobal,
+  void (*xDelete)(HctFileGlobal*)
+);
 
 /* Return the page-size in bytes */
 int sqlite3HctFilePagesize(HctFile *pFile);
@@ -170,7 +183,11 @@ int sqlite3HctFilePageGetPhysical(HctFile *pFile, u32 iPg, HctFilePage *pPg);
 u64 sqlite3HctFileStartTrans(HctFile *pFile);
 int sqlite3HctFileFinishTrans(HctFile *pFile);
 
+u64 sqlite3HctFileAllocateTransid(HctFile *pFile);
+u64 sqlite3HctFileAllocateSnapshotid(HctFile *pFile);
 u64 sqlite3HctFileGetTransid(HctFile *pFile);
+u64 sqlite3HctFileGetSnapshotid(HctFile *pFile);
+
 
 HctDatabase *sqlite3HctDbFind(sqlite3*, int);
 

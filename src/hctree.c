@@ -760,7 +760,10 @@ int sqlite3BtreeCursor(
   BtCursor *pCur                              /* Write new cursor here */
 ){
   int rc;
+
+  assert( p->eTrans!=SQLITE_TXN_NONE );
   assert( pCur->pHctTreeCsr==0 );
+
   pCur->pKeyInfo = pKeyInfo;
   rc = sqlite3HctTreeCsrOpen(p->pHctTree, iTable, &pCur->pHctTreeCsr);
   if( rc==SQLITE_OK && p->pHctDb ){

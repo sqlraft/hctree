@@ -43,6 +43,7 @@
 #define HCT_PAGEMAP_LOGICAL_EOF      2
 #define HCT_PAGEMAP_PHYSICAL_EOF     3
 #define HCT_PAGEMAP_TRANSID_EOF      4
+#define HCT_PAGEMAP_COMMITID         5
 
 #define HCT_PGMAPFLAG_PHYSINUSE  (((u64)0x00000001)<<56)
 
@@ -55,7 +56,7 @@ typedef struct HctMappingChunk HctMappingChunk;
 ** Global variables for this module. Access is protected by
 ** SQLITE_MUTEX_STATIC_VFS1.
 */
-static struct HctFileGlobal {
+static struct HctFileGlobalVars {
   HctFileServer *pServerList;
 } g;
 
@@ -89,6 +90,9 @@ struct HctMapping {
 struct HctFileServer {
   sqlite3_mutex *pMutex;          /* Mutex to protect this object */
   HctFile *pFileList;
+
+  HctFileGlobal *pGlobal;
+  void (*xGFree)(HctFileGlobal*);
 
   int fdDb;                       /* Read/write file descriptor */
   int fdMap;                      /* Read/write file descriptor for page-map */
@@ -182,6 +186,18 @@ static int hctFilePagemapSet(HctMapping *p, u32 iSlot, u64 iOld, u64 iNew){
 
 static u64 hctFilePagemapGet(HctMapping *p, u32 iSlot){
   return *(hctPagemapPtr(p, iSlot));
+}
+
+/*
+** Increment the value in slot iSlot by nIncr. Return the new value.
+*/
+static u64 hctFilePagemapIncr(HctMapping *p, u32 iSlot, int nIncr){
+  u64 *pPtr = hctPagemapPtr(p, iSlot);
+  u64 iOld;
+  do {
+    iOld = *pPtr;
+  }while( 0==(__sync_bool_compare_and_swap(pPtr, iOld, iOld+nIncr)) );
+  return iOld+nIncr;
 }
 
 static int hctFilePagemapSetLogical(
@@ -400,10 +416,10 @@ static int hctFileServerFind(HctFile *pFile, const char *zFile){
   sqlite3_mutex_enter(pMutex);
 
   /* Search for an existing HctFileServer already open on this database */
-  if( stat(zFile, &sStat) ){
+  if( 0==stat(zFile, &sStat) ){
     for(pServer=g.pServerList; pServer; pServer=pServer->pServerNext){
       if( pServer->st_ino==(i64)sStat.st_ino
-          && pServer->st_dev==(i64)sStat.st_dev
+       && pServer->st_dev==(i64)sStat.st_dev
         ){
         break;
       }
@@ -478,6 +494,33 @@ int sqlite3HctFileOpen(const char *zFile, HctFile **ppFile){
   return rc;
 }
 
+HctFileGlobal *sqlite3HctFileGlobal(
+  HctFile *pFile,
+  int nGlobal,
+  void (*xDelete)(HctFileGlobal*)
+){
+  HctFileServer *pServer = pFile->pServer;
+  HctFileGlobal *pRet = 0;
+  sqlite3_mutex_enter(pServer->pMutex);
+  pRet = pServer->pGlobal;
+  if( pRet==0 ){
+    pRet = sqlite3_malloc(sizeof(HctFileGlobal) + nGlobal);
+    if( pRet ){
+      memset(pRet, 0, sizeof(HctFileGlobal) + nGlobal);
+      pRet->pMutex = sqlite3_mutex_alloc(SQLITE_MUTEX_RECURSIVE);
+      if( pRet->pMutex==0 ){
+        sqlite3_free(pRet);
+        pRet = 0;
+      }else{
+        pServer->pGlobal = pRet;
+        pServer->xGFree = xDelete;
+      }
+    }
+  }
+  sqlite3_mutex_leave(pServer->pMutex);
+  return pRet;
+}
+
 void sqlite3HctFileClose(HctFile *pFile){
   if( pFile ){
     HctFileServer *pDel = 0;
@@ -518,6 +561,13 @@ void sqlite3HctFileClose(HctFile *pFile){
         if( pChunk->pData ) munmap(pChunk->pData, szChunkData);
       }
       hctMappingUnref(pMapping);
+
+      if( pDel->pGlobal ){
+        pDel->xGFree(pDel->pGlobal);
+        sqlite3_mutex_free(pDel->pGlobal->pMutex);
+        sqlite3_free(pDel->pGlobal);
+        pDel->pGlobal = 0;
+      }
 
       if( pDel->pHdr ){
         munmap(pDel->pHdr, HCT_HEADER_PAGESIZE*2);
@@ -692,8 +742,21 @@ u64 sqlite3HctFileStartTrans(HctFile *pFile){
   return (u64)iRet;
 }
 
+u64 sqlite3HctFileAllocateTransid(HctFile *pFile){
+  u64 iVal = hctFilePagemapIncr(pFile->pMapping, HCT_PAGEMAP_TRANSID_EOF, 1);
+  return iVal & HCT_TID_MASK;
+}
+u64 sqlite3HctFileAllocateSnapshotid(HctFile *pFile){
+  u64 iVal = hctFilePagemapIncr(pFile->pMapping, HCT_PAGEMAP_COMMITID, 1);
+  return iVal & HCT_TID_MASK;
+}
+
 u64 sqlite3HctFileGetTransid(HctFile *pFile){
   u64 iVal = hctFilePagemapGet(pFile->pMapping, HCT_PAGEMAP_TRANSID_EOF);
+  return iVal & HCT_TID_MASK;
+}
+u64 sqlite3HctFileGetSnapshotid(HctFile *pFile){
+  u64 iVal = hctFilePagemapGet(pFile->pMapping, HCT_PAGEMAP_COMMITID);
   return iVal & HCT_TID_MASK;
 }
 
