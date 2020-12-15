@@ -18,8 +18,30 @@ set testprefix hct_misc2
 do_execsql_test 1.0 {
   CREATE TABLE tx(a INTEGER PRIMARY KEY, b TEXT);
 }
+do_execsql_test 1.1 {
+  INSERT INTO tx VALUES(1346, hex(randomblob(38)));
+  INSERT INTO tx VALUES(41465, hex(randomblob(6)));
+}
+do_execsql_test 1.2 {
+  DELETE FROM tx WHERE a=1346;
+}
+do_execsql_test 1.3 {
+  DELETE FROM tx WHERE a=41465;
+}
+#execsql_pp { SELECT * FROM hctdb; }
+do_execsql_test 1.4 {
+  SELECT * FROM tx;
+}
+
+#-------------------------------------------------------------------------
+reset_db
+
+do_execsql_test 2.0 {
+  CREATE TABLE tx(a INTEGER PRIMARY KEY, b TEXT);
+}
 
 set nRow 10000
+set nStep 100
 
 expr srand(0)
 unset -nocomplain data
@@ -33,7 +55,7 @@ for {set i 0} {$i < $nRow} {incr i} {
 }
 
 foreach k [array names data] {
-  do_execsql_test 1.1.$k {
+  do_execsql_test 2.1.$k {
     SELECT a, b FROM tx WHERE a=$k
   } [list $k $data($k)]
 }
@@ -45,8 +67,8 @@ while {[llength [array names data]]>0} {
   execsql { DELETE FROM tx WHERE a = $k }
   unset data($k)
   set nLength [llength $L]
-  if {($nLength % 100)==0} {
-    do_execsql_test 1.2.[llength $L] {
+  if {($nLength % $nStep)==0} {
+    do_execsql_test 2.2.[llength $L] {
       SELECT a FROM tx ORDER BY a
     } [lsort -integer [array names data]]
   }

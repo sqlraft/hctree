@@ -657,8 +657,7 @@ int sqlite3HctFilePageGet(HctFile *pFile, u32 iPg, HctFilePage *pPg){
 }
 
 /*
-** Obtain a reference to physical page iPg. This is presently used by
-** the virtual table interfaces only.
+** Obtain a reference to physical page iPg.
 */
 int sqlite3HctFilePageGetPhysical(HctFile *pFile, u32 iPg, HctFilePage *pPg){
   u64 iVal;
