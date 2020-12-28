@@ -17,25 +17,30 @@ set testprefix hct_misc1
 
 if 1 {
 
-do_execsql_test 1.1 { CREATE TABLE t1(a, b) }
+do_execsql_test 1.1 { 
+  CREATE TABLE t1(a, b);
+  INSERT INTO t1 VALUES(1, 1);
+  INSERT INTO t1 VALUES(2, 2);
+}
 
 #execsql_pp { SELECT rowid, sql FROM sqlite_schema }
 #execsql_pp { SELECT * FROM hctdb }
 
-do_execsql_test 1.1b {
+do_execsql_test 1.2 {
+  SELECT * FROM t1;
+} {1 1 2 2}
+
+do_execsql_test 1.2 {
   CREATE TABLE t2(x);
 }
 #execsql_pp { SELECT rowid, sql FROM sqlite_schema }
 
-do_execsql_test 1.1b {
-  INSERT INTO t1 VALUES(1, 1);
-  INSERT INTO t1 VALUES(2, 2);
-
+do_execsql_test 1.3 {
   INSERT INTO t2 VALUES('a');
   INSERT INTO t2 VALUES('b');
 }
 
-do_execsql_test 1.1.1 {
+do_execsql_test 1.4 {
   SELECT name, rootpage FROM sqlite_master
 } {t1 33 t2 34}
 
@@ -287,32 +292,27 @@ db2 close
 #-------------------------------------------------------------------------
 reset_db
 sqlite3 db2 test.db
-do_execsql_test 12.0 {
-  CREATE TABLE t1(x INTEGER PRIMARY KEY, b TEXT);
+
+foreach {tn db sql res} {
+  0 db   "CREATE TABLE t1(x INTEGER PRIMARY KEY, b TEXT)" {}
+  1 db   "INSERT INTO t1 VALUES(2, 'two'), (3, 'three')"  {}
+  2 db2                 "BEGIN" {}
+  3 db2                 "  SELECT * FROM t1" 
+                           {2 two 3 three}
+  4 db   "INSERT INTO t1 VALUES(1, 'one'), (4, 'four')"   {}
+  5 db2                 "  SELECT * FROM t1 WHERE x>0"
+                           {2 two 3 three}
+
+  6 db2                 "  SELECT * FROM t1 WHERE x>=1"
+                           {2 two 3 three}
+  7 db2                 "COMMIT" {}
+  8 db2                 "SELECT * FROM t1"
+                         {1 one 2 two 3 three 4 four}
+} {
+  do_execsql_test -db $db 12.$tn $sql $res
 }
-do_execsql_test 12.1 {
-  INSERT INTO t1 VALUES(2, 'two'), (3, 'three');
-}
-do_execsql_test -db db2 12.2 {
-  BEGIN;
-    SELECT * FROM t1
-} {2 two 3 three}
-do_execsql_test 11.3 {
-  INSERT INTO t1 VALUES(1, 'one'), (4, 'four');
-}
-do_execsql_test -db db2 12.4 {
-    SELECT * FROM t1
-} {2 two 3 three}
-do_execsql_test -db db2 12.5 {
-    SELECT * FROM t1 WHERE x>0
-} {2 two 3 three}
-do_execsql_test -db db2 12.6 {
-    SELECT * FROM t1 WHERE x>=1
-} {2 two 3 three}
-do_execsql_test -db db2 12.7 {
-  COMMIT;
-  SELECT * FROM t1
-} {1 one 2 two 3 three 4 four}
+
+db2 close
 
 #-------------------------------------------------------------------------
 reset_db

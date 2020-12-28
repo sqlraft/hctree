@@ -700,6 +700,14 @@ int sqlite3HctFilePageNew(HctFile *pFile, u32 iPg, HctFilePage *pPg){
   return rc;
 }
 
+void sqlite3HctFilePageUnwrite(HctFilePage *pPg){
+  if( pPg->aNew ){
+    /* TODO: Reclaim resources properly */
+    pPg->iNewPg = 0;
+    pPg->aNew = 0;
+  }
+}
+
 int sqlite3HctFilePageWrite(HctFilePage *pPg){
   int rc = SQLITE_OK;             /* Return code */
 

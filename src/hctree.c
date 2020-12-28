@@ -501,12 +501,8 @@ int sqlite3BtreeIncrVacuum(Btree *p){
 ** the write-transaction for this database file is to delete the journal.
 */
 int sqlite3BtreeCommitPhaseOne(Btree *p, const char *zSuperJrnl){
-  int rc = SQLITE_OK;
-  if( p->pHctDb ){
-    sqlite3HctDbEndRead(p->pHctDb);
-    /* TODO: Invalidate any existing cursors */
-  }
-  return rc;
+  /* Everything happens in sqlite3BtreeCommitPhaseTwo() */
+  return SQLITE_OK;
 }
 
 static int btreeFlushOneToDisk(void *pCtx, u32 iRoot, KeyInfo *pKeyInfo){
@@ -546,6 +542,7 @@ static int btreeFlushOneToDisk(void *pCtx, u32 iRoot, KeyInfo *pKeyInfo){
 static int btreeFlushToDisk(Btree *p){
   int i;
   int rc = SQLITE_OK;
+  int rc2;
 
   sqlite3HctDbStartWrite(p->pHctDb);
 
@@ -559,8 +556,20 @@ static int btreeFlushToDisk(Btree *p){
     rc = sqlite3HctTreeForeach(p->pHctTree, (void*)p, btreeFlushOneToDisk);
   }
 
-  assert( rc==SQLITE_OK );        /* TODO: fix this */
-  rc = sqlite3HctDbEndWrite(p->pHctDb);
+  if( rc==SQLITE_BUSY ){
+    /* The transaction hit a conflict. Undo it. */ 
+#if 0
+    rc2 = sqlite3HctTreeForeach(p->pHctTree, (void*)p, btreeFlushOneToDisk);
+    if( rc2!=SQLITE_OK && rc2!=SQLITE_DONE ){
+      rc = rc2;
+    }
+#endif
+  }else if( rc!=SQLITE_OK ){
+    assert( 0 );        /* TODO: fix this */
+  }
+
+  rc2 = sqlite3HctDbEndWrite(p->pHctDb);
+  if( rc==SQLITE_OK ) rc = rc2;
   return rc;
 }
 
@@ -601,6 +610,7 @@ int sqlite3BtreeCommitPhaseTwo(Btree *p, int bCleanup){
     }
     p->eTrans = SQLITE_TXN_READ;
   }
+  sqlite3HctDbEndRead(p->pHctDb);
   return rc;
 }
 
