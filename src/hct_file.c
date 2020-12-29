@@ -40,10 +40,12 @@
 /*
 ** Pagemap slots used for special purposes.
 */
-#define HCT_PAGEMAP_LOGICAL_EOF      2
-#define HCT_PAGEMAP_PHYSICAL_EOF     3
-#define HCT_PAGEMAP_TRANSID_EOF      4
-#define HCT_PAGEMAP_COMMITID         5
+#define HCT_ROOTPAGE_SCHEMA          1
+#define HCT_ROOTPAGE_META            2
+#define HCT_PAGEMAP_LOGICAL_EOF      3
+#define HCT_PAGEMAP_PHYSICAL_EOF     4
+#define HCT_PAGEMAP_TRANSID_EOF      5
+#define HCT_PAGEMAP_COMMITID         6
 
 #define HCT_PGMAPFLAG_PHYSINUSE  (((u64)0x00000001)<<56)
 
@@ -171,8 +173,8 @@ static void *hctPagePtr(HctMapping *p, u32 iPhys){
   ];
 }
 
-static void hctFileInitRootpage(HctMapping *p, u32 iPg, u8 bIndex){
-  sqlite3HctDbRootPageInit(bIndex, hctPagePtr(p, iPg), p->szPage);
+static void hctFileInitRootpage(HctMapping *p, u32 iPg){
+  sqlite3HctDbRootPageInit(0, hctPagePtr(p, iPg), p->szPage);
 }
 
 /*
@@ -352,10 +354,14 @@ static int hctFileServerInit(HctFileServer *p, const char *zFile){
     **      ids allocated fields (page-map slots 2 and 3).
     */
     if( rc==SQLITE_OK && hctFilePagemapGet(pMapping, 1)==0 ){
+      u8 *a1 = (u8*)hctPagePtr(pMapping, HCT_ROOTPAGE_SCHEMA);
+      u8 *a2 = (u8*)hctPagePtr(pMapping, HCT_ROOTPAGE_META);
       hctFilePagemapSet(pMapping, HCT_PAGEMAP_LOGICAL_EOF, 0, 32);
-      hctFilePagemapSet(pMapping, HCT_PAGEMAP_PHYSICAL_EOF, 0, 1);
+      hctFilePagemapSet(pMapping, HCT_PAGEMAP_PHYSICAL_EOF, 0, 2);
       hctFilePagemapSet(pMapping, 1, 0, 1|HCT_PGMAPFLAG_PHYSINUSE);
-      hctFileInitRootpage(pMapping, 1, 0);
+      hctFilePagemapSet(pMapping, 2, 0, 2|HCT_PGMAPFLAG_PHYSINUSE);
+      sqlite3HctDbRootPageInit(0, a1, p->szPage);
+      sqlite3HctDbMetaPageInit(a2, p->szPage);
     }
   }
   return rc;

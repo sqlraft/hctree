@@ -40,8 +40,16 @@ struct Btree {
   BtNewRoot *aNewRoot;
 
   u32 iNextRoot;                  /* Next root page to allocate if pHctDb==0 */
-  u32 aMeta[16];                  /* 16 database meta values */
+  u32 aMeta[SQLITE_N_BTREE_META]; /* 16 database meta values */
+  int eMetaState;
 };
+
+/*
+** Candidate values for Btree.eMetaState.
+*/
+#define HCT_METASTATE_NONE  0
+#define HCT_METASTATE_READ  1
+#define HCT_METASTATE_DIRTY 2
 
 struct BtNewRoot {
   int iSavepoint;
@@ -451,8 +459,10 @@ int sqlite3BtreeBeginTrans(Btree *p, int wrflag, int *pSchemaVersion){
   int rc = SQLITE_OK;
   int req = wrflag ? SQLITE_TXN_WRITE : SQLITE_TXN_READ;
 
-  if( pSchemaVersion ) *pSchemaVersion = p->aMeta[1];
-  if( wrflag ){
+  if( pSchemaVersion ){
+    sqlite3BtreeGetMeta(p, 1, (u32*)pSchemaVersion);
+  }
+  if( rc==SQLITE_OK && wrflag ){
     rc = sqlite3HctTreeBegin(p->pHctTree, 1 + p->db->nSavepoint);
   }
   if( rc==SQLITE_OK && p->eTrans<req ){
@@ -552,6 +562,10 @@ static int btreeFlushToDisk(Btree *p){
     rc = sqlite3HctDbRootInit(p->pHctDb, pRoot->bIndex, pRoot->pgnoRoot);
   }
 
+  if( rc==SQLITE_OK && p->eMetaState==HCT_METASTATE_DIRTY ){
+    int nData = SQLITE_N_BTREE_META * 4;
+    rc = sqlite3HctDbInsert(p->pHctDb, 2, 0, 0, 0, nData, (u8*)p->aMeta);
+  }
   if( rc==SQLITE_OK ){
     rc = sqlite3HctTreeForeach(p->pHctTree, (void*)p, btreeFlushOneToDisk);
   }
@@ -608,9 +622,12 @@ int sqlite3BtreeCommitPhaseTwo(Btree *p, int bCleanup){
       sqlite3HctTreeClear(p->pHctTree);
       p->nNewRoot = 0;
     }
-    p->eTrans = SQLITE_TXN_READ;
   }
   sqlite3HctDbEndRead(p->pHctDb);
+  p->eTrans = SQLITE_TXN_NONE;
+  p->eMetaState = HCT_METASTATE_NONE;
+  /* TODO: Invalidate any active cursors */
+  assert( p->pCsrList==0 );
   return rc;
 }
 
@@ -1520,6 +1537,10 @@ int sqlite3BtreeDropTable(Btree *p, int iTable, int *piMoved){
 ** read it from this routine.
 */
 void sqlite3BtreeGetMeta(Btree *p, int idx, u32 *pMeta){
+  assert( idx>=0 && idx<SQLITE_N_BTREE_META );
+  if( p->pHctDb && p->eMetaState==HCT_METASTATE_NONE ){
+    sqlite3HctDbGetMeta(p->pHctDb, (u8*)p->aMeta, SQLITE_N_BTREE_META*4);
+  }
   *pMeta = p->aMeta[idx];
 }
 
@@ -1530,9 +1551,11 @@ void sqlite3BtreeGetMeta(Btree *p, int idx, u32 *pMeta){
 int sqlite3BtreeUpdateMeta(Btree *p, int idx, u32 iMeta){
   /* HCT: This is a problem - meta values should be subject to normal
   ** transaction/savepoint rollback.  */
-  int rc = SQLITE_OK;
+  u32 dummy;
+  sqlite3BtreeGetMeta(p, 0, &dummy);
   p->aMeta[idx] = iMeta;
-  return rc;
+  p->eMetaState = HCT_METASTATE_DIRTY;
+  return SQLITE_OK;
 }
 
 /*

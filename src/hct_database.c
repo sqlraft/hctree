@@ -358,6 +358,82 @@ void sqlite3HctDbRootPageInit(int bIndex, u8 *aPage, int szPage){
   pPg->fs.nFree = pPg->fs.nFreeSpace = szPage - sizeof(HctDbIntkeyLeaf);
 }
 
+void sqlite3HctDbMetaPageInit(u8 *aPage, int szPage){
+  HctDbIntkeyLeaf *pPg = (HctDbIntkeyLeaf*)aPage;
+  HctDbIntkeyEntry *pEntry = &pPg->aEntry[0];
+  const int nRecord = 8 + 4 + SQLITE_N_BTREE_META*4;
+  int nFree;
+
+  memset(aPage, 0, szPage);
+  pPg->pg.ePagetype = HCT_PAGETYPE_INTKEY;
+  pPg->pg.nEntry = 1;
+  nFree = szPage - sizeof(HctDbIntkeyLeaf) - sizeof(HctDbIntkeyEntry) - nRecord;
+  pPg->fs.nFree = pPg->fs.nFreeSpace = nFree;
+  pEntry->iKey = 0;
+  pEntry->nSize = SQLITE_N_BTREE_META*4;
+  pEntry->iOff = szPage - nRecord;
+  pEntry->flags = HCTDB_HAS_TID | HCTDB_HAS_OLD;
+}
+
+static void hctDbSnapshotOpen(HctDatabase *pDb){
+  if( pDb->iSnapshotId==0 ){
+    pDb->iSnapshotId = sqlite3HctFileGetSnapshotid(pDb->pFile);
+    if( pDb->pTMap==0 ){
+      hctDbTMapGet(pDb, 0);
+    }
+  }
+}
+
+static u64 hctGetU64(const u8 *a){
+  u64 ret;
+  memcpy(&ret, a, sizeof(u64));
+  return ret;
+}
+static u32 hctGetU32(const u8 *a){
+  u32 ret;
+  memcpy(&ret, a, sizeof(u32));
+  return ret;
+}
+
+
+/*
+** Load the meta-data record from the database and store it in buffer aBuf
+** (size nBuf bytes). The meta-data record is stored with rowid=0 int the
+** intkey table with root-page=2.
+*/
+int sqlite3HctDbGetMeta(HctDatabase *pDb, u8 *aBuf, int nBuf){
+  HctFilePage pg;
+  int rc;
+
+  hctDbSnapshotOpen(pDb);
+  rc = sqlite3HctFilePageGet(pDb->pFile, 2, &pg);
+  while( rc==SQLITE_OK ){
+    HctDbIntkeyLeaf *pLeaf = (HctDbIntkeyLeaf*)pg.aOld;
+    u64 iTid;
+    u32 iOld;
+    int iOff;
+
+    assert( pLeaf->pg.nEntry==1 );
+    assert( pLeaf->aEntry[0].iKey==0 );
+    assert( pLeaf->aEntry[0].nSize==nBuf );
+    assert( pLeaf->aEntry[0].flags==(HCTDB_HAS_TID|HCTDB_HAS_OLD) );
+    iOff = pLeaf->aEntry[0].iOff;
+
+    iTid = hctGetU64(&pg.aOld[iOff]);
+    iOld = hctGetU32(&pg.aOld[iOff+8]);
+    if( hctDbTMapLookup(pDb, iTid)<=pDb->iSnapshotId ){
+      memcpy(aBuf, &pg.aOld[iOff+12], nBuf);
+      sqlite3HctFilePageRelease(&pg);
+      break;
+    }
+
+    sqlite3HctFilePageRelease(&pg);
+    rc = sqlite3HctFilePageGetPhysical(pDb->pFile, iOld, &pg);
+  }
+
+  return rc;
+}
+
 int sqlite3HctDbRootInit(HctDatabase *p, int bIndex, u32 iRoot){
   HctFilePage pg;
   int rc;
@@ -506,17 +582,6 @@ int hctDbCsrSeek(
 
 void sqlite3HctDbCsrDir(HctDbCsr *pCsr, int eDir){
   pCsr->eDir = eDir;
-}
-
-static u64 hctGetU64(const u8 *a){
-  u64 ret;
-  memcpy(&ret, a, sizeof(u64));
-  return ret;
-}
-static u32 hctGetU32(const u8 *a){
-  u32 ret;
-  memcpy(&ret, a, sizeof(u32));
-  return ret;
 }
 
 static int hctDbFindKeyInPage(HctDbIntkeyLeaf *pPg, i64 iKey){
@@ -1600,12 +1665,7 @@ int sqlite3HctDbCsrOpen(HctDatabase *pDb, u32 iRoot, HctDbCsr **ppCsr){
     p->iCell = -1;
     p->pCsrNext = pDb->pCsrList;
     pDb->pCsrList = p;
-    if( pDb->iSnapshotId==0 ){
-      pDb->iSnapshotId = sqlite3HctFileGetSnapshotid(pDb->pFile);
-      if( pDb->pTMap==0 ){
-        hctDbTMapGet(pDb, 0);
-      }
-    }
+    hctDbSnapshotOpen(pDb);
   }
   *ppCsr = p;
   return rc;

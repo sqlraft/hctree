@@ -14,42 +14,66 @@
 set testdir [file dirname $argv0]
 source $testdir/tester.tcl
 set testprefix hct_mvcc1
-
-do_execsql_test 1.0 {
-  CREATE TABLE t1(a INTEGER PRIMARY KEY, b);
-  INSERT INTO t1 VALUES(1, 'one');
-  INSERT INTO t1 VALUES(3, 'three');
-  INSERT INTO t1 VALUES(5, 'five');
-}
-
 sqlite3 db2 test.db
 
-do_execsql_test 1.1 {
-  BEGIN;
-    INSERT INTO t1 VALUES(2, 'two');
-    INSERT INTO t1 VALUES(4, 'four');
+
+proc c_common {db tn sql res} {
+  if {$res=="database is locked"} {
+    uplevel [list do_test $tn [subst -nocommands {
+      list [catch { execsql {$sql} } msg] [set msg]
+    }] {1 {database is locked}}]
+  } else {
+    uplevel [list do_execsql_test -db $db $tn $sql $res]
+  }
 }
 
-breakpoint
-do_execsql_test -db db2 1.2 {
-  BEGIN;
-    SELECT * FROM t1;
-    INSERT INTO t1 VALUES(4, 'iv');
-    INSERT INTO t1 VALUES(6, 'vi');
-  COMMIT;
-} {1 one 3 three 5 five}
+#explain_i { CREATE TABLE txx(a, b); }
 
-do_execsql_test -db db2 1.3 {
-  SELECT * FROM t1;
-} {1 one 3 three 4 iv 5 five 6 vi}
+proc c1 {tn sql {res {}}} { uplevel [list c_common db $tn $sql $res] }
+proc c2 {tn sql {res {}}} { uplevel [list c_common db2 $tn $sql $res] }
 
-do_catchsql_test 1.4 {
-  COMMIT
-} {1 {database is locked}}
+c1 1.1 "CREATE TABLE t1(a INTEGER PRIMARY KEY, b)"
+c1 1.2 "INSERT INTO t1 VALUES(1, 'one')"
+c1 1.3 "INSERT INTO t1 VALUES(3, 'three')"
+c1 1.4 "INSERT INTO t1 VALUES(5, 'five')"
+c1 1.5 "BEGIN"
+c1 1.6 "  INSERT INTO t1 VALUES(2, 'two')"
+c1 1.7 "  INSERT INTO t1 VALUES(4, 'four')"
+c2 1.8                      "BEGIN"
+c2 1.9                        "SELECT * FROM t1" {1 one 3 three 5 five}
+c2 1.10                       "INSERT INTO t1 VALUES(4, 'iv')"
+c2 1.11                       "INSERT INTO t1 VALUES(6, 'vi')"
+c2 1.12                     "COMMIT"
+c2 1.13                     "SELECT * FROM t1" {1 one 3 three 4 iv 5 five 6 vi}
+c1 1.14 "COMMIT" {database is locked}
+c1 1.15 ROLLBACK
+c1 1.16 "SELECT * FROM t1" {1 one 3 three 4 iv 5 five 6 vi}
 
-do_execsql_test 1.5 {
-  SELECT * FROM t1
-} {1 one 3 three 4 iv 5 five 6 vi}
+
+
+c1 2.1 "CREATE TABLE t2(x INTEGER PRIMARY KEY, y)"
+c1 2.2 "INSERT INTO t2 VALUES(100, 'C')"
+c1 2.3 "BEGIN"
+c1 2.4 "  INSERT INTO t2 VALUES(200, 'CC')"
+c1 2.5 "  INSERT INTO t1 VALUES(10, 'ten')"
+c2 2.6                      "INSERT INTO t1 VALUES(10, 'ten')"
+c1 2.7 "COMMIT" {database is locked}
+c1 2.8 "ROLLBACK"
+c1 2.9 "SELECT * FROM t2" {100 C}
+c1 2.10 "SELECT * FROM t1" {1 one 3 three 4 iv 5 five 6 vi 10 ten}
+
+c1 3.1 "BEGIN"
+c1 3.2 "  INSERT INTO t2 VALUES(300, 'CCC')"
+c1 3.3 "  INSERT INTO t1 VALUES(20, 'twenty')"
+c2 3.4                      "INSERT INTO t2 VALUES(300, 'CCC')"
+c1 3.5 "COMMIT" {database is locked}
+c1 3.6 "ROLLBACK"
+c1 3.7 "SELECT * FROM t1" {1 one 3 three 4 iv 5 five 6 vi 10 ten}
+
+
 
 finish_test
+
+
+
 
