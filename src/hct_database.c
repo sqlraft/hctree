@@ -78,6 +78,7 @@ struct HctDatabase {
   int nWrite;                     /* Number of valid entries in aWritePg[] */
   i64 iWriteFpKey;
   HctDbCsr writecsr;
+  int bRollback;                  /* True for rollback mode */
 
   int nWriteKey;
   HctWriteKey aWriteKey[HCT_MAX_WRITEKEY];
@@ -1261,13 +1262,72 @@ static int hctDbSplitPage(
   return rc;
 }
 
+void sqlite3HctDbRollbackMode(HctDatabase *pDb, int bRollback){
+  assert( bRollback==0 || bRollback==1 );
+  assert( pDb->bRollback==0 || pDb->bRollback==1 );
+  assert( pDb->bRollback!=bRollback );
+  pDb->bRollback = bRollback;
+}
+
+static HctDbIntkeyEntry *hctDbIntkeyEntry(u8 *aPg, int iCell){
+  return iCell<0 ? 0 : (&((HctDbIntkeyLeaf*)aPg)->aEntry[iCell]);
+}
+
+static int hctDbFindRollback(
+  HctDatabase *pDb,
+  i64 iKey,
+  u8 *aPg,
+  int iCell,
+  int *pbDel,                     /* OUT: Value of bDel for rollback entry */
+  int *pnData,                    /* OUT: Value of nData for rollback entry */
+  const u8 **paData               /* OUT: Value of aData for rollback entry */
+){
+  HctDbIntkeyEntry *pEntry = hctDbIntkeyEntry(aPg, iCell);
+  int rc = SQLITE_OK;
+  if( pEntry==0 
+   || pEntry->iKey!=iKey
+   || (pEntry->flags & HCTDB_HAS_TID)==0
+   || hctGetU64(&aPg[pEntry->iOff])!=pDb->iTid
+  ){
+    return SQLITE_DONE;
+  }
+
+  if( (pEntry->flags & HCTDB_HAS_OLD)==0 ){
+    *pbDel = 1;
+    *pnData = 0;
+    *paData = 0;
+  }else{
+    u32 iOld = hctGetU32(&aPg[pEntry->iOff+8]);
+    rc = sqlite3HctFilePageGetPhysical(pDb->pFile, iOld, &pDb->writecsr.oldpg);
+    if( rc==SQLITE_OK ){
+      int b;
+      int iCell = hctDbIntkeyFindPosition(pDb->writecsr.oldpg.aOld, iKey, &b);
+      pEntry = hctDbIntkeyEntry(pDb->writecsr.oldpg.aOld, iCell);
+      if( (pEntry->flags & HCTDB_IS_DELETE) ){
+        *pbDel = 1;
+        *pnData = 0;
+        *paData = 0;
+      }else{
+        int iOff = pEntry->iOff 
+          + ((pEntry->flags & HCTDB_HAS_TID) ? 8 : 0)
+          + ((pEntry->flags & HCTDB_HAS_OLD) ? 4 : 0)
+          + ((pEntry->flags & HCTDB_HAS_OVFL) ? 4 : 0);
+        *pbDel = 0;
+        *pnData = pEntry->nSize;
+        *paData = &pDb->writecsr.oldpg.aOld[iOff];
+      }
+    }
+  }
+
+  return rc;
+}
+
 int sqlite3HctDbInsert(
   HctDatabase *pDb,
   u32 iRoot, 
   UnpackedRecord *pRec, 
   i64 iKey, 
-  int bDel,
-  int nData, const u8 *aData
+  int bDel, int nData, const u8 *aData
 ){
   int rc = SQLITE_OK;
   int iInsert;
@@ -1292,17 +1352,28 @@ int sqlite3HctDbInsert(
     hctDbCsrInit(pDb, iRoot, &pDb->writecsr);
     rc = hctDbCsrSeek(&pDb->writecsr, 0, pRec, iKey);
     assert( rc==SQLITE_OK );
-
     iInsert = pDb->writecsr.iCell;
-    if( iInsert>=0 && hctDbIntkeyGetKey(pDb->writecsr.pg.aOld, iInsert)==iKey ){
+
+    if( pDb->bRollback ){
+      rc = hctDbFindRollback(
+          pDb, iKey, pDb->writecsr.pg.aOld, iInsert, &bDel, &nData, &aData
+      );
+      if( rc!=SQLITE_OK ) return rc;
       bClobber = 1;
-    }
-    if( bDel && bClobber==0 ){
-      hctDbCsrReset(&pDb->writecsr);
-      return SQLITE_OK;
+    }else{
+      if( iInsert>=0 
+       && hctDbIntkeyGetKey(pDb->writecsr.pg.aOld,iInsert)==iKey 
+      ){
+        bClobber = 1;
+      }
+      if( bDel && bClobber==0 ){
+        hctDbCsrReset(&pDb->writecsr);
+        return SQLITE_OK;
+      }
     }
 
     pDb->aWritePg[0] = pDb->writecsr.pg;
+    memset(&pDb->writecsr.pg, 0, sizeof(HctFilePage));
     pDb->nWrite = 1;
     rc = sqlite3HctFilePageWrite(&pDb->aWritePg[0]);
     assert( rc==SQLITE_OK );
@@ -1333,7 +1404,14 @@ int sqlite3HctDbInsert(
     }
 
     iInsert = hctDbIntkeyFindPosition(pDb->aWritePg[iPg].aNew, iKey, &bClobber);
-    if( bDel && bClobber==0 ) return SQLITE_OK;
+    if( pDb->bRollback ){
+      rc = hctDbFindRollback(
+          pDb, iKey, pDb->aWritePg[iPg].aNew, iInsert, &bDel, &nData, &aData
+      );
+      if( rc!=SQLITE_OK ) return rc;
+    }else{
+      if( bDel && bClobber==0 ) return SQLITE_OK;
+    }
   }
 
   /* 
@@ -1347,7 +1425,7 @@ int sqlite3HctDbInsert(
   nDataReq = 8 + nData;
   if( bClobber ){
     HctDbIntkeyEntry *pEntry = &pLeaf->aEntry[iInsert];
-    if( pEntry->flags & HCTDB_HAS_TID ){
+    if( pDb->bRollback==0 && (pEntry->flags & HCTDB_HAS_TID) ){
       u64 iTid = hctGetU64(&((u8*)pLeaf)[pEntry->iOff]);
       u64 iCid = hctDbTMapLookup(pDb, iTid);
       if( iCid>pDb->iSnapshotId ){
@@ -1613,6 +1691,7 @@ int sqlite3HctDbStartWrite(HctDatabase *p){
   int rc = SQLITE_OK;
   HctDbTMap *pTMap;
   assert( p->iTid==0 );
+  assert( p->bRollback==0 );
   p->iTid = sqlite3HctFileAllocateTransid(p->pFile);
   pTMap = p->pTMap;
   if( p->iTid>=(pTMap->iFirstTid + pTMap->nMap*HCTDB_TMAP_SIZE) ){
@@ -1623,6 +1702,7 @@ int sqlite3HctDbStartWrite(HctDatabase *p){
 
 int sqlite3HctDbEndWrite(HctDatabase *p){
   int rc = SQLITE_OK;
+  assert( p->bRollback==0 );
   if( p->nWrite){
     rc = hctDbInsertFlushWrite(p, 0);
   }

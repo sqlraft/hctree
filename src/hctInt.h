@@ -112,6 +112,8 @@ int sqlite3HctDbStartWrite(HctDatabase*);
 int sqlite3HctDbEndWrite(HctDatabase*);
 int sqlite3HctDbEndRead(HctDatabase*);
 
+void sqlite3HctDbRollbackMode(HctDatabase*,int);
+
 int sqlite3HctDbCsrOpen(HctDatabase *pDb, u32 iRoot, HctDbCsr **ppCsr);
 void sqlite3HctDbCsrClose(HctDbCsr *pCsr);
 

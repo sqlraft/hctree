@@ -552,7 +552,7 @@ static int btreeFlushOneToDisk(void *pCtx, u32 iRoot, KeyInfo *pKeyInfo){
 static int btreeFlushToDisk(Btree *p){
   int i;
   int rc = SQLITE_OK;
-  int rc2;
+  int rcok = SQLITE_OK;
 
   sqlite3HctDbStartWrite(p->pHctDb);
 
@@ -572,19 +572,26 @@ static int btreeFlushToDisk(Btree *p){
 
   if( rc==SQLITE_BUSY ){
     /* The transaction hit a conflict. Undo it. */ 
-#if 0
-    rc2 = sqlite3HctTreeForeach(p->pHctTree, (void*)p, btreeFlushOneToDisk);
-    if( rc2!=SQLITE_OK && rc2!=SQLITE_DONE ){
-      rc = rc2;
+    rcok = SQLITE_BUSY;
+    rc = SQLITE_OK;
+    sqlite3HctDbRollbackMode(p->pHctDb, 1);
+    if( p->eMetaState==HCT_METASTATE_DIRTY ){
+      int nData = SQLITE_N_BTREE_META * 4;
+      rc = sqlite3HctDbInsert(p->pHctDb, 2, 0, 0, 0, nData, (u8*)p->aMeta);
     }
-#endif
-  }else if( rc!=SQLITE_OK ){
+    if( rc==SQLITE_OK ){
+      rc = sqlite3HctTreeForeach(p->pHctTree, (void*)p, btreeFlushOneToDisk);
+    }
+    sqlite3HctDbRollbackMode(p->pHctDb, 0);
+  }
+  
+  if( rc!=SQLITE_OK && rc!=SQLITE_DONE ){
     assert( 0 );        /* TODO: fix this */
+  }else{
+    rc = sqlite3HctDbEndWrite(p->pHctDb);
   }
 
-  rc2 = sqlite3HctDbEndWrite(p->pHctDb);
-  if( rc==SQLITE_OK ) rc = rc2;
-  return rc;
+  return (rc==SQLITE_OK ? rcok : rc);
 }
 
 /*
