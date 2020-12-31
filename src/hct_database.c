@@ -141,11 +141,11 @@ struct HctDbFreespaceHdr {
 };
 
 struct HctDbIntkeyEntry {
-  i64 iKey;
-  u32 nSize;
-  u16 iOff;
-  u8 flags;
-  u8 unused;
+  i64 iKey;                       /* 0: Integer key value */
+  u32 nSize;                      /* 8: Total size of data (local+overflow) */
+  u16 iOff;                       /* 12: Offset of record within this page */
+  u8 flags;                       /* 14: Flags (see below) */
+  u8 unused;                      /* 15: */
 };
 
 struct HctDbIntkeyLeaf {
@@ -1399,7 +1399,7 @@ int sqlite3HctDbInsert(
     ** on. This can be optimized later - by remembering which page the 
     ** previous key was stored on.  */
     for(iPg=0; iPg<pDb->nWrite-1; iPg++){
-      HctDbIntkeyLeaf *pPg = (HctDbIntkeyLeaf*)pDb->aWritePg[iPg].aNew;
+      HctDbIntkeyLeaf *pPg = (HctDbIntkeyLeaf*)pDb->aWritePg[iPg+1].aNew;
       if( pPg->aEntry[0].iKey>iKey ) break;
     }
 

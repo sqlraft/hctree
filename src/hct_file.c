@@ -652,14 +652,34 @@ int sqlite3HctFileRootFree(HctFile *pFile, u32 iRoot){
   return SQLITE_OK;
 }
 
+static int hctFilePagemapGetGrow(HctFile *pFile, u32 iPg, u64 *piVal){
+  int rc = hctFileGrowMapping(pFile, 1+(iPg>>pFile->pMapping->mapShift));
+  if( rc==SQLITE_OK ){
+    *piVal = hctFilePagemapGet(pFile->pMapping, iPg);
+  }
+  return rc;
+}
+
+static int hctFilePagemapPtr(HctFile *pFile, u32 iPg, u8 **paData){
+  int rc = hctFileGrowMapping(pFile, 1+(iPg>>pFile->pMapping->mapShift));
+  if( rc==SQLITE_OK ){
+    *paData = hctPagePtr(pFile->pMapping, iPg);
+  }
+  return rc;
+}
+
 int sqlite3HctFilePageGet(HctFile *pFile, u32 iPg, HctFilePage *pPg){
+  int rc;
   assert( iPg!=0 );
   memset(pPg, 0, sizeof(*pPg));
   pPg->pFile = pFile;
   pPg->iPg = iPg;
-  pPg->iPagemap = hctFilePagemapGet(pFile->pMapping, iPg);
-  pPg->aOld = (u8*)hctPagePtr(pFile->pMapping, (pPg->iPagemap & 0xFFFFFFFF));
-  return SQLITE_OK;
+  rc = hctFilePagemapGetGrow(pFile, iPg, &pPg->iPagemap);
+  if( rc==SQLITE_OK ){
+    u32 iPhys = (pPg->iPagemap & 0xFFFFFFFF);
+    rc = hctFilePagemapPtr(pFile, iPhys, &pPg->aOld);
+  }
+  return rc;
 }
 
 /*

@@ -1,0 +1,135 @@
+# 2020 December 30
+#
+# The author disclaims copyright to this source code.  In place of
+# a legal notice, here is a blessing:
+#
+#    May you do good and not evil.
+#    May you find forgiveness for yourself and forgive others.
+#    May you share freely, never taking more than you give.
+#
+#*************************************************************************
+# This file implements regression tests for SQLite library.
+#
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+set testprefix hct_mvcc2
+
+set nRange  200
+set nRep   1000
+set nTSize   5
+set nVal    500
+array set T1 [list]
+
+set nRange 200
+set nTSize 5
+set nRep   1000
+set nVal   500
+
+expr srand(0)
+
+do_execsql_test 1.0 {
+  CREATE TABLE t1(a INTEGER PRIMARY KEY, b TEXT);
+}
+sqlite3 db2 test.db
+
+proc random_int {nRange} {
+  expr int(rand()*$nRange)
+}
+proc random_val {nMax} {
+  set bDel [expr int(rand()*4)==0]
+  if {$bDel} { return "" }
+  set nText [expr int(rand()*$nMax)+1]
+  return [string range [string repeat "x$nText." $nText] 0 [expr $nText-1]]
+}
+
+for {set i 0} {$i < $nRep} {incr i} {
+  array unset a
+  array unset b
+
+  for {set x 0} {$x < $nTSize} {incr x} {
+    set a([random_int $nRange]) [random_val $nVal]
+    set b([random_int $nRange]) [random_val $nVal]
+  }
+
+  foreach x [array names a] {
+    if {$a($x)=="" && [info exists T1($x)]==0} { unset a($x) }
+  }
+  foreach x [array names b] {
+    if {$b($x)=="" && [info exists T1($x)]==0} { unset b($x) }
+  }
+
+  set bConflict 0
+  foreach x [array names a] {
+    if {[info exists b($x)]} { set bConflict 1 }
+  }
+
+  do_test 1.1.$i.1 {
+    execsql BEGIN
+    foreach k [array names a] {
+      set v $a($k) 
+      if {$v==""} {
+        execsql { DELETE FROM t1 WHERE a=$k }
+      } else {
+        execsql { REPLACE INTO t1 VALUES($k, $v) }
+      }
+    }
+  } {}
+
+  do_test 1.1.$i.2 {
+    execsql BEGIN db2
+    foreach k [array names b] {
+      set v $b($k) 
+      if {$v==""} {
+        execsql { DELETE FROM t1 WHERE a=$k } db2
+      } else {
+        execsql { REPLACE INTO t1 VALUES($k, $v) } db2
+      }
+    }
+    execsql COMMIT db2
+  } {}
+
+  if {$bConflict} {
+  if {$i==449} breakpoint
+    do_catchsql_test 1.1.$i.3a {
+      COMMIT
+    } {1 {database is locked}}
+    execsql ROLLBACK
+  } else {
+    do_catchsql_test 1.1.$i.3b {
+      COMMIT
+    } {0 {}}
+  }
+
+  foreach x [array names b] {
+    if {$b($x)==""} {
+      unset -nocomplain T1($x)
+    } else {
+      set T1($x) $b($x)
+    }
+  }
+  if {$bConflict==0} {
+    foreach x [array names a] {
+      if {$a($x)==""} {
+        unset -nocomplain T1($x)
+      } else {
+        set T1($x) $a($x)
+      }
+    }
+  }
+
+  set res [list]
+  foreach x [lsort -integer [array names T1]] {
+    lappend res $x $T1($x)
+  }
+  do_execsql_test 1.1.$i.4 {
+    SELECT * FROM t1 ORDER BY a
+  } $res
+
+}
+
+
+finish_test
+
+
+
