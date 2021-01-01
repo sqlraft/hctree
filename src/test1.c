@@ -7867,6 +7867,31 @@ static int SQLITE_TCLAPI test_write_db(
 }
 
 /*
+** Usage:  sqlite3_hct_cas_failure NFAIL NRESET
+*/
+static int SQLITE_TCLAPI test_hct_cas_failure(
+  void * clientData,
+  Tcl_Interp *interp,
+  int objc,
+  Tcl_Obj *CONST objv[]
+){
+  int nFail;
+  int nReset;
+
+  if( objc!=3 ){
+    Tcl_WrongNumArgs(interp, 1, objv, "NFAIL NRESET");
+    return TCL_ERROR;
+  }
+
+  if( Tcl_GetIntFromObj(interp, objv[1], &nFail) ) return TCL_ERROR;
+  if( Tcl_GetIntFromObj(interp, objv[2], &nReset) ) return TCL_ERROR;
+
+  sqlite3_hct_cas_failure(nFail, nReset);
+  Tcl_ResetResult(interp);
+  return TCL_OK;
+}
+
+/*
 ** Usage:  decode_hexdb TEXT
 **
 ** Example:   db deserialize [decode_hexdb $output_of_dbtotxt]
@@ -8232,6 +8257,7 @@ int Sqlitetest1_Init(Tcl_Interp *interp){
      { "sqlite3_config_sorterref", test_config_sorterref,   0 },
      { "decode_hexdb",             test_decode_hexdb,       0 },
      { "test_write_db",            test_write_db,           0 },
+     { "sqlite3_hct_cas_failure",  test_hct_cas_failure,    0 },
   };
   static int bitmask_size = sizeof(Bitmask)*8;
   static int longdouble_size = sizeof(LONGDOUBLE_TYPE);

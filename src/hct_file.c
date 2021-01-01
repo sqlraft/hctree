@@ -55,13 +55,27 @@ typedef struct HctMapping HctMapping;
 typedef struct HctMappingChunk HctMappingChunk;
 
 /*
-** Global variables for this module. Access is protected by
-** SQLITE_MUTEX_STATIC_VFS1.
+** Global variables for this module. 
+**
+** pServerList:
+**   Linked list of distinct files opened by this process. Access to this
+**   variable is protected by SQLITE_MUTEX_STATIC_VFS1.
+**
+** nCASFailCnt/nCASFailReset:
+**   These are used to inject CAS instruction failures for testing purposes.
+**   Set by the sqlite3_hct_cas_failure() API. They are not threadsafe.
 */
 static struct HctFileGlobalVars {
   HctFileServer *pServerList;
+
+  int nCASFailCnt;
+  int nCASFailReset;
 } g;
 
+void sqlite3_hct_cas_failure(int nCASFailCnt, int nCASFailReset){
+  g.nCASFailCnt = nCASFailCnt;
+  g.nCASFailReset = nCASFailReset;
+}
 
 /*
 ** nRef:
@@ -126,6 +140,16 @@ static int hctLog2(int n){
   return i;
 }
 
+static int hctBoolCompareAndSwap64(u64 *pPtr, u64 iOld, u64 iNew){
+  if( g.nCASFailCnt>0 ){
+    if( (--g.nCASFailCnt)==0 ){
+      g.nCASFailCnt = g.nCASFailReset;
+      return 0;
+    }
+  }
+  return (int)(__sync_bool_compare_and_swap(pPtr, iOld, iNew));
+}
+
 /*
 ** Allocate and return a new HctMapping object with enough space for
 ** nChunk chunks.
@@ -173,17 +197,13 @@ static void *hctPagePtr(HctMapping *p, u32 iPhys){
   ];
 }
 
-static void hctFileInitRootpage(HctMapping *p, u32 iPg){
-  sqlite3HctDbRootPageInit(0, hctPagePtr(p, iPg), p->szPage);
-}
-
 /*
 ** Use a CAS instruction to the value of page-map slot iSlot. Return true
 ** if the slot is successfully set to value iNew, or false otherwise.
 */
 static int hctFilePagemapSet(HctMapping *p, u32 iSlot, u64 iOld, u64 iNew){
   u64 *pPtr = hctPagemapPtr(p, iSlot);
-  return (int)(__sync_bool_compare_and_swap(pPtr, iOld, iNew));
+  return hctBoolCompareAndSwap64(pPtr, iOld, iNew);
 }
 
 static u64 hctFilePagemapGet(HctMapping *p, u32 iSlot){
@@ -198,7 +218,7 @@ static u64 hctFilePagemapIncr(HctMapping *p, u32 iSlot, int nIncr){
   u64 iOld;
   do {
     iOld = *pPtr;
-  }while( 0==(__sync_bool_compare_and_swap(pPtr, iOld, iOld+nIncr)) );
+  }while( 0==(hctBoolCompareAndSwap64(pPtr, iOld, iOld+nIncr)) );
   return iOld+nIncr;
 }
 
@@ -212,6 +232,13 @@ static int hctFilePagemapSetLogical(
     u64 i1 = hctFilePagemapGet(p, iSlot);
     u64 iOld1 = (iOld&~HCT_PGMAPFLAG_PHYSINUSE) | (i1&HCT_PGMAPFLAG_PHYSINUSE);
     u64 iNew1 = (iNew&~HCT_PGMAPFLAG_PHYSINUSE) | (i1&HCT_PGMAPFLAG_PHYSINUSE);
+
+    /* If a CAS instruction failure injection is scheduled, return 0
+    ** to the caller.  */
+    if( g.nCASFailCnt==1 ){
+      g.nCASFailCnt = g.nCASFailReset;
+      return 0;
+    }
 
     if( hctFilePagemapSet(p, iSlot, iOld1, iNew1) ) return 1;
     if( i1!=iOld1 ) return 0;
@@ -760,7 +787,7 @@ int sqlite3HctFilePageRelease(HctFilePage *pPg){
   if( pPg->aNew ){
     HctMapping *pMap = pPg->pFile->pMapping;
     if( !hctFilePagemapSetLogical(pMap, pPg->iPg, pPg->iPagemap, pPg->iNewPg) ){
-      rc = SQLITE_BUSY;
+      rc = SQLITE_LOCKED;
     }
   }
   memset(pPg, 0, sizeof(*pPg));

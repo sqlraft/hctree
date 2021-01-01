@@ -9871,6 +9871,8 @@ int sqlite3_deserialize(
 # undef double
 #endif
 
+void sqlite3_hct_cas_failure(int nCASFailCnt, int nCASFailReset);
+
 #ifdef __cplusplus
 }  /* End of the 'extern "C"' block */
 #endif

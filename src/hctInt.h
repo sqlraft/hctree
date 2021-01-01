@@ -107,7 +107,14 @@ void sqlite3HctDbRootPageInit(int bIndex, u8 *aPage, int szPage);
 void sqlite3HctDbMetaPageInit(u8 *aPage, int szPage);
 int sqlite3HctDbGetMeta(HctDatabase *p, u8 *aBuf, int nBuf);
 
-int sqlite3HctDbInsert(HctDatabase*, u32,UnpackedRecord*,i64,int,int,const u8*);
+int sqlite3HctDbInsert(
+  HctDatabase *pDb, 
+  u32 iRoot,
+  UnpackedRecord *pRec, i64 iKey, 
+  int bDel, int nData, const u8 *aData,
+  int *pnRetry
+);
+int sqlite3HctDbInsertFlush(HctDatabase *pDb, int *pnRetry);
 int sqlite3HctDbStartWrite(HctDatabase*);
 int sqlite3HctDbEndWrite(HctDatabase*);
 int sqlite3HctDbEndRead(HctDatabase*);

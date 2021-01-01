@@ -517,15 +517,15 @@ int sqlite3BtreeCommitPhaseOne(Btree *p, const char *zSuperJrnl){
 
 static int btreeFlushOneToDisk(void *pCtx, u32 iRoot, KeyInfo *pKeyInfo){
   Btree *p = (Btree*)pCtx;
+  HctDatabase *pDb = p->pHctDb;
   HctTreeCsr *pCsr = 0;
   int rc;
+  int nRetry = 0;
 
   rc = sqlite3HctTreeCsrOpen(p->pHctTree, iRoot, &pCsr);
   if( rc==SQLITE_OK ){
-    for(rc=sqlite3HctTreeCsrFirst(pCsr);
-        rc==SQLITE_OK && sqlite3HctTreeCsrEof(pCsr)==0;
-        rc=sqlite3HctTreeCsrNext(pCsr)
-    ){
+    for(rc=sqlite3HctTreeCsrFirst(pCsr); rc==SQLITE_OK ; /* no-op */){
+      int ii;
       i64 iKey = 0;
       int nData = 0;
       int bDel = 0;
@@ -536,13 +536,49 @@ static int btreeFlushOneToDisk(void *pCtx, u32 iRoot, KeyInfo *pKeyInfo){
       if( pKeyInfo ){
         assert( 0 );
       }else{
-        rc = sqlite3HctDbInsert(p->pHctDb, iRoot, 0, iKey, bDel, nData, aData);
+        rc = sqlite3HctDbInsert(pDb, iRoot, 0, iKey, bDel, nData,aData,&nRetry);
       }
       if( rc ) break;
+
+      assert( nRetry>=0 );
+      if( nRetry==0 ){
+        sqlite3HctTreeCsrNext(pCsr);
+        if( sqlite3HctTreeCsrEof(pCsr) ){
+          rc = sqlite3HctDbInsertFlush(pDb, &nRetry);
+          if( nRetry ){
+            sqlite3HctTreeCsrLast(pCsr);
+          }else{
+            /* Done - the table has been successfully flushed to disk */
+            break;
+          }
+        }
+      }
+      for(ii=1; ii<nRetry; ii++){
+        sqlite3HctTreeCsrPrev(pCsr);
+      }
     }
+
     sqlite3HctTreeCsrClose(pCsr);
   }
 
+  return rc;
+}
+
+static int btreeFlushData(Btree *p, int bRollback){
+  int rc = SQLITE_OK;
+  sqlite3HctDbRollbackMode(p->pHctDb, bRollback);
+  if( p->eMetaState==HCT_METASTATE_DIRTY ){
+    int nRetry = 0;
+    int nData = SQLITE_N_BTREE_META * 4;
+    rc = sqlite3HctDbInsert(p->pHctDb, 2, 0, 0, 0, nData, (u8*)p->aMeta,&nRetry);
+    if( rc==SQLITE_OK ){
+      rc = sqlite3HctDbInsertFlush(p->pHctDb, &nRetry);
+    }
+  }
+  if( rc==SQLITE_OK ){
+    rc = sqlite3HctTreeForeach(p->pHctTree, (void*)p, btreeFlushOneToDisk);
+  }
+  sqlite3HctDbRollbackMode(p->pHctDb, 0);
   return rc;
 }
 
@@ -561,28 +597,14 @@ static int btreeFlushToDisk(Btree *p){
     BtNewRoot *pRoot = &p->aNewRoot[i];
     rc = sqlite3HctDbRootInit(p->pHctDb, pRoot->bIndex, pRoot->pgnoRoot);
   }
-
-  if( rc==SQLITE_OK && p->eMetaState==HCT_METASTATE_DIRTY ){
-    int nData = SQLITE_N_BTREE_META * 4;
-    rc = sqlite3HctDbInsert(p->pHctDb, 2, 0, 0, 0, nData, (u8*)p->aMeta);
-  }
   if( rc==SQLITE_OK ){
-    rc = sqlite3HctTreeForeach(p->pHctTree, (void*)p, btreeFlushOneToDisk);
+    rc = btreeFlushData(p, 0);
   }
 
   if( rc==SQLITE_BUSY ){
     /* The transaction hit a conflict. Undo it. */ 
     rcok = SQLITE_BUSY;
-    rc = SQLITE_OK;
-    sqlite3HctDbRollbackMode(p->pHctDb, 1);
-    if( p->eMetaState==HCT_METASTATE_DIRTY ){
-      int nData = SQLITE_N_BTREE_META * 4;
-      rc = sqlite3HctDbInsert(p->pHctDb, 2, 0, 0, 0, nData, (u8*)p->aMeta);
-    }
-    if( rc==SQLITE_OK ){
-      rc = sqlite3HctTreeForeach(p->pHctTree, (void*)p, btreeFlushOneToDisk);
-    }
-    sqlite3HctDbRollbackMode(p->pHctDb, 0);
+    rc = btreeFlushData(p, 1);
   }
   
   if( rc!=SQLITE_OK && rc!=SQLITE_DONE ){
