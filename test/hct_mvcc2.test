@@ -15,14 +15,9 @@ set testdir [file dirname $argv0]
 source $testdir/tester.tcl
 set testprefix hct_mvcc2
 
-set nRange  200
-set nRep   1000
-set nTSize   5
-set nVal    500
 array set T1 [list]
-
 set nRange 200
-set nTSize 5
+set nTSize 10
 set nRep   1000
 set nVal   500
 

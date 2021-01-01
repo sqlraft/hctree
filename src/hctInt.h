@@ -191,7 +191,7 @@ int sqlite3HctFileFinishTrans(HctFile *pFile);
 u64 sqlite3HctFileAllocateTransid(HctFile *pFile);
 u64 sqlite3HctFileAllocateSnapshotid(HctFile *pFile);
 u64 sqlite3HctFileGetTransid(HctFile *pFile);
-u64 sqlite3HctFileGetSnapshotid(HctFile *pFile);
+u64 sqlite3HctFileGetSnapshotid(HctFile *pFile, u64*);
 
 
 HctDatabase *sqlite3HctDbFind(sqlite3*, int);

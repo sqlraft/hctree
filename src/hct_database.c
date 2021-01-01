@@ -291,7 +291,7 @@ static int hctDbTMapInit(HctDatabase *pDb){
 static u64 hctDbTMapLookup(HctDatabase *pDb, u64 iTid){
   HctDbTMap *pTMap = pDb->pTMap;
   int iMap = (iTid - pTMap->iFirstTid) / HCTDB_TMAP_SIZE;
-  if( iMap>=0 ){
+  if( iMap>=0 && iMap<pTMap->nMap ){
     int iOff = (iTid - pTMap->iFirstTid) % HCTDB_TMAP_SIZE;
     return pTMap->aaMap[iMap][iOff];
   }
@@ -378,8 +378,11 @@ void sqlite3HctDbMetaPageInit(u8 *aPage, int szPage){
 
 static void hctDbSnapshotOpen(HctDatabase *pDb){
   if( pDb->iSnapshotId==0 ){
-    pDb->iSnapshotId = sqlite3HctFileGetSnapshotid(pDb->pFile);
-    if( pDb->pTMap==0 ){
+    u64 iMaxTid = 0;
+    HctDbTMap *pTMap = pDb->pTMap;
+
+    pDb->iSnapshotId = sqlite3HctFileGetSnapshotid(pDb->pFile, &iMaxTid);
+    if( pTMap==0 || iMaxTid>=(pTMap->iFirstTid + pTMap->nMap*HCTDB_TMAP_SIZE) ){
       hctDbTMapGet(pDb, 0);
     }
   }

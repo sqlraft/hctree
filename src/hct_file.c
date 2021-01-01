@@ -788,9 +788,16 @@ u64 sqlite3HctFileGetTransid(HctFile *pFile){
   u64 iVal = hctFilePagemapGet(pFile->pMapping, HCT_PAGEMAP_TRANSID_EOF);
   return iVal & HCT_TID_MASK;
 }
-u64 sqlite3HctFileGetSnapshotid(HctFile *pFile){
-  u64 iVal = hctFilePagemapGet(pFile->pMapping, HCT_PAGEMAP_COMMITID);
-  return iVal & HCT_TID_MASK;
+
+u64 sqlite3HctFileGetSnapshotid(HctFile *pFile, u64 *piTid){
+  HctMapping *p = pFile->pMapping;
+  u64 iRet = hctFilePagemapGet(p, HCT_PAGEMAP_COMMITID) & HCT_TID_MASK;
+
+  /* We're assuming that this is a full-memory barrier. */
+  __sync_synchronize();
+
+  *piTid = hctFilePagemapGet(p, HCT_PAGEMAP_TRANSID_EOF) & HCT_TID_MASK;
+  return iRet;
 }
 
 int sqlite3HctFileFinishTrans(HctFile *pFile){
