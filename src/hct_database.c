@@ -821,6 +821,7 @@ static i64 hctDbIntkeyGetKey(u8 *aPg, int ii){
 static int hctDbInsertFlushWrite(HctDatabase *pDb, int bDiscard){
   int rc = SQLITE_OK;
   int ii;
+  assert( pDb->nWritePg==0 || pDb->nWriteKey>0 );
   for(ii=pDb->nWritePg-1; rc==SQLITE_OK && ii>=0; ii--){
     if( bDiscard ){
       sqlite3HctFilePageUnwrite(&pDb->aWritePg[ii]);
@@ -1085,6 +1086,7 @@ int sqlite3HctDbInsert(
     if( pDb->nWritePg>HCTDB_MAX_DIRTY || iKey>=pDb->iWriteFpKey ){
       rc = sqlite3HctDbInsertFlush(pDb, pnRetry);
       if( rc || *pnRetry ) return rc;
+      pDb->nWriteKey = 1;
     }
   }
 
