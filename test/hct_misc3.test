@@ -64,6 +64,7 @@ do_execsql_test 1.10 {
 }
 
 #-------------------------------------------------------------------------
+reset_db
 do_execsql_test 2.0 {
   CREATE TABLE t2(a INTEGER PRIMARY KEY, b TEXT);
 }
@@ -85,6 +86,10 @@ set res [db eval { SELECT a FROM t2 WHERE +a<10000 ORDER BY +a DESC }]
 do_execsql_test 2.3 {
   SELECT a FROM t2 WHERE a<10000 ORDER BY a DESC
 } $res
+
+foreach a [db eval {SELECT a FROM t2}] {
+  do_execsql_test 2.4.$a { SELECT a FROM t2 WHERE a=$a } $a
+}
 
 #-------------------------------------------------------------------------
 reset_db

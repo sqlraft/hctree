@@ -1,0 +1,48 @@
+# 2021 January 13
+#
+# The author disclaims copyright to this source code.  In place of
+# a legal notice, here is a blessing:
+#
+#    May you do good and not evil.
+#    May you find forgiveness for yourself and forgive others.
+#    May you share freely, never taking more than you give.
+#
+#*************************************************************************
+# This file implements regression tests for SQLite library.
+#
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+set testprefix hct_misc5
+
+do_execsql_test 1.0 {
+  CREATE TABLE tx(a INTEGER PRIMARY KEY, b TEXT);
+}
+
+expr srand(0)
+
+set nRow    50000
+set nRange 100000
+set nText     500
+
+do_test 1.1 {
+  for {set i 0} {$i < $nRow} {incr i} {
+    set rowid [expr int(rand()*$nRange)]
+    set n [expr int(rand()*$nText)+1]
+    set txt   [string range [string repeat "x${rowid}x" $n] 0 $n-1]
+    execsql {INSERT OR REPLACE INTO tx VALUES($rowid, $txt)}
+    set A($rowid) $txt
+  }
+} {}
+
+do_test 1.2 {
+  foreach ii [array names A] {
+    set res [execsql { SELECT b FROM tx WHERE a=$ii }]
+    if {$res != $A($ii)} {
+      error "mismatch at a=$ii"
+    }
+  }
+} {}
+
+finish_test
+

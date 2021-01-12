@@ -622,7 +622,7 @@ int sqlite3HctFilePagesize(HctFile *pFile){
 }
 
 u32 sqlite3HctFileMaxpage(HctFile *pFile){
-  u64 iVal = hctFilePagemapGet(pFile->pMapping, HCT_PAGEMAP_LOGICAL_EOF);
+  u64 iVal = hctFilePagemapGet(pFile->pMapping, HCT_PAGEMAP_PHYSICAL_EOF);
   return (iVal & 0xFFFFFFFF);
 }
 

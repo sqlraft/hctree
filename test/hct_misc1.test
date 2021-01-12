@@ -187,9 +187,8 @@ do_test 9.1.0 {
   }
 } {}
 
-#db eval { SELECT * FROM hctdb LIMIT 5 } {
-#  puts "$pgno | $pgtype | $peer | $nentry | $keys | $data"
-#}
+#execsql_pp { SELECT * FROM hctdb } 
+#execsql_pp { SELECT x, length(b) FROM t1 WHERE x=2 }
 do_execsql_test 9.1.1 {
   SELECT x, length(b) FROM t1 WHERE x=2;
 } {2 600}
