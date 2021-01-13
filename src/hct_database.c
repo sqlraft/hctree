@@ -43,6 +43,7 @@ struct HctDbCsr {
 #define HCTDB_MAX_DIRTY 8
 
 /*
+** iWriteFpKey/aWriteFpKey:
 */
 struct HctDatabase {
   HctFile *pFile;
@@ -58,6 +59,7 @@ struct HctDatabase {
   int nWritePg;                   /* Number of valid entries in aWritePg[] */
   int nWriteKey;                  /* Number of new keys in aWritePg[] array */
   i64 iWriteFpKey;
+  u8 *aWriteFpKey;
   HctDbCsr writecsr;
   int bRollback;                  /* True for rollback mode */
 };
@@ -434,69 +436,6 @@ int sqlite3HctDbRootInit(HctDatabase *p, int bIndex, u32 iRoot){
   return rc;
 }
 
-/*
-** Seek for key iKey (if pRec is null) or pRec within the table opened
-** by cursor pCsr.
-*/
-int hctDbCsrSeek(
-  HctDbCsr *pCsr,                 /* Cursor to seek */
-  int iHeight,                    /* Height to seek at (0==leaf, 1==parent) */
-  UnpackedRecord *pRec,           /* Key for index tables */
-  i64 iKey                        /* Key for intkey tables */
-){
-  HctFile *pFile = pCsr->pDb->pFile;
-  int rc;
-
-  assert( pRec==0 ); /* TODO! Support index tables! */
-  rc = sqlite3HctFilePageGet(pFile, pCsr->iRoot, &pCsr->pg);
-  while( rc==SQLITE_OK ){
-    HctDbIntkeyLeaf *pPg = (HctDbIntkeyLeaf*)pCsr->pg.aOld;
-    int i1 = -1;
-    int i2 = pPg->pg.nEntry-1;
-
-    /* Seek within the page. Goal is to find the entry that is less than or
-    ** equal to iKey. If all entries on the page are larger than iKey, find 
-    ** the "entry" -1. */
-    while( i2>i1 ){
-      int iTest = (i1+i2+1)/2;
-      i64 iPgkey = pPg->aEntry[iTest].iKey;
-
-      if( iKey<iPgkey ){
-        i2 = iTest-1;
-      }else if( iKey>iPgkey ){
-        i1 = iTest;
-      }else{
-        i1 = i2 = iTest;
-      }
-    }
-
-    /* Assert that we appear to have landed on the correct entry. */
-    assert( i1==i2 );
-    assert( i2==-1 || iKey>=pPg->aEntry[i2].iKey );
-    assert( i2+1==pPg->pg.nEntry || iKey<pPg->aEntry[i2+1].iKey );
-
-    /* Test if it is necessary to skip to the peer node. */
-    if( i2>=0 && i2==pPg->pg.nEntry-1 && pPg->pg.iPeerPg!=0 ){
-      HctFilePage peer;
-      rc = sqlite3HctFilePageGet(pFile, pPg->pg.iPeerPg, &peer);
-      if( rc==SQLITE_OK ){
-        HctDbIntkeyLeaf *pPeer = (HctDbIntkeyLeaf*)peer.aOld;
-        if( pPeer->aEntry[0].iKey<=iKey ){
-          SWAP(HctFilePage, pCsr->pg, peer);
-          sqlite3HctFilePageRelease(&peer);
-          continue;
-        }
-        sqlite3HctFilePageRelease(&peer);
-      }
-    }
-
-    pCsr->iCell = i2;
-    break;
-  }
-
-  return rc;
-}
-
 static i64 hctDbIntkeyFPKey(u8 *aPg){
   i64 iRet;
   if( ((HctDbPageHdr*)aPg)->nHeight==0 ){
@@ -509,6 +448,91 @@ static i64 hctDbIntkeyFPKey(u8 *aPg){
   return iRet;
 }
 
+/*
+** Buffer aPg contains an intkey leaf page.
+**
+** This function searches the leaf page for key iKey. If found, it returns
+** the index of the matching key within the page and sets output variable
+** (*pbExact) to 1. If there is no match for key iKey, this function returns
+** the index of the smallest key on the page that is larger than iKey, or 
+** (nEntry) if all keys on the page are smaller than iKey. (*pbExact) is 
+** set to 0 before returning in this case.
+*/
+static int hctDbIntkeyLeafSearch(
+  u8 *aPg, 
+  i64 iKey,
+  int *pbExact
+){
+  HctDbIntkeyLeaf *pLeaf = (HctDbIntkeyLeaf*)aPg;
+  int i1 = 0;
+  int i2 = pLeaf->pg.nEntry;
+
+  assert( pLeaf->pg.nHeight==0 );
+  while( i2>i1 ){
+    int iTest = (i1+i2)/2;
+    i64 iPgKey = pLeaf->aEntry[iTest].iKey;
+    if( iPgKey==iKey ){
+      *pbExact = 1;
+      return iTest;
+    }else if( iPgKey<iKey ){
+      i1 = iTest+1;
+    }else{
+      i2 = iTest;
+    }
+  }
+  assert( i1==i2 );
+
+  assert( i2>=0 );
+  assert( i2==pLeaf->pg.nEntry || iKey<pLeaf->aEntry[i2].iKey );
+  assert( i2==0 || iKey>pLeaf->aEntry[i2-1].iKey );
+
+  *pbExact = 0;
+  return i2;
+}
+
+/*
+** The first argument is a pointer to an intkey internal node page.
+**
+** This function searches the node page for key iKey. If found, it returns
+** the index of the matching key within the page and sets output variable
+** (*pbExact) to 1. If there is no match for key iKey, this function returns
+** the index of the smallest key on the page that is larger than iKey, or 
+** (nEntry) if all keys on the page are smaller than iKey. (*pbExact) is 
+** set to 0 before returning in this case.
+*/
+static int hctDbIntkeyNodeSearch(
+  HctDbIntkeyNode *pNode,
+  i64 iKey,
+  int *pbExact
+){
+  int i1 = 0;
+  int i2 = pNode->pg.nEntry;
+  int bRev = (pNode->pg.nHeight & 0x01);
+
+  assert( bRev==0 || bRev==1 );
+  while( i2>i1 ){
+    int iTest = (i1+i2)/2;
+    i64 iPgKey = pNode->aEntry[iTest].iKey;
+    if( iPgKey==iKey ){
+      *pbExact = 1;
+      return iTest;
+    }else if( (bRev==0 && iPgKey<iKey) || (bRev!=0 && iPgKey>iKey) ){
+      i1 = iTest+1;
+    }else{
+      i2 = iTest;
+    }
+  }
+  assert( i1==i2 );
+
+  assert( i2>=0 );
+  assert( bRev==1 || i2==pNode->pg.nEntry || iKey<pNode->aEntry[i2].iKey );
+  assert( bRev==1 || i2==0 || iKey>pNode->aEntry[i2-1].iKey );
+  assert( bRev==0 || i2==pNode->pg.nEntry || iKey>pNode->aEntry[i2].iKey );
+  assert( bRev==0 || i2==0 || iKey<pNode->aEntry[i2-1].iKey );
+
+  *pbExact = 0;
+  return i2;
+}
 
 int hctDbCsrIntkeySeek(
   HctDbCsr *pCsr,                 /* Cursor to seek */
@@ -526,57 +550,23 @@ int hctDbCsrIntkeySeek(
       int i2 = pHdr->nEntry-1;
       int bReverse = (pHdr->nHeight % 2);
       if( pHdr->nHeight==0 ){
-        HctDbIntkeyLeaf *pLeaf = (HctDbIntkeyLeaf*)pHdr;
-        int i1 = -1;
-
-        /* Seek within the page. Goal is to find the entry that is less than or
-        ** equal to iKey. If all entries on the page are larger than iKey, find
-        ** the "entry" -1. */
-        while( i2>i1 ){
-          int iTest = (i1+i2+1)/2;
-          i64 iPgkey = pLeaf->aEntry[iTest].iKey;
-          if( iKey<iPgkey ){
-            i2 = iTest-1;
-          }else if( iKey>iPgkey ){
-            i1 = iTest;
-          }else{
-            i1 = i2 = iTest;
-          }
-        }
-
-        /* Assert that we appear to have landed on the correct entry. */
-        assert( i1==i2 );
-        assert( i2==-1 || iKey>=pLeaf->aEntry[i2].iKey );
-        assert( i2+1==pLeaf->pg.nEntry || iKey<pLeaf->aEntry[i2+1].iKey );
+        int bExact;
+        i2 = hctDbIntkeyLeafSearch(pCsr->pg.aOld, iKey, &bExact);
+        if( bExact==0 ) i2--;
       }else{
+        int bExact = 0;
+        HctDbIntkeyNode *pNode = (HctDbIntkeyNode*)pCsr->pg.aOld;
         HctDbIntkeyNodeEntry *aEntry = ((HctDbIntkeyNode*)pHdr)->aEntry;
-        int i1 = 0;
+        i2 = hctDbIntkeyNodeSearch(pNode, iKey, &bExact);
 
-        /* Seek within the page. Goal is to find the cell containing the key
-        ** that is less than (in the sort order) or equal to iKey.  */
-        while( i2>i1 ){
-          int iTest = (i1+i2)/2;
-          i64 iPgkey = aEntry[iTest].iKey;
-          if( (bReverse==0 && iKey<iPgkey) || (bReverse && iKey>iPgkey) ){
-            i2 = iTest;
-          }else if( (bReverse==0 && iKey>iPgkey) || (bReverse && iKey<iPgkey) ){
-            i1 = iTest+1;
-          }else{
-            i1 = i2 = iTest;
-          }
-        }
-
-        /* Assert that we appear to have landed on the correct entry. */
-        assert( i1==i2 && i2>=0 && i2<pHdr->nEntry );
-        assert( bReverse==0 || (i2==pHdr->nEntry-1 || iKey>=aEntry[i2].iKey) );
-        assert( bReverse==1 || (i2==pHdr->nEntry-1 || iKey<=aEntry[i2].iKey) );
-
-        if( bReverse && iKey<aEntry[i2].iKey ){
+        assert( i2>=0 && i2<=pHdr->nEntry );
+        assert( bReverse==0 || (i2==pHdr->nEntry || iKey>=aEntry[i2].iKey) );
+        assert( bReverse==1 || (i2==pHdr->nEntry || iKey<=aEntry[i2].iKey) );
+        if( bReverse && i2>=pHdr->nEntry ){
           assert( pHdr->iPeerPg );
-          assert( i2==pHdr->nEntry-1 );
           iPg = pHdr->iPeerPg;
         }else{
-          iPg = aEntry[i2].iChildPg;
+          iPg = pNode->aEntry[i2].iChildPg;
         }
       }
 
@@ -586,7 +576,7 @@ int hctDbCsrIntkeySeek(
         rc = sqlite3HctFilePageGet(pFile, pHdr->iPeerPg, &peer);
         if( rc==SQLITE_OK ){
           i64 iFP = hctDbIntkeyFPKey(peer.aOld);
-          if( (bReverse==0 && iFP<=iKey) || (bReverse && iFP>=iKey) ){
+          if( iFP<=iKey ){
             SWAP(HctFilePage, pCsr->pg, peer);
             sqlite3HctFilePageRelease(&peer);
             iPg = 0;
@@ -843,90 +833,6 @@ static i64 hctDbIntkeyGetKey(u8 *aPg, int ii){
 }
 
 
-/*
-** Buffer aPg contains an intkey leaf page.
-**
-** This function searches the leaf page for key iKey. If found, it returns
-** the index of the matching key within the page and sets output variable
-** (*pbExact) to 1. If there is no match for key iKey, this function returns
-** the index of the smallest key on the page that is larger than iKey, or 
-** (nEntry) if all keys on the page are smaller than iKey. (*pbExact) is 
-** set to 0 before returning in this case.
-*/
-static int hctDbIntkeyLeafSearch(
-  u8 *aPg, 
-  i64 iKey,
-  int *pbExact
-){
-  HctDbIntkeyLeaf *pLeaf = (HctDbIntkeyLeaf*)aPg;
-  int i1 = 0;
-  int i2 = pLeaf->pg.nEntry;
-
-  while( i2>i1 ){
-    int iTest = (i1+i2)/2;
-    i64 iPgKey = pLeaf->aEntry[iTest].iKey;
-    if( iPgKey==iKey ){
-      *pbExact = 1;
-      return iTest;
-    }else if( iPgKey<iKey ){
-      i1 = iTest+1;
-    }else{
-      i2 = iTest;
-    }
-  }
-  assert( i1==i2 );
-
-  assert( i2>=0 );
-  assert( i2==pLeaf->pg.nEntry || iKey<pLeaf->aEntry[i2].iKey );
-  assert( i2==0 || iKey>pLeaf->aEntry[i2-1].iKey );
-
-  *pbExact = 0;
-  return i2;
-}
-
-/*
-** Buffer aPg contains an intkey node page.
-**
-** This function searches the node page for key iKey. If found, it returns
-** the index of the matching key within the page and sets output variable
-** (*pbExact) to 1. If there is no match for key iKey, this function returns
-** the index of the smallest key on the page that is larger than iKey, or 
-** (nEntry) if all keys on the page are smaller than iKey. (*pbExact) is 
-** set to 0 before returning in this case.
-*/
-static int hctDbIntkeyNodeSearch(
-  HctDbIntkeyNode *pNode,
-  i64 iKey,
-  int *pbExact
-){
-  int i1 = 0;
-  int i2 = pNode->pg.nEntry;
-  int bRev = (pNode->pg.nHeight & 0x01);
-
-  assert( bRev==0 || bRev==1 );
-  while( i2>i1 ){
-    int iTest = (i1+i2)/2;
-    i64 iPgKey = pNode->aEntry[iTest].iKey;
-    if( iPgKey==iKey ){
-      *pbExact = 1;
-      return iTest;
-    }else if( (bRev==0 && iPgKey<iKey) || (bRev!=0 && iPgKey>iKey) ){
-      i1 = iTest+1;
-    }else{
-      i2 = iTest;
-    }
-  }
-  assert( i1==i2 );
-
-  assert( i2>=0 );
-  assert( bRev==1 || i2==pNode->pg.nEntry || iKey<pNode->aEntry[i2].iKey );
-  assert( bRev==1 || i2==0 || iKey>pNode->aEntry[i2-1].iKey );
-  assert( bRev==0 || i2==pNode->pg.nEntry || iKey>pNode->aEntry[i2].iKey );
-  assert( bRev==0 || i2==0 || iKey<pNode->aEntry[i2-1].iKey );
-
-  *pbExact = 0;
-  return i2;
-}
 
 static int hctDbInsertFPKey(
   HctDatabase *pDb, 
@@ -1284,13 +1190,30 @@ int sqlite3HctDbInsertFlush(HctDatabase *pDb, int *pnRetry){
   return rc;
 }
 
+/*
+** If pRec is not NULL, it contains an unpacked index key. Compare this key
+** with the write-fp-key in pDb->aWriteFpKey. Return true if pRec is greater
+** than or equal to the write-fp-key.
+**
+** Or, if pRec is NULL, iKey is the key and it is compared to 
+** pDb->iWriteFpKey.
+*/
+static int hctDbGeWriteFpKey(HctDatabase *pDb, UnpackedRecord *pRec, i64 iKey){
+  if( pRec ){
+    int r = sqlite3VdbeRecordCompare(pDb->iWriteFpKey, pDb->aWriteFpKey, pRec);
+    return (r <= 0);
+  }
+  return iKey>=pDb->iWriteFpKey;
+}
+
 int sqlite3HctDbInsert(
-  HctDatabase *pDb,
-  u32 iRoot,
-  UnpackedRecord *pRec,
-  i64 iKey,
-  int bDel, int nData, const u8 *aData,
-  int *pnRetry
+  HctDatabase *pDb,               /* Database to insert into or delete from */
+  u32 iRoot,                      /* Root page of table to modify */
+  UnpackedRecord *pRec,           /* The key value for index tables */
+  i64 iKey,                       /* For intkey tables, the key value */
+  int bDel,                       /* True for a delete, false for insert */
+  int nData, const u8 *aData,     /* Record/key to insert */
+  int *pnRetry                    /* OUT: number of operations to retry */
 ){
   int rc = SQLITE_OK;
   int iInsert;
@@ -1307,12 +1230,14 @@ int sqlite3HctDbInsert(
   ** this key can be inserted. */
   assert( pDb->nWritePg==0 || iRoot==pDb->writecsr.iRoot );
   if( pDb->nWritePg ){
-    if( pDb->nWritePg>HCTDB_MAX_DIRTY || iKey>=pDb->iWriteFpKey ){
+    if( pDb->nWritePg>HCTDB_MAX_DIRTY || hctDbGeWriteFpKey(pDb, pRec, iKey) ){
       rc = sqlite3HctDbInsertFlush(pDb, pnRetry);
       if( rc || *pnRetry ) return rc;
       pDb->nWriteKey = 1;
     }
   }
+
+  assert( pRec==0 );
 
   if( pDb->nWritePg==0 ){
     hctDbCsrInit(pDb, iRoot, &pDb->writecsr);

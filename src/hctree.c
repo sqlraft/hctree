@@ -520,11 +520,17 @@ static int btreeFlushOneToDisk(void *pCtx, u32 iRoot, KeyInfo *pKeyInfo){
   HctDatabase *pDb = p->pHctDb;
   HctTreeCsr *pCsr = 0;
   int rc;
-  int nRetry = 0;
+  UnpackedRecord *pRec = 0;
+
+  if( pKeyInfo ){
+    pRec = sqlite3VdbeAllocUnpackedRecord(pKeyInfo);
+    if( pRec==0 ) return SQLITE_NOMEM_BKPT;
+  }
 
   rc = sqlite3HctTreeCsrOpen(p->pHctTree, iRoot, &pCsr);
   if( rc==SQLITE_OK ){
     for(rc=sqlite3HctTreeCsrFirst(pCsr); rc==SQLITE_OK ; /* no-op */){
+      int nRetry = 0;
       int ii;
       i64 iKey = 0;
       int nData = 0;
@@ -533,11 +539,8 @@ static int btreeFlushOneToDisk(void *pCtx, u32 iRoot, KeyInfo *pKeyInfo){
       sqlite3HctTreeCsrKey(pCsr, &iKey);
       sqlite3HctTreeCsrData(pCsr, &nData, &aData);
       bDel = sqlite3HctTreeCsrIsDelete(pCsr);
-      if( pKeyInfo ){
-        assert( 0 );
-      }else{
-        rc = sqlite3HctDbInsert(pDb, iRoot, 0, iKey, bDel, nData,aData,&nRetry);
-      }
+      if( pRec ) sqlite3VdbeRecordUnpack(pKeyInfo, nData, aData, pRec);
+      rc = sqlite3HctDbInsert(pDb, iRoot, pRec, iKey, bDel,nData,aData,&nRetry);
       if( rc ) break;
 
       assert( nRetry>=0 );
@@ -561,6 +564,9 @@ static int btreeFlushOneToDisk(void *pCtx, u32 iRoot, KeyInfo *pKeyInfo){
     sqlite3HctTreeCsrClose(pCsr);
   }
 
+  if( pKeyInfo ){
+    sqlite3DbFree(pKeyInfo->db, pRec);
+  }
   return rc;
 }
 
