@@ -121,7 +121,7 @@ int sqlite3HctDbEndRead(HctDatabase*);
 
 void sqlite3HctDbRollbackMode(HctDatabase*,int);
 
-int sqlite3HctDbCsrOpen(HctDatabase *pDb, u32 iRoot, HctDbCsr **ppCsr);
+int sqlite3HctDbCsrOpen(HctDatabase*, struct KeyInfo*, u32 iRoot, HctDbCsr**);
 void sqlite3HctDbCsrClose(HctDbCsr *pCsr);
 
 void sqlite3HctDbCsrDir(HctDbCsr*, int eDir);

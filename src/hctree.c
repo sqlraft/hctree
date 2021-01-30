@@ -576,7 +576,7 @@ static int btreeFlushData(Btree *p, int bRollback){
   if( p->eMetaState==HCT_METASTATE_DIRTY ){
     int nRetry = 0;
     int nData = SQLITE_N_BTREE_META * 4;
-    rc = sqlite3HctDbInsert(p->pHctDb, 2, 0, 0, 0, nData, (u8*)p->aMeta,&nRetry);
+    rc = sqlite3HctDbInsert(p->pHctDb, 2, 0, 0, 0, nData,(u8*)p->aMeta,&nRetry);
     if( rc==SQLITE_OK ){
       rc = sqlite3HctDbInsertFlush(p->pHctDb, &nRetry);
     }
@@ -658,7 +658,9 @@ int sqlite3BtreeCommitPhaseTwo(Btree *p, int bCleanup){
       p->nNewRoot = 0;
     }
   }
-  sqlite3HctDbEndRead(p->pHctDb);
+  if( p->pHctDb ){
+    sqlite3HctDbEndRead(p->pHctDb);
+  }
   p->eTrans = SQLITE_TXN_NONE;
   p->eMetaState = HCT_METASTATE_NONE;
   /* TODO: Invalidate any active cursors */
@@ -829,7 +831,7 @@ int sqlite3BtreeCursor(
   pCur->pKeyInfo = pKeyInfo;
   rc = sqlite3HctTreeCsrOpen(p->pHctTree, iTable, &pCur->pHctTreeCsr);
   if( rc==SQLITE_OK && p->pHctDb ){
-    rc = sqlite3HctDbCsrOpen(p->pHctDb, iTable, &pCur->pHctDbCsr);
+    rc = sqlite3HctDbCsrOpen(p->pHctDb, pKeyInfo, iTable, &pCur->pHctDbCsr);
   }
   if( rc==SQLITE_OK ){
     pCur->pCsrNext = p->pCsrList;
@@ -1603,10 +1605,11 @@ int sqlite3BtreeUpdateMeta(Btree *p, int idx, u32 iMeta){
 */
 int sqlite3BtreeCount(sqlite3 *db, BtCursor *pCur, i64 *pnEntry){
   i64 nEntry = 0;
-  for(
-      sqlite3HctTreeCsrFirst(pCur->pHctTreeCsr);
-      0==sqlite3HctTreeCsrEof(pCur->pHctTreeCsr);
-      sqlite3HctTreeCsrNext(pCur->pHctTreeCsr)
+  int dummy = 0;
+  int rc;
+  for(rc = sqlite3BtreeFirst(pCur, &dummy);
+      rc==SQLITE_OK && 0==sqlite3BtreeEof(pCur);
+      rc = sqlite3BtreeNext(pCur, 0)
   ){
     nEntry++;
   }

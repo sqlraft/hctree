@@ -881,9 +881,7 @@ static int pgmapConnect(
   int rc;
 
   rc = sqlite3_declare_vtab(db,
-      "CREATE TABLE x("
-        "slotno INTEGER, pgno INTEGER, physical_in_use BOOLEAN"
-      ")"
+      "CREATE TABLE x(logical INTEGER, pgno INTEGER)"
   );
 
   if( rc==SQLITE_OK ){
@@ -943,7 +941,11 @@ static int pgmapLoadSlot(pgmap_cursor *pCur){
 */
 static int pgmapNext(sqlite3_vtab_cursor *cur){
   pgmap_cursor *pCur = (pgmap_cursor*)cur;
-  pCur->slotno++;
+  if( pCur->slotno==2 ){
+    pCur->slotno = 33;
+  }else{
+    pCur->slotno++;
+  }
   return pgmapEof(cur) ? SQLITE_OK : pgmapLoadSlot(pCur);
 }
 
@@ -964,10 +966,6 @@ static int pgmapColumn(
     }
     case 1: {  /* pgno */
       sqlite3_result_int64(ctx, (pCur->iVal & 0xFFFFFFFF));
-      break;
-    }
-    case 2: {  /* physical_in_use */
-      sqlite3_result_int(ctx, (pCur->iVal & HCT_PGMAPFLAG_PHYSINUSE)?1:0);
       break;
     }
   }
