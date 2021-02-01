@@ -1,24 +1,29 @@
 
 
   *  [#system_overview|System Overview]
-  *  [#transaction    |Transaction Layer Details]
-  *  [#btree          |Btree Layer Details]
+  *  [#concurrency    |Concurrency Model]
+    <ul>
+      <li> [#concurrency_bg  |Background]
+    </ul>
   *  [#replication    |Replication and other Integration Issues]
-  *  [#robustness     |Process, Power and Operating System Failures]
-  *  [#embedded       |Embedded Deployment]
 
 A high-concurrency, optimistic row-level-locking backend for SQLite that
-more or less plugs in to the btree.h interface. All clients must be within a
-single process. Databases are robust in the face of process crashes.
+more or less plugs in to the btree.h interface. Goals are:
 
-The database may also be configured to be robust in the face of operating
-system crashes and power failures. Recovering from such a crash requires 
-scanning the entire database file. [#robustness|See below] for 
-details.
+  *  To run significantly faster than stock SQLite in all important cases, and
+  *  To allow an order of magnitude more write concurrency than stock SQLite.
+
+All clients must be within a single process. Databases are robust in the face
+of process crashes. At the cost of extra writes and file-system syncs, the
+database may also be configured to be robust in the face of operating system
+crashes and power failures.
 
 Suitable for use in a server system such as BedrockDB.
 
-There is also a [./fileformat.wiki | file format document].
+There is also a document describing the concurrent [./blink.wiki|b-link tree]
+used to store data persistently in the file-system, and a
+[./fileformat.wiki|file-format document] describing the structure of the 
+various types of files.
 
 <h1 id=system_overview>System Overview</h1>
 
@@ -71,226 +76,123 @@ reaches the head of the transaction queue without finding a conflict,
 it adds its own transaction to the end of the queue and in doing so
 assigns itself a transaction id. It then writes its keys to the database.
 
-<h1 id=transaction>Transaction Layer Details</h1>
+<h1 id=concurrency>Concurrency Model</h1>
 
-This section describes roughly the transaction layer - the layer that sits
-between SQLite and the b-tree described in the sections below. In general
-the data structures described here require a mutex to modify, but may be
-read safely without one. There are two mutexes for each database:
+<h2 id=concurrency_bg>Background</h2>
 
-  *  M1: Mutex taken when adding an entry to the end of the transaction queue.
-  *  M2: Mutex taken when a transaction has finished committing (after all
-     keys have been written to the b-tree layer).
+Until somewhere around 2010, concurrency in SQL database systems was much
+simpler. Transactions were in most cases allowed to proceed concurrently so
+long as they did not write to the same rows, or cause database constraint
+violations. This is often termed <b>snapshot isolation</b>. Although this is 
+simpler to implement and imposes relatively little overhead, it turns out to be
+quite difficult to use, as concurrent combinations of transactions that
+function correctly when run independently may malfunction.
 
-<b> Readers: </b>
+<pre>
+    CREATE TABLE marbles(id INTEGER PRIMARY KEY, color);
+    INSERT INTO marbles VALUES(1, 'white'), (2, 'black'), (3, 'white'), (4, 'black');
+</pre>
 
-There is a single 64-bit integer accessed using atomic store/get instructions
-that contains the newest available snapshot id (the transaction id for which
-all previous transactions have been completely committed). There are also two
-64-bit locking-slots (or arrays of locking slots). A locking-slot is similar to
-the locking slots used by SQLite's wal mode, except that in this case the lower
-56-bits of the slot are used for the snapshot id and the remaining 8 for the
-number of clients currently holding a lock on the slot. And so a single CAS
-instruction is used to take or release a lock. The value of the newest
-available snapshot field, as well as the transaction ids stored in the
-locking-slots, are set by writers holding the M2 mutex.
+And two transactions, one that changes the color of all marbles to white, and
+one that changes all marbles to black:
 
-More specifically, to open a transaction (read or write), a client must:
+<pre>
+    -- Transaction 1:
+    UPDATE marbles SET color='white' WHERE color='black';
+</pre>
 
-  1.  Read the value of both locking-slots.
-  2.  Use a CAS instruction to increment the lock-count of the locking-slot
-      containing the largest snapshot id. If this fails, goto 1.
-  3.  Read the value of the "newest snapshot" field. This should always be
-      equal to or greater than the locking-slot snapshot id.
+<pre>
+    -- Transaction 2:
+    UPDATE marbles SET color='black' WHERE color='white';
+</pre>
 
-It may be that with a sufficiently high number of clients opening and closing
-transactions, contention when writing the two locking-slots might slow things
-down. Or 256 or more clients require a lock on the same slot. In this case each
-locking-slot will be replaced with an array of locking-slots, spaced out in
-memory to avoid using the same cache-line for any two.
+Intuitively, after running both of the transactions above concurrently, there
+are two possible outcomes - either all of the marbles are white or all of the
+marbles are black. However, with snapshot isolation there is a third
+possibility - that the color of each marble has been changed, leaving half
+white and half black.
 
-<b> Writers: </b>
+Modern systems implement <b>serializable</b> isolation, which does not allow
+for this third possibility. Under serializable isolation, a set of
+transactions may only be committed if the same transactions may be executed
+in some serial order producing results consistent with the final and all
+visible interim states of the database produced by concurrent execution. The
+usual way to model this is as a graph, where each node is a transaction, and
+each directly edge represents a dependency. There are two types of dependency
+between transactions:
 
-Each writer has its own log file, and all log files are stored in a single
-directory. After a writer assigns a transaction id to a transaction (once
-it is sure to be committed), a record of all keys in the transaction, along
-with the transaction id, is written to the log file. Once the transaction
-has been completely committed, the record within the log file is marked
-as invalid. 
+  *  a <b>dependency</b> which occurs when transaction B reads data written
+     by transaction A. In this case transaction B must occur after transaction
+     A in the serialization order.
 
-These per-writer logs are used for process crash recovery only. On startup, 
-all logs in the log-directory are scanned for transactions that were partially
-committed when the crash occurred. The transactions are played forward and
-the log files deleted as part of startup.
+  *  an <b>anti-dependency</b> which occurs when transaction A reads data
+     that is overwritten by transaction B. In this case transaction A must
+     occur before transaction B in the serialization order.
 
-The transaction queue, the list of transactions in order of transaction
-id, is an ordinary singly linked-list in heap-memory. Associated with each
-of the locking-slot arrays is a pointer to the corresponding element of
-the transaction queue (i.e. the element with a transaction id identical
-to the locking-slots snapshot id). When a writer needs to iterate through
-the transaction queue, it always starts with the pointer associated with
-its locking slot.
+when a transaction is to be committed, it is added to the directed graph. If
+this creates a cycle in the graph, the transaction may not be committed.
 
-A writer therefore proceeds as follows:
+One quirk in this is that read-only transactions must also be added to the
+graph and be validated before "committing". Results returned by a
+read-transaction that does not pass validation must be considered suspect.
+For example, consider the following two transactions:
 
-  #  Opens a read transaction as described above. During the transaction
-     new keys and key-deletes are stored in memory, not written into the
-     database. Also recorded are the ranges of keys read from the database
-     by the transaction.
-  #  Iterate through the transaction queue, checking if the current
-     transaction conflicts with a transaction with an id greater than
-     the snapshot id opened in (1). If a conflict is found, return the 
-     error to the user.
-  #  Grab mutex M1. Append an entry for the current transaction to the
-     transaction queue and assign the next transaction id to it. Release
-     M1. Or, if when M1 is obtained some transaction that was not checked
-     for conflicts in (2) has already been appended to the list, drop mutex
-     M1 and goto 2.
-  #  Write an entry for the transaction to the writers log file.
-  #  Write all the transactions key and delete-keys to the database.
-  #  Grab mutex M2 and mark the transaction queue entry as fully committed
-     and update the newest-available-snapshot field if required. Also,
-     if possible, update the locking-slot values and the transaction queue
-     pointers (see below).
+<pre>
+    -- T1:
+    UPDATE marbles SET color='white';
+</pre>
 
-The transaction layer data structure can be summarized as follows:
+<pre>
+    -- T2:
+    INSERT INTO marbles VALUES(NULL, 'black');
+</pre>
 
-<verbatim>
-    struct TransactionLayer {
-      Mutex M1;
-      Mutex M2;
-      u64 aLockingSlot1[ARRAY_SIZE];
-      u64 aLockingSlot2[ARRAY_SIZE];
-      u64 iNewestAvailableSnapshot;
-      TransactionQueueEntry *p1;
-      TransactionQueueEntry *p2;
-    };
+The final state of the database is that it contains one black marble, and the
+rest are white. This implies that there is an anti-dependency between T1 and T2
+- T1 read data that was later overwritten by T2, so T1 must occur before T2 in
+the serialization order:
+
+<verbatim type="pikchr center">
+circle "T1" ; arrow ; circle "T2"
 </verbatim>
 
-Not shown above is the "largest transaction id allocated so far" field. This
-is part of the header of the database itself.
+In the above diagram, the arrow runs in the direction of time. The graph
+indicates that T2 must occur after T1 in the serialization order.
 
-After obtaining mutex M2 once all keys have been written to the database,
-a writer check if it is possible to update a locking-slot value and
-transaction queue pointer. It is always the locking-slot with the smaller
-value that is updated. The update takes place iff (a) there are no readers
-holding any locks on the locking-slot, and (b) the newest-available-snapshot-id
-is greater than the value stored in the other locking slot (as it is important
-that the locking slots always contain different values). The update proceeds as
-follows:
+Say there is also a read-only transaction running:
+<pre>
+  -- T3:
+  SELECT * FROM marbles;
+</pre>
 
-  #  Each value in the locking-slot array is set to 0. This ensures that no
-     reader locks it.
-  #  The transaction-queue pointer is advanced to point to the entry with
-     a transaction id equal to the current newest-available-snapshot-id
-     value. All transaction queue entries between the current pointer and
-     the pointer associated with the other locking slot can be deleted
-     at this point.
-  #  Each value in the locking-slot array is set to the
-     newest-available-snapshot-id value.
+If, by some quirk of the system, saw the effects of T2 but not T1 (a mix of
+black and white marbles plus the new black marble added by T2), then it would
+have a dependency on T2 but an anti-dependency on T1:
+
+<verbatim type="pikchr center">
+T3: circle "T3"
+T1: circle "T1" at T3 + (-0.5,0.7) ; arrow ; T2: circle "T2"
+arrow from T2.sw to T3.ne
+arrow from T3.nw to T1.se
+</verbatim>
+
+In this case, one of more of T1, T2 or T3 would have to be rolled back. Even
+though the both the final state and interim state of the database observed
+by T3 are possible outcomes of executing T1 and T2 in serial, they are not
+consistent with each other and therefore a violation of serializable
+isolation.
+
+A full implementation of such a graph is considered too expensive in 
+practice. And so all current systems implement some compromise that allows
+for some number of false-positive conflict detections.
+
+<h2>HC-Tree Approach</h2>
 
 
-
-<h1 id=btree>Btree Layer Details </h1>
-
-The b-tree is an ordinary single-process, multi-threaded, COW, (mostly)
-lock-free b-tree implementation. As with SQLite, multiple tree structures 
-exist within a single file - one for each database table and index.
-
-<a href=blink.wiki>Now described here.</a>
 
 <h1 id=replication>Replication and other Integration Issues</h1>
 
 <i> In which it is discussed how this fits in with streaming replication
 and bootstrapping a new node</i>
-
-<h1 id=robustness>Process, Power and Operating System Failures</h1>
-
-<h2> Process Failures </h2>
-
-The database file is always in a valid state, so does not require any
-repair to recover from process failure. The log directory is scanned for
-valid transactions and any found are written to the database. This ensures
-that a process failure does not leave the database containing partially
-committed transactions. Additionally, the entire page-map is scanned and,
-based on the PHYSICAL_IN_USE and page-map values, the heap memory data
-structure used to manage free logical and physical page ids is recreated.
-
-<h2> Power/OS Failures </h2>
-
-Recovery from power or OS failure (hereafter "system failure") is a slow
-process, as it requires scanning the entire database file not once, but twice.
-
-Each page written to the database contains a 28 byte header:
-
-  *  The transaction id of the transaction writing the page. (8 bytes)
-  *  A checksum based on the contents of the page and the checksum of
-     the previous page - if any - in the transaction. (8 bytes)
-  *  The logical page number of the page. (4 bytes)
-  *  A pointer (physical page id) to the previous page written by the 
-     transaction, if any. (4 bytes)
-  *  If the page is the last page written by the transaction, a flag to
-     indicate so. Also, a field to indicate the largest transaction id
-     of a page clobbered (or traversed?) by the writer while writing keys, if
-     it is larger than the current transaction. (4 byte)
-
-When recovering from a system failure, it is assumed that the page-map is
-completely untrustworthy. Recovering the database is to repopulate the 
-page-map to contain the newest possible version of the database for which 
-all valid pages have survived the catastrophe. This is done by first
-determining a transaction id to recover up to. This transaction id
-must meet two criteria:
-
-  *  All pages for all transactions with transaction ids less than
-     or equal to the recovery id must have made it to disk, and
-  *  No transaction with a transaction id less than or equal to the
-     recovery id may have overwritten a page written by a transaction 
-     with a transaction id larger than the recovery id.
-
-The second criteria above is necessary because transactions may have
-been written to the db out of order - and so it is possible that
-transaction N has written keys to a page that was linked into the tree
-structure until by transaction N+1. In this case it is not possible
-to use N as a recovery id.
-
-If physical pages are never reused, this means that the recovery id
-is the largest transaction id for which all pages of itself and
-all earlier transactions can be found with valid checksums in the
-database. If we require that pages written by a single transaction
-have increasing physical page ids, the recovery id can be determined 
-and the page-map largely reconstructed in a single pass of the database 
-file.
-
-Not completely though, as the flags stored in the page-map,
-SCHEDULED_FOR_EVICTION, PHYSICAL_IN_USE and NODE_HAS_SPLIT, are still 
-not set as required. Furthermore, in the case where a logical page id has 
-been evicted from the tree, the page-map may still contain a non-zero value.
-All of this is fixed by iterating through the entire tree structure, visiting
-each page, including overflow pages.
-
-Of course, this only works if old physical pages are never reused. In order
-to facilitate the reuse of old pages without breaking recovery from system 
-failure, the database file is periodically synced to disk. More specifically:
-
-  *  The client waits until all existing transactions have finished committing,
-     while preventing new transactions from beginning to write keys to the
-     database. This ensures that the transaction id of the last transaction
-     committed may be used as a recovery id.
-  *  The db file is synced to disk.
-  *  One of two 4KiB blocks at the start of the database file is updated
-     with, amongst other things, the transaction id of the last transaction
-     written to the db before the sync.
-  *  The db file is synced to disk again.
-
-When recovering from system failure, the client checks each of the two
-4KiB blocks for the newest guaranteed recovery id. During the first scan
-of the database file it then assumes all transaction up to and including
-this id were successfully committed.
-
-Once a guaranteed recovery id has been synced to disk, physical pages
-made free by transactions up to and including this transaction id may
-be reused.
-
-<h1 id=embedded>Embedded Deployment</h1>
 
 

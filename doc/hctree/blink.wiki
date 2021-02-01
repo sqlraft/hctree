@@ -47,11 +47,11 @@ There is also a <a href=fileformat.wiki>file format document</a>.
 <h1 id=overview> Design Overview </h1>
 
 The distinguishing feature of the database format is the <b>page-map</b>. The
-page-map is a massive array large enough to contain an entry for each
-logical page in the database. It's primary purpose is to map between
-logical and physical page numbers (locations in the database file). In order
-to read the data from a page from disk given a logical page number, a client
-must first look up the physical page number within the page-map.
+page-map is a very large array - large enough to contain an entry for each
+page in the database. It's primary purpose is to map between logical and
+physical page numbers (locations in the database file). In order to read the
+data from a page from disk given a logical page number, a client must first
+look up the physical page number within the page-map.
 
 The page-map is stored on disk and memory mapped into the database process
 address space for client access. Clients always write to the page-map using
@@ -69,15 +69,15 @@ entire pages</b>. In order to safely update an existing page, a client:
      the page has been written since step 1, this will fail (as the
      page-map entry will have been modified). 
 
-For the purposes of most of this page, we assume that logical and physical
-page numbers are never reused. In practice they must be, because both are
-32-bit unsigned integers, and also to avoid the database file growing
+For the purposes of most of this document, we assume that logical and physical
+page numbers are never reused. In practice they must be, partly because both
+are 32-bit unsigned integers, and also to avoid the database file growing
 indefinitely.
 
 Page-map slots are 64-bits in size, but physical page numbers are just 
 32-bits. 1 of the remaining bits is used to store the <b>PAGE_EVICTED flag</b>.
-The PAGE_EVICTED is set on a logical page as part of removing it from the
-database (see below). Because it is part of the page-map entry, setting
+The PAGE_EVICTED is set on a logical page as part of removing it from a 
+tree structure (see below). Because it is part of the page-map entry, setting
 the PAGE_EVICTED flag and the page data may both be considered part of the
 thing that is Compared-And-Swapped by the method above.
 
@@ -540,7 +540,8 @@ a snapshot that does not include the transaction that freed the page.
 
 Logical page id are managed quite similarly to physical page ids. They
 are slightly more complicated because a logical page id might be present
-in the parent list.
+in the parent list, making it more difficult to know exactly when a logical
+page id becomes free.
 
 To manage this we add another flag - LOGICAL_IN_PARENT - that must be
 set if the logical page id is present in the parent list. It may not
