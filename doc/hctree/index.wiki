@@ -1,11 +1,13 @@
 
 
-  *  [#system_overview|System Overview]
-  *  [#concurrency    |Concurrency Model]
+  *  [#system_overview|1. System Overview]
+  *  [#concurrency    |2. Concurrency Model]
     <ul>
-      <li> [#concurrency_bg  |Background]
+      <li> [#concurrency_bg    |2.1. Background]
+      <li> [#concurrency_hct   |2.2. Overview of HC-Tree Concurrency]
+      <li> [#concurrency_notes |2.3. Notes on HC-Tree Concurrency]
     </ul>
-  *  [#replication    |Replication and other Integration Issues]
+  *  [#replication    |3. Replication and other Integration Issues]
 
 A high-concurrency, optimistic row-level-locking backend for SQLite that
 more or less plugs in to the btree.h interface. Goals are:
@@ -25,33 +27,30 @@ used to store data persistently in the file-system, and a
 [./fileformat.wiki|file-format document] describing the structure of the 
 various types of files.
 
-<h1 id=system_overview>System Overview</h1>
+<h1 id=system_overview>1. System Overview</h1>
 
-The system is described here in two parts - the b-tree layer and the 
-transaction layer. The b-tree layer differs from the SQLite b-tree 
-in that:
+The system is built around the b-tree backend [./blink.wiki|described here].
+The b-tree layer differs from the SQLite b-tree in that:
 
-  *  No direct support for transactions, sub-transactions or transaction
-     rollback is provided. Each key operation (insert/update/delete) is
-     immediately visible to all other database users.
+  *  No direct support for transaction isolation or rollback is provided. Each
+     key operation (insert/update/delete) is immediately visible to other
+     database users.
   *  Concurrent writers are supported.
 
 MVCC snapshots for readers are supported using the same technique as Postgres:
 
-  *  Appended to each key inserted into the b-tree is a transaction id.
-  *  Each key has an optional field for the transaction id of the transaction
-     that deletes it from the database.
-  *  Transaction ids are 56-bit monotonically increasing integers.
-  *  To read the newest available stable snapshot, readers need to know the 
-     largest committed transaction id for which all previous transactions
-     are completely committed. They may then selectively ignore database
-     entries based on the created and deleted transaction ids associated with
-     each key.
-  *  Writers remove entries and transaction id fields that are no longer
-     required lazily, when the page is updated for some other reason.
-     To do this they need to know the oldest transaction id that may
-     still be being used by a reader as a snapshot id as described in
-     the previous bullet point.
+  *  Along with each key or delete-key inserted into the b-tree is a
+     transaction id.  
+  *  Each key has an optional field for the transaction id (TID) of the
+     transaction that deletes it from the database.
+  *  If there are multiple versions of the key in the database, they are
+     linked into a list so that it is possible to navigate from a new
+     key to all older versions.
+  *  Readers carry with them a record of the transactions that were committed
+     at the time when the read transaction was started and the snapshot opened.
+  *  By selectively ignoring or using older versions of records based on
+     the associated TIDs, readers obtain a consistent view of the database
+     snapshot on which their read transaction is opened.
 
 A writer does not write directly to the b-tree structures when executing
 DML/DDL statements. Instead, new keys are accumulated in private memory
@@ -59,28 +58,21 @@ structures until the transaction is ready to commit. Also accumulated are
 a list of keys and key-ranges read from the database as part of the
 transaction.
 
-The transaction queue contains an entry for each transactions that has
-either been committed, or is being committed, sorted in order of transaction
-id. A transaction is not added to the transaction queue or assigned a
-transaction id until it is certain that it will be committed - that it does 
-not conflict with any other transaction. Associated with each transaction
-queue entry is the set of database keys that the transaction writes to.
+Writers use the same rule as the SQLite BEGIN CONCURRENT branch, modified
+to work with row-level locks instead of page-level locks, to determine
+whether or not a transaction may be safely committed or not: The transaction
+may be committed if none of the keys or key ranges that it read (or wrote, each
+write is also implicitly a read) have been modified since the transactions
+snapshot. This is described in <a href=#concurrency_hct>more detail</a> below.
 
-When a writer wishes to commit a transaction it iterates through the 
-transaction queue, starting with the entry with a transaction id
-one greater than the snapshot id it used while reading the database,
-in ascending transaction id order, checking for conflicts. A conflict
-is found if the writer's transaction reads a key or range of keys that
-was modified by a transaction already in the queue. If the writer
-reaches the head of the transaction queue without finding a conflict,
-it adds its own transaction to the end of the queue and in doing so
-assigns itself a transaction id. It then writes its keys to the database.
+  
 
-<h1 id=concurrency>Concurrency Model</h1>
 
-<h2 id=concurrency_bg>Background</h2>
+<h1 id=concurrency>2. Concurrency Model</h1>
 
-Until somewhere around 2010, concurrency in SQL database systems was much
+<h2 id=concurrency_bg>2.1. Background</h2>
+
+Until surprisingly recently, concurrency in SQL database systems was much
 simpler. Transactions were in most cases allowed to proceed concurrently so
 long as they did not write to the same rows, or cause database constraint
 violations. This is often termed <b>snapshot isolation</b>. Although this is 
@@ -186,11 +178,97 @@ A full implementation of such a graph is considered too expensive in
 practice. And so all current systems implement some compromise that allows
 for some number of false-positive conflict detections.
 
-<h2>HC-Tree Approach</h2>
+<h2 id=concurrency_hct>2.2. Overview of HC-Tree Concurrency</h2>
 
+A write transaction writes no data into the database while executing DDL
+or DML statements. Instead, new database entries and delete keys are
+accumulated in a private, in-memory, data structure. Queries run within
+the transaction merge data from the database and in-memory tree structures
+to return to the caller. Also accumulated in memory is a record of the
+keys and key-ranges read from the database as part of the transaction.
 
+Associated with each record or delete-key in the database is a transaction ID
+(TID). A TID is a 56-bit integer assigned to transactions in increasing order
+as described below. A TID's only purpose is as a key to use with the
+transaction-map. The transaction-map maps each TID to one of four types
+of values:
 
-<h1 id=replication>Replication and other Integration Issues</h1>
+  *  Special value COMMITTING. This means that keys for the transaction 
+     are being written into the database.
+  *  Special value ROLLBACK. This means that keys are currently being
+     removed from the database (replaced with their previous versions). This
+     happens after a conflict is detected and it is determined that the
+     transaction will not be committed.
+  *  A commit ID (CID) value with the VALIDATING flag set.
+  *  A commit ID (CID) value.
+
+Commit IDs (CIDs) are also 56-bit integers assigned to transactions in
+increasing order. A database snapshot is defined by a commit id <i>C</i> - all
+keys in the file with with TIDs mapped to CIDs less than or equal to <i>C</i>
+are part of the snapshot and should be read, all other keys should be ignored.
+
+A commit proceeds as follows:
+
+  #  <p>The transaction is assigned a transaction ID (TID). The transaction 
+     map entry is set to COMMITTING.
+  #  <p>The transaction writes its set of new keys and delete-keys into the
+     database. The transaction id assigned in the previous step is associated
+     with each new database entry. If the writer finds that it must clobber
+     a version of a key with a TID that indicates that the key being clobbered
+     was written after the writers snapshot, the transaction is deemed to
+     conflict and any changes rolled back.
+  #  <p>The transaction is assigned a commit ID (CID). The transaction map
+     entry is set to contain the CID with the VALIDATING flag set.
+  #  <p>The transaction queries the database for the keys and key ranges that
+     it queried for while it was running. If it encounters any keys with
+     TIDs mapped to CID values greater than the CID of the database snapshot
+     that the transaction was prepared against, but less than the CID assigned
+     in step 3, the transaction is deemed to conflict and all changes rolled
+     back.
+  #  The VALIDATING flag is cleared in the transaction map. The transaction
+     is now committed and its keys may be read by readers.
+
+To rollback, the database client:
+
+  #  <p>Sets the transaction map entry for the transaction to ROLLBACK.
+  #  <p>Runs through all keys already written to the database, restoring the 
+     original values.
+  #  <p>Sets the transaction map entry for the transaction to the CID
+     value. A transaction that modified zero keys has been committed.
+
+This scheme means that a transaction may finish committing before all
+transactions with smaller CID values have. If a reader is allowed to read the
+database in this state, it may encounter data anomalies similar to that
+described at the end of the previous section. Although each database snapshot
+is possible in and of itself, a single reader might see a sequence of database
+snapshots that would not be possible if transactions were truly serialized.
+
+One solution might be to have new readers read from the database snapshot 
+defined by the largest CID for which the transaction and all transactions
+earlier in the serialization order (those with smaller CID values) have
+already finished committing, ignoring some recently committed transactions. 
+But this means that a single database connection might read from a snapshot
+that does not contain the effects of its own previous write transactions, 
+which is not tenable.
+
+Instead, a new reader reads from the snapshot defined by the largest CID
+that has finished committing so far. If it encounters a key with a TID
+mapped to a CID with the VALIDATING flag set, the reader spinlocks on
+the transaction-map entry until it is either set to ROLLBACK or until the
+VALIDATING flag is cleared. The reader then proceeds - reading either the
+key or the previous version (if any), depending on whether or not the
+transaction was committed or rolled back.
+
+<h2 id=concurrency_notes>2.3. Notes on HC-Tree Concurrency</h2>
+
+Don't have to store the entire transaction-map.
+
+Can check by page before falling back to range when validating.
+
+This is not as good as some schemes. This is a consequence of not wishing
+to validate read-only transactions.
+
+<h1 id=replication>3. Replication and other Integration Issues</h1>
 
 <i> In which it is discussed how this fits in with streaming replication
 and bootstrapping a new node</i>
