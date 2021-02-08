@@ -1,7 +1,7 @@
 
 <title> Database Design </title>
 
-  *  <a href=#context>Component Context</a>
+  *  <a href=#context>Component Overview</a>
   *  <a href=#overview>Design Overview</a>
   *  <a href=#btree>B-Tree Data Structure</a>
     <ul>
@@ -13,7 +13,7 @@
   *  <a href=#mvcc> MVCC Version Management </a>
   *  <a href=#recovery> Crash Recovery </a>
 
-<h1 id=context> Component Context </h1>
+<h1 id=context> Component Overview </h1>
 
 This page describes the data structures and algorithms used to implement
 the on-disk part of the database system.
@@ -23,23 +23,32 @@ number, each of which is either an intkey or index tree structure, as required
 by SQLite. The special root page number 1 identifies the sqlite3_schema
 table.
 
-By the time a client begins writing entries to the database, the transaction
-has been reduced to a list of keys and delete-keys that must be written into
-the various tree structures within the db. It has already been determined that
-the transaction will be committed, and that it does not conflict with any other
-concurrently committing transaction. There is no chance rollback will be
-required. Any number of non-conflicting transactions may be concurrently
-writing to the database.
-
 Each key and delete-key written to the database has an associated 
-transaction id. Each reader carries with it a record of the transactions
-that were completely written (committed) to the db when its read transaction
-started. Keys or delete-keys with transaction ids for transactions that were
-not committed when the read transaction was opened are ignored. This means that
-it is not a problem if a reader reads a page that contains keys written since
-its transaction was opened, so long as it never reads a version of a page too
-old to contain keys that are part of transactions that were already completely
-committed. There may be any number of readers.
+transaction id (TID). Additionally, if the key or delete-key replaced another
+version of the same key when it was written, the new entry contains a pointer
+to the location in the database file of the old version, allowing readers
+to navigate from newer versions to old. Each reader carries with it a record of
+the transactions that were completely written (committed) to the db when its
+read transaction started. Keys or delete-keys with TIDs for transactions that
+were not committed when the read transaction was opened are ignored. This means
+that it is not a problem if a reader reads a page that contains keys written
+since its transaction was opened, so long as it never reads a version of a page
+too old to contain keys that are part of transactions that were already
+completely committed. There may be any number of readers.
+
+When a new key or delete-key replaces an existing entry, the writer inspects
+the TID of the old version. If the TID indicates that the old version is
+not visible to the writer client, then attempting to write the new version
+is declared a conflict and the transaction rolled back. This, combined with
+the consistent snapshot view, provides something version close to "snapshot
+isolation" concurrency on top of which the systems serializable concurrency
+model is built.
+
+The database does not provide any special support for sub-transactions or
+rollback operations. If it is discovered that a transaction must be rolled
+back after one or more keys have been written into the database, the client
+must edit the database to remove each key using a methods similar to those
+with which it was inserted in the first place.
 
 The remainder of this page describes the database design at a high level. 
 There is also a <a href=fileformat.wiki>file format document</a>.
@@ -95,7 +104,7 @@ boxht=0.2 ; boxwid=0.5 ; linewid=0.2
 
 A1: box ; arrow ; A2: box ; arrow ; A3: box ; arrow ; A4: box ; arrow
 A5: box ; arrow ; A6: box ; arrow ; A7: box ; arrow ; A8: box
-B1: box at A3 + (0.35, 0.5) ; arrow <- ; B2: box ; arrow <- ; B3: box
+B1: box at A3 + (0.35, 0.5) ; arrow -> ; B2: box ; arrow -> ; B3: box
 C1: box at B2 + (0,0.5) 
 
 arrow from B1.s to A1.n
@@ -124,20 +133,17 @@ key for the child node. This is different from the usual b-tree approach of N
 pointers and N-1 keys per internal node page - in this system an internal
 node with N pointer contains N keys.
 
-Another departure from conventionality is that the key sorting order is
-reversed for each tier of the tree structure. On nodes that are parents of leaf
-nodes, keys are sorted in reverse order. For nodes that are grandparents of the
-leaf nodes, keys sorting is in the same order as on leaves. For
-great-grandparents, reversed. And so on. The advantages of this are <a
-href=#interior>described below</a>.
-
 <h2 id=leaves> B-Tree Leaf Node Operations </h2>
 
 The data structure is best analyzed as a series of loosely coupled
 linked-lists. Consider, to begin with, just the leaves of a b-tree 
 structure - logical pages 1, 2, 3 and 4. The linked-list is being
 updated, possibly by multiple concurrent writers, and is also being
-traversed from start to finish by multiple readers.
+traversed from start to finish by multiple readers. With a linked list,
+a seek operation is equivalent to iterating from start to finish (as the
+only algorithm available is a linear search), and a reverse iteration is
+equivalent to multiple seeks (instead of following a pointer to skip to the
+"previous" page, the client must seek to the current key less a delta).
 
 <verbatim type="pikchr center">
 boxht=0.2 ; boxwid=0.5
@@ -336,27 +342,8 @@ which to start the search. Since the fencepost key of a logical page never
 changes, it is not possible for a non-PAGE_EVICTED entry within a parent
 list to be invalid or out of date.
 
-Another quirk is that sorting order is reversed for each successive tier
-of the b-tree. That is to say, keys in each parent list are sorted in the
-opposite order to those in its child list. This is for two reasons:
-
-  *  If a seek operation would otherwise follow a pointer to a page marked
-     PAGE_EVICTED, the reader needs to follow the pointer associated with
-     the previous entry to the child list. But iterating backwards can be
-     tricky - if the PAGE_EVICTED key is the first on its page, this 
-     essentially means retraversing parent nodes. But if the parent list
-     is in reverse order, the pointer to follow is the that associated with
-     the next entry, which is simple in all cases.
-
-  *  Efficiently iterating backwards through leaf nodes while accounting for
-     possible writers is complicated, requiring extra memory and extra seek
-     operations within the tree. It is made simpler, as well as more efficient,
-     if the parent list is in reverse order.
-
 The following diagram shows a tree structure containing keys from a keyspace
-consisting of 8-bit numbers, rendered in hexadecimal. The largest and smallest
-possible keys, respectively, are FF and 00. The middle tier of the b-tree
-is sorted in the opposite order than the leaf or root tier.
+consisting of 8-bit numbers, rendered in hexadecimal.
 
 <verbatim type="pikchr center">
 boxht=0.2 ; boxwid=0.6 ; linewid=0.2
@@ -368,48 +355,10 @@ A4:  box "45  4F  50" ; arrow
 A5:  box "51  5E  69" ; arrow
 A6:  box "7A  BD  C2" ; arrow
 A7:  box "CE  E0  F6" ; arrow
-A8:  box "F7  F7  F8"
+A8:  box "F7  FA  FB"
 
-B1: box "F7  CE  7A" with c at A3 + (0.35, 0.5) ; arrow
-B2: box "51  45" ; arrow
-B3: box "38  21  00"
-
-C:  box "38  51  FF" with c at B2 + (0, 0.5)
-
-arrow from C.s to B2.n
-arrow from C.s left 0.2 then to B3.n
-arrow from C.s right 0.2 then to B1.n
-
-arrow from B1.s left 0.2 then to A8.n
-arrow from B1.s to A7.n
-arrow from B1.s right 0.2 then to A6.n
-
-arrow from B2.s left 0.1 then to A5.n
-arrow from B2.s right 0.1 then to A4.n
-
-arrow from B3.s left 0.2 then to A3.n
-arrow from B3.s to A2.n
-arrow from B3.s right 0.2 then to A1.n
-</verbatim>
-
-Alternative rendering of the same tree. Rendered this way, the fencepost
-keys for each node in the middle tier of the tree structure appear on the
-right-hand-side of each box.
-
-<verbatim type="pikchr center">
-boxht=0.2 ; boxwid=0.6 ; linewid=0.2
-
-A1:  box "09  13  19" ; arrow
-A2:  box "21  2A  2A" ; arrow
-A3:  box "38  3C  43" ; arrow
-A4:  box "45  4F  50" ; arrow
-A5:  box "51  5E  69" ; arrow
-A6:  box "7A  BD  C2" ; arrow
-A7:  box "CE  E0  F6" ; arrow
-A8:  box "F7  F7  F8"
-
-B1: box "00  21  38" with c at A3 + (0.35, 0.5) ; arrow <-
-B2: box "45  51" ; arrow <-
+B1: box "00  21  38" with c at A3 + (0.35, 0.5) ; arrow ->
+B2: box "45  51" ; arrow ->
 B3: box "7A  CE  F7"
 
 C:  box "38  51  FF" with c at B2 + (0, 0.5)
@@ -648,15 +597,15 @@ this nature can omit these extra operations.
 
 <h2 id=recovery1> Recovery From Application Failure </h2>
 
-To support application failure, each writer client has a log file. Once
-it is known that a transaction does not conflict and is to be written into
-the database file, an entry is appended to the log file containing all
-the logical write operations that make up the transaction, along with the
-transaction id. Once the transaction has been completely written to the
-database, the log file entry is marked as committed.
+To support application failure, each writer client has a log file. Before
+it begins writing a transaction into the database, a new entry containing
+the transactions keys and delete-keys is appended to the log file. Once the
+transaction has either been completely written and the system has determined 
+it will be committed, or else completely rolled back, the log file entry
+is marked as completed.
 
 Upon recovery, the database process scans the log files for transactions
-not marked as committed. They are then written into the database, one
+not marked as completed. They are then written into the database, one
 key at a time, using the usual methods. This avoids partial transactions
 being left in the database following an application failure.
 
@@ -667,9 +616,10 @@ separate page-map files - A, B and C. We refer to "files" in this section, but
 these could just as easily be three different parts of a single file, or three
 different parts of the database file itself.
 
-A database also has two header pages that occur at the start of the database
-file. Each header page is located on a different disk sector, so it can be
-synced to disk separately.
+A database also has two header pages. Each header page is located on a
+different disk sector, so it can be synced to disk separately. These are
+called header pages, but are in fact stored in a separate file to other
+database content. This is also to allow them to be synced separately.
 
 Robustness in the face of power failures is achieved using database checkpoints
 and checksummed log files. A checkpoint is a version of the page-map and a set

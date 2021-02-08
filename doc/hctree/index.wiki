@@ -261,12 +261,33 @@ transaction was committed or rolled back.
 
 <h2 id=concurrency_notes>2.3. Notes on HC-Tree Concurrency</h2>
 
-Don't have to store the entire transaction-map.
+  *  The system <b>does not have to store the entire transaction map</b>.
+     Instead, it can be compressed by storing a transaction id Tmin for
+     which there are no readers reading from snapshots old enough to
+     exclude transaction Tmin or any transaction with a TID smaller than
+     Tmin from the snapshot. Then all entries for TIDs Tmin and smaller
+     may be discarded.
 
-Can check by page before falling back to range when validating.
+  *  <b>The validation phase can be optimized by using page level checks
+     before falling back to range and key checks</b>. When a client records
+     the list of keys and ranges that it reads during the transaction,
+     it also records the 
+     <a href=blink.wiki#overview>page-map value</a> for each logical page that
+     it reads. When validating a key or range of keys, it first comparse the
+     recorded page-map values with the current page-map value or values. If the
+     page-map values have not changed, there is no need to proceed with the
+     more expensive key level checks.
 
-This is not as good as some schemes. This is a consequence of not wishing
-to validate read-only transactions.
+  *  <b>This permits less concurrency than some other schemes</b>. This is 
+     largely a consequence of not wishing to validate read-only transactions.
+     The technique used most successfully to increase concurrency relative
+     to the scheme described above is Serializable Snapshot Isolation (SSI):
+     <p> [https://wiki.postgresql.org/wiki/Serializable]
+     <p>Another, similar, method is the Serial Safety Net:
+     <p>[https://event.cwi.nl/damon2015/papers/damon15-wang.pdf]
+
+<h3> 2.3.1. Increasing Concurrency </h3>
+
 
 <h1 id=replication>3. Replication and other Integration Issues</h1>
 
