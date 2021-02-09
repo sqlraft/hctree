@@ -337,6 +337,7 @@ int sqlite3HctDbOpen(const char *zFile, HctDatabase **ppDb){
 
 void sqlite3HctDbClose(HctDatabase *p){
   if( p ){
+    assert( p->aWriteFpKey==0 );
     hctDbTMapRelease(p);
     sqlite3HctFileClose(p->pFile);
     p->pFile = 0;
@@ -566,16 +567,14 @@ static int hctDbIntkeyNodeSearch(
 ){
   int i1 = 0;
   int i2 = pNode->pg.nEntry;
-  int bRev = (pNode->pg.nHeight & 0x01);
 
-  assert( bRev==0 || bRev==1 );
   while( i2>i1 ){
     int iTest = (i1+i2)/2;
     i64 iPgKey = pNode->aEntry[iTest].iKey;
     if( iPgKey==iKey ){
       *pbExact = 1;
       return iTest;
-    }else if( (bRev==0 && iPgKey<iKey) || (bRev!=0 && iPgKey>iKey) ){
+    }else if( iPgKey<iKey ){
       i1 = iTest+1;
     }else{
       i2 = iTest;
@@ -584,10 +583,8 @@ static int hctDbIntkeyNodeSearch(
   assert( i1==i2 );
 
   assert( i2>=0 );
-  assert( bRev==1 || i2==pNode->pg.nEntry || iKey<pNode->aEntry[i2].iKey );
-  assert( bRev==1 || i2==0 || iKey>pNode->aEntry[i2-1].iKey );
-  assert( bRev==0 || i2==pNode->pg.nEntry || iKey>pNode->aEntry[i2].iKey );
-  assert( bRev==0 || i2==0 || iKey<pNode->aEntry[i2-1].iKey );
+  assert( i2==pNode->pg.nEntry || iKey<pNode->aEntry[i2].iKey );
+  assert( i2==0 || iKey>pNode->aEntry[i2-1].iKey );
 
   *pbExact = 0;
   return i2;
@@ -626,7 +623,6 @@ int hctDbCsrSeek(
     if( rc==SQLITE_OK ){
       HctDbPageHdr *pHdr = (HctDbPageHdr*)pCsr->pg.aOld;
       int i2 = pHdr->nEntry-1;
-      int bReverse = (pHdr->nHeight % 2);
       int bExact;
       if( pHdr->nHeight==0 ){
         if( pRec ){
@@ -637,24 +633,18 @@ int hctDbCsrSeek(
         if( bExact==0 ) i2--;
       }else{
         HctDbIntkeyNode *pNode = (HctDbIntkeyNode*)pCsr->pg.aOld;
-        HctDbIntkeyNodeEntry *aEntry = ((HctDbIntkeyNode*)pHdr)->aEntry;
+
         i2 = hctDbIntkeyNodeSearch(pNode, iKey, &bExact);
-
-        assert( pRec==0 );
-
-        assert( i2>=0 && i2<=pHdr->nEntry );
-        assert( bReverse==0 || (i2==pHdr->nEntry || iKey>=aEntry[i2].iKey) );
-        assert( bReverse==1 || (i2==pHdr->nEntry || iKey<=aEntry[i2].iKey) );
-        if( bReverse && i2>=pHdr->nEntry ){
-          assert( pHdr->iPeerPg );
-          iPg = pHdr->iPeerPg;
-        }else{
-          iPg = pNode->aEntry[i2].iChildPg;
-        }
+        assert( i2==pHdr->nEntry || iKey<=pNode->aEntry[i2].iKey );
+        assert( i2==pHdr->nEntry || bExact==(iKey==pNode->aEntry[i2].iKey) );
+        assert( i2<pHdr->nEntry || bExact==0 );
+        i2 -= !bExact;
+        iPg = pNode->aEntry[i2].iChildPg;
+        assert( iPg );
       }
 
       /* Test if it is necessary to skip to the peer node. */
-      if( bReverse==0 && i2>=0 && i2==pHdr->nEntry-1 && pHdr->iPeerPg!=0 ){
+      if( i2>=0 && i2==pHdr->nEntry-1 && pHdr->iPeerPg!=0 ){
         HctFilePage peer;
         rc = sqlite3HctFilePageGet(pFile, pHdr->iPeerPg, &peer);
         if( rc==SQLITE_OK ){
@@ -1019,7 +1009,7 @@ static int hctDbInsertFPKey(
           pNew2 = (HctDbIntkeyNode*)pg2.aNew;
 
           if( csr.pg.iPg==csr.iRoot ){
-            i64 iNewKey = (iHeight & 0x01) ? LARGEST_INT64 : SMALLEST_INT64;
+            i64 iNewKey = SMALLEST_INT64;
             memcpy(pg2.aNew, csr.pg.aNew, pDb->pgsz);
             pNew->pg.nHeight++;
             pNew->pg.nEntry = 1;
@@ -1045,10 +1035,9 @@ static int hctDbInsertFPKey(
         }
 
         if( pNew2 ){
-          int bRev = (iHeight & 0x01);
           i64 iFP = pNew2->aEntry[0].iKey;
           i64 iIns = aRem[iRem].iKey;
-          if( (bRev && iIns<=iFP) || (bRev==0 && iIns>=iFP) ){
+          if( iIns>=iFP ){
             pIns = pNew2;
           }else{
             pIns = pNew;
@@ -1094,6 +1083,8 @@ static void hctDbInsertDiscard(HctDatabase *pDb){
     sqlite3HctFilePageRelease(&pDb->aWritePg[ii]);
   }
   pDb->nWritePg = 0;
+  sqlite3_free(pDb->aWriteFpKey);
+  pDb->aWriteFpKey = 0;
 }
 
 static int hctDbInsertFlushWrite(HctDatabase *pDb){
@@ -1120,7 +1111,7 @@ static int hctDbInsertFlushWrite(HctDatabase *pDb){
       /* Loop through the set of pages to write out. */
       assert( pDb->nWriteKey>0 );
       for(ii=0; rc==SQLITE_OK && ii<pDb->nWritePg; ii++){
-        HctFilePage *pPg = &pDb->aWritePg[pDb->nWritePg-1-ii];
+        HctFilePage *pPg = &pDb->aWritePg[ii];
         HctDbIntkeyLeaf *pNew = (HctDbIntkeyLeaf*)(pPg->aNew);
         aKey[ii].iChildPg = pPg->iPg;
         aKey[ii].iKey = pNew->aEntry[0].iKey;
@@ -1135,11 +1126,11 @@ static int hctDbInsertFlushWrite(HctDatabase *pDb){
           pRoot->pg.ePagetype = HCT_PAGETYPE_INTKEY;
           pRoot->pg.nHeight = 1;
           pRoot->pg.iPeerPg = 0;
-          aKey[pDb->nWritePg-1].iKey = SMALLEST_INT64;
+          aKey[0].iKey = SMALLEST_INT64;
           memcpy(pRoot->aEntry, aKey, sizeof(aKey[0])*pDb->nWritePg);
           rc = sqlite3HctFilePageRelease(&root);
         }else if( pDb->nWritePg>1 ){
-          rc = hctDbInsertFPKey(pDb, pDb->nWritePg-1, &aKey[0], 1);
+          rc = hctDbInsertFPKey(pDb, pDb->nWritePg-1, &aKey[1], 1);
         }
       }
     }else{
@@ -1154,6 +1145,8 @@ static int hctDbInsertFlushWrite(HctDatabase *pDb){
       hctDbInsertDiscard(pDb);
     }
     pDb->nWritePg = 0;
+    sqlite3_free(pDb->aWriteFpKey);
+    pDb->aWriteFpKey = 0;
   }
   return rc;
 }
@@ -1545,11 +1538,11 @@ int sqlite3HctDbInsert(
 
     if( pDb->bRollback ){
       assert( pRec==0 );
-      assert( bClobber );
       rc = hctDbFindRollback(
           pDb, iKey, pDb->writecsr.pg.aOld, iInsert, &bDel, &nData, &aData
       );
       if( rc!=SQLITE_OK ) return rc;
+      assert( bClobber );
     }else{
       if( bDel && bClobber==0 ){
         hctDbCsrReset(&pDb->writecsr);
@@ -1716,6 +1709,7 @@ int sqlite3HctDbEndWrite(HctDatabase *p){
   int rc = SQLITE_OK;
   assert( p->bRollback==0 );
   assert( p->nWritePg==0 );
+  assert( p->aWriteFpKey==0 );
   if( rc==SQLITE_OK ){
     HctDbTMap *pTMap = p->pTMap;
     u64 iSnapshotid = sqlite3HctFileAllocateSnapshotid(p->pFile);
@@ -1802,14 +1796,8 @@ int sqlite3HctDbCsrFirst(HctDbCsr *pCsr){
     rc = sqlite3HctFilePageGet(pFile, iPg, &pg);
     if( rc!=SQLITE_OK ) break;
     pPg = (HctDbPageHdr*)pg.aOld;
-    if( (pPg->nHeight % 2) && pPg->iPeerPg ){
-      iPg = pPg->iPeerPg;
-    }
-    else if( pPg->nHeight==0 ){
+    if( pPg->nHeight==0 ){
       break;
-    }
-    else if( (pPg->nHeight % 2) ){
-      iPg = ((HctDbIntkeyNode*)pPg)->aEntry[pPg->nEntry-1].iChildPg;
     }else{
       iPg = ((HctDbIntkeyNode*)pPg)->aEntry[0].iChildPg;
     }
@@ -1841,17 +1829,13 @@ int sqlite3HctDbCsrLast(HctDbCsr *pCsr){
     if( rc!=SQLITE_OK ) break;
 
     pPg = (HctDbPageHdr*)pg.aOld;
-    if( pPg->iPeerPg && (pPg->nHeight % 2)==0 ){
+    if( pPg->iPeerPg ){
       iPg = pPg->iPeerPg;
     }else if( pPg->nHeight==0 ){
       break;
     }else{
       HctDbIntkeyNode *pNode = (HctDbIntkeyNode*)pPg;
-      if( (pPg->nHeight % 2) ){
-        iPg = pNode->aEntry[0].iChildPg;
-      }else{
-        iPg = pNode->aEntry[pPg->nEntry-1].iChildPg;
-      }
+      iPg = pNode->aEntry[pPg->nEntry-1].iChildPg;
     }
     sqlite3HctFilePageRelease(&pg);
   }
