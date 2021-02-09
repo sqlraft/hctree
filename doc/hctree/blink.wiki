@@ -548,6 +548,11 @@ any) from any other, non-delete, keys.
 
 <b>External Delete-Key Sets</b>
 
+<i style=color:green>Why are these even in the database file? Can they be kept
+in main memory, given that they will never be required following a process
+restart? Update: Perhaps this is not true - they are required when rolling
+back transactions based on log files following an application crash. </i>
+
 In most scenarios, the above should be sufficient. But in the presence of 
 long running read transactions or large deletes, some database pages may come
 to contain a high percentage of delete-keys. Which is inefficient for new
@@ -668,10 +673,6 @@ checkpoint a version of the database:
 For this to work, writers must only recycle a physical page made eligible
 for recycling before the most recent completed checkpoint. Logical page
 ids may still be recycled as soon as they are eligible.
-
-<i style=color:green>Should the two "header pages" be moved to a separate
-file? So that writing and syncing them does not imply syncing whatever has
-been written to the database file in the meantime.</i>
 
 
 

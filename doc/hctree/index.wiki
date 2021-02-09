@@ -288,6 +288,8 @@ transaction was committed or rolled back.
 
 <h3> 2.3.1. Increasing Concurrency </h3>
 
+<i> In which it is discussed how to enhance the above to be equivalent 
+to SSN. </i>
 
 <h1 id=replication>3. Replication and other Integration Issues</h1>
 
