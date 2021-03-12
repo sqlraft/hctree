@@ -1,5 +1,5 @@
-C Merge\sv3.35.0\srelease\sto\sthis\sbranch.
-D 2021-03-12T20:29:38.300
+C Add\stest\sfor\sautoconf/Makefile.msc\scurrent\swith\srespect\sto\sits\sgenerator\sinput.
+D 2021-03-12T21:59:11.486
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -838,6 +838,7 @@ F test/delete2.test 3a03f2cca1f9a67ec469915cb8babd6485db43fa
 F test/delete3.test 555e84a00a99230b7d049d477a324a631126a6ab
 F test/delete4.test 6aa279f459f4aa792cc251435c3809415c1ecaf9f27dce91675e26f05b503db3
 F test/delete_db.test 096d828493c7907f9ea11a7098ea6a0f73edba89406487d5d6cc2228dc4ab8b0
+F test/deriveds_updated.test 12be9a02c41ef77b709cf407e41de893047c9411a90193bbb91e2ef1f746532d
 F test/descidx1.test edc8adee58d491b06c7157c50364eaf1c3605c9c19f8093cb1ea2b6184f3ac13
 F test/descidx2.test a0ba347037ff3b811f4c6ceca5fd0f9d5d72e74e59f2d9de346a9d2f6ad78298
 F test/descidx3.test 953c831df7ea219c73826dfbf2f6ee02d95040725aa88ccb4fa43d1a1999b926
@@ -1910,8 +1911,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P 8dc765d3ba26cb1267b5e3e3fc2b3103b1e4f841431306bf86798511971747ff acd63062eb06748bfe9e4886639e4f2b54ea6a496a83f10716abbaba4115500b
-R 39a4a0d8e5c6bc44cb1af4a996c13e18
+P 6733ed766e6fa5c57409475312458872d40f787a20ac4596550def4d013c5920
+R 0ee2da53105ac7a5a17452454af49e17
 U larrybr
-Z 5a31c57d435f928d754cc5d5a8b2ddc0
+Z 17f95cd7d33be0c99a375e3aac73dfa8
 # Remove this line to create a well-formed Fossil manifest.
