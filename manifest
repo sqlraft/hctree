@@ -1,5 +1,5 @@
-C Store\sall\slists\sin\sascending\sorder,\sinstead\sof\salternating\sbetween\sascending\sand\sdescending.
-D 2021-02-09T20:18:13.736
+C Updates\sto\sfile\sformat\sand\sother\sdocuments.
+D 2021-03-19T21:28:52.959
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -42,9 +42,9 @@ F doc/hctree/blink.wiki fe8951d62d42229bdefcf53eb94b0a159ba2959364225c816df42a98
 F doc/hctree/btree_merge1.png 850d83122906431143a3ec302d12ab219a172283fe9cf3e90c820c8767faee8d
 F doc/hctree/btree_redistribute1.png 1666cf0e3a24d3f792a09081665307f79d469f4d10a9f2e08526544c75644a2c
 F doc/hctree/btree_split1.png c90032107fbcb0333f8770d94f5c6102155aa3abb6a2f769f55529969f67ab6d
-F doc/hctree/fileformat.wiki 046584b5222818fd7378c8425cd9c1f1fdf7147443504d8205b4a2b6e80d577d
+F doc/hctree/fileformat.wiki d90fed989ee1d10aec5889f6a2c5b2f53c0026daccba47f54544c65deb3ad144
 F doc/hctree/hcfigures.odg 1caebdd7e8bc545ac5a1a0186e2669091dcc64769ae7918f23925edbff654f31
-F doc/hctree/index.wiki 9e2ffe44fd38d5cfe3351fc0564826094121e43822eab5557dce5e04266091d7
+F doc/hctree/index.wiki 7e8ec79a123ae165e61ca3da3c1966f8f0348d0a439f10d71d4b487afecf9f73
 F doc/hctree/list1.png 85bb3c77acf9e3135f156852ce71b1de825e51b1dc6cc889810069685816682d
 F doc/hctree/listop1.png 9a88c25b0e5d7202e17a41c8f92d13702b79ca2f7690f80d3475fd13b334d71c
 F doc/hctree/tqueue.wiki f8217c1a4faa7c4aef2244be1fd3b3fb6a4463ab0e1fbeda30bf7bf9cccbe103
@@ -470,7 +470,7 @@ F ext/userauth/userauth.c 7f00cded7dcaa5d47f54539b290a43d2e59f4b1eb5f447545fa865
 F install-sh 9d4de14ab9fb0facae2f48780b874848cbf2f895 x
 F ltmain.sh 3ff0879076df340d2e23ae905484d8c15d5fdea8
 F magic.txt 8273bf49ba3b0c8559cb2774495390c31fd61c60
-F main.mk 76adb6856aae7dd138d116a0675c62fe9f7328f18be19e1a64ff598d1fc6234d
+F main.mk 90337bebcf648e0b6f72c735ba46a5c8c9c990b015b61bd1b19cdeece6ca1561
 F mkso.sh fd21c06b063bb16a5d25deea1752c2da6ac3ed83
 F mptest/config01.test 3c6adcbc50b991866855f1977ff172eb6d901271
 F mptest/config02.test 4415dfe36c48785f751e16e32c20b077c28ae504
@@ -507,7 +507,8 @@ F src/func.c 2333eb4277f55a5efdc12ef754e7d7ec9105d257b2fd00301d23ce1e8fa67dc0
 F src/global.c 943256ac44f333039d35a9830c18d075a81fa6b6bf2af05771494a9acfb9a40b
 F src/hash.c 8d7dda241d0ebdafb6ffdeda3149a412d7df75102cecfc1021c98d6219823b19
 F src/hash.h 9d56a9079d523b648774c1784b74b89bd93fac7b365210157482e4319a468f38
-F src/hctInt.h c1af7ea887b6b5c3c372edf94416dd29d6fb6301daa1c7fbdc90d9137621fdca
+F src/hctInt.h 0c3776d81fb2d5a54b9bb7674bcacb805a17bf18f031a644b25ce06130d7f137
+F src/hctTMapInt.h 3c4bcd71d88b90b0447b61389d7079d34223ea06e04c10a7e0bbb75e79a5c7d9
 F src/hct_database.c 13a7d8df18e5b8fe5ec21cf39dd2c771f8ef9c2225fc045f8c4b14076794ed43
 F src/hct_file.c 709c76ad579ee6b5c16289185cffbafe8e2842a07b2c6e4d3994a038fcda682c
 F src/hct_tree.c 49024e058fced83a12e87e7b69bae11091130cfa3c6f82f431306dac390be3f3
@@ -1908,8 +1909,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P b1e63c4673ecaf9129d584028906d873a0bb4ecf367e705d5c0de000319eb573
-R 49d145c5aefc22ac347803a78dcf96f7
+P 265a0ca54f67a962739efe3a40f81470803445fa5d9c9ad543eb34ad409caa8d
+R 6d391d3bebc158d38af6c438fffaa140
 U dan
-Z 34037b62d3f42beeea6d98306c6f823b
+Z 3e8e171617fd0810d6ef00b562c3d006
 # Remove this line to create a well-formed Fossil manifest.

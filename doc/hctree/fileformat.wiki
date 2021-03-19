@@ -3,6 +3,13 @@
   *   <a href=#header>Header File Format</a>
   *   <a href=#pagemap>Page Map Format</a>
   *   <a href=#db>Database File Format</a>
+    <ul>
+      <li><a href=#intkey_leaf>Intkey Leaf Page Format</li>
+      <li><a href=#intkey_node>Intkey Internal Node Format</li>
+      <li><a href=#index_leaf>Index Leaf Page Format</li>
+      <li><a href=#index_node>Index Internal Node Format</li>
+      <li><a href=#overflow>Overflow Chain Format</li>
+    </ul>
 
 <h1 id=overall> Overall Structure </h1>
 
@@ -69,17 +76,38 @@ All pages begin with an 8 byte page header:
   <tr><td>4 <td>4 <td> Peer page number.
 </table>
 
-<h2 id=intkey_leaf> Intkey Leaf Page Format </h2>
+<h2 id=intkey_leaf> Intkey Leaf Page Format</h2>
+Intkey leaf page format:
 
-Following the page header, the free-space header:
+<verbatim type="pikchr center">
+boxht=0.2 ; boxwid=0.6 ; linewid=0.2
+
+PGHDR: box "page hdr"        wid 0.8
+LEHDR: box "leaf hdr" wid 1.0
+ARRAY:box "entry array"      wid 1.2
+box "free space"             wid 1.5
+box "record area"            wid 3.0
+
+text "8 bytes" at PGHDR - (0, 0.2)
+text "24 bytes" at LEHDR - (0, 0.2)
+text "nEntry x 16 bytes" at ARRAY - (0, 0.2)
+</verbatim>
+
+Following the page header, the 24 byte intkey leaf header:
 
 <table border=1 cellpadding=5 width=90%>
   <tr><th>Byte Offset <th>Size <th width=80%> Description
   <tr><td>8 <td>2 <td> number of bytes of free space between the end of 
-    header array and the first entry within the record area.
+    header array and the first entry within the record area (the region
+    marked "free space" in the diagram above).
   <tr><td>10 <td>2 <td> number of bytes of free space (in total) within
     record area.
-  <tr><td>12 <td>4 <td> Unused.
+  <tr><td>12 <td>2 <td> Number of delete keys on page.
+  <tr><td>14 <td>2 <td> Bytes of space consumed by delete keys.
+  <tr><td>16 <td>8 <td> EDKS TID value, if any. Or 0 otherwise.
+  <tr><td>24 <td>4 <td> Physical page number of EDKS root, if any. Or 0
+    otherwise.
+  <tr><td>28 <td>4 <td> Unused.
 </table>
 
 Following the free-space header, an array of <i>nEntry</i> 16-byte entries. 
@@ -88,44 +116,52 @@ Each 16-byte entry is comprised of the following:
   *  8-byte rowid value.
   *  4-byte record size (in bytes).
   *  2-byte record offset (from start of page).
-  *  1-byte flags field. Flags are HAS_TID, HAS_OLD and HAS_OVFL.
+  *  1-byte flags field. Flags are HAS_TID, HAS_OLD, HAS_OVFL and IS_DELETE.
   *  1-byte unused.
 
 Each record within the record area consists of:
 
   *  If HAS_TID is set, an 8-byte transaction id.
   *  If HAS_OLD is set, a 4-byte "old" physical page number.
-  *  If HAS_OVFL is set, a 4-byte overflow page number.
+  *  If HAS_OVFL is set, a 4-byte physical overflow page number.
   *  The part of the record stored on the main page.
 
 The part of the record stored on the main page is calculated using:
 
 <verbatim>
-        if( nRecord <= (pgsz-16-16-12) ){
+        if( nRecord <= (pgsz-32-16-12) ){
           nLocal = nRecord;
         }else{ 
           nLocal = nRecord % (pgsz-8);
-          if( nLocal < (pgsz/16) || nLocal > (pgsz-16-16-16) ){
+          if( nLocal < (pgsz/16) || nLocal > (pgsz-32-16-12-4) ){
             nLocal = pgsz/16;
           }
         }
 </verbatim>
 
-<h2> Intkey Internal Node Page Format </h2>
 
-Each entry on an intkey internal node page consists of an 8 byte rowid and
-a 4 byte page-id. Such a page may therefore contain up to <i>nMax</i> entries:
+<h2 id=intkey_node> Intkey Internal Node Format </h2>
 
-<verbatim>
-        nMax = ((pgsz-8) / 12)
+<verbatim type="pikchr center">
+boxht=0.2 ; boxwid=0.6 ; linewid=0.2
+PGHDR: box "page hdr"        wid 0.8
+ARRAY:box "entry array"      wid 4.2
+box "free space"             wid 2.5
+
+text "8 bytes" at PGHDR - (0, 0.2)
+text "nEntry x 16 bytes" at ARRAY - (0, 0.2)
 </verbatim>
 
-The area immediately following the page header is divided into two arrays
-of <i>nMax</i> entries each. The first is of 8-byte rowids, the second
-of 4-byte page ids. Only the first <i>nEntry</i> entries in each array
-are valid.
+Each entry on an intkey internal node page consists of an 8 byte rowid 
+followed by a 4 byte logical page-id, and is padded out to 16 bytes.
+The maximum number of entries on an intkey internal node page is
+therefore:
 
-<h2> Overflow Page Format </h2>
+<verbatim>
+        nMax = ((pgsz-8) / 16)
+</verbatim>
+
+<h2 id=overflow> Overflow Chain Format </h2>
 
 As in SQLite, overflow pages are a linked list, starting with the page
 identified in the b-tree page record. The number of overflow pages in
@@ -138,7 +174,7 @@ page header.
 pointers within the linked list, and the original page number on the b-tree
 page could just be physical page numbers.</i>
 
-<h2> Index Leaf Page Format </h2>
+<h2 id=index_leaf> Index Leaf Page Format </h2>
 
 Index leaf pages have a free-space header immediately following the page
 header. See the <a href=#intkey_leaf>intkey leaf page format</a> section for
@@ -172,7 +208,8 @@ main page is calculated using:
         }
 </verbatim>
 
-<h2> Index Internal Node Page Format </h2>
+
+<h2 id=index_node> Index Internal Node Page Format </h2>
 
 As for index leaf pages, except that the <i>nEntry</i> array consists of
 12-byte entries:

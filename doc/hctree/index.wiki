@@ -193,7 +193,7 @@ as described below. A TID's only purpose is as a key to use with the
 transaction-map. The transaction-map maps each TID to one of four types
 of values:
 
-  *  Special value COMMITTING. This means that keys for the transaction 
+  *  Special value WRITING. This means that keys for the transaction 
      are being written into the database.
   *  Special value ROLLBACK. This means that keys are currently being
      removed from the database (replaced with their previous versions). This
@@ -210,7 +210,7 @@ are part of the snapshot and should be read, all other keys should be ignored.
 A commit proceeds as follows:
 
   #  <p>The transaction is assigned a transaction ID (TID). The transaction 
-     map entry is set to COMMITTING.
+     map entry is set to WRITING.
   #  <p>The transaction writes its set of new keys and delete-keys into the
      database. The transaction id assigned in the previous step is associated
      with each new database entry. If the writer finds that it must clobber
@@ -234,7 +234,9 @@ To rollback, the database client:
   #  <p>Runs through all keys already written to the database, restoring the 
      original values.
   #  <p>Sets the transaction map entry for the transaction to the CID
-     value. A transaction that modified zero keys has been committed.
+     value with the ROLLED_BACK flag set. Any reader that sees a CID with
+     the ROLLED_BACK flag set should reseek the cursor to find the rewritten
+     entry.
 
 This scheme means that a transaction may finish committing before all
 transactions with smaller CID values have. If a reader is allowed to read the

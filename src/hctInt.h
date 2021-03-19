@@ -7,6 +7,8 @@ typedef unsigned int u32;
 
 # define HctAtomicStore(PTR,VAL)  __atomic_store_n((PTR),(VAL),__ATOMIC_RELAXED)
 
+#include <hctTMapInt.h>
+
 /*
 ** Page types. These are the values that may appear in the page-type
 ** field of a page header.
