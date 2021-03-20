@@ -1,17 +1,17 @@
 
-  *   <a href=#overall>Overall Structure</a>
-  *   <a href=#header>Header File Format</a>
-  *   <a href=#pagemap>Page Map Format</a>
-  *   <a href=#db>Database File Format</a>
+  *   [#overall | 1. Overall Structure]
+  *   [#header  | 2. Header File Format]
+  *   [#pagemap | 3. Page Map Format]
+  *   [#db      | 4. Database File Format]
     <ul>
-      <li><a href=#intkey_leaf>Intkey Leaf Page Format</li>
-      <li><a href=#intkey_node>Intkey Internal Node Format</li>
-      <li><a href=#index_leaf>Index Leaf Page Format</li>
-      <li><a href=#index_node>Index Internal Node Format</li>
-      <li><a href=#overflow>Overflow Chain Format</li>
+      <li>[#intkey_leaf | 4.1. Intkey Leaf Page Format]
+      <li>[#intkey_node | 4.2. Intkey Internal Node Format]
+      <li>[#index_leaf  | 4.3. Index Leaf Page Format]
+      <li>[#index_node  | 4.4. Index Internal Node Format]
+      <li>[#overflow    | 4.5. Overflow Chain Format]
     </ul>
 
-<h1 id=overall> Overall Structure </h1>
+<h1 id=overall>1. Overall Structure </h1>
 
 Each database consists of at least three files:
 
@@ -24,7 +24,7 @@ failures, there are three page-map files instead of one.
 
 Additionally, there may be one or more client log files.
 
-<h1 id=header> Header File Format </h1>
+<h1 id=header> 2. Header File Format </h1>
 
 The header file consists of two pages using the same format.
 
@@ -37,7 +37,7 @@ The header file consists of two pages using the same format.
   <tr><td>48 <td>8  <td>Guaranteed safe recovery transaction id.
 </table>
 
-<h1 id=pagemap> Page Map Format </h1>
+<h1 id=pagemap> 3. Page Map Format </h1>
 
 Page-map slots 2-32, inclusive, are not used for a logical-to-physical page
 mapping. Instead, the lower 32-bits of these slots are used as follows:
@@ -48,7 +48,7 @@ mapping. Instead, the lower 32-bits of these slots are used as follows:
   <tr><td>3   <td>Largest physical page number allocated in database.
 </table>
 
-<h1 id=db> Database File Format </h1>
+<h1 id=db> 4. Database File Format </h1>
 
 Database pages are numbered starting from 1. Each database page is <i>pgsz</i>
 bytes in size, where <i>pgsz</i> is determined by the value stored in the
@@ -76,14 +76,15 @@ All pages begin with an 8 byte page header:
   <tr><td>4 <td>4 <td> Peer page number.
 </table>
 
-<h2 id=intkey_leaf> Intkey Leaf Page Format</h2>
+<h2 id=intkey_leaf> 4.1. Intkey Leaf Page Format</h2>
 Intkey leaf page format:
 
 <verbatim type="pikchr center">
 boxht=0.2 ; boxwid=0.6 ; linewid=0.2
 
+# total width is 7.5
 PGHDR: box "page hdr"        wid 0.8
-LEHDR: box "leaf hdr" wid 1.0
+LEHDR: box "leaf hdr"        wid 1.0
 ARRAY:box "entry array"      wid 1.2
 box "free space"             wid 1.5
 box "record area"            wid 3.0
@@ -140,10 +141,12 @@ The part of the record stored on the main page is calculated using:
 </verbatim>
 
 
-<h2 id=intkey_node> Intkey Internal Node Format </h2>
+<h2 id=intkey_node> 4.2. Intkey Internal Node Format </h2>
 
 <verbatim type="pikchr center">
 boxht=0.2 ; boxwid=0.6 ; linewid=0.2
+
+# total width is 7.5
 PGHDR: box "page hdr"        wid 0.8
 ARRAY:box "entry array"      wid 4.2
 box "free space"             wid 2.5
@@ -161,22 +164,24 @@ therefore:
         nMax = ((pgsz-8) / 16)
 </verbatim>
 
-<h2 id=overflow> Overflow Chain Format </h2>
+<h2 id=index_leaf> 4.3. Index Leaf Page Format </h2>
 
-As in SQLite, overflow pages are a linked list, starting with the page
-identified in the b-tree page record. The number of overflow pages in
-the linked list, and the amount of data on the last of them, may be inferred
-from the record-size field on the b-tree page. The amount of data on each
-page, in bytes, is also stored in the <i>nEntry</i> field of the overflow
-page header.
+<verbatim type="pikchr center">
+boxht=0.2 ; boxwid=0.6 ; linewid=0.2
 
-<i style=color:green>Idea: Overflow pages do not need logical page numbers. All
-pointers within the linked list, and the original page number on the b-tree
-page could just be physical page numbers.</i>
+# total width is 7.5
+PGHDR: box "page hdr"        wid 0.8
+LEHDR: box "leaf hdr"        wid 1.0
+ARRAY:box "entry array"      wid 1.2
+box "free space"             wid 1.5
+box "record area"            wid 3.0
 
-<h2 id=index_leaf> Index Leaf Page Format </h2>
+text "8 bytes" at PGHDR - (0, 0.2)
+text "24 bytes" at LEHDR - (0, 0.2)
+text "nEntry x 8 bytes" at ARRAY - (0, 0.2)
+</verbatim>
 
-Index leaf pages have a free-space header immediately following the page
+Index leaf pages have a 24 byte leaf header immediately following the page
 header. See the <a href=#intkey_leaf>intkey leaf page format</a> section for
 details.
 
@@ -194,7 +199,7 @@ Each record within the record area consist of:
   *  If HAS_OVFL is set, a 4-byte overflow page number.
   *  The part of the record stored on the main page.
 
-just as those on index leaf pages do. The part of the record stored on the
+just as those on intkey leaf pages do. The part of the record stored on the
 main page is calculated using:
 
 <verbatim>
@@ -209,7 +214,31 @@ main page is calculated using:
 </verbatim>
 
 
-<h2 id=index_node> Index Internal Node Page Format </h2>
+<h2 id=index_node> 4.4. Index Internal Node Page Format </h2>
+
+<verbatim type="pikchr center">
+boxht=0.2 ; boxwid=0.6 ; linewid=0.2
+
+# total width is 7.5
+PGHDR: box "page hdr"        wid 0.8
+INHDR: box "i-n hdr"         wid 0.6
+ARRAY:box "entry array"      wid 1.2
+box "free space"             wid 1.5
+box "record area"            wid 3.4
+
+text "8 bytes" at PGHDR - (0, 0.2)
+text "4 bytes" at INHDR - (0, 0.2)
+text "nEntry x 12 bytes" at ARRAY - (0, 0.2)
+</verbatim>
+
+<table border=1 cellpadding=5 width=90%>
+  <tr><th>Byte Offset <th>Size <th width=80%> Description
+  <tr><td>8 <td>2 <td> number of bytes of free space between the end of 
+    header array and the first entry within the record area (the region
+    marked "free space" in the diagram above).
+  <tr><td>10 <td>2 <td> number of bytes of free space (in total) within
+    record area.
+</table>
 
 As for index leaf pages, except that the <i>nEntry</i> array consists of
 12-byte entries:
@@ -218,6 +247,31 @@ As for index leaf pages, except that the <i>nEntry</i> array consists of
   *  A 4-byte child page number.
   *  A 2-byte record offset, and
   *  A 1-byte flags field (the only valid flag is HAS_OVFL).
+
+<h2 id=overflow> 4.5. Overflow Chain Format </h2>
+
+<verbatim type="pikchr center">
+boxht=0.2 ; boxwid=0.6 ; linewid=0.2
+
+PGHDR: box "page hdr"        wid 0.8
+DATA: box "data"             wid 4.7
+box "free space"             wid 2.0
+
+text "8 bytes" at PGHDR - (0, 0.2)
+text "nEntry bytes" at DATA - (0, 0.2)
+</verbatim>
+
+As in SQLite, overflow pages are a linked list, starting with the page
+identified in the b-tree page record. The number of overflow pages in
+the linked list, and the amount of data on the last of them, may be inferred
+from the record-size field on the b-tree page. The amount of data on each
+page, in bytes, is also stored in the <i>nEntry</i> field of the overflow
+page header.
+
+Overflow pages are identified by physical page only - both the page number
+embedded in the start of the record within the tree structure page and the
+"next page" page number on overflow pages themselves are physical, not 
+logical, page numbers
 
 
 

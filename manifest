@@ -1,5 +1,5 @@
-C Updates\sto\sfile\sformat\sand\sother\sdocuments.
-D 2021-03-19T21:28:52.959
+C Further\sclarifications\sin\sfileformat.wiki.
+D 2021-03-20T17:00:53.648
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -42,7 +42,7 @@ F doc/hctree/blink.wiki fe8951d62d42229bdefcf53eb94b0a159ba2959364225c816df42a98
 F doc/hctree/btree_merge1.png 850d83122906431143a3ec302d12ab219a172283fe9cf3e90c820c8767faee8d
 F doc/hctree/btree_redistribute1.png 1666cf0e3a24d3f792a09081665307f79d469f4d10a9f2e08526544c75644a2c
 F doc/hctree/btree_split1.png c90032107fbcb0333f8770d94f5c6102155aa3abb6a2f769f55529969f67ab6d
-F doc/hctree/fileformat.wiki d90fed989ee1d10aec5889f6a2c5b2f53c0026daccba47f54544c65deb3ad144
+F doc/hctree/fileformat.wiki 6dcc9a68b36396a2cf8915d0e1e95d8ae33aec50c4c86e29fd3acffb9b8e72e8
 F doc/hctree/hcfigures.odg 1caebdd7e8bc545ac5a1a0186e2669091dcc64769ae7918f23925edbff654f31
 F doc/hctree/index.wiki 7e8ec79a123ae165e61ca3da3c1966f8f0348d0a439f10d71d4b487afecf9f73
 F doc/hctree/list1.png 85bb3c77acf9e3135f156852ce71b1de825e51b1dc6cc889810069685816682d
@@ -1909,8 +1909,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P 265a0ca54f67a962739efe3a40f81470803445fa5d9c9ad543eb34ad409caa8d
-R 6d391d3bebc158d38af6c438fffaa140
+P 3c51cf78c139af5fb541163b242196cb157223ca99a8e77d55c272e7b8341e0e
+R 94425d57d9bb7b07ca7b81083e36be31
 U dan
-Z 3e8e171617fd0810d6ef00b562c3d006
+Z 3ca9aa42d95524613e2b7ebec43a7efc
 # Remove this line to create a well-formed Fossil manifest.
