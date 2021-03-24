@@ -9,14 +9,6 @@ typedef unsigned int u32;
 
 #include <hctTMapInt.h>
 
-/*
-** Page types. These are the values that may appear in the page-type
-** field of a page header.
-*/
-#define HCT_PAGETYPE_INTKEY   0x01
-#define HCT_PAGETYPE_INDEX    0x02
-#define HCT_PAGETYPE_OVERFLOW 0x03
-
 /*************************************************************************
 ** Interface to code in hct_tree.c
 */

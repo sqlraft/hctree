@@ -8275,7 +8275,9 @@ int Sqlitetest1_Init(Tcl_Interp *interp){
 #ifdef SQLITE_DEBUG
   extern int sqlite3WhereTrace;
   extern int sqlite3OSTrace;
+#ifndef SQLITE_OMIT_WAL
   extern int sqlite3WalTrace;
+#endif
 #endif
 #ifdef SQLITE_TEST
 #ifdef SQLITE_ENABLE_FTS3
