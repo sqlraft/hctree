@@ -23,7 +23,7 @@
 #include <sys/mman.h>
 
 // #define HCT_DEFAULT_PAGESIZE     512
-#define HCT_DEFAULT_PAGESIZE     4096
+#define HCT_DEFAULT_PAGESIZE     1024
 
 // #define HCT_DEFAULT_PAGEPERCHUNK (128*1024)
 #define HCT_DEFAULT_PAGEPERCHUNK 512

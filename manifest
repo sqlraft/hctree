@@ -1,5 +1,5 @@
-C Further\sprogress\stowards\sb-tree\sstyle\sbalancing.
-D 2021-03-24T21:12:37.470
+C Further\sprogress\son\sintkey\sbalances.
+D 2021-03-25T18:18:13.439
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -509,8 +509,8 @@ F src/hash.c 8d7dda241d0ebdafb6ffdeda3149a412d7df75102cecfc1021c98d6219823b19
 F src/hash.h 9d56a9079d523b648774c1784b74b89bd93fac7b365210157482e4319a468f38
 F src/hctInt.h 439bb9c8df414f2f27bc464ad956a634797aa61205d173d80fabe74452d50308
 F src/hctTMapInt.h 3c4bcd71d88b90b0447b61389d7079d34223ea06e04c10a7e0bbb75e79a5c7d9
-F src/hct_database.c ce6739042c71462bb2e0ec13197ddcee7d2d4c6d4a7b75fad13e3428dc8d3852
-F src/hct_file.c 709c76ad579ee6b5c16289185cffbafe8e2842a07b2c6e4d3994a038fcda682c
+F src/hct_database.c fd2428c65f33bc9542984fb1ffaa3d7cb4a74936ce5eff8898f6bdccfc636d90
+F src/hct_file.c dadfae54bfc6fb0fee239d65ff509c64ed44f903f045df53f893121c85c209f1
 F src/hct_tree.c 49024e058fced83a12e87e7b69bae11091130cfa3c6f82f431306dac390be3f3
 F src/hctree.c 5cdf9073a5dc5624e6ebfa65108988ab6868813fde9979252249b5e1d3285cd3
 F src/hwtime.h cb1d7e3e1ed94b7aa6fde95ae2c2daccc3df826be26fc9ed7fd90d1750ae6144
@@ -1909,8 +1909,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P f07d5b6b6384860ac542c18b4a44b1a49b4a2c3ee05efd1c4f1c811177ffc18d
-R 78737531dae11273a0de0af178c76e95
+P 2c66cf6a7b01672887b63dce9f30d06532d8f75d744396c41f3154f14dd8137a
+R 65c720a9b80a2e93e7cb7e13519db2bc
 U dan
-Z 4c6104645b2b13f5f68a68b2094b53c6
+Z d9caf9e534633a456481656778a9e158
 # Remove this line to create a well-formed Fossil manifest.
