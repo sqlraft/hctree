@@ -794,6 +794,21 @@ int sqlite3HctFilePageRelease(HctFilePage *pPg){
   return rc;
 }
 
+int sqlite3HctFilePageCommit(HctFilePage *pPg){
+  int rc = SQLITE_OK;
+  if( pPg->aNew ){
+    HctMapping *pMap = pPg->pFile->pMapping;
+    if( !hctFilePagemapSetLogical(pMap, pPg->iPg, pPg->iPagemap, pPg->iNewPg) ){
+      rc = SQLITE_LOCKED;
+    }else{
+      pPg->iPagemap = pPg->iNewPg;
+      pPg->aOld = pPg->aNew;
+      pPg->aNew = 0;
+    }
+  }
+  return rc;
+}
+
 u64 sqlite3HctFileStartTrans(HctFile *pFile){
   u32 iRet = 0;
   /* TODO - support 56-bit tids */
