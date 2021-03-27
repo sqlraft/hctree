@@ -1451,9 +1451,21 @@ int sqlite3BtreeDelete(BtCursor *pCur, u8 flags){
   int rc = SQLITE_OK;
   if( pCur->pHctDbCsr==0 ){
     rc = sqlite3HctTreeDelete(pCur->pHctTreeCsr);
-  }else{
+  }else if( pCur->pKeyInfo==0 ){
     i64 iKey = sqlite3BtreeIntegerKey(pCur);
-    rc = sqlite3HctTreeDeleteKey(pCur->pHctTreeCsr, 0, iKey);
+    rc = sqlite3HctTreeDeleteKey(pCur->pHctTreeCsr, 0, iKey, 0, 0);
+  }else{
+    u32 nKey;
+    const u8 *aKey = (u8*)sqlite3BtreePayloadFetch(pCur, &nKey);
+    UnpackedRecord *pRec = sqlite3VdbeAllocUnpackedRecord(pCur->pKeyInfo);
+
+    if( pRec==0 ){
+      rc = SQLITE_NOMEM_BKPT;
+    }else{
+      sqlite3VdbeRecordUnpack(pCur->pKeyInfo, nKey, aKey, pRec);
+      rc = sqlite3HctTreeDeleteKey(pCur->pHctTreeCsr, pRec, 0, nKey, aKey);
+      sqlite3DbFree(pCur->pBtree->db, pRec);
+    }
   }
   return rc;
 }

@@ -1902,6 +1902,30 @@ assert( bClobber==0 );
   return rc;
 }
 
+/*
+** The buffer passed as the first argument contains a page that is 
+** guaranteed to be either an intkey leaf, or an index leaf or node.
+** This function returns the offset of entry iEntry on the page and
+** populates output variable *pFlags with the entry flags.
+*/
+static int hctDbEntryInfo(void *aPg, int iEntry, int *pFlags){
+  int iOff;
+  if( hctPagetype(aPg)==HCT_PAGETYPE_INTKEY ){
+    HctDbIntkeyEntry *pEntry = &((HctDbIntkeyLeaf*)aPg)->aEntry[iEntry];
+    iOff = pEntry->iOff;
+    *pFlags = pEntry->flags;
+  }else if( hctPageheight(aPg)==0 ){
+    HctDbIndexEntry *pEntry = &((HctDbIndexLeaf*)aPg)->aEntry[iEntry];
+    iOff = pEntry->iOff;
+    *pFlags = pEntry->flags;
+  }else{
+    HctDbIndexNodeEntry *pEntry = &((HctDbIndexNode*)aPg)->aEntry[iEntry];
+    iOff = pEntry->iOff;
+    *pFlags = pEntry->flags;
+  }
+  return iOff;
+}
+
 static int hctDbInsert(
   HctDatabase *pDb,
   HctDbWriter *p,
@@ -2022,15 +2046,16 @@ assert( bDel==0 || p->iHeight==0 );
   pLeaf = (HctDbIntkeyLeaf*)p->aWritePg[iPg].aNew;
   nDataReq = 8 + nData;
   if( bClobber ){
-    HctDbIntkeyEntry *pEntry = &pLeaf->aEntry[iInsert];
-assert( pRec==0 );  /* TODO  - index support */
-assert( p->iHeight==0 );
-    if( pDb->bRollback==0 && (pEntry->flags & HCTDB_HAS_TID) ){
-      u64 iTid = hctGetU64(&((u8*)pLeaf)[pEntry->iOff]);
-      u64 iCid = hctDbTMapLookup(pDb, iTid);
-      if( iCid>pDb->iSnapshotId ){
-        hctDbInsertDiscard(p);
-        return SQLITE_BUSY;
+    if( pDb->bRollback==0 ){
+      int flags;
+      int iOff = hctDbEntryInfo(pLeaf, iInsert, &flags);
+      if( flags & HCTDB_HAS_TID ){
+        u64 iTid = hctGetU64(&((u8*)pLeaf)[iOff]);
+        u64 iCid = hctDbTMapLookup(pDb, iTid);
+        if( iCid>pDb->iSnapshotId ){
+          hctDbInsertDiscard(p);
+          return SQLITE_BUSY;
+        }
       }
     }
     nDataReq += 4;

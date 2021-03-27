@@ -560,7 +560,7 @@ int treeInsert(
   HctTree *pTree = pCsr->pTree;
   HctTreeNode *pNew;
 
-  assert( bDelete==0 || (nData==0 && aData==0 && nZero==0) );
+  assert( bDelete==0 || pKey || (aData==0 && nData==0 && nZero==0) );
 
   pNew = (HctTreeNode*)hctMallocZero(sizeof(HctTreeNode) + nData + nZero);
   if( pNew==0 ){
@@ -598,9 +598,11 @@ int sqlite3HctTreeInsert(
 int sqlite3HctTreeDeleteKey(
   HctTreeCsr *pCsr,
   UnpackedRecord *pKey,
-  i64 iKey
+  i64 iKey,
+  int nData, 
+  const u8 *aData
 ){
-  return treeInsert(pCsr, pKey, iKey, 1, 0, 0, 0);
+  return treeInsert(pCsr, pKey, iKey, 1, nData, aData, 0);
 }
 
 /*

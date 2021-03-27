@@ -20,7 +20,7 @@ void sqlite3HctTreeFree(HctTree *pTree);
 
 int sqlite3HctTreeInsert(HctTreeCsr*, UnpackedRecord*, i64, int, const u8*,int);
 int sqlite3HctTreeDelete(HctTreeCsr *pCsr);
-int sqlite3HctTreeDeleteKey(HctTreeCsr *pCsr, UnpackedRecord *pKey, i64 iKey);
+int sqlite3HctTreeDeleteKey(HctTreeCsr *, UnpackedRecord *, i64, int,const u8*);
 
 /* 
 ** These functions are used to open and close transactions and nested 
