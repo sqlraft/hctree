@@ -133,12 +133,16 @@ Each record within the record area consists of:
 The part of the record stored on the main page is calculated using:
 
 <verbatim>
-        if( nRecord <= (pgsz-32-16-12) ){
+        nMax  = pgsz - 8 - 24 - 16 - 12;    /* max record that fits on page */
+        nMaxO = nMax - 4;                   /* max record with ovfl that fits */
+        nMin  = pgsz / 8;                   /* min prefix to store on page */
+
+        if( nRecord <= nMax ){
           nLocal = nRecord;
         }else{ 
           nLocal = nRecord % (pgsz-8);
-          if( nLocal < (pgsz/16) || nLocal > (pgsz-32-16-12-4) ){
-            nLocal = pgsz/16;
+          if( nLocal < nMin || nLocal > nMaxO ){
+            nLocal = nMin;
           }
         }
 </verbatim>

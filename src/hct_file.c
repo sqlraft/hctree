@@ -724,6 +724,20 @@ int sqlite3HctFilePageGetPhysical(HctFile *pFile, u32 iPg, HctFilePage *pPg){
   return SQLITE_OK;
 }
 
+int sqlite3HctFilePageNewPhysical(HctFile *pFile, HctFilePage *pPg){
+  int rc;
+  u32 iNewPg;                     /* New physical page id */
+  memset(pPg, 0, sizeof(*pPg));
+  rc = hctFileTmpAllocate(pFile, HCT_PAGEMAP_PHYSICAL_EOF, &iNewPg);
+  if( rc==SQLITE_OK ){
+    rc = hctFileSetFlag(pFile, iNewPg, HCT_PGMAPFLAG_PHYSINUSE);
+    pPg->iNewPg = iNewPg;
+    pPg->aNew = (u8*)hctPagePtr(pFile->pMapping, iNewPg);
+    pPg->pFile = pFile;
+  }
+  return rc;
+}
+
 /*
 ** Allocate a new logical page. If parameter iPg is zero, then a new
 ** logical page number is allocated. Otherwise, it must be a logical page
@@ -784,7 +798,7 @@ int sqlite3HctFilePageDelete(HctFilePage *pPg){
 
 int sqlite3HctFilePageRelease(HctFilePage *pPg){
   int rc = SQLITE_OK;
-  if( pPg->aNew ){
+  if( pPg->aNew && pPg->iPg ){
     HctMapping *pMap = pPg->pFile->pMapping;
     if( !hctFilePagemapSetLogical(pMap, pPg->iPg, pPg->iPagemap, pPg->iNewPg) ){
       rc = SQLITE_LOCKED;
