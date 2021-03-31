@@ -4329,6 +4329,9 @@ case OP_SeekGT: {       /* jump, in3, group */
     { int i; for(i=0; i<r.nField; i++) assert( memIsValid(&r.aMem[i]) ); }
 #endif
     r.eqSeen = 0;
+    sqlite3BtreeCursorDir(pC->uc.pCursor, 
+        (oc==OP_SeekGE || oc==OP_SeekGT) ? BTREE_DIR_FORWARD : BTREE_DIR_REVERSE
+    );
     rc = sqlite3BtreeMovetoUnpacked(pC->uc.pCursor, &r, 0, 0, &res);
     if( rc!=SQLITE_OK ){
       goto abort_due_to_error;

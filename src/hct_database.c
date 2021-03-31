@@ -16,6 +16,7 @@
 #include <string.h>
 #include <assert.h>
 
+typedef struct HctBuffer HctBuffer;
 typedef struct HctDatabase HctDatabase;
 typedef struct HctDbGlobal HctDbGlobal;
 typedef struct HctDbIndexEntry HctDbIndexEntry;
@@ -33,6 +34,12 @@ typedef struct HctDbWriter HctDbWriter;
 typedef struct HctDbPageHdr HctDbPageHdr;
 typedef struct HctDbTMap HctDbTMap;
 
+struct HctBuffer {
+  u8 *aBuf;
+  int nBuf;
+  int nAlloc;
+};
+
 struct HctDbCsr {
   HctDatabase *pDb;               /* Database that owns this cursor */
   HctDbCsr *pCsrNext;             /* Next cursor in list belonging to pDb */
@@ -43,6 +50,7 @@ struct HctDbCsr {
 
   u8 *aRecord;                    /* Record in allocated memory */
   int nRecord;                    /* Size of aRecord[] in bytes */
+  HctBuffer rec;
 
   int iCell;                      /* Current cell within page */
   HctFilePage pg;                 /* Current database page */
@@ -457,7 +465,8 @@ static void hctDbRootPageInit(
     if( bIndex ){
       HctDbIndexNode *pNode = (HctDbIndexNode*)pPg;
       pNode->aEntry[0].iChildPg = iChildPg;
-      pNode->hdr.nFreeBytes = szPage - sizeof(HctDbIndexNode);
+      pNode->hdr.nFreeBytes = 
+        szPage - sizeof(HctDbIndexNode) - sizeof(HctDbIndexNodeEntry);
       pNode->hdr.nFreeGap = pNode->hdr.nFreeBytes;
     }else{
       HctDbIntkeyNode *pNode = (HctDbIntkeyNode*)pPg;
@@ -577,29 +586,6 @@ static int hctDbOffset(int iOff, int flags){
 }
 
 
-static int hctDbIndexFPKey(
-  u8 *aPg, int nPg,               /* IN: Page data and size */
-  const u8 **ppKey, int *pnKey,   /* OUT: pointer to key buffer and size */
-  u8 **ppFree                     /* OUT: caller must sqlite3_free() this */
-){
-  if( hctPageheight(aPg)==0 ){
-    HctDbIndexLeaf *pLeaf = (HctDbIndexLeaf*)aPg;
-    HctDbIndexEntry *pEntry = &pLeaf->aEntry[0];
-    *ppKey = &aPg[ hctDbOffset(pEntry->iOff, pEntry->flags) ];
-    *pnKey = pEntry->nSize;
-    *ppFree = 0;
-  }else{
-    HctDbIndexNode *pNode = (HctDbIndexNode*)aPg;
-    HctDbIndexNodeEntry *pEntry = &pNode->aEntry[0];
-    *ppKey = &aPg[ hctDbOffset(pEntry->iOff, pEntry->flags) ];
-    *pnKey = pEntry->nSize;
-    *ppFree = 0;
-  }
-
-  return SQLITE_OK;
-}
-
-
 /*
 ** Buffer aPg contains an intkey leaf page.
 **
@@ -648,6 +634,7 @@ static int hctDbIntkeyLeafSearch(
 static int hctDbIndexLeafSearch(
   u8 *aPg, 
   UnpackedRecord *pRec,
+  int *piPos,
   int *pbExact
 ){
   HctDbIndexLeaf *pLeaf = (HctDbIndexLeaf*)aPg;
@@ -658,12 +645,19 @@ static int hctDbIndexLeafSearch(
   while( i2>i1 ){
     int iTest = (i1+i2)/2;
     HctDbIndexEntry *pEntry = &pLeaf->aEntry[iTest];
-    int iOff = hctDbOffset(pEntry->iOff, pEntry->flags);
-    int res = sqlite3VdbeRecordCompare(pEntry->nSize, &aPg[iOff], pRec);
+    int res;
+    
+    if( pEntry->flags & HCTDB_HAS_OVFL ){
+      assert( 0 );
+    }else{
+      int iOff = hctDbOffset(pEntry->iOff, pEntry->flags);
+      res = sqlite3VdbeRecordCompare(pEntry->nSize, &aPg[iOff], pRec);
+    }
 
     if( res==0 ){
       *pbExact = 1;
-      return iTest;
+      *piPos = iTest;
+      return SQLITE_OK;
     }else if( res<0 ){
       i1 = iTest+1;
     }else{
@@ -673,7 +667,254 @@ static int hctDbIndexLeafSearch(
 
   assert( i1==i2 && i2>=0 );
   *pbExact = 0;
-  return i2;
+  *piPos = i2;
+  return SQLITE_OK;
+}
+
+static int hctDbIntkeyLocalsize(int pgsz, int nSize){
+  int nMax = pgsz-sizeof(HctDbIntkeyLeaf)-sizeof(HctDbIntkeyEntry)-12;
+  int nLocal;
+  if( nSize<nMax ){
+    nLocal = nSize;
+  }else{
+    int nMin = pgsz / 8;
+    nLocal = nSize % (pgsz-sizeof(HctDbPageHdr));
+    if( nLocal<nMin || nLocal> (nMax-sizeof(u32)) ){
+      nLocal = nMin;
+    }
+  }
+
+  return nLocal;
+}
+
+static int hctDbIndexLocalsize(int pgsz, int nSize){
+  int nLocal;
+  int nMax = pgsz/4;
+  if( nSize<nMax ){
+    nLocal = nSize;
+  }else{
+    int nMin = 64;
+    nLocal = nSize % (pgsz-sizeof(HctDbPageHdr));
+    if( nLocal<nMin || nLocal>nMax ){
+      nLocal = nMin;
+    }
+  }
+  return nLocal;
+}
+
+static int hctDbLocalsize(u8 *aPg, int pgsz, int nSize){
+  if( hctPagetype(aPg)==HCT_PAGETYPE_INTKEY ){
+    return hctDbIntkeyLocalsize(pgsz, nSize);
+  }
+  return hctDbIndexLocalsize(pgsz, nSize);
+}
+
+static int hctDbIntkeyEntrySize(HctDbIntkeyEntry *pEntry, int pgsz){
+  int sz = hctDbIntkeyLocalsize(pgsz, pEntry->nSize)
+    + ((pEntry->flags & HCTDB_HAS_TID) ? 8 : 0)
+    + ((pEntry->flags & HCTDB_HAS_OLD) ? 4 : 0)
+    + ((pEntry->flags & HCTDB_HAS_OVFL) ? 4 : 0);
+  return sz;
+}
+
+static int hctDbIndexEntrySize(HctDbIndexEntry *pEntry, int pgsz){
+  int sz = hctDbIndexLocalsize(pgsz, pEntry->nSize) + 
+    + ((pEntry->flags & HCTDB_HAS_TID) ? 8 : 0)
+    + ((pEntry->flags & HCTDB_HAS_OLD) ? 4 : 0)
+    + ((pEntry->flags & HCTDB_HAS_OVFL) ? 4 : 0);
+  return sz;
+}
+
+static int hctDbIndexNodeEntrySize(HctDbIndexNodeEntry *pEntry, int pgsz){
+  return hctDbIndexLocalsize(pgsz, pEntry->nSize);
+}
+
+static int hctDbEntrySize(int nData, int bClobber, u32 pgOvfl){
+  int sz = nData + 8 + (bClobber ? 4 : 0) + (pgOvfl ? 4 : 0);
+  return sz;
+}
+
+/*
+** The pointer passed as the first argument is a pointer to a buffer
+** containing a page that uses variable sized records. That is, an
+** intkey leaf page, or an index leaf or node page. This function
+** returns the number of bytes of record-area space consumed by
+** entry iEntry on the page.
+*/
+static int hctDbPageRecordSize(void *aPg, int pgsz, int iEntry){
+  int eType = hctPagetype(aPg);
+  if( eType==HCT_PAGETYPE_INTKEY ){
+    assert( hctPageheight(aPg)==0 );
+    return hctDbIntkeyEntrySize(&((HctDbIntkeyLeaf*)aPg)->aEntry[iEntry], pgsz);
+  }else if( hctPageheight(aPg)==0 ){
+    return hctDbIndexEntrySize(&((HctDbIndexLeaf*)aPg)->aEntry[iEntry], pgsz);
+  }
+  return hctDbIndexNodeEntrySize(&((HctDbIndexNode*)aPg)->aEntry[iEntry], pgsz);
+}
+static int hctDbPageEntrySize(void *aPg){
+  int eType = hctPagetype(aPg);
+  if( eType==HCT_PAGETYPE_INTKEY ){
+    assert( hctPageheight(aPg)==0 );
+    return sizeof(HctDbIntkeyEntry);
+  }else if( hctPageheight(aPg)==0 ){
+    return sizeof(HctDbIndexEntry);
+  }
+  return sizeof(HctDbIndexNodeEntry);
+}
+
+/*
+** The buffer passed as the first argument contains a page that is 
+** guaranteed to be either an intkey leaf, or an index leaf or node.
+** This function returns the offset of entry iEntry on the page and
+** populates output variable *pFlags with the entry flags.
+*/
+static int hctDbEntryInfo(void *aPg, int iEntry, int *pnSz, int *pFlags){
+  int iOff;
+  if( hctPagetype(aPg)==HCT_PAGETYPE_INTKEY ){
+    HctDbIntkeyEntry *pEntry = &((HctDbIntkeyLeaf*)aPg)->aEntry[iEntry];
+    iOff = pEntry->iOff;
+    *pFlags = pEntry->flags;
+    if( pnSz ) *pnSz = pEntry->nSize;
+  }else if( hctPageheight(aPg)==0 ){
+    HctDbIndexEntry *pEntry = &((HctDbIndexLeaf*)aPg)->aEntry[iEntry];
+    iOff = pEntry->iOff;
+    *pFlags = pEntry->flags;
+    if( pnSz ) *pnSz = pEntry->nSize;
+  }else{
+    HctDbIndexNodeEntry *pEntry = &((HctDbIndexNode*)aPg)->aEntry[iEntry];
+    iOff = pEntry->iOff;
+    *pFlags = pEntry->flags;
+    if( pnSz ) *pnSz = pEntry->nSize;
+  }
+  return iOff;
+}
+
+static int hctBufferGrow(HctBuffer *pBuf, int nSize){
+  int rc = SQLITE_OK;
+  if( nSize>pBuf->nAlloc ){
+    u8 *aNew = sqlite3_realloc(pBuf->aBuf, nSize);
+    if( aNew==0 ){
+      rc = SQLITE_NOMEM_BKPT;
+    }else{
+      pBuf->aBuf = aNew;
+      pBuf->nAlloc = nSize;
+    }
+  }
+  return rc;
+}
+static void hctBufferFree(HctBuffer *pBuf){
+  sqlite3_free(pBuf->aBuf);
+  memset(pBuf, 0, sizeof(HctBuffer));
+}
+
+/*
+** Argument aPg[] is a buffer containing either an index tree page, or an 
+** intkey leaf page. This function locates the record associated with
+** cell iCell on the page, and populates output variables *pnData and
+** *paData with the size and a pointer to a buffer containing the record,
+** respectively.
+**
+** If the record in cell iCell does not overflow the page, (*paData) is
+** set to point into the body of the page itself. If the record does
+** overflow the page, then buffer pBuf is used to store the record and
+** (*paData) is set to point to the buffer's allocation. In this case
+** it is the responsibility of the caller to eventually release the buffer.
+**
+** SQLITE_OK is returned if successful, or an SQLite error code otherwise.
+*/
+static int hctDbLoadRecord(
+  HctDatabase *pDb,
+  HctBuffer *pBuf,
+  u8 *aPg,
+  int iCell,
+  int *pnData,
+  const u8 **paData
+){
+  int rc = SQLITE_OK;
+  int iOff;
+  int nSize;
+  int flags;
+
+  iOff = hctDbEntryInfo(aPg, iCell, &nSize, &flags);
+  *pnData = nSize;
+  if( paData ){
+    if( flags & HCTDB_HAS_OVFL ){
+      rc = hctBufferGrow(pBuf, nSize);
+      *paData = pBuf->aBuf;
+      if( rc==SQLITE_OK ){
+        u32 pgOvfl;
+        int nLocal = hctDbLocalsize(aPg, pDb->pgsz, nSize);
+
+        iOff = hctDbOffset(iOff, flags);
+        memcpy(pBuf->aBuf, &aPg[iOff], nLocal);
+        pgOvfl = hctGetU32(&aPg[iOff-sizeof(u32)]);
+        iOff = nLocal;
+
+        while( rc==SQLITE_OK && iOff<nSize ){
+          HctFilePage ovfl;
+          rc = sqlite3HctFilePageGetPhysical(pDb->pFile, pgOvfl, &ovfl);
+          if( rc==SQLITE_OK ){
+            int nCopy = MIN(pDb->pgsz-8, nSize-iOff);
+            memcpy(&pBuf->aBuf[iOff],&ovfl.aOld[sizeof(HctDbPageHdr)],nCopy);
+            iOff += nCopy;
+            pgOvfl = ((HctDbPageHdr*)ovfl.aOld)->iPeerPg;
+            sqlite3HctFilePageRelease(&ovfl);
+          }
+        }
+      }
+    }else{
+      iOff = hctDbOffset(iOff, flags);
+      *paData = &aPg[iOff];
+    }
+  }
+
+  return rc;
+}
+
+static int hctDbIndexSearch(
+  HctDatabase *pDb,
+  u8 *aPg, 
+  UnpackedRecord *pRec,
+  int *piPos,
+  int *pbExact
+){
+  int rc = SQLITE_OK;
+  HctBuffer buf;
+  int i1 = 0;
+  int i2 = ((HctDbPageHdr*)aPg)->nEntry;
+
+  memset(&buf, 0, sizeof(buf));
+
+  while( i2>i1 ){
+    int iTest = (i1+i2)/2;
+    int res;
+    int nRec = 0;
+    const u8 *aRec = 0;
+
+    rc = hctDbLoadRecord(pDb, &buf, aPg, iTest, &nRec, &aRec);
+    if( rc!=SQLITE_OK ) break;
+    if( nRec==0 ){
+      res = -1;
+    }else{
+      res = sqlite3VdbeRecordCompare(nRec, aRec, pRec);
+    }
+
+    if( res==0 ){
+      *pbExact = 1;
+      *piPos = iTest;
+      return SQLITE_OK;
+    }else if( res<0 ){
+      i1 = iTest+1;
+    }else{
+      i2 = iTest;
+    }
+  }
+
+  assert( i1==i2 && i2>=0 );
+  hctBufferFree(&buf);
+  *pbExact = 0;
+  *piPos = i2;
+  return rc;
 }
 
 /*
@@ -769,14 +1010,14 @@ static int hctDbCompareFPKey(
 ){
   const u8 *aFP = 0;
   int nFP = 0;
-  u8 *pFree = 0;
   int res;
   int rc;
+  HctBuffer buf = {0,0,0};
 
-  rc = hctDbIndexFPKey(aPg, pDb->pgsz, &aFP, &nFP, &pFree);
+  rc = hctDbLoadRecord(pDb, &buf, aPg, 0, &nFP, &aFP);
 assert( rc==SQLITE_OK );
   res = sqlite3VdbeRecordCompare(nFP, aFP, pRec);
-  sqlite3_free(pFree);
+  hctBufferFree(&buf);
 
   *pbGe = (res<=0);
   return SQLITE_OK;
@@ -804,14 +1045,16 @@ nCall++;
       int bExact;
       if( pHdr->nHeight==0 ){
         if( pRec ){
-          i2 = hctDbIndexLeafSearch(pCsr->pg.aOld, pRec, &bExact);
+          // rc = hctDbIndexLeafSearch(pCsr->pg.aOld, pRec, &i2, &bExact);
+          rc = hctDbIndexSearch(pCsr->pDb, pCsr->pg.aOld, pRec, &i2, &bExact);
         }else{
           i2 = hctDbIntkeyLeafSearch(pCsr->pg.aOld, iKey, &bExact);
         }
         if( bExact==0 ) i2--;
       }else if( pRec ){
         HctDbIndexNode *pNode = (HctDbIndexNode*)pCsr->pg.aOld;
-        i2 = hctDbIndexNodeSearch(pNode, pRec, &bExact);
+        rc = hctDbIndexSearch(pCsr->pDb, pCsr->pg.aOld, pRec, &i2, &bExact);
+        // i2 = hctDbIndexNodeSearch(pNode, pRec, &bExact);
         i2 -= !bExact;
         iPg = pNode->aEntry[i2].iChildPg;
         assert( iPg );
@@ -909,6 +1152,7 @@ static int hctDbCellOffset(const u8 *aPage, int iCell, u8 *pFlags){
 static int hctDbFindKeyInOldPage(HctDbCsr *pCsr){
   int iCell;
   if( pCsr->pKeyInfo ){
+    int rc;
     int bExact;
     HctDbIndexEntry *p = &((HctDbIndexLeaf*)pCsr->pg.aOld)->aEntry[pCsr->iCell];
     u8 *aCell = &pCsr->pg.aOld[hctDbOffset(p->iOff, p->flags)];
@@ -917,7 +1161,8 @@ static int hctDbFindKeyInOldPage(HctDbCsr *pCsr){
       if( pCsr->pRec==0 ) return SQLITE_NOMEM_BKPT;
     }
     sqlite3VdbeRecordUnpack(pCsr->pKeyInfo, p->nSize, aCell, pCsr->pRec);
-    iCell = hctDbIndexLeafSearch(pCsr->pg.aOld, pCsr->pRec, &bExact);
+    rc = hctDbIndexLeafSearch(pCsr->pg.aOld, pCsr->pRec, &iCell, &bExact);
+    if( rc ) return rc;
     if( bExact==0 ) iCell = -1;
   }else{
     iCell = hctDbFindKeyInPage(
@@ -1227,7 +1472,9 @@ static int hctDbInsertFlushWrite(HctDatabase *pDb, HctDbWriter *p){
 
     if( rc==SQLITE_OK ){
       HctDbWriter wr;
+      HctBuffer buf;
       memset(&wr, 0, sizeof(wr));
+      memset(&buf, 0, sizeof(buf));
       wr.iHeight = p->iHeight + 1;
       for(ii=1; ii<p->nWritePg && rc==SQLITE_OK; ii++){
         HctFilePage *pPg = &p->aWritePg[ii];
@@ -1237,8 +1484,8 @@ static int hctDbInsertFlushWrite(HctDatabase *pDb, HctDbWriter *p){
         }else{
           const u8 *aFPKey = 0;
           int nFPKey = 0;
-          u8 *pFree = 0;
-          rc = hctDbIndexFPKey(pPg->aOld, pDb->pgsz, &aFPKey, &nFPKey, &pFree);
+
+          rc = hctDbLoadRecord(pDb, &buf, pPg->aOld, 0, &nFPKey, &aFPKey);
           if( rc==SQLITE_OK ){
             UnpackedRecord *pRec = p->writecsr.pRec;
             if( pRec==0 ){
@@ -1254,9 +1501,9 @@ static int hctDbInsertFlushWrite(HctDatabase *pDb, HctDbWriter *p){
                 pRec, 0, pPg->iPg, 0, nFPKey, aFPKey
             );
           }
-          sqlite3_free(pFree);
         }
       }
+      hctBufferFree(&buf);
 
       if( rc==SQLITE_OK ){
         rc = hctDbInsertFlushWrite(pDb, &wr);
@@ -1406,77 +1653,6 @@ static int hctDbSetWriteFpKey(HctDatabase *pDb, HctDbWriter *p){
   }
 
   return rc;
-}
-
-static int hctDbIntkeyLocalsize(int pgsz, int nSize){
-  int nMin = pgsz / 8;
-  int nMax = pgsz-sizeof(HctDbIntkeyLeaf)-sizeof(HctDbIntkeyEntry)-12;
-  int nLocal;
-
-  if( nSize<nMax ){
-    nLocal = nSize;
-  }else{
-    nLocal = nSize % (pgsz-sizeof(HctDbPageHdr));
-    if( nLocal<nMin || nLocal> (nMax-sizeof(u32)) ){
-      nLocal = nMin;
-    }
-  }
-
-  return nLocal;
-}
-
-static int hctDbIntkeyEntrySize(HctDbIntkeyEntry *pEntry, int pgsz){
-  int sz = hctDbIntkeyLocalsize(pgsz, pEntry->nSize)
-    + ((pEntry->flags & HCTDB_HAS_TID) ? 8 : 0)
-    + ((pEntry->flags & HCTDB_HAS_OLD) ? 4 : 0)
-    + ((pEntry->flags & HCTDB_HAS_OVFL) ? 4 : 0);
-  return sz;
-}
-
-static int hctDbIndexEntrySize(HctDbIndexEntry *pEntry){
-  int sz = pEntry->nSize + 
-    + ((pEntry->flags & HCTDB_HAS_TID) ? 8 : 0)
-    + ((pEntry->flags & HCTDB_HAS_OLD) ? 4 : 0)
-    + ((pEntry->flags & HCTDB_HAS_OVFL) ? 4 : 0);
-  return sz;
-}
-
-static int hctDbIndexNodeEntrySize(HctDbIndexNodeEntry *pEntry){
-  int sz = pEntry->nSize;
-  return sz;
-}
-
-static int hctDbEntrySize(int nData, int bClobber, u32 pgOvfl){
-  int sz = nData + 8 + (bClobber ? 4 : 0) + (pgOvfl ? 4 : 0);
-  return sz;
-}
-
-/*
-** The pointer passed as the first argument is a pointer to a buffer
-** containing a page that uses variable sized records. That is, an
-** intkey leaf page, or an index leaf or node page. This function
-** returns the number of bytes of record-area space consumed by
-** entry iEntry on the page.
-*/
-static int hctDbPageRecordSize(void *aPg, int pgsz, int iEntry){
-  int eType = hctPagetype(aPg);
-  if( eType==HCT_PAGETYPE_INTKEY ){
-    assert( hctPageheight(aPg)==0 );
-    return hctDbIntkeyEntrySize(&((HctDbIntkeyLeaf*)aPg)->aEntry[iEntry], pgsz);
-  }else if( hctPageheight(aPg)==0 ){
-    return hctDbIndexEntrySize(&((HctDbIndexLeaf*)aPg)->aEntry[iEntry]);
-  }
-  return hctDbIndexNodeEntrySize(&((HctDbIndexNode*)aPg)->aEntry[iEntry]);
-}
-static int hctDbPageEntrySize(void *aPg){
-  int eType = hctPagetype(aPg);
-  if( eType==HCT_PAGETYPE_INTKEY ){
-    assert( hctPageheight(aPg)==0 );
-    return sizeof(HctDbIntkeyEntry);
-  }else if( hctPageheight(aPg)==0 ){
-    return sizeof(HctDbIndexEntry);
-  }
-  return sizeof(HctDbIndexNodeEntry);
 }
 
 #ifdef SQLITE_DEBUG
@@ -1766,7 +1942,8 @@ assert( rc==SQLITE_OK );
           hctDbCellPut(a, pDb->iTid, iOld, pgOvfl, aData, nWrite);
           pEntry->nSize = nData;
           pEntry->flags = HCTDB_HAS_TID 
-            | (bClobber?HCTDB_HAS_OLD:0) | (bDel?HCTDB_IS_DELETE:0);
+            | (bClobber?HCTDB_HAS_OLD:0) | (bDel?HCTDB_IS_DELETE:0)
+            | (pgOvfl?HCTDB_HAS_OVFL:0);
         }else{
           HctDbIndexLeaf *pSrc = (HctDbIndexLeaf*)aPgCopy[pSz->iPg];
           HctDbIndexEntry *pOld = &pSrc->aEntry[pSz->iEntry];
@@ -1779,7 +1956,7 @@ assert( rc==SQLITE_OK );
         if( pSz->iPg<0 ){
           hctDbCellPut(&((u8*)pLeaf)[iOff], 0, 0, pgOvfl, aData, nWrite);
           pEntry->nSize = nData;
-          pEntry->flags = 0; 
+          pEntry->flags = (pgOvfl?HCTDB_HAS_OVFL:0);
           pEntry->iChildPg = iChildPg; 
         }else{
           HctDbIndexNode *pSrc = (HctDbIndexNode*)aPgCopy[pSz->iPg];
@@ -1934,32 +2111,6 @@ assert( bClobber==0 );
   return rc;
 }
 
-/*
-** The buffer passed as the first argument contains a page that is 
-** guaranteed to be either an intkey leaf, or an index leaf or node.
-** This function returns the offset of entry iEntry on the page and
-** populates output variable *pFlags with the entry flags.
-*/
-static int hctDbEntryInfo(void *aPg, int iEntry, int *pnSz, int *pFlags){
-  int iOff;
-  if( hctPagetype(aPg)==HCT_PAGETYPE_INTKEY ){
-    HctDbIntkeyEntry *pEntry = &((HctDbIntkeyLeaf*)aPg)->aEntry[iEntry];
-    iOff = pEntry->iOff;
-    *pFlags = pEntry->flags;
-    if( pnSz ) *pnSz = pEntry->nSize;
-  }else if( hctPageheight(aPg)==0 ){
-    HctDbIndexEntry *pEntry = &((HctDbIndexLeaf*)aPg)->aEntry[iEntry];
-    iOff = pEntry->iOff;
-    *pFlags = pEntry->flags;
-    if( pnSz ) *pnSz = pEntry->nSize;
-  }else{
-    HctDbIndexNodeEntry *pEntry = &((HctDbIndexNode*)aPg)->aEntry[iEntry];
-    iOff = pEntry->iOff;
-    *pFlags = pEntry->flags;
-    if( pnSz ) *pnSz = pEntry->nSize;
-  }
-  return iOff;
-}
 
 /*
 ** The buffer passed as the first
@@ -1983,14 +2134,12 @@ static int hctDbInsertOverflow(
   int rc = SQLITE_OK;
   int nMax = pDb->pgsz-sizeof(HctDbIntkeyLeaf)-sizeof(HctDbIntkeyEntry)-12;
 
-  assert( hctPagetype(aTarget)==HCT_PAGETYPE_INTKEY );
-
   if( nData<=nMax ){
     *pnWrite = nData;
     *ppgOvfl = 0;
   }else{
     const int sz = (pDb->pgsz - sizeof(HctDbPageHdr));
-    int nLocal = hctDbIntkeyLocalsize(pDb->pgsz, nData);
+    int nLocal = hctDbLocalsize(aTarget, pDb->pgsz, nData);
     int nRem;
     int nCopy;
     u32 iPg = 0;
@@ -2093,16 +2242,23 @@ assert( bDel==0 || p->iHeight==0 );
     ** on. This can be optimized later - by remembering which page the 
     ** previous key was stored on.  */
     if( pRec ){
+      HctBuffer buf = {0,0,0};
       for(iPg=0; iPg<p->nWritePg-1; iPg++){
         const u8 *aK;
         int nK;
-        u8 *pFree = 0;
-        rc = hctDbIndexFPKey(p->aWritePg[iPg+1].aNew,pDb->pgsz,&aK,&nK,&pFree);
-        if( rc!=SQLITE_OK ) return rc;
+        rc = hctDbLoadRecord(pDb, &buf, p->aWritePg[iPg+1].aNew, 0, &nK, &aK);
+        if( rc!=SQLITE_OK ){
+          hctBufferFree(&buf);
+          return rc;
+        }
         if( sqlite3VdbeRecordCompare(nK, aK, pRec)>0 ) break;
       }
+      hctBufferFree(&buf);
       if( p->iHeight==0 ){
-        iInsert = hctDbIndexLeafSearch(p->aWritePg[iPg].aNew, pRec, &bClobber);
+        rc = hctDbIndexLeafSearch(
+            p->aWritePg[iPg].aNew, pRec, &iInsert, &bClobber
+        );
+        if( rc!=SQLITE_OK ) return rc;
       }else{
         iInsert = hctDbIndexNodeSearch(p->aWritePg[iPg].aNew, pRec, &bClobber);
       }
@@ -2144,10 +2300,8 @@ assert( bDel==0 || p->iHeight==0 );
   aTarget = p->aWritePg[iPg].aNew;
 
   /* If any overflow pages are required, create them now. */
-  if( hctPagetype(aTarget)==HCT_PAGETYPE_INTKEY ){
   rc = hctDbInsertOverflow(pDb, aTarget, nData, aData, &nWrite, &pgOvfl);
 assert( rc==SQLITE_OK );
-  }
 
   nDataReq = 8 + (pgOvfl?4:0) + nWrite;
   if( bClobber ){
@@ -2261,7 +2415,7 @@ assert( rc==SQLITE_OK );
       pEntry = &pINode->aEntry[iInsert];
       pEntry->nSize = nData;
       pEntry->iOff = iOff;
-      pEntry->flags = 0;
+      pEntry->flags = (pgOvfl ? HCTDB_HAS_OVFL : 0);
       pEntry->iChildPg = iChildPg;
       iTid = 0;
       assert( iChildPg!=0 );
@@ -2369,18 +2523,13 @@ int sqlite3HctDbCsrOpen(
   return rc;
 }
 
-static void hctDbCsrClearCache(HctDbCsr *pCsr){
-  sqlite3_free(pCsr->aRecord);
-  pCsr->aRecord = 0;
-}
-
 void sqlite3HctDbCsrClose(HctDbCsr *pCsr){
   if( pCsr ){
     HctDatabase *pDb = pCsr->pDb;
     HctDbCsr **pp;
     for(pp=&pDb->pCsrList; *pp!=pCsr; pp=&(*pp)->pCsrNext);
     *pp = pCsr->pCsrNext;
-    hctDbCsrClearCache(pCsr);
+    hctBufferFree(&pCsr->rec);
     sqlite3_free(pCsr);
   }
 }
@@ -2522,13 +2671,8 @@ assert( 0 );
 }
 
 int sqlite3HctDbCsrData(HctDbCsr *pCsr, int *pnData, const u8 **paData){
-  int rc = SQLITE_OK;
   u8 *pPg;
   int iCell;
-  int iOff;
-  int nSize;
-  int flags;
-
   if( pCsr->oldpg.aOld ){
     pPg = pCsr->oldpg.aOld;
     iCell = pCsr->iOldCell;
@@ -2536,52 +2680,8 @@ int sqlite3HctDbCsrData(HctDbCsr *pCsr, int *pnData, const u8 **paData){
     pPg = pCsr->pg.aOld;
     iCell = pCsr->iCell;
   }
-
   assert( hctPageheight(pPg)==0 );
-
-  iOff = hctDbEntryInfo(pPg, iCell, &nSize, &flags);
-  *pnData = nSize;
-  if( paData ){
-    if( flags & HCTDB_HAS_OVFL ){
-      HctDatabase *pDb = pCsr->pDb;
-      hctDbCsrClearCache(pCsr);
-      pCsr->aRecord = sqlite3_malloc(nSize);
-      pCsr->nRecord = nSize;
-      if( pCsr->aRecord==0 ){
-        rc = SQLITE_NOMEM_BKPT;
-      }else{
-        u32 pgOvfl;
-        int nLocal = hctDbIntkeyLocalsize(pDb->pgsz, nSize);
-
-        iOff = hctDbOffset(iOff, flags);
-        memcpy(pCsr->aRecord, &pPg[iOff], nLocal);
-        pgOvfl = hctGetU32(&pPg[iOff-sizeof(u32)]);
-        iOff = nLocal;
-
-        while( rc==SQLITE_OK && iOff<nSize ){
-          HctFilePage ovfl;
-          rc = sqlite3HctFilePageGetPhysical(pDb->pFile, pgOvfl, &ovfl);
-          if( rc==SQLITE_OK ){
-            int nCopy = MIN(pDb->pgsz-8, nSize-iOff);
-            memcpy(&pCsr->aRecord[iOff],&ovfl.aOld[sizeof(HctDbPageHdr)],nCopy);
-            iOff += nCopy;
-            pgOvfl = ((HctDbPageHdr*)ovfl.aOld)->iPeerPg;
-            sqlite3HctFilePageRelease(&ovfl);
-          }
-        }
-
-        if( rc==SQLITE_OK ){
-          *pnData = pCsr->nRecord;
-          *paData = pCsr->aRecord;
-        }
-      }
-    }else{
-      iOff = hctDbOffset(iOff, flags);
-      *paData = &pPg[iOff];
-    }
-  }
-
-  return rc;
+  return hctDbLoadRecord(pCsr->pDb, &pCsr->rec, pPg, iCell, pnData, paData);
 }
 
 /*************************************************************************
@@ -3190,21 +3290,19 @@ static int hctentryColumn(
       if( pIntkeyNode==0 ){
         sqlite3 *db = sqlite3_context_db_handle(ctx);
         u8 *aPg = pCur->pg.aOld;
-        int iOff;
-        int flags;
         char *zRec;
         int sz;
-        iOff = hctDbEntryInfo(aPg, pCur->iEntry, &sz, &flags);
-        iOff = hctDbOffset(iOff, flags);
-        if( flags & HCTDB_HAS_OVFL ){
-          zRec = sqlite3_mprintf("<overflow record>");
-        }else{
-          zRec = hctDbRecordToText(db, &aPg[iOff], sz);
-        }
+        const u8 *aRec = 0;
+        HctBuffer buf = {0,0,0};
+
+        hctDbLoadRecord(pCur->pDb, &buf, aPg, pCur->iEntry, &sz, &aRec);
+
+        zRec = hctDbRecordToText(db, aRec, sz);
         if( zRec ){
           sqlite3_result_text(ctx, zRec, -1, SQLITE_TRANSIENT);
           sqlite3_free(zRec);
         }
+        hctBufferFree(&buf);
       }
       break;
   }
