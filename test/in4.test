@@ -330,7 +330,7 @@ do_execsql_test in4-6.1 {
 do_execsql_test in4-6.1-eqp {
   EXPLAIN QUERY PLAN
   SELECT * FROM t6a, t6b WHERE a=3 AND b IN (c);
-} {~/SCAN TABLE t6a/}
+} {~/SCAN t6a/}
 do_execsql_test in4-6.2 {
   SELECT * FROM t6a, t6b WHERE a=3 AND c IN (b);
 } {3 4 4 44}
@@ -364,5 +364,33 @@ ifcapable rtree {
     SELECT * FROM t2 LEFT JOIN t1 ON c IN (d) AND b IN (10,10,10);
   } {{} 1 {} {} {}}
 }
+
+#-------------------------------------------------------------------------
+reset_db
+do_execsql_test 8.0 {
+  CREATE TABLE t1(x INTEGER PRIMARY KEY, y);
+  CREATE UNIQUE INDEX t1y ON t1(y);
+  INSERT INTO t1 VALUES(111, 'AAA'),(222, 'BBB'),(333, 'CCC');
+  CREATE TABLE t2(z);
+  INSERT INTO t2 VALUES('BBB'),('AAA');
+  ANALYZE sqlite_schema;
+  INSERT INTO sqlite_stat1 VALUES('t1', 't1y','100 1');
+}
+
+db close
+sqlite3 db test.db
+
+do_execsql_test 8.1 {
+  SELECT t1.x FROM t2 CROSS JOIN t1 WHERE t2.z = t1.y;
+} {222 111}
+
+do_execsql_test 8.2 {
+  SELECT t1.x FROM t2 CROSS JOIN t1 WHERE t2.z = t1.y AND +t1.x IN (111, 222);
+} {222 111}
+
+do_execsql_test 8.3 {
+  SELECT t1.x FROM t2 CROSS JOIN t1 WHERE t2.z = t1.y AND t1.x IN (111, 222);
+} {222 111}
+
 
 finish_test

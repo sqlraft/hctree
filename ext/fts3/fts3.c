@@ -326,7 +326,9 @@ int sqlite3Fts3Never(int b)  { assert( !b ); return b; }
 ** assert() conditions in the fts3 code are activated - conditions that are
 ** only true if it is guaranteed that the fts3 database is not corrupt.
 */
+#ifdef SQLITE_DEBUG
 int sqlite3_fts3_may_be_corrupt = 1;
+#endif
 
 /* 
 ** Write a 64-bit variable-length integer to memory starting at p[0].
@@ -5212,9 +5214,9 @@ static int fts3EvalNearTrim(
   );
   if( res ){
     nNew = (int)(pOut - pPhrase->doclist.pList) - 1;
-    if( nNew>=0 ){
+    assert_fts3_nc( nNew<=pPhrase->doclist.nList && nNew>0 );
+    if( nNew>=0 && nNew<=pPhrase->doclist.nList ){
       assert( pPhrase->doclist.pList[nNew]=='\0' );
-      assert( nNew<=pPhrase->doclist.nList && nNew>0 );
       memset(&pPhrase->doclist.pList[nNew], 0, pPhrase->doclist.nList - nNew);
       pPhrase->doclist.nList = nNew;
     }

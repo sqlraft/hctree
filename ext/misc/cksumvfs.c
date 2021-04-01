@@ -157,6 +157,9 @@
 ** value at offset 20 the SQLite database header is exactly 8.  If
 ** the reserved-space value is not 8, this module is a no-op.
 */
+#if defined(SQLITE_AMALGAMATION) && !defined(SQLITE_CKSUMVFS_STATIC)
+# define SQLITE_CKSUMVFS_STATIC
+#endif
 #ifdef SQLITE_CKSUMVFS_STATIC
 # include "sqlite3.h"
 #else
@@ -176,7 +179,7 @@ typedef struct CksmFile CksmFile;
 /*
 ** Useful datatype abbreviations
 */
-#if !defined(SQLITE_CORE)
+#if !defined(SQLITE_AMALGAMATION)
   typedef unsigned char u8;
   typedef unsigned int u32;
 #endif
@@ -353,6 +356,41 @@ static void cksmVerifyFunc(
   sqlite3_result_int(context, memcmp(data+nByte-8,cksum,8)==0);
 }
 
+#ifdef SQLITE_CKSUMVFS_INIT_FUNCNAME
+/*
+** SQL function:    initialize_cksumvfs(SCHEMANAME)
+**
+** This SQL functions (whose name is actually determined at compile-time
+** by the value of the SQLITE_CKSUMVFS_INIT_FUNCNAME macro) invokes:
+**
+**   sqlite3_file_control(db, SCHEMANAME, SQLITE_FCNTL_RESERVE_BYTE, &n);
+**
+** In order to set the reserve bytes value to 8, so that cksumvfs will
+** operation.  This feature is provided (if and only if the
+** SQLITE_CKSUMVFS_INIT_FUNCNAME compile-time option is set to a string
+** which is the name of the SQL function) so as to provide the ability
+** to invoke the file-control in programming languages that lack
+** direct access to the sqlite3_file_control() interface (ex: Java).
+**
+** This interface is undocumented, apart from this comment.  Usage
+** example:
+**
+**    1.  Compile with -DSQLITE_CKSUMVFS_INIT_FUNCNAME="ckvfs_init"
+**    2.  Run:  "SELECT cksum_init('main'); VACUUM;"
+*/
+static void cksmInitFunc(
+  sqlite3_context *context,
+  int argc,
+  sqlite3_value **argv
+){
+  int nByte = 8;
+  const char *zSchemaName = (const char*)sqlite3_value_text(argv[0]);
+  sqlite3 *db = sqlite3_context_db_handle(context);
+  sqlite3_file_control(db, zSchemaName, SQLITE_FCNTL_RESERVE_BYTES, &nByte);
+  /* Return NULL */
+}
+#endif /* SQLITE_CKSUMBFS_INIT_FUNCNAME */
+
 /*
 ** Close a cksm-file.
 */
@@ -395,7 +433,9 @@ static int cksmRead(
   pFile = ORIGFILE(pFile);
   rc = pFile->pMethods->xRead(pFile, zBuf, iAmt, iOfst);
   if( rc==SQLITE_OK ){
-    if( iOfst==0 && iAmt>=100 && memcmp(zBuf,"SQLite format 3",16)==0 ){
+    if( iOfst==0 && iAmt>=100 && (
+          memcmp(zBuf,"SQLite format 3",16)==0 || memcmp(zBuf,"ZV-",3)==0 
+    )){
       u8 *d = (u8*)zBuf;
       char hasCorrectReserveSize = (d[20]==8);
       cksmSetFlags(p, hasCorrectReserveSize);
@@ -434,7 +474,9 @@ static int cksmWrite(
 ){
   CksmFile *p = (CksmFile *)pFile;
   pFile = ORIGFILE(pFile);
-  if( iOfst==0 && iAmt>=100 && memcmp(zBuf,"SQLite format 3",16)==0 ){
+  if( iOfst==0 && iAmt>=100 && (
+        memcmp(zBuf,"SQLite format 3",16)==0 || memcmp(zBuf,"ZV-",3)==0 
+  )){
     u8 *d = (u8*)zBuf;
     char hasCorrectReserveSize = (d[20]==8);
     cksmSetFlags(p, hasCorrectReserveSize);
@@ -604,13 +646,20 @@ static int cksmFetch(
     return SQLITE_OK;
   }
   pFile = ORIGFILE(pFile);
-  return pFile->pMethods->xFetch(pFile, iOfst, iAmt, pp);
+  if( pFile->pMethods->iVersion>2 && pFile->pMethods->xFetch ){
+    return pFile->pMethods->xFetch(pFile, iOfst, iAmt, pp);
+  }
+  *pp = 0;
+  return SQLITE_OK;
 }
 
 /* Release a memory-mapped page */
 static int cksmUnfetch(sqlite3_file *pFile, sqlite3_int64 iOfst, void *pPage){
   pFile = ORIGFILE(pFile);
-  return pFile->pMethods->xUnfetch(pFile, iOfst, pPage);
+  if( pFile->pMethods->iVersion>2 && pFile->pMethods->xUnfetch ){
+    return pFile->pMethods->xUnfetch(pFile, iOfst, pPage);
+  }
+  return SQLITE_OK;
 }
 
 /*
@@ -701,7 +750,17 @@ static int cksmGetLastError(sqlite3_vfs *pVfs, int a, char *b){
   return ORIGVFS(pVfs)->xGetLastError(ORIGVFS(pVfs), a, b);
 }
 static int cksmCurrentTimeInt64(sqlite3_vfs *pVfs, sqlite3_int64 *p){
-  return ORIGVFS(pVfs)->xCurrentTimeInt64(ORIGVFS(pVfs), p);
+  sqlite3_vfs *pOrig = ORIGVFS(pVfs);
+  int rc;
+  assert( pOrig->iVersion>=2 );
+  if( pOrig->xCurrentTimeInt64 ){
+    rc = pOrig->xCurrentTimeInt64(pOrig, p);
+  }else{
+    double r;
+    rc = pOrig->xCurrentTime(pOrig, &r);
+    *p = (sqlite3_int64)(r*86400000.0);
+  }
+  return rc;
 }
 static int cksmSetSystemCall(
   sqlite3_vfs *pVfs,
@@ -732,6 +791,11 @@ static int cksmRegisterFunc(
   rc = sqlite3_create_function(db, "verify_checksum", 1,
                    SQLITE_UTF8|SQLITE_INNOCUOUS|SQLITE_DETERMINISTIC,
                    0, cksmVerifyFunc, 0, 0);
+#ifdef SQLITE_CKSUMVFS_INIT_FUNCNAME
+  (void)sqlite3_create_function(db, SQLITE_CKSUMVFS_INIT_FUNCNAME, 1,
+                   SQLITE_UTF8|SQLITE_DIRECTONLY,
+                   0, cksmInitFunc, 0, 0);
+#endif
   return rc;
 }
 
@@ -762,6 +826,13 @@ static int cksmRegisterVfs(void){
 int sqlite3_register_cksumvfs(const char *NotUsed){
   (void)NotUsed;
   return cksmRegisterVfs();
+}
+int sqlite3_unregister_cksumvfs(void){
+  if( sqlite3_vfs_find("cksmvfs") ){
+    sqlite3_vfs_unregister(&cksm_vfs);
+    sqlite3_cancel_auto_extension((void(*)(void))cksmRegisterFunc);
+  }
+  return SQLITE_OK;
 }
 #endif /* defined(SQLITE_CKSUMVFS_STATIC */
 

@@ -22,7 +22,9 @@
 ** assert() conditions in the fts5 code are activated - conditions that are
 ** only true if it is guaranteed that the fts5 database is not corrupt.
 */
+#ifdef SQLITE_DEBUG
 int sqlite3_fts5_may_be_corrupt = 1;
+#endif
 
 
 typedef struct Fts5Auxdata Fts5Auxdata;
@@ -2177,7 +2179,8 @@ static int fts5ApiPhraseFirst(
   int n;
   int rc = fts5CsrPoslist(pCsr, iPhrase, &pIter->a, &n);
   if( rc==SQLITE_OK ){
-    pIter->b = &pIter->a[n];
+    assert( pIter->a || n==0 );
+    pIter->b = (pIter->a ? &pIter->a[n] : 0);
     *piCol = 0;
     *piOff = 0;
     fts5ApiPhraseNext(pCtx, pIter, piCol, piOff);
@@ -2236,7 +2239,8 @@ static int fts5ApiPhraseFirstColumn(
       rc = sqlite3Fts5ExprPhraseCollist(pCsr->pExpr, iPhrase, &pIter->a, &n);
     }
     if( rc==SQLITE_OK ){
-      pIter->b = &pIter->a[n];
+      assert( pIter->a || n==0 );
+      pIter->b = (pIter->a ? &pIter->a[n] : 0);
       *piCol = 0;
       fts5ApiPhraseNextColumn(pCtx, pIter, piCol);
     }
@@ -2244,7 +2248,8 @@ static int fts5ApiPhraseFirstColumn(
     int n;
     rc = fts5CsrPoslist(pCsr, iPhrase, &pIter->a, &n);
     if( rc==SQLITE_OK ){
-      pIter->b = &pIter->a[n];
+      assert( pIter->a || n==0 );
+      pIter->b = (pIter->a ? &pIter->a[n] : 0);
       if( n<=0 ){
         *piCol = -1;
       }else if( pIter->a[0]==0x01 ){
@@ -2722,7 +2727,7 @@ int sqlite3Fts5GetTokenizer(
     *pzErr = sqlite3_mprintf("no such tokenizer: %s", azArg[0]);
   }else{
     rc = pMod->x.xCreate(
-        pMod->pUserData, &azArg[1], (nArg?nArg-1:0), &pConfig->pTok
+        pMod->pUserData, (azArg?&azArg[1]:0), (nArg?nArg-1:0), &pConfig->pTok
     );
     pConfig->pTokApi = &pMod->x;
     if( rc!=SQLITE_OK ){
