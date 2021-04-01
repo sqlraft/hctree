@@ -4735,6 +4735,7 @@ case OP_Found: {        /* jump, in3 */
       }
     }
   }
+  sqlite3BtreeCursorDir(pC->uc.pCursor, BTREE_DIR_FORWARD);
   rc = sqlite3BtreeMovetoUnpacked(pC->uc.pCursor, pIdxKey, 0, 0, &res);
   if( pFree ) sqlite3DbFreeNN(db, pFree);
   if( rc!=SQLITE_OK ){
