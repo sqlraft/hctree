@@ -39,6 +39,8 @@ struct Btree {
   int nNewRoot;
   BtNewRoot *aNewRoot;
 
+  int openFlags;
+
   u32 iNextRoot;                  /* Next root page to allocate if pHctDb==0 */
   u32 aMeta[SQLITE_N_BTREE_META]; /* 16 database meta values */
   int eMetaState;
@@ -204,6 +206,7 @@ int sqlite3BtreeOpen(
     memset(pNew, 0, sizeof(Btree));
     pNew->iNextRoot = 2;
     pNew->db = db;
+    pNew->openFlags = flags;
     rc = sqlite3HctTreeNew(&pNew->pHctTree);
   }else{
     rc = SQLITE_NOMEM;
@@ -875,15 +878,19 @@ void sqlite3BtreeCursorZero(BtCursor *p){
 ** when the last cursor is closed.
 */
 int sqlite3BtreeCloseCursor(BtCursor *pCur){
-  if( pCur->pBtree ){
+  Btree *pBtree = pCur->pBtree;
+  if( pBtree ){
     BtCursor **pp;
     sqlite3HctTreeCsrClose(pCur->pHctTreeCsr);
     sqlite3HctDbCsrClose(pCur->pHctDbCsr);
-    for(pp=&pCur->pBtree->pCsrList; *pp!=pCur; pp=&(*pp)->pCsrNext);
+    for(pp=&pBtree->pCsrList; *pp!=pCur; pp=&(*pp)->pCsrNext);
     *pp = pCur->pCsrNext;
     pCur->pHctTreeCsr = 0;
     pCur->pBtree = 0;
     pCur->pCsrNext = 0;
+    if( (pBtree->openFlags & BTREE_SINGLE) && pBtree->pCsrList==0 ){
+      sqlite3BtreeClose(pBtree);
+    }
   }
   return SQLITE_OK;
 }

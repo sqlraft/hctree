@@ -1,5 +1,5 @@
-C Merge\slatest\strunk\schanges\sinto\sthis\sbranch.
-D 2021-04-01T20:36:40.791
+C Update\shctree.c\sto\sclose\sany\sBTREE_SINGLE\sbtree\swhen\sits\slast\scursor\sis\sclosed.
+D 2021-04-02T16:20:50.810
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -517,7 +517,7 @@ F src/hctTMapInt.h 3c4bcd71d88b90b0447b61389d7079d34223ea06e04c10a7e0bbb75e79a5c
 F src/hct_database.c c97b050d11f09c8b368768efeadf10fddbcd17ea993cf3af0b873bcf1add0eb3
 F src/hct_file.c 7c7aae64af7c55e1d56f79e28962f809c35e38a21385d0ce0403495cba2a580e
 F src/hct_tree.c 57999dc2008022968bb249dc710e0d748462490a493a667fd015e995b731bb15
-F src/hctree.c 9e78253172e4ffe491ef178f97020e1ac1a3be641d89cfb27997883d651f735d
+F src/hctree.c aba186f608771af628557767f0b26cd1dfabb0514aec64d90cc1b91c231518a8
 F src/hwtime.h cb1d7e3e1ed94b7aa6fde95ae2c2daccc3df826be26fc9ed7fd90d1750ae6144
 F src/in-operator.md 10cd8f4bcd225a32518407c2fb2484089112fd71
 F src/insert.c f8d462ab6174a2c30476b5a1fc77f4d66ce7d9dd45c994966b9f4445db1131f0
@@ -1938,8 +1938,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P de5bd28b3525b8a060ad6eaa41112e1a72dee2bce5c9d5528383ef26f9ee8e9d fd4ea3f626b6e4957d56c2369be711895735cfc37cfde65650a6682ad5a3eb1a
-R 3c38c1f09f990595b223d0fa3552d819
+P 2a204d6b9b2d59c2b311d7809f65f3aa56e93e9e8ed5a2f8b3afd6426a1ca97b
+R 2bb3363d14cabafe798545004bf530e6
 U dan
-Z 280b05ccde759fe204248d1dd0b007b0
+Z 57998f7d8c5a23371b29ca79bc92a28a
 # Remove this line to create a well-formed Fossil manifest.
