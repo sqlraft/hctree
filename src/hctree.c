@@ -560,6 +560,7 @@ static int btreeFlushOneToDisk(void *pCtx, u32 iRoot, KeyInfo *pKeyInfo){
         }
       }
       for(ii=1; ii<nRetry; ii++){
+        assert( sqlite3HctTreeCsrEof(pCsr)==0 );
         sqlite3HctTreeCsrPrev(pCsr);
       }
     }
@@ -598,6 +599,9 @@ static int btreeFlushToDisk(Btree *p){
   int i;
   int rc = SQLITE_OK;
   int rcok = SQLITE_OK;
+
+static int nCall = 0;
+nCall++;
 
   sqlite3HctDbStartWrite(p->pHctDb);
 

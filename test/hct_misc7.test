@@ -17,6 +17,8 @@ set testprefix hct_misc7
 
 set nRow 2000
 
+if 0 {
+
 do_execsql_test 1.1.0 {
   CREATE TABLE t1(a INTEGER PRIMARY KEY, b TEXT);
 }
@@ -26,7 +28,6 @@ do_test 1.1.1 {
     set t [db one {SELECT hex(randomblob(5000))}]
     db eval { INSERT INTO t1 VALUES($i, $t) }
     set A($i) $t
-    flush stdout
   }
   set {} {}
 } {}
@@ -39,6 +40,9 @@ do_test 1.1.2 {
     }
   }
 } {}
+
+execsql_pp { SELECT * FROM hctpgmap NATURAL JOIN hctdb }
+exit
 
 reset_db
 array unset A
@@ -53,7 +57,6 @@ do_test 1.2.1 {
     set k [db one {SELECT random()}]
     db eval { INSERT INTO t1 VALUES($k, $t) }
     set A($k) $t
-    flush stdout
   }
   set {} {}
 } {}
@@ -77,10 +80,45 @@ do_test 1.2.3 {
 
 do_execsql_test 1.2.4 { PRAGMA integrity_check } {ok}
 
+#-------------------------------------------------------------------------
+}
+reset_db
+do_execsql_test 2.0 {
+  CREATE TABLE x1(a INTEGER PRIMARY KEY, b TEXT);
+}
+
+set nRow 5000
+
+do_test 2.1 {
+  for {set i 1} {$i <= $nRow} {incr i} {
+    set t [db one {SELECT hex(randomblob(50))}]
+    db eval { INSERT INTO x1 VALUES($i, $t) }
+    set A($i) $t
+  }
+  set {} {}
+} {}
+
+reset_db
+breakpoint
+do_test 2.2 {
+  execsql {
+    CREATE TABLE x1(a INTEGER PRIMARY KEY, b TEXT);
+  }
+  for {set ii 1} {$ii <= $nRow} {incr ii} {
+    set t [db one {SELECT hex(randomblob(50))}]
+    set i [db one {SELECT random()}]
+    db eval { INSERT INTO x1 VALUES($i, $t) }
+    set A($i) $t
+  }
+  set {} {}
+} {}
+
+#execsql_pp { SELECT * FROM hctpgmap NATURAL JOIN hctdb ORDER BY CAST (fpkey }
+#execsql_pp { SELECT * FROM hctpgmap NATURAL JOIN hctdb NATURAL JOIN hctentry WHERE nheight>0 }
 
 #execsql_pp { SELECT * FROM hctpgmap }
-#execsql_pp { SELECT * FROM hctpgmap NATURAL JOIN hctdb WHERE pgtype='index' }
-#execsql_pp { SELECT * FROM hctpgmap NATURAL JOIN hctentry WHERE ikey IS NULL }
+#execsql_pp { SELECT * FROM hctpgmap NATURAL JOIN hctdb }
+#execsql_pp { SELECT * FROM hctpgmap NATURAL JOIN hctentry }
 
 finish_test
 

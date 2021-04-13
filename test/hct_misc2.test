@@ -40,7 +40,7 @@ do_execsql_test 2.0 {
   CREATE TABLE tx(a INTEGER PRIMARY KEY, b TEXT);
 }
 
-set nRow 10000
+set nRow 2000
 set nStep 100
 
 expr srand(0)
@@ -54,10 +54,11 @@ for {set i 0} {$i < $nRow} {incr i} {
   set data($a) $txt
 }
 
+#execsql_pp { SELECT * FROM hctpgmap NATURAL JOIN hctdb; }
+#execsql_pp { SELECT * FROM hctpgmap NATURAL JOIN hctentry }
+
 foreach k [array names data] {
-  do_execsql_test 2.1.$k {
-    SELECT a, b FROM tx WHERE a=$k
-  } [list $k $data($k)]
+  do_execsql_test 2.1.$k {SELECT a, b FROM tx WHERE a=$k} [list $k $data($k)]
 }
 
 while {[llength [array names data]]>0} {
@@ -66,15 +67,15 @@ while {[llength [array names data]]>0} {
   set k [lindex $L $i]
   execsql { DELETE FROM tx WHERE a = $k }
   unset data($k)
-  set nLength [llength $L]
-  if {($nLength % $nStep)==0} {
-    do_execsql_test 2.2.[llength $L] {
-      SELECT a FROM tx ORDER BY a
-    } [lsort -integer [array names data]]
-  }
 }
 
-do_execsql_test 1.x {
+foreach k [array names data] {
+  do_execsql_test 2.2.$k {
+    SELECT a, b FROM tx WHERE a=$k
+  } [list $k $data($k)]
+}
+
+do_execsql_test 2.x {
   SELECT * FROM tx
 } {}
 

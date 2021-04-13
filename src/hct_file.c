@@ -775,6 +775,14 @@ void sqlite3HctFilePageUnwrite(HctFilePage *pPg){
   }
 }
 
+void sqlite3HctFilePageZero(HctFilePage *pPg){
+  HctMapping *pMap = pPg->pFile->pMapping;
+  u64 iVal;
+  do {
+    iVal = hctFilePagemapGet(pMap, pPg->iPg);
+  }while( !hctFilePagemapSetLogical(pMap, pPg->iPg, iVal, 0) );
+}
+
 int sqlite3HctFilePageWrite(HctFilePage *pPg){
   int rc = SQLITE_OK;             /* Return code */
 

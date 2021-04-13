@@ -182,6 +182,7 @@ int sqlite3HctFilePageGet(HctFile *pFile, u32 iPg, HctFilePage *pPg);
 int sqlite3HctFilePageNew(HctFile *pFile, u32 iPg, HctFilePage *pPg);
 int sqlite3HctFilePageWrite(HctFilePage *pPg);
 void sqlite3HctFilePageUnwrite(HctFilePage *pPg);
+void sqlite3HctFilePageZero(HctFilePage *pPg);
 int sqlite3HctFilePageDelete(HctFilePage *pPg);
 int sqlite3HctFilePageRelease(HctFilePage *pPg);
 int sqlite3HctFilePageCommit(HctFilePage *pPg);
