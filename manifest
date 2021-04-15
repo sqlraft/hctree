@@ -1,5 +1,5 @@
-C Fix\sproblems\swith\srollback\safter\sa\swrite-write\sconflict.
-D 2021-04-13T21:13:19.138
+C Fix\sbalancing\sof\sindex\sb-tree\snodes.
+D 2021-04-15T21:14:13.165
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -514,7 +514,7 @@ F src/hash.c 8d7dda241d0ebdafb6ffdeda3149a412d7df75102cecfc1021c98d6219823b19
 F src/hash.h 9d56a9079d523b648774c1784b74b89bd93fac7b365210157482e4319a468f38
 F src/hctInt.h c82855a694aab0b1641a54fe23ae52d296c19c8f7d4643f461f3f70c636025db
 F src/hctTMapInt.h 3c4bcd71d88b90b0447b61389d7079d34223ea06e04c10a7e0bbb75e79a5c7d9
-F src/hct_database.c 5676a0afc0608522dddd233a7a2703019c8edad80b2133823ad6a6cb4862ad33
+F src/hct_database.c 8808a76383eeb354e1cdd6bea56679b38f02d2b16a5f0997d3d10d03930247a1
 F src/hct_file.c 94665180f82f1cb31fbf43bfb0f637fa47b6378a87c70c5ba59f5c7977e0f27b
 F src/hct_tree.c 57999dc2008022968bb249dc710e0d748462490a493a667fd015e995b731bb15
 F src/hctree.c 153d3018bfafff390f8d174b225a125a87f32041467afb6cc6ab3bb4b792a265
@@ -1938,8 +1938,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P 5c1c1c6d61e9cbb5c643bfcbfdb551045eb199a13f6ab9638c0dfa4a74b55a98
-R 83a99da4ec77852f412cecee16c95d89
+P 3ed441c81ded498c6f726fd059ab8e0f1a054ede68f77615d40f43acdb0448d0
+R 566c4bcbbe58e85ddd831090f0179394
 U dan
-Z 870d36a09aa5a6369184ddd555c6ffa9
+Z 8657345de32521e60630e509d9b3899e
 # Remove this line to create a well-formed Fossil manifest.
