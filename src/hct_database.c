@@ -1892,6 +1892,32 @@ static int hctDbExtendWriteArray(
   return rc;
 }
 
+static int hctDbCsrLoadAndDecode(
+  HctDbCsr *pCsr, 
+  int iCell, 
+  UnpackedRecord **ppRec
+){
+  const u8 *aPg = pCsr->pg.aNew ? pCsr->pg.aNew : pCsr->pg.aOld;
+  int nData = 0;
+  const u8 *aData = 0;
+  int rc;
+
+  rc = hctDbLoadRecord(pCsr->pDb, &pCsr->rec, aPg, iCell, &nData, &aData);
+  if( rc==SQLITE_OK ){
+    rc = hctDbAllocateUnpacked(pCsr);
+  }
+  if( rc==SQLITE_OK ){
+    *ppRec = pCsr->pRec;
+    sqlite3VdbeRecordUnpack(pCsr->pKeyInfo, nData, aData, pCsr->pRec);
+  }
+
+  return rc;
+}
+
+int sqlite3HctDbCsrLoadAndDecode(HctDbCsr *pCsr, UnpackedRecord **ppRec){
+  return hctDbCsrLoadAndDecode(pCsr, pCsr->iCell, ppRec);
+}
+
 /*
 **
 */
@@ -2795,6 +2821,7 @@ void sqlite3HctDbCsrClose(HctDbCsr *pCsr){
     HctDbCsr **pp;
     for(pp=&pDb->pCsrList; *pp!=pCsr; pp=&(*pp)->pCsrNext);
     *pp = pCsr->pCsrNext;
+    if( pCsr->pRec ) sqlite3DbFree(pCsr->pKeyInfo->db, pCsr->pRec);
     hctBufferFree(&pCsr->rec);
     sqlite3_free(pCsr);
   }
@@ -2921,7 +2948,14 @@ int sqlite3HctDbCsrPrev(HctDbCsr *pCsr){
       ** parent list (which is in reverse order) instead of seeking 
       ** for each new page.  */
       if( pCsr->pKeyInfo ){
-assert( 0 );
+        UnpackedRecord *pRec = 0;
+        rc = hctDbCsrLoadAndDecode(pCsr, 0, &pRec);
+        if( rc==SQLITE_OK ){
+          int bDummy;
+          pRec->default_rc = 1;
+          hctDbCsrSeek(pCsr, 0, pRec, 0, &bDummy);
+          pRec->default_rc = 0;
+        }
       }else{
         HctDbIntkeyLeaf *pLeaf = (HctDbIntkeyLeaf*)pCsr->pg.aOld;
         i64 iKey = pLeaf->aEntry[0].iKey;

@@ -704,6 +704,7 @@ int sqlite3HctFilePageGet(HctFile *pFile, u32 iPg, HctFilePage *pPg){
   rc = hctFilePagemapGetGrow(pFile, iPg, &pPg->iPagemap);
   if( rc==SQLITE_OK ){
     u32 iPhys = (pPg->iPagemap & 0xFFFFFFFF);
+    assert( iPhys!=0 );
     rc = hctFilePagemapPtr(pFile, iPhys, &pPg->aOld);
   }
   return rc;

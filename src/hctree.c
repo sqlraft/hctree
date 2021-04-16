@@ -838,7 +838,11 @@ int sqlite3BtreeCursor(
   pCur->pKeyInfo = pKeyInfo;
   rc = sqlite3HctTreeCsrOpen(p->pHctTree, iTable, &pCur->pHctTreeCsr);
   if( rc==SQLITE_OK && p->pHctDb ){
-    rc = sqlite3HctDbCsrOpen(p->pHctDb, pKeyInfo, iTable, &pCur->pHctDbCsr);
+    int ii;
+    for(ii=0; ii<p->nNewRoot && p->aNewRoot[ii].pgnoRoot!=iTable; ii++);
+    if( ii==p->nNewRoot ){
+      rc = sqlite3HctDbCsrOpen(p->pHctDb, pKeyInfo, iTable, &pCur->pHctDbCsr);
+    }
   }
   if( rc==SQLITE_OK ){
     pCur->pCsrNext = p->pCsrList;
@@ -1053,7 +1057,8 @@ const void *sqlite3BtreePayloadFetch(BtCursor *pCur, u32 *pAmt){
   return aData;
 }
 
-static void btreeSetUseTree(BtCursor *pCur){
+static int btreeSetUseTree(BtCursor *pCur){
+  int rc = SQLITE_OK;
   int bTreeEof = sqlite3HctTreeCsrEof(pCur->pHctTreeCsr);
   int bDbEof = sqlite3HctDbCsrEof(pCur->pHctDbCsr);
 
@@ -1077,9 +1082,25 @@ static void btreeSetUseTree(BtCursor *pCur){
       if( pCur->eDir==BTREE_DIR_REVERSE ) pCur->bUseTree = !pCur->bUseTree;
     }
   }else{
-    /* TODO - index cursors */
-    assert( 0 );
+    UnpackedRecord *pKeyDb = 0;
+    const u8 *aKeyTree = 0;
+    int nKeyTree = 0;
+
+    rc = sqlite3HctDbCsrLoadAndDecode(pCur->pHctDbCsr, &pKeyDb);
+    if( rc==SQLITE_OK ){
+      int res;
+      sqlite3HctTreeCsrData(pCur->pHctTreeCsr, &nKeyTree, &aKeyTree);
+      res = sqlite3VdbeRecordCompare(nKeyTree, aKeyTree, pKeyDb);
+      if( res==0 ){
+        pCur->bUseTree = 2;
+      }else{
+        pCur->bUseTree = (res<0);
+        if( pCur->eDir==BTREE_DIR_REVERSE ) pCur->bUseTree = !pCur->bUseTree;
+      }
+    }
   }
+
+  return rc;
 }
 
 /* Move the cursor to the first entry in the table.  Return SQLITE_OK
@@ -1201,7 +1222,7 @@ int sqlite3BtreeMovetoUnpacked(
         rc = sqlite3HctDbCsrNext(pCur->pHctDbCsr);
       }
       if( rc==SQLITE_OK && res1<0 && !sqlite3HctTreeCsrEof(pCur->pHctTreeCsr) ){
-        rc = sqlite3HctDbCsrNext(pCur->pHctDbCsr);
+        rc = sqlite3HctTreeCsrNext(pCur->pHctTreeCsr);
       }
 
       if( res1==0 || res2==0 ){

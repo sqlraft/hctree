@@ -129,6 +129,7 @@ int sqlite3HctDbCsrPrev(HctDbCsr*);
 
 void sqlite3HctDbCsrKey(HctDbCsr*, i64 *piKey);
 int sqlite3HctDbCsrData(HctDbCsr *pCsr, int *pnData, const u8 **paData);
+int sqlite3HctDbCsrLoadAndDecode(HctDbCsr *pCsr, UnpackedRecord **ppRec);
 
 /*************************************************************************
 ** Interface to code in hct_file.c
