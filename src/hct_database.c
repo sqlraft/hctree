@@ -1344,6 +1344,16 @@ int sqlite3HctDbCsrSeek(
   return rc;
 }
 
+int sqlite3HctDbIsIndex(HctDatabase *pDb, u32 iRoot, int *pbIndex){
+  HctFilePage pg;
+  int rc = sqlite3HctFilePageGet(pDb->pFile, iRoot, &pg);
+  if( rc==SQLITE_OK ){
+    *pbIndex = (hctPagetype(pg.aOld)==HCT_PAGETYPE_INDEX);
+    sqlite3HctFilePageRelease(&pg);
+  }
+  return rc;
+}
+
 static void hctDbCsrInit(HctDatabase *pDb, u32 iRoot, HctDbCsr *pCsr){
   memset(pCsr, 0, sizeof(HctDbCsr));
   pCsr->pDb = pDb;
@@ -2924,6 +2934,7 @@ int sqlite3HctDbCsrNext(HctDbCsr *pCsr){
       u32 iPeerPg = pPg->iPeerPg;
       if( iPeerPg==0 ){
         pCsr->iCell = -1;
+        sqlite3HctFilePageRelease(&pCsr->pg);
       }else{
         /* Jump to peer page */
         rc = sqlite3HctFilePageRelease(&pCsr->pg);
@@ -2944,9 +2955,7 @@ int sqlite3HctDbCsrPrev(HctDbCsr *pCsr){
   do {
     pCsr->iCell--;
     if( pCsr->iCell<0 ){
-      /* TODO: This can be made much faster by iterating through the 
-      ** parent list (which is in reverse order) instead of seeking 
-      ** for each new page.  */
+      /* TODO: This can be made much faster by using parent list pointers. */
       if( pCsr->pKeyInfo ){
         UnpackedRecord *pRec = 0;
         rc = hctDbCsrLoadAndDecode(pCsr, 0, &pRec);

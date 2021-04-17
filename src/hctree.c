@@ -658,20 +658,24 @@ nCall++;
 int sqlite3BtreeCommitPhaseTwo(Btree *p, int bCleanup){
   int rc = SQLITE_OK;
   if( p->eTrans==SQLITE_TXN_WRITE ){
+    /* TODO: Invalidate any active cursors */
+    assert( p->pCsrList==0 );
     sqlite3HctTreeRelease(p->pHctTree, 0);
     if( p->pHctDb ){
       rc = btreeFlushToDisk(p);
       sqlite3HctTreeClear(p->pHctTree);
       p->nNewRoot = 0;
     }
+    p->eTrans = SQLITE_TXN_READ;
+    p->eMetaState = HCT_METASTATE_READ;
   }
-  if( p->pHctDb ){
-    sqlite3HctDbEndRead(p->pHctDb);
+  if( p->pCsrList==0 ){
+    if( p->pHctDb ){
+      sqlite3HctDbEndRead(p->pHctDb);
+    }
+    p->eTrans = SQLITE_TXN_NONE;
+    p->eMetaState = HCT_METASTATE_NONE;
   }
-  p->eTrans = SQLITE_TXN_NONE;
-  p->eMetaState = HCT_METASTATE_NONE;
-  /* TODO: Invalidate any active cursors */
-  assert( p->pCsrList==0 );
   return rc;
 }
 
@@ -1225,7 +1229,7 @@ int sqlite3BtreeMovetoUnpacked(
         rc = sqlite3HctTreeCsrNext(pCur->pHctTreeCsr);
       }
 
-      if( res1==0 || res2==0 ){
+      if( res1==0 || (res2==0 && pCur->pHctDbCsr) ){
         *pRes = 0;
       }else if( sqlite3HctTreeCsrEof(pCur->pHctTreeCsr)
              && sqlite3HctDbCsrEof(pCur->pHctDbCsr)
@@ -1326,23 +1330,27 @@ i64 sqlite3BtreeRowCountEst(BtCursor *pCur){
 int sqlite3BtreeNext(BtCursor *pCur, int flags){
   int rc = SQLITE_OK;
   assert( pCur->eDir==BTREE_DIR_FORWARD );
-  do{
-    if( pCur->bUseTree ){
-      rc = sqlite3HctTreeCsrNext(pCur->pHctTreeCsr);
-    }
-    if( rc==SQLITE_OK && (pCur->bUseTree==0 || pCur->bUseTree==2) ){
-      rc = sqlite3HctDbCsrNext(pCur->pHctDbCsr);
-    }
-    if( rc==SQLITE_OK ){
-      if( sqlite3BtreeEof(pCur) ){
-        rc = SQLITE_DONE;
-      }else{
-        btreeSetUseTree(pCur);
+  if( sqlite3BtreeEof(pCur) ){
+    rc = SQLITE_DONE;
+  }else{
+    do{
+      if( pCur->bUseTree ){
+        rc = sqlite3HctTreeCsrNext(pCur->pHctTreeCsr);
       }
-    }
-  }while( rc==SQLITE_OK 
-      && pCur->bUseTree && sqlite3HctTreeCsrIsDelete(pCur->pHctTreeCsr) 
-  );
+      if( rc==SQLITE_OK && (pCur->bUseTree==0 || pCur->bUseTree==2) ){
+        rc = sqlite3HctDbCsrNext(pCur->pHctDbCsr);
+      }
+      if( rc==SQLITE_OK ){
+        if( sqlite3BtreeEof(pCur) ){
+          rc = SQLITE_DONE;
+        }else{
+          btreeSetUseTree(pCur);
+        }
+      }
+    }while( rc==SQLITE_OK 
+        && pCur->bUseTree && sqlite3HctTreeCsrIsDelete(pCur->pHctTreeCsr) 
+    );
+  }
   return rc;
 }
 
@@ -1502,6 +1510,25 @@ int sqlite3BtreeDelete(BtCursor *pCur, u8 flags){
   return rc;
 }
 
+static int hctreeAddNewRoot(Btree *p, u32 iRoot, int bIndex){
+  BtNewRoot *aNewRoot;
+
+  /* Grow the Btree.aNewRoot array */
+  assert( p->pHctDb );
+  aNewRoot = (BtNewRoot*)sqlite3_realloc(
+      p->aNewRoot, sizeof(BtNewRoot)*(p->nNewRoot+1)
+  );
+  if( aNewRoot==0 ) return SQLITE_NOMEM_BKPT;
+
+  p->aNewRoot = aNewRoot;
+  p->aNewRoot[p->nNewRoot].pgnoRoot = iRoot;
+  p->aNewRoot[p->nNewRoot].iSavepoint = p->db->nSavepoint;
+  p->aNewRoot[p->nNewRoot].bIndex = bIndex;
+  p->nNewRoot++;
+
+  return SQLITE_OK;
+}
+
 /*
 ** Create a new BTree table.  Write into *piTable the page
 ** number for the root page of the new table.
@@ -1517,23 +1544,12 @@ int sqlite3BtreeCreateTable(Btree *p, Pgno *piTable, int flags){
   Pgno iNew = 0;
   int rc = SQLITE_OK;
   if( p->pHctDb ){
-    BtNewRoot *aNewRoot;
-
-    /* Grow the Btree.aNewRoot array */
-    aNewRoot = (BtNewRoot*)sqlite3_realloc(
-        p->aNewRoot, sizeof(BtNewRoot)*(p->nNewRoot+1)
-    );
-    if( aNewRoot==0 ) return SQLITE_NOMEM_BKPT;
-    p->aNewRoot = aNewRoot;
-
-    /* Allocate a new root page and add it to the array. */
     rc = sqlite3HctDbRootNew(p->pHctDb, &iNew);
     if( rc==SQLITE_OK ){
-      int bIndex = (flags & BTREE_INTKEY)==0;
-      p->aNewRoot[p->nNewRoot].pgnoRoot = iNew;
-      p->aNewRoot[p->nNewRoot].iSavepoint = p->db->nSavepoint;
-      p->aNewRoot[p->nNewRoot].bIndex = bIndex;
-      p->nNewRoot++;
+      rc = hctreeAddNewRoot(p, 0, (flags & BTREE_INTKEY)==0);
+    }
+    if( rc==SQLITE_OK ){
+      p->aNewRoot[p->nNewRoot-1].pgnoRoot = iNew;
     }
   }else{
     iNew = p->iNextRoot++;
@@ -1556,7 +1572,24 @@ int sqlite3BtreeCreateTable(Btree *p, Pgno *piTable, int flags){
 ** entries in the table.
 */
 int sqlite3BtreeClearTable(Btree *p, int iTable, int *pnChange){
-  return sqlite3HctTreeClearOne(p->pHctTree, iTable, pnChange);
+  int rc = sqlite3HctTreeClearOne(p->pHctTree, iTable, pnChange);
+  if( rc==SQLITE_OK && p->pHctDb ){
+    int ii;
+    int bIndex = -1;
+    for(ii=0; ii<p->nNewRoot; ii++){
+      if( p->aNewRoot[ii].pgnoRoot==iTable ){
+        bIndex = p->aNewRoot[ii].bIndex;
+        break;
+      }
+    }
+    if( bIndex<0 ){
+      rc = sqlite3HctDbIsIndex(p->pHctDb, iTable, &bIndex);
+    }
+    if( rc==SQLITE_OK ){
+      rc = hctreeAddNewRoot(p, iTable, bIndex);
+    }
+  }
+  return rc;
 }
 
 /*
