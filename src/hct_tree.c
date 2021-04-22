@@ -701,6 +701,7 @@ static int treeDelete(HctTreeCsr *pCsr, int bRollback){
   rc = hctSaveCursors(pCsr->pRoot, pCsr);
   if( rc ) return rc;
 
+  assert( pCsr->pReseek==0 );
   assert( pCsr->iNode>=0 );
 #if 0
   fprintf(stdout, "deleting %lld\n", iKey);

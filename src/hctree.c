@@ -107,7 +107,7 @@ sqlite3_uint64 sqlite3BtreeSeekCount(Btree *pBt){
 ** Clear the current cursor position.
 */
 void sqlite3BtreeClearCursor(BtCursor *pCur){
-  assert( 0 );
+  /* assert( 0 ); */
 }
 
 /*
@@ -1210,8 +1210,8 @@ int sqlite3BtreeMovetoUnpacked(
   }
 
   if( pCur->eDir==BTREE_DIR_NONE ){
-    if( res1==0 ){
-      *pRes = 0;
+    if( res1==0 || pCur->pHctDbCsr==0 ){
+      *pRes = res1;
       pCur->bUseTree = 1;
       if( sqlite3HctTreeCsrIsDelete(pCur->pHctTreeCsr) ){
         *pRes = -1;
