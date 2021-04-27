@@ -1,5 +1,5 @@
-C Better\serror\smessages\son\sshowdb.
-D 2021-04-27T00:05:03.863
+C Create\snew\sbranch\snamed\s"testing_help"
+D 2021-04-27T17:36:00.065
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -1914,8 +1914,11 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P 3eabac2ee50fd70b22a927d3d2934718a15e1f666d8d271b854579156c8b01de
+P 7e18e114b245d17aa259ea9ab42752ccc9ad5303bbac8d8e46928dd10319f545
 R 6fea783c7cee361a6851786be6d6a280
-U drh
-Z 6b8049099c18bf9fc8a3db324724e010
+T *branch * testing_help
+T *sym-testing_help *
+T -sym-trunk *
+U larrybr
+Z 3c7da2c608abe94678630e632a861b66
 # Remove this line to create a well-formed Fossil manifest.
