@@ -1119,15 +1119,13 @@ int sqlite3BtreeFirst(BtCursor *pCur, int *pRes){
     rc = sqlite3HctDbCsrFirst(pCur->pHctDbCsr);
   }
   if( rc==SQLITE_OK ){
-    int bTreeEof = sqlite3HctTreeCsrEof(pCur->pHctTreeCsr);
-    int bDbEof = sqlite3HctDbCsrEof(pCur->pHctDbCsr);
-    *pRes = (bTreeEof && bDbEof);
     pCur->eDir = BTREE_DIR_FORWARD;
     btreeSetUseTree(pCur);
     if( pCur->bUseTree && sqlite3HctTreeCsrIsDelete(pCur->pHctTreeCsr) ){
       rc = sqlite3BtreeNext(pCur, 0);
       if( rc==SQLITE_DONE ) rc = SQLITE_OK;
     }
+    *pRes = sqlite3BtreeEof(pCur);
   }
 
   return rc;
@@ -1329,7 +1327,12 @@ i64 sqlite3BtreeRowCountEst(BtCursor *pCur){
 */
 int sqlite3BtreeNext(BtCursor *pCur, int flags){
   int rc = SQLITE_OK;
+  int bDummy;
   assert( pCur->eDir==BTREE_DIR_FORWARD );
+
+  rc = sqlite3BtreeCursorRestore(pCur, &bDummy);
+  if( rc!=SQLITE_OK ) return rc;
+
   if( sqlite3BtreeEof(pCur) ){
     rc = SQLITE_DONE;
   }else{
@@ -1376,7 +1379,12 @@ int sqlite3BtreeNext(BtCursor *pCur, int flags){
 */
 int sqlite3BtreePrevious(BtCursor *pCur, int flags){
   int rc = SQLITE_OK;
+  int bDummy;
   assert( pCur->eDir==BTREE_DIR_REVERSE );
+
+  rc = sqlite3BtreeCursorRestore(pCur, &bDummy);
+  if( rc!=SQLITE_OK ) return rc;
+
   do{
     if( pCur->bUseTree ){
       rc = sqlite3HctTreeCsrPrev(pCur->pHctTreeCsr);

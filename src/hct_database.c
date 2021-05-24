@@ -252,14 +252,6 @@ struct HctDbIndexNode {
 #define HCTDB_HAS_OVFL  0x04
 #define HCTDB_IS_DELETE 0x08
 
-/*
-** Flags used in the spare 8-bits of the transaction-id fields on each
-** non-overflow page of the db.
-*/
-#define HCT_IS_DELETED   (((u64)0x01)<<56)
-#define HCT_HAS_OVERFLOW (((u64)0x02)<<56)
-
-#define HCT_TID_MASK     ((((u64)0x00FFFFFF)<<32)|0xFFFFFFFF)
 
 static void hctDbFreeGlobal(HctFileGlobal *pFileGlobal){
   HctDbGlobal *p = (HctDbGlobal*)pFileGlobal;
