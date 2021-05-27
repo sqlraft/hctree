@@ -1447,6 +1447,7 @@ int sqlite3BtreeInsert(
   const u8 *aData;
   int nData;
   int nZero;
+  i64 iKey = 0;
 
   if( pX->pKey ){
     aData = pX->pKey;
@@ -1463,14 +1464,14 @@ int sqlite3BtreeInsert(
       if( pRec==0 ) return SQLITE_NOMEM_BKPT;
       sqlite3VdbeRecordUnpack(pCur->pKeyInfo, nData, aData, pRec);
     }
+    iKey = 0;
   }else{
     aData = pX->pData;
     nData = pX->nData;
     nZero = pX->nZero;
+    iKey = pX->nKey;
   }
-  rc = sqlite3HctTreeInsert(
-      pCur->pHctTreeCsr, pRec, pX->nKey, nData, aData, nZero
-  );
+  rc = sqlite3HctTreeInsert(pCur->pHctTreeCsr, pRec, iKey, nData, aData, nZero);
 
   if( pRec && pRec!=&r ){
     sqlite3DbFree(pCur->pKeyInfo->db, pRec);

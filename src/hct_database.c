@@ -2127,7 +2127,7 @@ if( 1 || hctPagetype(p->aWritePg[0].aNew)==HCT_PAGETYPE_INTKEY ){
       aPgFirst[nOut] = iSz;
       nOut++;
       nRem = pDb->pgsz - sizeof(HctDbIntkeyLeaf);
-      assert( nOut<ArraySize(aPgRem) );
+      assert( nOut<=ArraySize(aPgRem) );
     }
     nRem -= aSz[iSz].nByte;
   }

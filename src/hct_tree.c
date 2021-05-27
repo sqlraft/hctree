@@ -521,6 +521,7 @@ static int treeInsertNode(
       *(hctTreeFindPointer(&csr, csr.iNode)) = pNew;
       if( bRollback==0 && pTree->iStmt>=0 ){
         pNew->pClobber = pNode;
+        assert( pNew->iKey==pNode->iKey );
       }else{
         treeNodeUnref(pNode);
       }
@@ -592,6 +593,7 @@ int sqlite3HctTreeInsert(
   const u8 *aData,
   int nZero
 ){
+  assert( pKey==0 || iKey==0 );
   return treeInsert(pCsr, pKey, iKey, 0, nData, aData, nZero);
 }
 
