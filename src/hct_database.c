@@ -2347,8 +2347,6 @@ static int hctDbInsertIntkeyNode(
   HctDbIntkeyNode *pNode;
   int rc = SQLITE_OK;
 
-assert( bClobber==bDel );
-
   pNode = (HctDbIntkeyNode*)p->aWritePg[iPg].aNew;
   if( (pNode->pg.nEntry>=nMax && bClobber==0) ){
     /* Need to do a balance operation to make room for the new entry */
@@ -2368,14 +2366,16 @@ assert( bClobber==bDel );
       rc = hctDbBalanceIntkeyNode(pDb, p, iPg, -1, 0, 0);
     }
   }else{
-    if( iInsert<pNode->pg.nEntry && bClobber==0 ){
-      int nByte = sizeof(HctDbIntkeyNodeEntry) * (pNode->pg.nEntry-iInsert);
-      memmove(&pNode->aEntry[iInsert+1], &pNode->aEntry[iInsert], nByte);
+    if( bClobber==0 ){
+      if( iInsert<pNode->pg.nEntry ){
+        int nByte = sizeof(HctDbIntkeyNodeEntry) * (pNode->pg.nEntry-iInsert);
+        memmove(&pNode->aEntry[iInsert+1], &pNode->aEntry[iInsert], nByte);
+      }
+      pNode->pg.nEntry++;
     }
     pNode->aEntry[iInsert].iKey = iKey;
     pNode->aEntry[iInsert].iChildPg = iChildPg;
     pNode->aEntry[iInsert].unused = 0;
-    pNode->pg.nEntry++;
   }
 
   return rc;
