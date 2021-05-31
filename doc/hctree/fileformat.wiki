@@ -9,6 +9,7 @@
       <li>[#index_leaf  | 4.3. Index Leaf Page Format]
       <li>[#index_node  | 4.4. Index Internal Node Format]
       <li>[#overflow    | 4.5. Overflow Chain Format]
+      <li>[#edks        | 4.6. EDKS Page Formats]
     </ul>
 
 <h1 id=overall>1. Overall Structure </h1>
@@ -67,9 +68,11 @@ All pages begin with an 8 byte page header:
 <table border=1 cellpadding=5 width=90%>
   <tr><th>Byte Offset <th>Size <th width=80%> Description
   <tr><td>0 <td>1 <td> Least-signicant nibble stores the page type:
-  *  0x01 - Intkey pages.
-  *  0x02 - Index pages.
-  *  0x03 - Overflow page. 
+  *  0x01 - Intkey page.
+  *  0x02 - Intkey EDKS page.
+  *  0x03 - Index pages.
+  *  0x04 - Index EDKS page.
+  *  0x05 - Overflow page. 
 
 Other nibble contains flags:
   *  0x80 - HCT_PAGETYPE_LEFTMOST (set for leftmost page in each list)
@@ -279,6 +282,40 @@ Overflow pages are identified by physical page only - both the page number
 embedded in the start of the record within the tree structure page and the
 "next page" page number on overflow pages themselves are physical, not 
 logical, page numbers
+
+<h2 id=edks> 4.6. EDKS Page Formats </h2>
+
+Each EDKS tree is similar to the main tree that it is attached to. Index
+leaves and nodes, and intkey leaves use the same page formats as their main
+tree counterparts, except that:
+
+  *  The page-type field in the page header is set to 0x02/0x04 instead of
+     0x01/0x03.
+  *  The peer-page field in the page header is always zero.
+  *  All child page numbers are physical, not logical, page numbers.
+
+<b>Intkey EDKS Leaf Page Format:</b>
+
+<verbatim type="pikchr center">
+boxht=0.2 ; boxwid=0.6 ; linewid=0.2
+
+# total width is 7.5
+PGHDR: box "page hdr"        wid 0.8
+ARRAY:box "entry array"      wid 4.2
+box "free space"             wid 2.5
+
+text "8 bytes" at PGHDR - (0, 0.2)
+text "nEntry x 24 bytes" at ARRAY - (0, 0.2)
+</verbatim>
+
+Intkey EDKS leaf pages contain <i>nEntry</i> entries of 24 bytes each. Each
+entry consists of:
+
+  *  8 byte rowid value,
+  *  8 byte TID value,
+  *  4 byte physical old page number.
+
+Entries are rounded up to 24 bytes each to preserve 8 byte alignment.
 
 
 

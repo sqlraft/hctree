@@ -152,9 +152,11 @@ struct HctDbPageHdr {
 ** Page types. These are the values that may appear in the page-type
 ** field of a page header.
 */
-#define HCT_PAGETYPE_INTKEY   0x01
-#define HCT_PAGETYPE_INDEX    0x02
-#define HCT_PAGETYPE_OVERFLOW 0x03
+#define HCT_PAGETYPE_INTKEY      0x01
+#define HCT_PAGETYPE_INTKEY_EDKS 0x02
+#define HCT_PAGETYPE_INDEX       0x03
+#define HCT_PAGETYPE_INDEX_EDKS  0x04
+#define HCT_PAGETYPE_OVERFLOW    0x05
 
 #define HCT_PAGETYPE_MASK     0x07
 
@@ -1230,7 +1232,6 @@ static int hctDbCsrFindVersion(int *pRc, HctDbCsr *pCsr){
         sqlite3HctFilePageRelease(&pCsr->oldpg);
         return 0;
       }else{
-        int iCell;
         int rc;
         HctFile *pFile = pCsr->pDb->pFile;
         u32 iOld = hctGetU32(&aPage[iOff+8]);
@@ -1238,17 +1239,11 @@ static int hctDbCsrFindVersion(int *pRc, HctDbCsr *pCsr){
         sqlite3HctFilePageRelease(&pCsr->oldpg);
         rc = sqlite3HctFilePageGetPhysical(pFile, iOld, &pCsr->oldpg);
         if( rc==SQLITE_OK ){
-          iCell = hctDbFindKeyInOldPage(pCsr);
+          rc = hctDbFindKeyInOldPage(pCsr);
         }
 
         if( rc==SQLITE_OK ){
-          if( iCell<0 ){
-            rc = SQLITE_CORRUPT_BKPT;
-          }else{
-            aPage = pCsr->oldpg.aOld;
-            iOff = hctDbCellOffset(pCsr->oldpg.aOld, iCell, &flags);
-            pCsr->iOldCell = iCell;
-          }
+          iOff = hctDbCellOffset(pCsr->oldpg.aOld, pCsr->iOldCell, &flags);
         }
         if( rc!=SQLITE_OK ){
           *pRc = rc;
@@ -2001,6 +1996,9 @@ static int hctDbLoadPeers(HctDatabase *pDb, HctDbWriter *p, int *piPg){
   return rc;
 }
 
+/*
+** Rebalance routine for intkey leaves, index leaves and index nodes.
+*/
 static int hctDbBalance(
   HctDatabase *pDb,
   HctDbWriter *p,
@@ -2047,12 +2045,10 @@ static int hctDbBalance(
     iOld = p->iOldPgno;
   }
 
-if( 1 || hctPagetype(p->aWritePg[0].aNew)==HCT_PAGETYPE_INTKEY ){
   rc = hctDbLoadPeers(pDb, p, &iPg);
   if( rc!=SQLITE_OK ){
     return rc;
   }
-}
 
   iLeftPg = iPg;
   if( iPg==0 ){
@@ -3011,8 +3007,9 @@ struct hctdb_cursor {
   u32 iPeerPg;
   u32 nEntry;
   u32 nHeight;
-  char *zKeys;
-  char *zData;
+  u64 iEdksTid;
+  u32 iEdksPg;
+  char *zFpKey;
 };
 
 /*
@@ -3041,8 +3038,8 @@ static int hctdbConnect(
   rc = sqlite3_declare_vtab(db,
       "CREATE TABLE x("
         "pgno INTEGER, pgtype TEXT, nheight INTEGER, "
-        "peer INTEGER, nentry INTEGER, fpkey TEXT,"
-        "data TEXT"
+        "peer INTEGER, nentry INTEGER, edks_pg INTEGER, "
+        "edks_tid INTEGER, fpkey TEXT"
       ")"
   );
 
@@ -3080,8 +3077,7 @@ static int hctdbOpen(sqlite3_vtab *p, sqlite3_vtab_cursor **ppCursor){
 */
 static int hctdbClose(sqlite3_vtab_cursor *cur){
   hctdb_cursor *pCur = (hctdb_cursor*)cur;
-  sqlite3_free(pCur->zKeys);
-  sqlite3_free(pCur->zData);
+  sqlite3_free(pCur->zFpKey);
   sqlite3_free(pCur);
   return SQLITE_OK;
 }
@@ -3154,34 +3150,43 @@ static int hctdbLoadPage(
   static const char *azType[] = {
     0,                          /* 0x00 */
     "intkey",                   /* 0x01 */
-    "index",                    /* 0x02 */
-    "overflow",                 /* 0x03 */
+    "intkey_edks",              /* 0x02 */
+    "index",                    /* 0x03 */
+    "index_edks",               /* 0x04 */
+    "overflow",                 /* 0x05 */
   };
   int rc = SQLITE_OK;
   HctDbPageHdr *pHdr = (HctDbPageHdr*)aPg;
   sqlite3 *db = ((hctdb_vtab*)pCur->base.pVtab)->db;
 
-  sqlite3_free(pCur->zKeys);
-  pCur->zKeys = 0;
-  sqlite3_free(pCur->zData);
-  pCur->zData = 0;
+  sqlite3_free(pCur->zFpKey);
+  pCur->zFpKey = 0;
 
   pCur->zPgtype = azType[hctPagetype(pHdr)];
   pCur->iPeerPg = pHdr->iPeerPg;
   pCur->nEntry = pHdr->nEntry;
   pCur->nHeight = pHdr->nHeight;
 
+  if( pHdr->nHeight==0 ){
+    HctDbIntkeyLeaf *pLeaf = (HctDbIntkeyLeaf*)aPg;
+    pCur->iEdksPg = pLeaf->hdr.iEdksPg;
+    pCur->iEdksTid = pLeaf->hdr.iEdksTid;
+  }else{
+    pCur->iEdksPg = 0;
+    pCur->iEdksTid = 0;
+  }
+
   if( hctPagetype(pHdr)==HCT_PAGETYPE_INTKEY ){
     if( pHdr->nHeight==0 ){
       HctDbIntkeyLeaf *pLeaf = (HctDbIntkeyLeaf*)aPg;
-      char *zKeys = sqlite3_mprintf("%lld", pLeaf->aEntry[0].iKey);
-      if( zKeys==0 ) rc = SQLITE_NOMEM_BKPT;
-      pCur->zKeys = zKeys;
+      char *zFpKey = sqlite3_mprintf("%lld", pLeaf->aEntry[0].iKey);
+      if( zFpKey==0 ) rc = SQLITE_NOMEM_BKPT;
+      pCur->zFpKey = zFpKey;
     }else{
       HctDbIntkeyNode *pNode = (HctDbIntkeyNode*)aPg;
-      char *zKeys = sqlite3_mprintf("%lld", pNode->aEntry[0].iKey);
-      if( zKeys==0 ) rc = SQLITE_NOMEM_BKPT;
-      pCur->zKeys = zKeys;
+      char *zFpKey = sqlite3_mprintf("%lld", pNode->aEntry[0].iKey);
+      if( zFpKey==0 ) rc = SQLITE_NOMEM_BKPT;
+      pCur->zFpKey = zFpKey;
     }
   }else if( hctPagetype(pHdr)==HCT_PAGETYPE_INDEX ){
     HctBuffer buf = {0,0,0};
@@ -3190,9 +3195,9 @@ static int hctdbLoadPage(
 
     rc = hctDbLoadRecord(pCur->pDb, &buf, aPg, 0, &nRec, &aRec);
     if( rc==SQLITE_OK ){
-      char *zKeys = hctDbRecordToText(db, aRec, nRec);
-      if( zKeys==0 ) rc = SQLITE_NOMEM_BKPT;
-      pCur->zKeys = zKeys;
+      char *zFpKey = hctDbRecordToText(db, aRec, nRec);
+      if( zFpKey==0 ) rc = SQLITE_NOMEM_BKPT;
+      pCur->zFpKey = zFpKey;
     }
 
     hctBufferFree(&buf);
@@ -3248,7 +3253,7 @@ static int hctdbColumn(
     case 1: /* pgtype */
       sqlite3_result_text(ctx, pCur->zPgtype, -1, SQLITE_TRANSIENT);
       break;
-    case 2: /* peer */
+    case 2: /* nHeight */
       sqlite3_result_int64(ctx, (i64)pCur->nHeight);
       break;
     case 3: /* peer */
@@ -3257,11 +3262,14 @@ static int hctdbColumn(
     case 4: /* nEntry */
       sqlite3_result_int64(ctx, (i64)pCur->nEntry);
       break;
-    case 5: /* keys */
-      sqlite3_result_text(ctx, pCur->zKeys, -1, SQLITE_TRANSIENT);
+    case 5: /* edks_pg */
+      sqlite3_result_int64(ctx, (i64)pCur->iEdksPg);
       break;
-    case 6: /* data */
-      sqlite3_result_text(ctx, pCur->zData, -1, SQLITE_TRANSIENT);
+    case 6: /* edks_tid */
+      sqlite3_result_int64(ctx, (i64)pCur->iEdksTid);
+      break;
+    case 7: /* fpkey */
+      sqlite3_result_text(ctx, pCur->zFpKey, -1, SQLITE_TRANSIENT);
       break;
   }
   return SQLITE_OK;
@@ -3379,7 +3387,7 @@ static int hctentryConnect(
       "CREATE TABLE x("
         "pgno INTEGER, entry INTEGER, "
         "ikey INTEGER, size INTEGER, offset INTEGER, "
-        "child INTEGER, "
+        "child INTEGER, isdel BOOLEAN, "
         "tid INTEGER, oldpg INTEGER, ovfl INTEGER, record TEXT"
       ")"
   );
@@ -3518,26 +3526,30 @@ static int hctentryColumn(
       if( pIndexNode ) sqlite3_result_int64(ctx, pIndexNode->iChildPg);
       if( pIntkeyNode ) sqlite3_result_int64(ctx, pIntkeyNode->iChildPg);
       break;
-    case 6: /* tid */
-    case 7: /* oldpg */
-    case 8: /* ovfl */
+    case 6: /* isdel */
+    case 7: /* tid */
+    case 8: /* oldpg */
+    case 9: /* ovfl */
       if( pIntkeyNode==0 ){
         u8 *aPg = pCur->pg.aOld;
         int iOff;
         int flags;
         iOff = hctDbEntryInfo(aPg, pCur->iEntry, 0, &flags);
-        if( i==6 && (flags & HCTDB_HAS_TID) ){
+        if( i==6 ){
+          sqlite3_result_int(ctx, (flags & HCTDB_IS_DELETE) ? 1 : 0);
+        }
+        if( i==7 && (flags & HCTDB_HAS_TID) ){
           i64 iTid;
           memcpy(&iTid, &aPg[iOff], sizeof(i64));
           sqlite3_result_int64(ctx, iTid);
         }
-        if( i==7 && (flags & HCTDB_HAS_OLD) ){
+        if( i==8 && (flags & HCTDB_HAS_OLD) ){
           u32 iOld;
           iOff += (flags & HCTDB_HAS_TID) ? 8 : 0;
           memcpy(&iOld, &aPg[iOff], sizeof(u32));
           sqlite3_result_int64(ctx, (i64)iOld);
         }
-        if( i==8 && (flags & HCTDB_HAS_OVFL) ){
+        if( i==9 && (flags & HCTDB_HAS_OVFL) ){
           u32 iOvfl;
           iOff += (flags & HCTDB_HAS_TID) ? 8 : 0;
           iOff += (flags & HCTDB_HAS_OLD) ? 4 : 0;
@@ -3546,7 +3558,7 @@ static int hctentryColumn(
         }
       }
       break;
-    case 9: /* record */
+    case 10: /* record */
       if( pIntkeyNode==0 ){
         sqlite3 *db = sqlite3_context_db_handle(ctx);
         u8 *aPg = pCur->pg.aOld;
