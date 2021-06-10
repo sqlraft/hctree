@@ -1,5 +1,5 @@
-C Improved\srobustness\sfollowing\sOOM\sin\sthe\sconstant\spropagation\soptimization.\ndbsqlfuzz\s001a20255c0df7495c21df62a20ea5b51e22c390.
-D 2021-06-10T14:36:23.869
+C Fix\sproblems\swith\sALTER\sTABLE\sand\sschemas\sthat\scontain\sviews\swith\scomplex\sCTEs.
+D 2021-06-10T19:08:21.012
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -478,7 +478,7 @@ F spec.template 86a4a43b99ebb3e75e6b9a735d5fd293a24e90ca
 F sqlite.pc.in 42b7bf0d02e08b9e77734a47798d1a55a9e0716b
 F sqlite3.1 fc7ad8990fc8409983309bb80de8c811a7506786
 F sqlite3.pc.in 48fed132e7cb71ab676105d2a4dc77127d8c1f3a
-F src/alter.c 2cb4a3d15cfee6a8a631bbf35943421312addaee36ed171aafe1a88de8ada060
+F src/alter.c 5dae4f6b217af7ef8293e4dde6fa5d9b544871227aea06dd0218d5d5fab2833a
 F src/analyze.c 01c6c6765cb4d40b473b71d85535093730770bb186f2f473abac25f07fcdee5c
 F src/attach.c a514e81758ba7b3a3a0501faf70af6cfc509de8810235db726cfc9f25165e929
 F src/auth.c 08954fdc4cc2da5264ba5b75cfd90b67a6fc7d1710a02ccf917c38eadec77853
@@ -544,7 +544,7 @@ F src/printf.c 78fabb49b9ac9a12dd1c89d744abdc9b67fd3205e62967e158f78b965a29ec4b
 F src/random.c 80f5d666f23feb3e6665a6ce04c7197212a88384
 F src/resolve.c 35630effd4d16d2373caa41bae40a3d71f853f3ad0cb4f572f2ed4b8c350c1e9
 F src/rowset.c ba9515a922af32abe1f7d39406b9d35730ed65efab9443dc5702693b60854c92
-F src/select.c 96d8a8c19d8dd4a605f55166e3eefe4f8a3cd4d3e9255096b4bc740c75159593
+F src/select.c f242ba8a86ce84730c92ead09ea11c2d6facf4e7f7a952e10b99299f4177442c
 F src/shell.c.in a4bc0e2ba9be798e293790f354dcc0099c6370127eec18cf49cb161b9dae2fbc
 F src/sqlite.h.in f450394634eac00bc680c0e91582b818359c6ad61149f49f90fb6ecbd526b51f
 F src/sqlite3.rc 5121c9e10c3964d5755191c80dd1180c122fc3a8
@@ -658,7 +658,7 @@ F test/altermalloc.test 167a47de41b5c638f5f5c6efb59784002b196fff70f98d9b4ed3cd74
 F test/altermalloc2.test fa7b1c1139ea39b8dec407cf1feb032ca8e0076bd429574969b619175ad0174b
 F test/altermalloc3.test 059841a3de6b6780efd9f0b30bf1d9b4443c555f68d39975cbcac2583167b239
 F test/alterqf.test 67568ad152db8c1187b15633b801242cf960f1beafc51261a3d1725d910baeb2
-F test/altertab.test a96e2169bbb2c5a754b0ddac8a396e15b4ad6f34a5fbf6fbfad76bdfb339479f
+F test/altertab.test 8483f9b13f987a87e1663c725929b9ac4e237df0e52c077b06bb3b907da4e651
 F test/altertab2.test b0d62f323ca5dab42b0bc028c52e310ebdd13e655e8fac070fe622bad7852c2b
 F test/altertab3.test 2b82fa2236a3a91553d53ae5555d8e723c7eec174c41f1fa62ff497355398479
 F test/amatch1.test b5ae7065f042b7f4c1c922933f4700add50cdb9f
@@ -1918,8 +1918,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P 56ff58c0b8905aa10c85f1418da8d6089d23fd9a220c5cb17027d46affe05002
-R 18566ccb2436921d616b19510604cebd
-U drh
-Z c0637a6bda27d46672c1c58f8de8002f
+P 8658a64d414db6900b55281f5e67180ea74b82627199b927634a727ed28030c2
+R 1265312c9e624e6019bdbe44dc2c7a64
+U dan
+Z cb49b716b12434038f4a26690098d1f5
 # Remove this line to create a well-formed Fossil manifest.
