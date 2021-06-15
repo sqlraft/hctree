@@ -182,6 +182,7 @@ test_suite "hct" -prefix "" -description {
   hct_cas.test hct_misc1.test hct_misc2.test hct_misc3.test
   hct_misc4.test hct_misc5.test hct_misc6.test hct_misc7.test
   hct_mvcc1.test hct_mvcc2.test hct_vtab1.test 
+  hct_delete.test
 
   update.test
   select2.test select3.test select4.test select5.test

@@ -47,5 +47,52 @@ do_execsql_test -db db2 1.5 {
 #execsql_pp { SELECT * FROM hctdb; }
 #execsql_pp { SELECT * FROM hctentry; }
 
+#-------------------------------------------------------------------------
+proc irange {i1 i2} {
+  set R [list]
+  for {set i $i1} {$i<=$i2} {incr i} {
+    lappend R $i
+  }
+  set R
+}
+
+reset_db
+sqlite3 db2 test.db
+do_execsql_test 2.0 {
+  BEGIN;
+    CREATE TABLE x1(y INTEGER PRIMARY KEY, z TEXT);
+    WITH s(i) AS (
+      VALUES(1) UNION ALL SELECT i+1 FROM s WHERE i<80
+    ) 
+    INSERT INTO x1(z) SELECT quote(randomblob(10)) FROM s;
+  COMMIT;
+}
+
+do_execsql_test -db db2 2.1 {
+  BEGIN;
+    SELECT y FROM x1
+} [irange 1 80]
+
+do_execsql_test 2.2 {
+  DELETE FROM x1 WHERE y<10
+}
+
+breakpoint
+do_execsql_test -db db2 2.3 {
+  SELECT y FROM x1;
+  COMMIT;
+} [irange 1 80]
+#finish_test
+
+#do_execsql_test -db db2 2.4 {
+#  SELECT y FROM x1
+#} [irange 60 80]
+
+#execsql_pp { SELECT * FROM sqlite_schema; }
+#execsql_pp { SELECT * FROM hctdb; }
+#execsql_pp { SELECT * FROM hctpgmap; }
+#execsql_pp { SELECT * FROM hctentry; }
+
+
 finish_test
 
