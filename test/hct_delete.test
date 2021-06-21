@@ -77,12 +77,61 @@ do_execsql_test 2.2 {
   DELETE FROM x1 WHERE y<10
 }
 
-breakpoint
 do_execsql_test -db db2 2.3 {
+  SELECT y FROM x1;
+} [irange 1 80]
+
+do_execsql_test 2.4 {
+  DELETE FROM x1 WHERE y<60
+}
+
+do_execsql_test -db db2 2.5 {
   SELECT y FROM x1;
   COMMIT;
 } [irange 1 80]
-#finish_test
+
+#-------------------------------------------------------------------------
+
+reset_db
+sqlite3 db test.db
+do_execsql_test 3.0 {
+  BEGIN;
+    CREATE TABLE x1(y INTEGER PRIMARY KEY, z TEXT);
+    WITH s(i) AS (
+      VALUES(1) UNION ALL SELECT i+1 FROM s WHERE i<100
+    ) 
+    INSERT INTO x1(z) SELECT quote(randomblob(100)) FROM s;
+  COMMIT;
+}
+
+set lHandle [list]
+foreach {tn i1 i2} {
+  1     1  40
+  2     40 80
+  3     80 120
+  4     80 120
+  5     120 160
+  6     160 200
+} {
+  set hdl "db$tn"
+  sqlite3 $hdl test.db
+  $hdl eval BEGIN
+  set res [$hdl eval { SELECT count(*), sum(y), md5sum(z) FROM x1 }]
+  lappend lHandle $hdl $res
+
+  do_execsql_test 3.$tn.1 {
+    DELETE FROM x1 WHERE y BETWEEN $i1 AND $i2
+  }
+
+  foreach {hdl res} $lHandle {
+    do_test 3.$tn.2.$hdl.([lindex $res 0]) { 
+      $hdl eval { SELECT count(*), sum(y), md5sum(z) FROM x1 }
+    } $res
+  }
+
+}
+
+
 
 #do_execsql_test -db db2 2.4 {
 #  SELECT y FROM x1
@@ -91,8 +140,16 @@ do_execsql_test -db db2 2.3 {
 #execsql_pp { SELECT * FROM sqlite_schema; }
 #execsql_pp { SELECT * FROM hctdb; }
 #execsql_pp { SELECT * FROM hctpgmap; }
-#execsql_pp { SELECT * FROM hctentry; }
 
+#execsql_pp { SELECT * FROM hctdb NATURAL JOIN hctpgmap }
+
+#execsql_pp { SELECT * FROM hctdb WHERE pgtype LIKE '%edks%' }
+
+#execsql_pp {
+#  SELECT * FROM hctentry WHERE EXISTS( SELECT 1 FROM hctdb WHERE pgno=hctentry.pgno AND pgtype LIKE '%edks%' )
+#}
+
+#execsql_pp { SELECT * FROM hctentry; }
 
 finish_test
 
