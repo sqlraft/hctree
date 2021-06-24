@@ -90,6 +90,10 @@ do_execsql_test -db db2 2.5 {
   COMMIT;
 } [irange 1 80]
 
+do_execsql_test -db db2 2.6 {
+  SELECT y FROM x1
+} [irange 60 80]
+
 #-------------------------------------------------------------------------
 
 reset_db
@@ -98,7 +102,7 @@ do_execsql_test 3.0 {
   BEGIN;
     CREATE TABLE x1(y INTEGER PRIMARY KEY, z TEXT);
     WITH s(i) AS (
-      VALUES(1) UNION ALL SELECT i+1 FROM s WHERE i<100
+      VALUES(1) UNION ALL SELECT i+1 FROM s WHERE i<500
     ) 
     INSERT INTO x1(z) SELECT quote(randomblob(100)) FROM s;
   COMMIT;
@@ -112,6 +116,9 @@ foreach {tn i1 i2} {
   4     80 120
   5     120 160
   6     160 200
+  7     200 400
+  8     400 450
+  9     450 500
 } {
   set hdl "db$tn"
   sqlite3 $hdl test.db
@@ -128,28 +135,39 @@ foreach {tn i1 i2} {
       $hdl eval { SELECT count(*), sum(y), md5sum(z) FROM x1 }
     } $res
   }
-
 }
 
+foreach {hdl res} $lHandle {
+  $hdl eval { COMMIT }
+  $hdl close
+}
 
-
-#do_execsql_test -db db2 2.4 {
-#  SELECT y FROM x1
-#} [irange 60 80]
 
 #execsql_pp { SELECT * FROM sqlite_schema; }
 #execsql_pp { SELECT * FROM hctdb; }
 #execsql_pp { SELECT * FROM hctpgmap; }
-
-#execsql_pp { SELECT * FROM hctdb NATURAL JOIN hctpgmap }
-
+#execsql_pp { SELECT * FROM hctpgmap NATURAL JOIN hctdb }
 #execsql_pp { SELECT * FROM hctdb WHERE pgtype LIKE '%edks%' }
-
-#execsql_pp {
-#  SELECT * FROM hctentry WHERE EXISTS( SELECT 1 FROM hctdb WHERE pgno=hctentry.pgno AND pgtype LIKE '%edks%' )
-#}
-
+#execsql_pp { SELECT * FROM hctentry WHERE EXISTS( SELECT 1 FROM hctdb WHERE pgno=hctentry.pgno AND pgtype LIKE '%edks%' ) }
 #execsql_pp { SELECT * FROM hctentry; }
+
+
+
+if 0 {
+execsql_pp {
+  WITH edks_root(logical, edks) AS (
+    SELECT logical, edks_pg FROM hctpgmap NATURAL JOIN hctdb WHERE edks_pg>0
+  ),
+
+  edks_tree(path, epgno) AS (
+    SELECT '/' || edks, edks FROM edks_root
+      UNION ALL
+    SELECT path || '/' || oldpg, oldpg FROM hctentry, edks_tree WHERE pgno=epgno AND ikey IS NULL
+  )
+
+  SELECT * FROM edks_tree ORDER BY path
+}
+}
 
 finish_test
 

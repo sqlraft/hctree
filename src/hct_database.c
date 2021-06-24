@@ -37,8 +37,8 @@ typedef struct HctDbLeafHdr HctDbLeafHdr;
 typedef struct HctDbWriter HctDbWriter;
 typedef struct HctDbPageHdr HctDbPageHdr;
 typedef struct HctDbTMap HctDbTMap;
-typedef struct HctDbIntkeyEdksFan HctDbIntkeyEdksFan;
-typedef struct HctDbIntkeyEdksFanEntry HctDbIntkeyEdksFanEntry;
+typedef struct HctDbEdksFan HctDbEdksFan;
+typedef struct HctDbEdksFanEntry HctDbEdksFanEntry;
 
 struct HctBuffer {
   u8 *aBuf;
@@ -237,6 +237,30 @@ struct HctDbPageHdr {
 #define hctIsLeftmost(p) (((HctDbPageHdr*)(p))->hdrFlags&HCT_PAGETYPE_LEFTMOST)
 #define hctPageheight(p)   (((HctDbPageHdr*)(p))->nHeight)
 
+
+/*
+** The iEdksVal fields in both HctDbLeafHdr and HctDbEdksFanEntry encodes
+** two values:
+**
+**   * The TID value - if all TIDs equal to or smaller than this value
+**     correspond to transactions visible to the reader, the pointer need
+**     not (and cannot safely) be followed. This is the least-significant
+**     56 bytes of the iEdksVal field.
+**
+**   * The 8 bit EDKS merge-count field. If this is set to 0xFF, then the 
+**     page indicated by iEdksPg is an EDKS fan page. Otherwise, it is set
+**     to the number of times the EDKS has been merged since it was created.
+*/
+
+/* Macros for reading iEdksVal values */
+#define hctEdksValTid(iVal) ((u64)(iVal) & ~(((u64)0xFF) << 56))
+#define hctEdksValMergeCount(iVal) ((u64)(iVal) >> 56)
+#define hctEdksValIsFan(iVal) (hctEdksValMergeCount(iVal)==0xFF)
+
+#define hctEdksValNew(iTid, nMerge) (                \
+  hctEdksValTid(iTid) + ((u64)(nMerge & 0xFF) << 56) \
+)
+
 /*
 ** 24-byte leaf page header. Used by both index and intkey leaf pages.
 ** Described in fileformat.wiki.
@@ -246,7 +270,7 @@ struct HctDbLeafHdr {
   u16 nFreeBytes;                 /* Total free bytes on page */
   u16 nDelete;                    /* Number of delete keys on page */
   u16 nDeleteBytes;               /* Bytes in record area used by del keys */
-  u64 iEdksTid;                   /* EDKS TID value, if any. 0 otherwise */
+  u64 iEdksVal;                   /* EDKS TID value, if any. 0 otherwise */
   u32 iEdksPg;                    /* Physical root of first EDKS tree, if any */
   u32 unused;
 };
@@ -321,8 +345,11 @@ struct HctDbIntkeyEdksEntry {
   u32 iOldPgno;
 };
 
-struct HctDbIntkeyEdksFanEntry {
-  u64 iTid;
+/*
+** An entry on an EDKS fan page.
+*/
+struct HctDbEdksFanEntry {
+  u64 iEdksVal;
   u32 iRoot;
 };
 
@@ -331,9 +358,9 @@ struct HctDbIntkeyEdksLeaf {
   HctDbIntkeyEdksEntry aEntry[0];
 };
 
-struct HctDbIntkeyEdksFan {
+struct HctDbEdksFan {
   HctDbPageHdr pg;
-  HctDbIntkeyEdksFanEntry aEntry[0];
+  HctDbEdksFanEntry aEntry[0];
 };
 
 
@@ -1283,6 +1310,7 @@ static int hctDbEdksCsrBuild(
   if( rc==SQLITE_OK ){
     HctDbPageHdr *pHdr = (HctDbPageHdr*)pg.aOld; 
     if( pHdr->hdrFlags==HCT_PAGETYPE_INTKEY_EDKS ){
+
       if( pCsr==0 || (pCsr->nCsr & (pCsr->nCsr-1))==0 ){
         int nNew = pCsr ? pCsr->nCsr*2 : 1;
         HctDbEdksCsr *pNew = (HctDbEdksCsr*)sqlite3_realloc(pCsr,
@@ -1305,9 +1333,9 @@ static int hctDbEdksCsrBuild(
       }
     }else{
       int ii;
-      HctDbIntkeyEdksFan *pFan = (HctDbIntkeyEdksFan*)pg.aOld;
+      HctDbEdksFan *pFan = (HctDbEdksFan*)pg.aOld;
       for(ii=0; ii<pFan->pg.nEntry; ii++){
-        HctDbIntkeyEdksFanEntry *pEntry = &pFan->aEntry[ii];
+        HctDbEdksFanEntry *pEntry = &pFan->aEntry[ii];
         rc = hctDbEdksCsrBuild(pDb, pEntry->iRoot, &pCsr);
       }
     }
@@ -2362,7 +2390,7 @@ static void hctDbEWriterIntkey(
     HctDbIntkeyEdksLeaf *pLeaf;
     HctDbIntkeyEdksEntry *pEntry;
     int pgsz = p->pDb->pgsz;
-    int nMax = (pgsz - sizeof(*pLeaf)) / sizeof(*pEntry);
+    const int nMax = (pgsz - sizeof(*pLeaf)) / sizeof(*pEntry);
 
     /* If this is the first key written to this EWriter object, allocate
     ** the leftmost leaf page. */
@@ -2392,27 +2420,85 @@ static void hctDbEWriterIntkey(
 }
 
 /*
-** Add a pointer to the EDKS with root page iAuxRoot and max TID iAuxTid to 
+** Add a pointer to the EDKS with root page iNewRoot and max TID iNewEdksVal to 
 ** the EDKS being written by (*p).
 */
-static void hctDbEWriterEDKS(HctDbEWriter *p, u64 iAuxTid, u32 iAuxRoot){
+static void hctDbEWriterEDKS(HctDbEWriter *p, u64 iNewEdksVal, u32 iNewRoot){
   if( p->rc==SQLITE_OK ){
-    HctDbIntkeyEdksFan *pFan;
+    HctDbEdksFan *pFan;
+    HctDatabase *pDb = p->pDb;
+    const int nMax = (pDb->pgsz - sizeof(*pFan)) / sizeof(HctDbEdksFanEntry);
 
     /* If there is no fan-page, allocate it now */
-    pFan = (HctDbIntkeyEdksFan*)p->fanpg.aNew;
+    pFan = (HctDbEdksFan*)p->fanpg.aNew;
     if( pFan==0 ){
-      p->rc = sqlite3HctFilePageNewPhysical(p->pDb->pFile, &p->fanpg);
+      p->rc = sqlite3HctFilePageNewPhysical(pDb->pFile, &p->fanpg);
       if( p->rc ) return;
-      pFan = (HctDbIntkeyEdksFan*)p->fanpg.aNew;
+      pFan = (HctDbEdksFan*)p->fanpg.aNew;
       memset(pFan, 0, sizeof(*pFan));
       pFan->pg.hdrFlags = HCT_PAGETYPE_EDKS_FAN;
     }
 
-    /* Add an entry to the fan page */
-    pFan->aEntry[pFan->pg.nEntry].iTid = iAuxTid;
-    pFan->aEntry[pFan->pg.nEntry].iRoot = iAuxRoot;
-    pFan->pg.nEntry++;
+    if( hctEdksValIsFan(iNewEdksVal) ){
+      HctFilePage pg;
+      p->rc = sqlite3HctFilePageGetPhysical(pDb->pFile, iNewRoot, &pg);
+      if( p->rc==SQLITE_OK ){
+        HctDbEdksFanEntry *aOld = 0;
+        int nByte = sizeof(*aOld) * pFan->pg.nEntry;
+        if( nByte ){
+          aOld = (HctDbEdksFanEntry*)sqlite3Malloc(nByte);
+          if( !aOld ) p->rc = SQLITE_NOMEM;
+        }
+        if( p->rc==SQLITE_OK ){
+          HctDbEdksFan *pNew = (HctDbEdksFan*)pg.aOld;
+          int iNew = 0;
+          int iOld = 0;
+          int iOut = 0;
+
+          if( nByte ) memcpy(aOld, pFan->aEntry, nByte);
+
+          while( iNew<pNew->pg.nEntry || iOld<pFan->pg.nEntry ){
+            u32 iNewRoot = iNew<pNew->pg.nEntry ? pNew->aEntry[iNew].iRoot :0;
+            u32 iOldRoot = iOld<pFan->pg.nEntry ? aOld[iOld].iRoot :0;
+
+            if( iOut>=nMax ){
+              assert( 0 );
+            }
+
+            if( iOldRoot==0 || (iNewRoot && iNewRoot<iOldRoot) ){
+              pFan->aEntry[iOut] = pNew->aEntry[iNew++];
+            }else{
+              pFan->aEntry[iOut] = aOld[iOld++];
+              if( iOldRoot==iNewRoot ) iNew++;
+            }
+            iOut++;
+          }
+          sqlite3HctFilePageRelease(&pg);
+          pFan->pg.nEntry = iOut;
+        }
+        sqlite3_free(aOld);
+      }
+    }else{
+      HctDbEdksFanEntry *pEntry;
+      HctDbEdksFanEntry *pEof;
+
+      /* If fan page is full, merge some EDKS together */
+      if( pFan->pg.nEntry>=nMax ){
+        assert( 0 );
+      }
+
+      /* Insert the new entry so that entries are sorted by iRoot field */
+      pEof = &pFan->aEntry[pFan->pg.nEntry];
+      for(pEntry=pFan->aEntry; pEntry<pEof; pEntry++){
+        if( pEntry->iRoot>iNewRoot ) break;
+      }
+      if( pEntry!=pEof ){
+        memmove(&pEntry[1], pEntry, (pEof-pEntry)*sizeof(*pEntry));
+      }
+      pEntry->iEdksVal = iNewEdksVal;
+      pEntry->iRoot = iNewRoot;
+      pFan->pg.nEntry++;
+    }
   }
 }
 
@@ -2422,23 +2508,24 @@ static int hctDbEWriterFlush(HctDbEWriter *p){
 
   assert( p->nPg==0 || p->nPg==1 );
   if( p->fanpg.aNew ){
-    HctDbIntkeyEdksFan *pFan = (HctDbIntkeyEdksFan*)p->fanpg.aNew;
+    HctDbEdksFan *pFan = (HctDbEdksFan*)p->fanpg.aNew;
     p->iRoot = p->fanpg.iNewPg;
     if( p->nPg ){
       /* Add an entry to the fan page for the new EDKS */
-      pFan->aEntry[pFan->pg.nEntry].iTid = p->iMaxTid;
+      pFan->aEntry[pFan->pg.nEntry].iEdksVal = p->iMaxTid;
       pFan->aEntry[pFan->pg.nEntry].iRoot = p->aPg[0].iNewPg;
       pFan->pg.nEntry++;
     }
     for(ii=0; ii<pFan->pg.nEntry; ii++){
-      p->iMaxTid = MAX(p->iMaxTid, pFan->aEntry[ii].iTid);
+      p->iMaxTid = MAX(p->iMaxTid, hctEdksValTid(pFan->aEntry[ii].iEdksVal));
     }
+    p->iMaxTid = hctEdksValNew(p->iMaxTid, 0xFF);
   }else{
     p->iRoot = p->aPg[0].iNewPg;
   }
 
   if( rc==SQLITE_OK && p->fanpg.aNew ){
-    rc = sqlite3HctFilePageRelease(&p->aPg[ii]);
+    rc = sqlite3HctFilePageRelease(&p->fanpg);
   }
   for(ii=0; rc==SQLITE_OK && ii<p->nPg; ii++){
     rc = sqlite3HctFilePageRelease(&p->aPg[ii]);
@@ -2699,7 +2786,7 @@ assert( rc==SQLITE_OK );
     for(iIn=0; iIn<nIn; iIn++){
       HctDbIntkeyLeaf *pLeaf = (HctDbIntkeyLeaf*)aPgCopy[iIn];
       if( pLeaf->hdr.iEdksPg ){
-        hctDbEWriterEDKS(&edks, pLeaf->hdr.iEdksTid, pLeaf->hdr.iEdksPg);
+        hctDbEWriterEDKS(&edks, pLeaf->hdr.iEdksVal, pLeaf->hdr.iEdksPg);
       }
     }
 
@@ -2796,7 +2883,7 @@ assert( rc==SQLITE_OK );
 
     if( p->iHeight==0 ){
       hctDbEWriterFlush(&edks);
-      pLeaf->hdr.iEdksPg = hctDbEWriterRootpgno(&edks, &pLeaf->hdr.iEdksTid);
+      pLeaf->hdr.iEdksPg = hctDbEWriterRootpgno(&edks, &pLeaf->hdr.iEdksVal);
     }
   }
 
@@ -3439,7 +3526,7 @@ void sqlite3HctDbCsrKey(HctDbCsr *pCsr, i64 *piKey){
 }
 
 int sqlite3HctDbCsrEof(HctDbCsr *pCsr){
-  return pCsr==0 || pCsr->iCell<0;
+  return pCsr==0 || (pCsr->iCell<0 && pCsr->eEdks==HCT_EDKS_NO);
 }
 
 int sqlite3HctDbCsrFirst(HctDbCsr *pCsr){
@@ -3475,7 +3562,7 @@ int sqlite3HctDbCsrFirst(HctDbCsr *pCsr){
     memcpy(&pCsr->pg, &pg, sizeof(pg));
     if( pLeaf->hdr.iEdksPg ){
       rc = hctDbEdksCsrInit(pCsr->pDb, 
-          pLeaf->hdr.iEdksPg, pLeaf->hdr.iEdksTid, &pCsr->pEdks
+          pLeaf->hdr.iEdksPg, pLeaf->hdr.iEdksVal, &pCsr->pEdks
       );
     }
   }
@@ -3655,7 +3742,7 @@ struct hctdb_cursor {
   u32 iPeerPg;
   u32 nEntry;
   u32 nHeight;
-  u64 iEdksTid;
+  u64 iEdksVal;
   u32 iEdksPg;
   char *zFpKey;
 };
@@ -3825,14 +3912,14 @@ static int hctdbLoadPage(
   pCur->nEntry = pHdr->nEntry;
   pCur->nHeight = pHdr->nHeight;
   pCur->iEdksPg = 0;
-  pCur->iEdksTid = 0;
+  pCur->iEdksVal = 0;
 
   if( (eType==HCT_PAGETYPE_INTKEY || eType==HCT_PAGETYPE_INDEX) 
    && pHdr->nHeight==0 
   ){
     HctDbIntkeyLeaf *pLeaf = (HctDbIntkeyLeaf*)aPg;
     pCur->iEdksPg = pLeaf->hdr.iEdksPg;
-    pCur->iEdksTid = pLeaf->hdr.iEdksTid;
+    pCur->iEdksVal = pLeaf->hdr.iEdksVal;
   }
 
   if( eType==HCT_PAGETYPE_INTKEY ){
@@ -3925,7 +4012,7 @@ static int hctdbColumn(
       sqlite3_result_int64(ctx, (i64)pCur->iEdksPg);
       break;
     case 6: /* edks_tid */
-      sqlite3_result_int64(ctx, (i64)pCur->iEdksTid);
+      sqlite3_result_int64(ctx, (i64)pCur->iEdksVal);
       break;
     case 7: /* fpkey */
       sqlite3_result_text(ctx, pCur->zFpKey, -1, SQLITE_TRANSIENT);
@@ -4145,7 +4232,7 @@ static int hctentryColumn(
   HctDbIndexEntry *pIndex = 0;
   HctDbIndexNodeEntry *pIndexNode = 0;
   HctDbIntkeyEdksEntry *pEdks = 0;
-  HctDbIntkeyEdksFanEntry *pFan = 0;
+  HctDbEdksFanEntry *pFan = 0;
 
   switch( eType ){
     case HCT_PAGETYPE_INTKEY:
@@ -4165,7 +4252,7 @@ static int hctentryColumn(
       break;
 
     case HCT_PAGETYPE_EDKS_FAN:
-      pFan = &((HctDbIntkeyEdksFan*)pCur->pg.aOld)->aEntry[pCur->iEntry];
+      pFan = &((HctDbEdksFan*)pCur->pg.aOld)->aEntry[pCur->iEntry];
       break;
 
     default:
@@ -4205,7 +4292,7 @@ static int hctentryColumn(
     case 8: /* oldpg */
     case 9: /* ovfl */
       if( pFan ){
-        if( i==7 ) sqlite3_result_int64(ctx, (i64)pFan->iTid);
+        if( i==7 ) sqlite3_result_int64(ctx, (i64)pFan->iEdksVal);
         if( i==8 ) sqlite3_result_int64(ctx, (i64)pFan->iRoot);
       }
       else if( pEdks ){
