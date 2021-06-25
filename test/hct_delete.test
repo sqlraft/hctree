@@ -96,20 +96,51 @@ do_execsql_test -db db2 2.6 {
 
 #-------------------------------------------------------------------------
 
-reset_db
-sqlite3 db test.db
-do_execsql_test 3.0 {
-  BEGIN;
+
+proc run_delete_range_test3 {tn2 data} {
+  set lSql {
+    "SELECT count(*), sum(y), md5sum(z) FROM x1 ORDER BY y ASC"
+  }
+#   "SELECT count(*), sum(y), md5sum(z) FROM (SELECT * FROM x1 ORDER BY y DESC)"
+
+  reset_db
+  do_execsql_test $tn2.0 {
+    BEGIN;
     CREATE TABLE x1(y INTEGER PRIMARY KEY, z TEXT);
     WITH s(i) AS (
       VALUES(1) UNION ALL SELECT i+1 FROM s WHERE i<500
     ) 
     INSERT INTO x1(z) SELECT quote(randomblob(100)) FROM s;
-  COMMIT;
+    COMMIT;
+  }
+  
+  foreach {tn i1 i2} $data {
+
+    set hdl "db$tn"
+    sqlite3 $hdl test.db
+    $hdl eval BEGIN
+    set lRes [list]
+    foreach sql $lSql { lappend lRes [$hdl eval $sql] }
+    lappend lHandle $hdl $lRes
+  
+    do_execsql_test $tn2.$tn.1 "DELETE FROM x1 WHERE y BETWEEN $i1 AND $i2"
+  
+    foreach {hdl lRes} $lHandle {
+      set ii 1
+      foreach sql $lSql res $lRes {
+        do_execsql_test -db $hdl $tn2.$tn.$hdl.$ii.([lindex $res 0]) $sql $res
+        incr ii
+      }
+    }
+  }
+
+  foreach {hdl lRes} $lHandle {
+    $hdl eval { COMMIT }
+    $hdl close
+  }
 }
 
-set lHandle [list]
-foreach {tn i1 i2} {
+run_delete_range_test3 3.1 {
   1     1  40
   2     40 80
   3     80 120
@@ -119,27 +150,31 @@ foreach {tn i1 i2} {
   7     200 400
   8     400 450
   9     450 500
-} {
-  set hdl "db$tn"
-  sqlite3 $hdl test.db
-  $hdl eval BEGIN
-  set res [$hdl eval { SELECT count(*), sum(y), md5sum(z) FROM x1 }]
-  lappend lHandle $hdl $res
-
-  do_execsql_test 3.$tn.1 {
-    DELETE FROM x1 WHERE y BETWEEN $i1 AND $i2
-  }
-
-  foreach {hdl res} $lHandle {
-    do_test 3.$tn.2.$hdl.([lindex $res 0]) { 
-      $hdl eval { SELECT count(*), sum(y), md5sum(z) FROM x1 }
-    } $res
-  }
 }
 
-foreach {hdl res} $lHandle {
-  $hdl eval { COMMIT }
-  $hdl close
+run_delete_range_test3 3.2 {
+  1     450 500
+  2     400 450
+  3     200 400
+  4     160 200
+  5     120 160
+  6     80 120
+  7     80 120
+  8     40 80
+  9     1  40
+}
+
+run_delete_range_test3 3.3 {
+  1       0  50
+  2     200 250
+  3     400 450
+  4      50 100
+  5     250 300
+  6     450 500
+  7     100 150
+  8     300 350
+  9     150 200
+ 10     350 400
 }
 
 
@@ -148,6 +183,7 @@ foreach {hdl res} $lHandle {
 #execsql_pp { SELECT * FROM hctpgmap; }
 #execsql_pp { SELECT * FROM hctpgmap NATURAL JOIN hctdb }
 #execsql_pp { SELECT * FROM hctdb WHERE pgtype LIKE '%edks%' }
+#execsql_pp { SELECT pgtype, count(*) FROM hctdb GROUP BY 1 }
 #execsql_pp { SELECT * FROM hctentry WHERE EXISTS( SELECT 1 FROM hctdb WHERE pgno=hctentry.pgno AND pgtype LIKE '%edks%' ) }
 #execsql_pp { SELECT * FROM hctentry; }
 

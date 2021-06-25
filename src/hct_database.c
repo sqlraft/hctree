@@ -3529,6 +3529,38 @@ int sqlite3HctDbCsrEof(HctDbCsr *pCsr){
   return pCsr==0 || (pCsr->iCell<0 && pCsr->eEdks==HCT_EDKS_NO);
 }
 
+/*
+** If the leaf page that pCsr currently points to has an EDKS pointer,
+** initialize an EDKS cursor for it.
+*/
+static int hctDbCsrInitEdks(HctDbCsr *pCsr){
+  int rc = SQLITE_OK;
+  HctDbIntkeyLeaf *pLeaf = (HctDbIntkeyLeaf*)pCsr->pg.aOld;
+
+  assert( pCsr->pEdks==0 );
+  if( pLeaf && pLeaf->hdr.iEdksPg ){
+    rc = hctDbEdksCsrInit(pCsr->pDb,
+        pLeaf->hdr.iEdksPg, pLeaf->hdr.iEdksVal, &pCsr->pEdks
+    );
+    if( rc==SQLITE_OK ){
+      i64 iPgKey = hctDbIntkeyFPKey(pLeaf);
+      while( 1 ){
+        i64 iEdksKey;
+        hctDbEdksCsrEntry(pCsr->pEdks, &iEdksKey, 0);
+        if( iEdksKey>iPgKey ) break;
+        hctDbEdksCsrNext(pCsr->pEdks);
+        if( hctDbEdksCsrEof(pCsr->pEdks) ){
+          hctDbEdksCsrClose(pCsr->pEdks);
+          pCsr->pEdks = 0;
+          break;
+        }
+      }
+    }
+  }
+
+  return rc;
+}
+
 int sqlite3HctDbCsrFirst(HctDbCsr *pCsr){
   int rc = SQLITE_OK;
   HctFile *pFile = pCsr->pDb->pFile;
@@ -3557,14 +3589,8 @@ int sqlite3HctDbCsrFirst(HctDbCsr *pCsr){
 
   /* Open an EDKS cursor for the new leaf page, if required. */
   if( rc==SQLITE_OK ){
-    HctDbIntkeyLeaf *pLeaf = (HctDbIntkeyLeaf*)pPg;
-    assert( (u8*)pPg==pg.aOld && pPg->nHeight==0 );
     memcpy(&pCsr->pg, &pg, sizeof(pg));
-    if( pLeaf->hdr.iEdksPg ){
-      rc = hctDbEdksCsrInit(pCsr->pDb, 
-          pLeaf->hdr.iEdksPg, pLeaf->hdr.iEdksVal, &pCsr->pEdks
-      );
-    }
+    rc = hctDbCsrInitEdks(pCsr);
   }
 
   /* Skip forward to the first visible entry, if any. */
@@ -3643,6 +3669,10 @@ int sqlite3HctDbCsrNext(HctDbCsr *pCsr){
         }
         if( pCsr->pEdks ){
           pCsr->eEdks = HCT_EDKS_TRAIL;
+        }else{
+          /* If there is no EDKS cursor for the previous leaf page, load 
+          ** any EDKS cursor for this new leaf page now */
+          rc = hctDbCsrInitEdks(pCsr);
         }
       }
     }else{
@@ -3651,16 +3681,24 @@ int sqlite3HctDbCsrNext(HctDbCsr *pCsr){
       if( hctDbEdksCsrEof(pCsr->pEdks) ){
         hctDbEdksCsrClose(pCsr->pEdks);
         pCsr->pEdks = 0;
+        if( pCsr->eEdks==HCT_EDKS_TRAIL ){
+          rc = hctDbCsrInitEdks(pCsr);
+        }
         pCsr->eEdks = HCT_EDKS_NO;
       }
     }
 
-    if( pCsr->pEdks && pCsr->iCell>=0 ){
+    if( rc==SQLITE_OK && pCsr->pEdks && pCsr->iCell>=0 ){
       i64 iEdksKey;
       i64 iMainKey;
       hctDbEdksCsrEntry(pCsr->pEdks, &iEdksKey, 0);
       hctDbCsrKey(pCsr, &iMainKey);
       if( iMainKey<=iEdksKey ){
+        if( pCsr->eEdks==HCT_EDKS_TRAIL ){
+          hctDbEdksCsrClose(pCsr->pEdks);
+          pCsr->pEdks = 0;
+          rc = hctDbCsrInitEdks(pCsr);
+        }
         pCsr->eEdks = HCT_EDKS_NO;
       }else if( pCsr->eEdks==HCT_EDKS_NO ){
         pCsr->eEdks = HCT_EDKS_YES;
