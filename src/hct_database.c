@@ -11,7 +11,6 @@
 *************************************************************************
 */
 
-
 #include "hctInt.h"
 #include <string.h>
 #include <assert.h>
@@ -123,6 +122,7 @@ struct HctDbEdksCsr1 {
 ** tree structure leaf page.
 */
 struct HctDbEdksCsr {
+  int eDir;                       /* BTREE_DIR_FORWARD/REVERSE/NONE */
   int iCurrent;                   /* Current aCsr[] entry. Or -1 for EOF */
   int nCsr;
   HctDbEdksCsr1 aCsr[0];
@@ -1358,10 +1358,11 @@ static int hctDbEdksCsrSetCurrent(HctDbEdksCsr *pCsr){
     HctDbEdksCsr1 *p1 = &pCsr->aCsr[ii];
     HctDbIntkeyEdksLeaf *pLeaf = (HctDbIntkeyEdksLeaf*)p1->pg.aOld;
 
-    if( p1->iCell<pLeaf->pg.nEntry ){
+    if( p1->iCell<pLeaf->pg.nEntry && p1->iCell>=0 ){
       HctDbIntkeyEdksEntry *pNew = &pLeaf->aEntry[p1->iCell];
       if( pBest==0 
-       || pNew->iRowid<pBest->iRowid
+       || (pCsr->eDir==BTREE_DIR_FORWARD && pNew->iRowid<pBest->iRowid)
+       || (pCsr->eDir==BTREE_DIR_REVERSE && pNew->iRowid>pBest->iRowid)
        || (pNew->iRowid==pBest->iRowid && pNew->iTid>pBest->iTid)
       ){
         iBest = ii;
@@ -1375,12 +1376,56 @@ static int hctDbEdksCsrSetCurrent(HctDbEdksCsr *pCsr){
 }
 
 /*
+** Advance the single EDKS cursor one position. 
+*/
+static int hctDbEdksCsr1Next(HctDbEdksCsr1 *p){
+  p->iCell++;
+  return SQLITE_OK;
+}
+
+/*
+** Reverse the single EDKS cursor one position. 
+*/
+static int hctDbEdksCsr1Prev(HctDbEdksCsr1 *p){
+  p->iCell--;
+  return SQLITE_OK;
+}
+
+static int hctDbEdksCsr1Eof(HctDbEdksCsr1 *p1){
+  HctDbIntkeyEdksLeaf *pLeaf = (HctDbIntkeyEdksLeaf*)p1->pg.aOld;
+  return (p1->iCell>=pLeaf->pg.nEntry || p1->iCell<0);
+}
+
+static int hctDbEdksCsr1Last(HctDbEdksCsr1 *p1){
+  HctDbIntkeyEdksLeaf *pLeaf = (HctDbIntkeyEdksLeaf*)p1->pg.aOld;
+  p1->iCell = pLeaf->pg.nEntry-1;
+  return SQLITE_OK;
+}
+
+/*
+** Return the rowid value that the single EDKS cursor currently points to.
+*/
+static i64 hctDbEdksCsr1Intkey(HctDbEdksCsr1 *p){
+  assert( p->iCell>=0 );
+  return ((HctDbIntkeyEdksLeaf*)p->pg.aOld)->aEntry[p->iCell].iRowid;
+}
+
+/*
+** Return true if the EDKS cursor is at EOF, false otherwise.
+*/
+static int hctDbEdksCsrEof(HctDbEdksCsr *pCsr){
+  return pCsr->iCurrent<0;
+}
+
+/*
 ** Open a new EDKS cursor with physical root page iRoot.
 */
 static int hctDbEdksCsrInit(
   HctDatabase *pDb,               /* Database handle */
   u32 iRoot,                      /* Physical root page number */
   u64 iTid,                       /* TID associated with EDKS root page */
+  int eDir,                       /* BTREE_DIR_FORWARD/REVERSE/NONE */
+  i64 iStartKey,                  /* Key to start at */
   HctDbEdksCsr **ppCsr            /* OUT: New HctDbEdksCsr object */
 ){
   int rc;
@@ -1390,16 +1435,42 @@ static int hctDbEdksCsrInit(
   // iCid = hctDbTMapLookup(pDb, iTid);
   // if( iCid<=pCsr->pDb->iSnapshotId )
 
+  assert( eDir==BTREE_DIR_FORWARD || eDir==BTREE_DIR_REVERSE );
+
   /* Allocate the HctDbEdksCsr structure and the array of HctDbEdksCsr1 
   ** cursors. */
   rc = hctDbEdksCsrBuild(pDb, iRoot, &pRet);
-
-  /* Seek the new cursor to the first entry, if any. */
   if( rc==SQLITE_OK ){
-    rc = hctDbEdksCsrSetCurrent(pRet);
+    pRet->eDir = eDir;
+    if( eDir==BTREE_DIR_FORWARD ){
+      int i1;
+      for(i1=0; rc==SQLITE_OK && i1<pRet->nCsr; i1++){
+        HctDbEdksCsr1 *p1 = &pRet->aCsr[i1];
+        while( rc==SQLITE_OK 
+            && hctDbEdksCsr1Eof(p1)==0 && hctDbEdksCsr1Intkey(p1)<iStartKey 
+        ){
+          rc = hctDbEdksCsr1Next(p1);
+        }
+      }
+    }else{
+      int i1;
+      for(i1=0; rc==SQLITE_OK && i1<pRet->nCsr; i1++){
+        HctDbEdksCsr1 *p1 = &pRet->aCsr[i1];
+        rc = hctDbEdksCsr1Last(p1);
+        while( rc==SQLITE_OK 
+            && hctDbEdksCsr1Eof(p1)==0 && hctDbEdksCsr1Intkey(p1)>iStartKey 
+        ){
+          rc = hctDbEdksCsr1Prev(p1);
+        }
+      }
+    }
+
+    if( rc==SQLITE_OK ){
+      rc = hctDbEdksCsrSetCurrent(pRet);
+    }
   }
 
-  if( rc!=SQLITE_OK ){
+  if( rc!=SQLITE_OK || hctDbEdksCsrEof(pRet) ){
     hctDbEdksCsrClose(pRet);
     pRet = 0;
   }
@@ -1407,23 +1478,28 @@ static int hctDbEdksCsrInit(
   return rc;
 }
 
-static void hctDbEdksCsrNext(HctDbEdksCsr *pCsr){
+static void hctDbEdksCsrAdvance(HctDbEdksCsr *pCsr, int iDir){
   HctDbEdksCsr1 *p1 = &pCsr->aCsr[pCsr->iCurrent];
-  i64 iKey = ((HctDbIntkeyEdksLeaf*)p1->pg.aOld)->aEntry[p1->iCell].iRowid;
+  i64 iKey = hctDbEdksCsr1Intkey(p1);
   int ii;
+
+  assert( iDir==1 || iDir==-1 );
 
   for(ii=0; ii<pCsr->nCsr; ii++){
     HctDbEdksCsr1 *p2 = &pCsr->aCsr[ii];
-    if( ((HctDbIntkeyEdksLeaf*)p2->pg.aOld)->aEntry[p2->iCell].iRowid==iKey ){
-      p2->iCell++;
+    if( hctDbEdksCsr1Eof(p2)==0 && hctDbEdksCsr1Intkey(p2)==iKey ){
+      p2->iCell += iDir;
     }
   }
 
   hctDbEdksCsrSetCurrent(pCsr);
 }
 
-static int hctDbEdksCsrEof(HctDbEdksCsr *pCsr){
-  return pCsr->iCurrent<0;
+static void hctDbEdksCsrNext(HctDbEdksCsr *pCsr){
+  hctDbEdksCsrAdvance(pCsr, 1);
+}
+static void hctDbEdksCsrPrev(HctDbEdksCsr *pCsr){
+  hctDbEdksCsrAdvance(pCsr, -1);
 }
 
 static u32 hctDbEdksCsrEntry(HctDbEdksCsr *pCsr, i64 *piKey, u64 *piTid){
@@ -3533,29 +3609,21 @@ int sqlite3HctDbCsrEof(HctDbCsr *pCsr){
 ** If the leaf page that pCsr currently points to has an EDKS pointer,
 ** initialize an EDKS cursor for it.
 */
-static int hctDbCsrInitEdks(HctDbCsr *pCsr){
+static int hctDbCsrInitEdks(HctDbCsr *pCsr, i64 iLimit){
   int rc = SQLITE_OK;
   HctDbIntkeyLeaf *pLeaf = (HctDbIntkeyLeaf*)pCsr->pg.aOld;
 
   assert( pCsr->pEdks==0 );
+  assert( pCsr->eDir==BTREE_DIR_FORWARD || pCsr->eDir==BTREE_DIR_REVERSE );
   if( pLeaf && pLeaf->hdr.iEdksPg ){
-    rc = hctDbEdksCsrInit(pCsr->pDb,
-        pLeaf->hdr.iEdksPg, pLeaf->hdr.iEdksVal, &pCsr->pEdks
-    );
-    if( rc==SQLITE_OK ){
-      i64 iPgKey = hctDbIntkeyFPKey(pLeaf);
-      while( 1 ){
-        i64 iEdksKey;
-        hctDbEdksCsrEntry(pCsr->pEdks, &iEdksKey, 0);
-        if( iEdksKey>iPgKey ) break;
-        hctDbEdksCsrNext(pCsr->pEdks);
-        if( hctDbEdksCsrEof(pCsr->pEdks) ){
-          hctDbEdksCsrClose(pCsr->pEdks);
-          pCsr->pEdks = 0;
-          break;
-        }
-      }
+    i64 iVal = iLimit;
+    if( pCsr->eDir==BTREE_DIR_FORWARD ){
+      iVal = hctDbIntkeyFPKey(pLeaf);
     }
+
+    rc = hctDbEdksCsrInit(pCsr->pDb, 
+        pLeaf->hdr.iEdksPg, pLeaf->hdr.iEdksVal, pCsr->eDir, iVal, &pCsr->pEdks
+    );
   }
 
   return rc;
@@ -3590,7 +3658,7 @@ int sqlite3HctDbCsrFirst(HctDbCsr *pCsr){
   /* Open an EDKS cursor for the new leaf page, if required. */
   if( rc==SQLITE_OK ){
     memcpy(&pCsr->pg, &pg, sizeof(pg));
-    rc = hctDbCsrInitEdks(pCsr);
+    rc = hctDbCsrInitEdks(pCsr, 0);
   }
 
   /* Skip forward to the first visible entry, if any. */
@@ -3632,9 +3700,14 @@ int sqlite3HctDbCsrLast(HctDbCsr *pCsr){
     sqlite3HctFilePageRelease(&pg);
   }
 
+  /* Open an EDKS cursor for the new leaf page, if required. */
   if( rc==SQLITE_OK ){
     assert( pPg->nHeight==0 && pPg->iPeerPg==0 );
     memcpy(&pCsr->pg, &pg, sizeof(pg));
+    rc = hctDbCsrInitEdks(pCsr, LARGEST_INT64);
+  }
+
+  if( rc==SQLITE_OK ){
     pCsr->iCell = pPg->nEntry;
     rc = sqlite3HctDbCsrPrev(pCsr);
   }
@@ -3672,7 +3745,7 @@ int sqlite3HctDbCsrNext(HctDbCsr *pCsr){
         }else{
           /* If there is no EDKS cursor for the previous leaf page, load 
           ** any EDKS cursor for this new leaf page now */
-          rc = hctDbCsrInitEdks(pCsr);
+          rc = hctDbCsrInitEdks(pCsr, 0);
         }
       }
     }else{
@@ -3682,7 +3755,7 @@ int sqlite3HctDbCsrNext(HctDbCsr *pCsr){
         hctDbEdksCsrClose(pCsr->pEdks);
         pCsr->pEdks = 0;
         if( pCsr->eEdks==HCT_EDKS_TRAIL ){
-          rc = hctDbCsrInitEdks(pCsr);
+          rc = hctDbCsrInitEdks(pCsr, 0);
         }
         pCsr->eEdks = HCT_EDKS_NO;
       }
@@ -3697,7 +3770,7 @@ int sqlite3HctDbCsrNext(HctDbCsr *pCsr){
         if( pCsr->eEdks==HCT_EDKS_TRAIL ){
           hctDbEdksCsrClose(pCsr->pEdks);
           pCsr->pEdks = 0;
-          rc = hctDbCsrInitEdks(pCsr);
+          rc = hctDbCsrInitEdks(pCsr, 0);
         }
         pCsr->eEdks = HCT_EDKS_NO;
       }else if( pCsr->eEdks==HCT_EDKS_NO ){
@@ -3712,29 +3785,67 @@ int sqlite3HctDbCsrNext(HctDbCsr *pCsr){
 
 int sqlite3HctDbCsrPrev(HctDbCsr *pCsr){
   int rc = SQLITE_OK;
+  assert( pCsr->eEdks==HCT_EDKS_NO || pCsr->pEdks );
+  assert( pCsr->eEdks==HCT_EDKS_NO || pCsr->eEdks==HCT_EDKS_YES );
+
   sqlite3HctFilePageRelease(&pCsr->oldpg);
+
   do {
-    pCsr->iCell--;
-    if( pCsr->iCell<0 ){
-      /* TODO: This can be made much faster by using parent list pointers. */
-      if( pCsr->pKeyInfo ){
-        UnpackedRecord *pRec = 0;
-        rc = hctDbCsrLoadAndDecode(pCsr, 0, &pRec);
-        if( rc==SQLITE_OK ){
-          int bDummy;
-          pRec->default_rc = 1;
-          hctDbCsrSeek(pCsr, 0, pRec, 0, &bDummy);
-          pRec->default_rc = 0;
-        }
-      }else{
-        HctDbIntkeyLeaf *pLeaf = (HctDbIntkeyLeaf*)pCsr->pg.aOld;
-        i64 iKey = pLeaf->aEntry[0].iKey;
-        if( iKey!=SMALLEST_INT64 ){
+    
+    if( pCsr->eEdks==HCT_EDKS_NO ){
+      /* Advance the main cursor */
+      pCsr->iCell--;
+      if( pCsr->iCell<0 ){
+
+        hctDbEdksCsrClose(pCsr->pEdks);
+        pCsr->pEdks = 0;
+
+        /* TODO: This can be made much faster by using parent list pointers. */
+        if( pCsr->pKeyInfo ){
+          UnpackedRecord *pRec = 0;
+          rc = hctDbCsrLoadAndDecode(pCsr, 0, &pRec);
+          if( rc==SQLITE_OK ){
+            int bDummy;
+            HctFilePage pg = pCsr->pg;
+            memset(&pCsr->pg, 0, sizeof(HctFilePage));
+            pRec->default_rc = 1;
+            hctDbCsrSeek(pCsr, 0, pRec, 0, &bDummy);
+            pRec->default_rc = 0;
+            sqlite3HctFilePageRelease(&pg);
+          }
+        }else if( hctIsLeftmost(pCsr->pg.aOld)==0 ){
+          i64 iKey = hctDbIntkeyFPKey(pCsr->pg.aOld);
           sqlite3HctFilePageRelease(&pCsr->pg);
           rc = hctDbCsrSeek(pCsr, 0, 0, iKey-1, 0);
+          if( rc==SQLITE_OK ){
+            rc = hctDbCsrInitEdks(pCsr, iKey-1);
+          }
         }
       }
+    }else{
+      hctDbEdksCsrPrev(pCsr->pEdks);
+      if( hctDbEdksCsrEof(pCsr->pEdks) ){
+        hctDbEdksCsrClose(pCsr->pEdks);
+        pCsr->pEdks = 0;
+        pCsr->eEdks = HCT_EDKS_NO;
+      }
     }
+
+    /* If there is an EDKS cursor and the main cursor is currently valid,
+    ** set HctDbCsr.eEdks to indicate which represents the current cursor
+    ** entry.  */
+    if( rc==SQLITE_OK && pCsr->pEdks && pCsr->iCell>=0 ){
+      i64 iEdksKey;
+      i64 iMainKey;
+      hctDbEdksCsrEntry(pCsr->pEdks, &iEdksKey, 0);
+      hctDbCsrKey(pCsr, &iMainKey);
+      if( iMainKey>=iEdksKey ){
+        pCsr->eEdks = HCT_EDKS_NO;
+      }else{
+        pCsr->eEdks = HCT_EDKS_YES;
+      }
+    }
+
   }while( rc==SQLITE_OK && hctDbCsrFindVersion(&rc, pCsr)==0 );
 
   return rc;

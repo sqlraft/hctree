@@ -50,11 +50,18 @@ do_execsql_test -db db2 1.5 {
 #-------------------------------------------------------------------------
 proc irange {i1 i2} {
   set R [list]
-  for {set i $i1} {$i<=$i2} {incr i} {
-    lappend R $i
-  }
+  for {set i $i1} {$i<=$i2} {incr i} { lappend R $i }
   set R
 }
+
+proc lreverse {L} {
+  set ret [list]
+  for {set i [expr [llength $L]-1]} {$i>=0} {incr i -1} {
+    lappend ret [lindex $L $i]
+  }
+  set ret
+}
+
 
 reset_db
 sqlite3 db2 test.db
@@ -77,9 +84,13 @@ do_execsql_test 2.2 {
   DELETE FROM x1 WHERE y<10
 }
 
-do_execsql_test -db db2 2.3 {
+do_execsql_test -db db2 2.3a {
   SELECT y FROM x1;
 } [irange 1 80]
+
+do_execsql_test -db db2 2.3b {
+  SELECT y FROM x1 ORDER BY y DESC;
+} [lreverse [irange 1 80]]
 
 do_execsql_test 2.4 {
   DELETE FROM x1 WHERE y<60
@@ -100,8 +111,8 @@ do_execsql_test -db db2 2.6 {
 proc run_delete_range_test3 {tn2 data} {
   set lSql {
     "SELECT count(*), sum(y), md5sum(z) FROM x1 ORDER BY y ASC"
+    "SELECT count(*), sum(y), md5sum(z) FROM (SELECT * FROM x1 ORDER BY y DESC)"
   }
-#   "SELECT count(*), sum(y), md5sum(z) FROM (SELECT * FROM x1 ORDER BY y DESC)"
 
   reset_db
   do_execsql_test $tn2.0 {
