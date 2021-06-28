@@ -1162,9 +1162,6 @@ int hctDbCsrSeek(
   u32 iPg = pCsr->iRoot;
   int rc = SQLITE_OK;
 
-static int nCall = 0;
-nCall++;
-
   while( rc==SQLITE_OK ){
     if( iPg ) rc = sqlite3HctFilePageGet(pFile, iPg, &pCsr->pg);
     if( rc==SQLITE_OK ){
@@ -1361,7 +1358,7 @@ static int hctDbEdksCsrSetCurrent(HctDbEdksCsr *pCsr){
     if( p1->iCell<pLeaf->pg.nEntry && p1->iCell>=0 ){
       HctDbIntkeyEdksEntry *pNew = &pLeaf->aEntry[p1->iCell];
       if( pBest==0 
-       || (pCsr->eDir==BTREE_DIR_FORWARD && pNew->iRowid<pBest->iRowid)
+       || (pCsr->eDir!=BTREE_DIR_REVERSE && pNew->iRowid<pBest->iRowid)
        || (pCsr->eDir==BTREE_DIR_REVERSE && pNew->iRowid>pBest->iRowid)
        || (pNew->iRowid==pBest->iRowid && pNew->iTid>pBest->iTid)
       ){
@@ -1435,14 +1432,17 @@ static int hctDbEdksCsrInit(
   // iCid = hctDbTMapLookup(pDb, iTid);
   // if( iCid<=pCsr->pDb->iSnapshotId )
 
-  assert( eDir==BTREE_DIR_FORWARD || eDir==BTREE_DIR_REVERSE );
+  assert( eDir==BTREE_DIR_FORWARD 
+       || eDir==BTREE_DIR_REVERSE 
+       || eDir==BTREE_DIR_NONE 
+  );
 
   /* Allocate the HctDbEdksCsr structure and the array of HctDbEdksCsr1 
   ** cursors. */
   rc = hctDbEdksCsrBuild(pDb, iRoot, &pRet);
   if( rc==SQLITE_OK ){
     pRet->eDir = eDir;
-    if( eDir==BTREE_DIR_FORWARD ){
+    if( eDir!=BTREE_DIR_REVERSE ){
       int i1;
       for(i1=0; rc==SQLITE_OK && i1<pRet->nCsr; i1++){
         HctDbEdksCsr1 *p1 = &pRet->aCsr[i1];
@@ -1699,7 +1699,40 @@ static void hctDbCsrReset(HctDbCsr *pCsr){
   sqlite3HctFilePageRelease(&pCsr->pg);
   sqlite3HctFilePageRelease(&pCsr->oldpg);
   pCsr->iCell = -1;
+  hctDbEdksCsrClose(pCsr->pEdks);
+  pCsr->pEdks = 0;
+  pCsr->eEdks = HCT_EDKS_NO;
   /* pCsr->eDir = 0; */
+}
+
+/*
+** If the leaf page that pCsr currently points to has an EDKS pointer,
+** initialize an EDKS cursor for it.
+*/
+static int hctDbCsrInitEdks(HctDbCsr *pCsr, i64 iLimit){
+  int rc = SQLITE_OK;
+  HctDbIntkeyLeaf *pLeaf = (HctDbIntkeyLeaf*)pCsr->pg.aOld;
+
+  assert( pCsr->pEdks==0 );
+  assert( pCsr->eDir==BTREE_DIR_FORWARD 
+       || pCsr->eDir==BTREE_DIR_REVERSE 
+       || pCsr->eDir==BTREE_DIR_NONE 
+  );
+  if( pLeaf && pLeaf->hdr.iEdksPg ){
+    i64 iVal;
+    if( pCsr->eDir!=BTREE_DIR_REVERSE ){
+      i64 iPg = hctDbIntkeyFPKey(pLeaf);
+      iVal = MAX(iPg, iLimit);
+    }else{
+      iVal = iLimit;
+    }
+
+    rc = hctDbEdksCsrInit(pCsr->pDb, 
+        pLeaf->hdr.iEdksPg, pLeaf->hdr.iEdksVal, pCsr->eDir, iVal, &pCsr->pEdks
+    );
+  }
+
+  return rc;
 }
 
 /*
@@ -1730,9 +1763,9 @@ int sqlite3HctDbCsrSeek(
   hctDbCsrReset(pCsr);
   rc = hctDbCsrSeek(pCsr, 0, pRec, iKey, &bExact);
 
-  /* Cursor now points to the largest entry less than or equal to the
-  ** supplied key (pRec or iKey). If the supplied key is smaller than all
-  ** entries in the table, then pCsr->iCell is set to -1.  */
+  /* The main cursor now points to the largest entry less than or equal 
+  ** to the supplied key (pRec or iKey). If the supplied key is smaller 
+  ** than all entries in the table, then pCsr->iCell is set to -1.  */
   if( rc==SQLITE_OK ){
 
     if( pCsr->iCell<0 ){
@@ -1745,22 +1778,51 @@ int sqlite3HctDbCsrSeek(
       }else{
         *pRes = -1;
       }
-    }else if( 0==hctDbCsrFindVersion(&rc, pCsr) ){
-      switch( pCsr->eDir ){
-        case BTREE_DIR_FORWARD:
-          *pRes = 1;
-          rc = sqlite3HctDbCsrNext(pCsr);
-          break;
-        case BTREE_DIR_REVERSE:
-          rc = sqlite3HctDbCsrPrev(pCsr);
-          break;
-        default: assert( pCsr->eDir==BTREE_DIR_NONE );
-          hctDbCsrReset(pCsr);
-          *pRes = -1;
-          break;
-      }
     }else{
-      *pRes = (bExact ? 0 : -1); 
+
+      if( pRec==0 && (pCsr->eDir!=BTREE_DIR_NONE || bExact==0) ){
+        rc = hctDbCsrInitEdks(pCsr, iKey);
+        if( rc==SQLITE_OK && pCsr->pEdks ){
+          i64 iEdksKey;
+          i64 iMainKey;
+          hctDbEdksCsrEntry(pCsr->pEdks, &iEdksKey, 0);
+          hctDbCsrKey(pCsr, &iMainKey);
+          switch( pCsr->eDir ){
+            case BTREE_DIR_FORWARD:
+              assert( iMainKey<=iKey && iEdksKey>=iKey );
+              assert( iMainKey<=iEdksKey );
+              pCsr->eEdks = HCT_EDKS_NO;
+              break;
+            case BTREE_DIR_REVERSE:
+              assert( 0 );
+              break;
+            case BTREE_DIR_NONE:
+              if( iEdksKey==iKey && bExact==0 ){
+                bExact = 1;
+                pCsr->eEdks = HCT_EDKS_YES;
+              }
+              break;
+          }
+        }
+      }
+
+      if( 0==hctDbCsrFindVersion(&rc, pCsr) ){
+        switch( pCsr->eDir ){
+          case BTREE_DIR_FORWARD:
+            *pRes = 1;
+            rc = sqlite3HctDbCsrNext(pCsr);
+            break;
+          case BTREE_DIR_REVERSE:
+            rc = sqlite3HctDbCsrPrev(pCsr);
+            break;
+          default: assert( pCsr->eDir==BTREE_DIR_NONE );
+            hctDbCsrReset(pCsr);
+            *pRes = -1;
+            break;
+        }
+      }else{
+        *pRes = (bExact ? 0 : -1); 
+      }
     }
   }
 
@@ -3577,6 +3639,7 @@ void sqlite3HctDbCsrClose(HctDbCsr *pCsr){
   if( pCsr ){
     HctDatabase *pDb = pCsr->pDb;
     HctDbCsr **pp;
+    hctDbCsrReset(pCsr);
     for(pp=&pDb->pCsrList; *pp!=pCsr; pp=&(*pp)->pCsrNext);
     *pp = pCsr->pCsrNext;
     if( pCsr->pRec ) sqlite3DbFree(pCsr->pKeyInfo->db, pCsr->pRec);
@@ -3603,30 +3666,6 @@ void sqlite3HctDbCsrKey(HctDbCsr *pCsr, i64 *piKey){
 
 int sqlite3HctDbCsrEof(HctDbCsr *pCsr){
   return pCsr==0 || (pCsr->iCell<0 && pCsr->eEdks==HCT_EDKS_NO);
-}
-
-/*
-** If the leaf page that pCsr currently points to has an EDKS pointer,
-** initialize an EDKS cursor for it.
-*/
-static int hctDbCsrInitEdks(HctDbCsr *pCsr, i64 iLimit){
-  int rc = SQLITE_OK;
-  HctDbIntkeyLeaf *pLeaf = (HctDbIntkeyLeaf*)pCsr->pg.aOld;
-
-  assert( pCsr->pEdks==0 );
-  assert( pCsr->eDir==BTREE_DIR_FORWARD || pCsr->eDir==BTREE_DIR_REVERSE );
-  if( pLeaf && pLeaf->hdr.iEdksPg ){
-    i64 iVal = iLimit;
-    if( pCsr->eDir==BTREE_DIR_FORWARD ){
-      iVal = hctDbIntkeyFPKey(pLeaf);
-    }
-
-    rc = hctDbEdksCsrInit(pCsr->pDb, 
-        pLeaf->hdr.iEdksPg, pLeaf->hdr.iEdksVal, pCsr->eDir, iVal, &pCsr->pEdks
-    );
-  }
-
-  return rc;
 }
 
 int sqlite3HctDbCsrFirst(HctDbCsr *pCsr){
@@ -3745,7 +3784,7 @@ int sqlite3HctDbCsrNext(HctDbCsr *pCsr){
         }else{
           /* If there is no EDKS cursor for the previous leaf page, load 
           ** any EDKS cursor for this new leaf page now */
-          rc = hctDbCsrInitEdks(pCsr, 0);
+          rc = hctDbCsrInitEdks(pCsr, SMALLEST_INT64);
         }
       }
     }else{
@@ -3755,7 +3794,7 @@ int sqlite3HctDbCsrNext(HctDbCsr *pCsr){
         hctDbEdksCsrClose(pCsr->pEdks);
         pCsr->pEdks = 0;
         if( pCsr->eEdks==HCT_EDKS_TRAIL ){
-          rc = hctDbCsrInitEdks(pCsr, 0);
+          rc = hctDbCsrInitEdks(pCsr, SMALLEST_INT64);
         }
         pCsr->eEdks = HCT_EDKS_NO;
       }
@@ -3770,7 +3809,7 @@ int sqlite3HctDbCsrNext(HctDbCsr *pCsr){
         if( pCsr->eEdks==HCT_EDKS_TRAIL ){
           hctDbEdksCsrClose(pCsr->pEdks);
           pCsr->pEdks = 0;
-          rc = hctDbCsrInitEdks(pCsr, 0);
+          rc = hctDbCsrInitEdks(pCsr, SMALLEST_INT64);
         }
         pCsr->eEdks = HCT_EDKS_NO;
       }else if( pCsr->eEdks==HCT_EDKS_NO ){

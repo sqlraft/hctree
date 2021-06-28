@@ -92,6 +92,10 @@ do_execsql_test -db db2 2.3b {
   SELECT y FROM x1 ORDER BY y DESC;
 } [lreverse [irange 1 80]]
 
+do_execsql_test -db db2 2.3c {
+  SELECT y, length(z) FROM x1 WHERE y = 4
+} {4 23}
+
 do_execsql_test 2.4 {
   DELETE FROM x1 WHERE y<60
 }
@@ -112,6 +116,13 @@ proc run_delete_range_test3 {tn2 data} {
   set lSql {
     "SELECT count(*), sum(y), md5sum(z) FROM x1 ORDER BY y ASC"
     "SELECT count(*), sum(y), md5sum(z) FROM (SELECT * FROM x1 ORDER BY y DESC)"
+    "SELECT count(*), sum(y), md5sum(z) FROM x1 WHERE y IN (
+      10, 20, 30, 40, 50, 60, 70, 80, 90, 100,
+      110, 120, 130, 140, 150, 160, 170, 180, 190, 200,
+      210, 220, 230, 240, 250, 260, 270, 280, 290, 300,
+      310, 320, 330, 340, 350, 360, 370, 380, 390, 400,
+      410, 420, 430, 440, 450, 460, 470, 480, 490
+    )"
   }
 
   reset_db
@@ -139,6 +150,7 @@ proc run_delete_range_test3 {tn2 data} {
     foreach {hdl lRes} $lHandle {
       set ii 1
       foreach sql $lSql res $lRes {
+ 
         do_execsql_test -db $hdl $tn2.$tn.$hdl.$ii.([lindex $res 0]) $sql $res
         incr ii
       }
