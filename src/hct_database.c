@@ -1791,7 +1791,19 @@ int sqlite3HctDbCsrSeek(
             case BTREE_DIR_FORWARD:
               assert( iMainKey<=iKey && iEdksKey>=iKey );
               assert( iMainKey<=iEdksKey );
-              pCsr->eEdks = HCT_EDKS_NO;
+              if( iKey==iEdksKey && iMainKey<iKey ){
+                assert( bExact==0 );
+                sqlite3HctDbCsrNext(pCsr);
+                if( sqlite3HctDbCsrEof(pCsr)==0 ){
+                  i64 iCsrKey;
+                  sqlite3HctDbCsrKey(pCsr, &iCsrKey);
+                  bExact = (iCsrKey==iKey);
+                  *pRes = (iCsrKey==iKey) ? 0 : +1;
+                }else{
+                  *pRes = -1;
+                }
+                return SQLITE_OK;
+              }
               break;
             case BTREE_DIR_REVERSE:
               assert( 0 );
@@ -1806,7 +1818,7 @@ int sqlite3HctDbCsrSeek(
         }
       }
 
-      if( 0==hctDbCsrFindVersion(&rc, pCsr) ){
+      if( rc==SQLITE_OK && 0==hctDbCsrFindVersion(&rc, pCsr) ){
         switch( pCsr->eDir ){
           case BTREE_DIR_FORWARD:
             *pRes = 1;
