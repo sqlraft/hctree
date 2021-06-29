@@ -129,6 +129,15 @@ proc run_delete_range_test3 {tn2 data} {
        SELECT 10 UNION ALL SELECT x+10 FROM tens WHERE x<500
      )
      SELECT count(*), sum(y), md5sum(z) FROM x1, tens WHERE y BETWEEN x AND x+3"
+
+    "
+     WITH tens(x) AS (
+       SELECT 10 UNION ALL SELECT x+10 FROM tens WHERE x<500
+     )
+     SELECT x, md5sum( 
+       (SELECT z FROM x1 WHERE y<x ORDER BY y DESC LIMIT 1 OFFSET 3) 
+     ) FROM tens;
+    "
   }
 
   reset_db
@@ -141,7 +150,7 @@ proc run_delete_range_test3 {tn2 data} {
     INSERT INTO x1(z) SELECT quote(randomblob(100)) FROM s;
     COMMIT;
   }
-  
+ 
   foreach {tn i1 i2} $data {
 
     set hdl "db$tn"

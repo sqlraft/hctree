@@ -1806,7 +1806,11 @@ int sqlite3HctDbCsrSeek(
               }
               break;
             case BTREE_DIR_REVERSE:
-              assert( 0 );
+              assert( iMainKey<=iKey && iEdksKey<=iKey );
+              if( iMainKey<iEdksKey ){
+                bExact = (iEdksKey==iKey);
+                pCsr->eEdks = HCT_EDKS_YES;
+              }
               break;
             case BTREE_DIR_NONE:
               if( iEdksKey==iKey && bExact==0 ){
