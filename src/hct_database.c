@@ -2047,7 +2047,6 @@ static int hctdbWriterSortFPKeys(
 static int hctDbInsertFlushWrite(HctDatabase *pDb, HctDbWriter *p){
   int rc = SQLITE_OK;
   int ii;
-
   int eType = hctPagetype(p->aWritePg[0].aNew);
   HctFilePage root;
 
@@ -2173,7 +2172,7 @@ static int hctDbFindRollback(
     *paData = 0;
   }else{
     u32 iOld = hctGetU32(&aPg[pEntry->iOff+8]);
-    rc = sqlite3HctFilePageGetPhysical(pDb->pFile, iOld, &pDb->pa.writecsr.oldpg);
+    rc = sqlite3HctFilePageGetPhysical(pDb->pFile,iOld,&pDb->pa.writecsr.oldpg);
     if( rc==SQLITE_OK ){
       int b;
       int iCell = hctDbIntkeyLeafSearch(pDb->pa.writecsr.oldpg.aOld, iKey, &b);
@@ -2197,15 +2196,52 @@ static int hctDbFindRollback(
   return rc;
 }
 
-int sqlite3HctDbInsertFlush(HctDatabase *pDb, int *pnRetry){
-  int rc = hctDbInsertFlushWrite(pDb, &pDb->pa);
-  if( rc==SQLITE_LOCKED ){
-    *pnRetry = pDb->pa.nWriteKey;
-    rc = SQLITE_OK;
-  }else{
-    *pnRetry = 0;
+static int hctDbFindRollbackData(
+  HctDatabase *pDb,
+  i64 iKey,
+  u32 iOld,
+  int *pbDel,                     /* OUT: Value of bDel for rollback entry */
+  int *pnData,                    /* OUT: Value of nData for rollback entry */
+  const u8 **paData               /* OUT: Value of aData for rollback entry */
+){
+  int rc;
+  
+  rc = sqlite3HctFilePageGetPhysical(pDb->pFile, iOld, &pDb->pa.writecsr.oldpg);
+  if( rc==SQLITE_OK ){
+    HctDbIntkeyEntry *pEntry;
+    int b;
+    int iCell = hctDbIntkeyLeafSearch(pDb->pa.writecsr.oldpg.aOld, iKey, &b);
+    pEntry = hctDbIntkeyEntry(pDb->pa.writecsr.oldpg.aOld, iCell);
+    if( (pEntry->flags & HCTDB_IS_DELETE) ){
+      *pbDel = 1;
+      *pnData = 0;
+      *paData = 0;
+    }else{
+      int iOff = pEntry->iOff 
+        + ((pEntry->flags & HCTDB_HAS_TID) ? 8 : 0)
+        + ((pEntry->flags & HCTDB_HAS_OLD) ? 4 : 0)
+        + ((pEntry->flags & HCTDB_HAS_OVFL) ? 4 : 0);
+      *pbDel = 0;
+      *pnData = pEntry->nSize;
+      *paData = &pDb->pa.writecsr.oldpg.aOld[iOff];
+    }
   }
-  pDb->pa.nWriteKey = 0;
+
+  return rc;
+}
+
+int sqlite3HctDbInsertFlush(HctDatabase *pDb, int *pnRetry){
+  int rc = SQLITE_OK;
+  if( pDb->pa.nWritePg ){
+    rc = hctDbInsertFlushWrite(pDb, &pDb->pa);
+    if( rc==SQLITE_LOCKED ){
+      *pnRetry = pDb->pa.nWriteKey;
+      rc = SQLITE_OK;
+    }else{
+      *pnRetry = 0;
+    }
+    pDb->pa.nWriteKey = 0;
+  }
   return rc;
 }
 
@@ -3300,103 +3336,136 @@ static int hctDbInsert(
     }
   }
 
+  /* If the page array is empty, seek the write cursor to find the leaf
+  ** page on which to insert this new entry or delete key. */
   if( p->nWritePg==0 ){
-    /* Page array is empty. Seek the write cursor. */
     hctDbCsrInit(pDb, iRoot, &p->writecsr);
     if( pRec ) p->writecsr.pKeyInfo = pRec->pKeyInfo;
     rc = hctDbCsrSeek(&p->writecsr, p->iHeight, pRec, iKey, &bClobber);
-    assert( rc==SQLITE_OK );
-    iInsert = p->writecsr.iCell;
-
-    if( pDb->bRollback && p->iHeight==0 ){
-      assert( pRec==0 );
-      rc = hctDbFindRollback(
-          pDb, iKey, p->writecsr.pg.aOld, iInsert, &bDel, &nData, &aData
-      );
-      if( rc!=SQLITE_OK ) return rc;
-      assert( bClobber );
-    }else{
-      if( bDel && bClobber==0 ){
-        hctDbCsrReset(&p->writecsr);
-        return SQLITE_OK;
-      }
-    }
+    if( rc ) return rc;
 
     p->aWritePg[0] = p->writecsr.pg;
     memset(&p->writecsr.pg, 0, sizeof(HctFilePage));
     p->nWritePg = 1;
     rc = sqlite3HctFilePageWrite(&p->aWritePg[0]);
-    assert( rc==SQLITE_OK );      /* todo! */
+    if( rc ) return rc;
     memcpy(p->aWritePg[0].aNew, p->aWritePg[0].aOld, pDb->pgsz);
-
     rc = hctDbSetWriteFpKey(pDb, p);
-    if( bClobber==0 ) iInsert++;
+    if( rc ) return rc;
     p->iOldPgno = (p->aWritePg[0].iPagemap & 0xFFFFFFFF);
-  }else{
-    /* Figure out which page in the aWritePg[] array the new entry belongs
-    ** on. This can be optimized later - by remembering which page the 
-    ** previous key was stored on.  */
-    if( pRec ){
-      HctBuffer buf = {0,0,0};
-      for(iPg=0; iPg<p->nWritePg-1; iPg++){
-        const u8 *aK;
-        int nK;
-        rc = hctDbLoadRecord(pDb, &buf, p->aWritePg[iPg+1].aNew, 0, &nK, &aK);
-        if( rc!=SQLITE_OK ){
-          hctBufferFree(&buf);
-          return rc;
-        }
-        if( sqlite3VdbeRecordCompare(nK, aK, pRec)>0 ) break;
-      }
-      hctBufferFree(&buf);
-      if( p->iHeight==0 ){
-        rc = hctDbIndexSearch(pDb,
-            p->aWritePg[iPg].aNew, pRec, &iInsert, &bClobber
-        );
-        if( rc!=SQLITE_OK ) return rc;
-      }else{
-        iInsert = hctDbIndexNodeSearch(p->aWritePg[iPg].aNew, pRec, &bClobber);
-      }
-    }else{
-      for(iPg=0; iPg<p->nWritePg-1; iPg++){
-        if( hctDbIntkeyFPKey(p->aWritePg[iPg+1].aNew)>iKey ) break;
-      }
-      if( p->iHeight==0 ){
-        iInsert = hctDbIntkeyLeafSearch(p->aWritePg[iPg].aNew, iKey, &bClobber);
-      }else{
-        iInsert = hctDbIntkeyNodeSearch(p->aWritePg[iPg].aNew, iKey, &bClobber);
-      }
-    }
+  }
+  assert( p->nWritePg>0 && p->aWritePg[0].aNew );
 
-    if( pDb->bRollback && p->iHeight==0 ){
-      assert( pRec==0 );
-      rc = hctDbFindRollback(
-          pDb, iKey, p->aWritePg[iPg].aNew, iInsert, &bDel, &nData, &aData
-      );
-      if( rc==SQLITE_DONE ){
-        int rc2 = hctDbInsertFlushWrite(pDb, p);
-        if( rc2!=SQLITE_OK ) rc = rc2;
+  /* Figure out which page in the aWritePg[] array the new entry belongs
+  ** on. This can be optimized later - by remembering which page the 
+  ** previous key was stored on.  */
+  if( pRec ){
+    HctBuffer buf = {0,0,0};
+    for(iPg=0; iPg<p->nWritePg-1; iPg++){
+      const u8 *aK;
+      int nK;
+      rc = hctDbLoadRecord(pDb, &buf, p->aWritePg[iPg+1].aNew, 0, &nK, &aK);
+      if( rc!=SQLITE_OK ){
+        hctBufferFree(&buf);
+        return rc;
       }
+      if( sqlite3VdbeRecordCompare(nK, aK, pRec)>0 ) break;
+    }
+    hctBufferFree(&buf);
+    if( p->iHeight==0 ){
+      rc = hctDbIndexSearch(pDb,
+          p->aWritePg[iPg].aNew, pRec, &iInsert, &bClobber
+          );
       if( rc!=SQLITE_OK ) return rc;
     }else{
-      if( bDel && bClobber==0 ) return SQLITE_OK;
+      iInsert = hctDbIndexNodeSearch(p->aWritePg[iPg].aNew, pRec, &bClobber);
+    }
+  }else{
+    for(iPg=0; iPg<p->nWritePg-1; iPg++){
+      if( hctDbIntkeyFPKey(p->aWritePg[iPg+1].aNew)>iKey ) break;
+    }
+    if( p->iHeight==0 ){
+      iInsert = hctDbIntkeyLeafSearch(p->aWritePg[iPg].aNew, iKey, &bClobber);
+    }else{
+      iInsert = hctDbIntkeyNodeSearch(p->aWritePg[iPg].aNew, iKey, &bClobber);
     }
   }
 
-  /* 
-  ** At this point it is known that the new entry should be inserted into 
-  ** page pDb->aWritePg[iPg]. If bClobber is true then it deletes 
-  ** or clobbers existing entry iInsert. Or, if bClobber is false, then the
-  ** new key is inserted to the right of entry iInsert.  
-  */
-
+  /* Writes to an intkey internal node are handled separately. They are
+  ** different because they used fixed size key/data pairs. All other types
+  ** of page use variably sized key/data entries. */
   if( pRec==0 && p->iHeight>0 ){
     return hctDbInsertIntkeyNode(
         pDb, p, iPg, iInsert, iKey, iChildPg, bClobber, bDel
     );
   }
 
+  /* At this point it is known that the new entry should be inserted into 
+  ** page pDb->aWritePg[iPg]. */
   aTarget = p->aWritePg[iPg].aNew;
+
+  /* If this write is to a leaf page and the search above failed to find an
+  ** exact match, search any EDKS for a match. This is required for both
+  ** rollback (to find the data for the original entry) and for regular
+  ** writes (to see if there is a conflict).  */
+  if( p->iHeight==0 ){
+    u32 iEdksPgno = 0;
+    u64 iEdksTid = 0;
+
+    if( bClobber ){
+      int flags;
+      int iOff = hctDbEntryInfo(aTarget, iInsert, 0, &flags);
+      if( flags & HCTDB_HAS_TID ){
+        iEdksTid = hctGetU64(&aTarget[iOff]);
+      }
+      if( flags & HCTDB_HAS_OLD ){
+        iEdksPgno = hctGetU32(&aTarget[iOff+8]);
+      }
+    }else if( pRec==0 ){
+      HctDbIntkeyLeaf *pLeaf = (HctDbIntkeyLeaf*)aTarget;
+      if( pLeaf->hdr.iEdksPg ){
+        HctDbEdksCsr *pEdks = 0;
+        i64 iEdksKey = 0;
+        rc = hctDbEdksCsrInit(pDb, pLeaf->hdr.iEdksPg, 
+            pLeaf->hdr.iEdksVal, BTREE_DIR_NONE, iKey, &pEdks
+        );
+        assert( rc==SQLITE_OK );  /* todo */
+        if( pEdks ){
+          iEdksPgno = hctDbEdksCsrEntry(pEdks, &iEdksKey, &iEdksTid);
+          if( iEdksKey!=iKey ){
+            iEdksTid = 0;
+            iEdksPgno = 0;
+          }
+          hctDbEdksCsrClose(pEdks);
+        }
+      }
+    }
+
+    if( pDb->bRollback ){
+      if( iEdksTid!=pDb->iTid ){
+        rc = hctDbInsertFlushWrite(pDb, p);
+        if( rc==SQLITE_OK ) rc = SQLITE_DONE;
+      }else if( iEdksPgno==0 ){
+        bDel = 1;
+        aData = 0;
+        nData = 0;
+      }else{
+        assert( pRec==0 );          /* TODO */
+        rc = hctDbFindRollbackData(pDb, iKey, iEdksPgno, &bDel, &nData, &aData);
+      }
+
+      if( rc!=SQLITE_OK ) return rc;
+
+    }else if( iEdksTid ){
+      /* Check for a write conflict */
+      u64 iCid = hctDbTMapLookup(pDb, iEdksTid);
+      if( iCid>pDb->iSnapshotId ){
+        hctDbInsertDiscard(p);
+        return SQLITE_BUSY;
+      }
+    }
+
+  }
 
   /* If any overflow pages are required, create them now. */
   rc = hctDbInsertOverflow(pDb, aTarget, nData, aData, &nWrite, &pgOvfl);
@@ -3435,7 +3504,10 @@ assert( rc==SQLITE_OK );
 
   if( hctDbFreegap(aTarget)<nReq 
    || (iInsert==0 && p->iHeight>0) 
-   || hctDbFreebytes(aTarget)+nDataFree-nDataReq>(2*pDb->pgsz/3)
+   || ( 
+       hctDbFreebytes(aTarget)+nDataFree-nDataReq>(2*pDb->pgsz/3)
+    && (((HctDbPageHdr*)aTarget)->iPeerPg || hctIsLeftmost(aTarget)==0)
+   )
   ){
     rc = hctDbBalance(pDb, p, iPg, iInsert, bClobber, 
         iKey, iChildPg, bDel, pgOvfl, nWrite, nData, aData

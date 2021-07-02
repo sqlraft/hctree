@@ -49,8 +49,6 @@ c1 1.14 "COMMIT" {database is locked}
 c1 1.15 ROLLBACK
 c1 1.16 "SELECT * FROM t1" {1 one 3 three 4 iv 5 five 6 vi}
 
-
-
 c1 2.1 "CREATE TABLE t2(x INTEGER PRIMARY KEY, y)"
 c1 2.2 "INSERT INTO t2 VALUES(100, 'C')"
 c1 2.3 "BEGIN"
