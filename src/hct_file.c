@@ -725,6 +725,10 @@ int sqlite3HctFilePageGetPhysical(HctFile *pFile, u32 iPg, HctFilePage *pPg){
   return SQLITE_OK;
 }
 
+/*
+** Allocate a new physical page and set (*pPg) to refer to it. The new
+** physical page number is available in HctFilePage.iNewPg.
+*/
 int sqlite3HctFilePageNewPhysical(HctFile *pFile, HctFilePage *pPg){
   int rc;
   u32 iNewPg;                     /* New physical page id */
