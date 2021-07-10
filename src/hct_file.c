@@ -715,14 +715,15 @@ int sqlite3HctFilePageGet(HctFile *pFile, u32 iPg, HctFilePage *pPg){
 */
 int sqlite3HctFilePageGetPhysical(HctFile *pFile, u32 iPg, HctFilePage *pPg){
   u64 iVal;
+  int rc;
   assert( iPg!=0 );
   memset(pPg, 0, sizeof(*pPg));
-  iVal = hctFilePagemapGet(pFile->pMapping, iPg);
-  if( iVal & HCT_PGMAPFLAG_PHYSINUSE ){
+  rc = hctFilePagemapGetGrow(pFile, iPg, &iVal);
+  if( rc==SQLITE_OK && (iVal & HCT_PGMAPFLAG_PHYSINUSE) ){
     pPg->iPagemap = iVal;
     pPg->aOld = (u8*)hctPagePtr(pFile->pMapping, iPg);
   }
-  return SQLITE_OK;
+  return rc;
 }
 
 /*

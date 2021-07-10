@@ -219,8 +219,8 @@ run_delete_range_test3 3.3 {
 #execsql_pp { SELECT * FROM hctdb; }
 #execsql_pp { SELECT * FROM hctpgmap; }
 #execsql_pp { SELECT * FROM hctpgmap NATURAL JOIN hctdb }
-#execsql_pp { SELECT * FROM hctdb WHERE pgtype LIKE '%edks%' }
 #execsql_pp { SELECT pgtype, count(*) FROM hctdb GROUP BY 1 }
+#execsql_pp { SELECT * FROM hctdb WHERE pgtype LIKE '%edks%' }
 #execsql_pp { SELECT * FROM hctentry WHERE EXISTS( SELECT 1 FROM hctdb WHERE pgno=hctentry.pgno AND pgtype LIKE '%edks%' ) }
 #execsql_pp { SELECT * FROM hctentry; }
 

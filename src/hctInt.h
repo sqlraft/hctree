@@ -9,6 +9,10 @@ typedef unsigned int u32;
 
 #include <hctTMapInt.h>
 
+struct HctConfig {
+  int nMaxEdksFan;
+};
+
 /*************************************************************************
 ** Interface to code in hct_tree.c
 */

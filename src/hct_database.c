@@ -1456,6 +1456,7 @@ static int hctDbEdksCsr1Advance(HctDatabase *pDb, HctDbEdksCsr1 *p, int iDir){
         p->iPg++;
         sqlite3HctFilePageGetPhysical(pDb->pFile, iChild, &p->aPg[p->iPg]);
         pLeaf = (HctDbIntkeyEdksLeaf*)p->aPg[p->iPg].aOld;
+        p->aiCell[p->iPg] = pLeaf->pg.nEntry-1;
         iChild = pLeaf->aEntry[ pLeaf->pg.nEntry-1 ].iChildPgno;
       }while( iChild );
     }
@@ -1568,6 +1569,26 @@ static int hctDbEdksCsrEof(HctDbEdksCsr *pCsr){
   return pCsr->iCurrent<0;
 }
 
+static int hctDbEdksCsrSeek(
+  HctDatabase *pDb,
+  HctDbEdksCsr *pCsr,
+  i64 iKey,
+  int eDir
+){
+  int rc = SQLITE_OK;
+  int i1;
+
+  pCsr->eDir = eDir;
+  for(i1=0; rc==SQLITE_OK && i1<pCsr->nCsr; i1++){
+    HctDbEdksCsr1 *p1 = &pCsr->aCsr[i1];
+    rc = hctDbEdksCsr1Seek(pDb, p1, iKey, eDir);
+  }
+  if( rc==SQLITE_OK ){
+    rc = hctDbEdksCsrSetCurrent(pCsr);
+  }
+
+  return rc;
+}
 
 /*
 ** Open a new EDKS cursor with physical root page iRoot.
@@ -1596,15 +1617,7 @@ static int hctDbEdksCsrInit(
   ** cursors. */
   rc = hctDbEdksCsrBuild(pDb, iRoot, &pRet);
   if( rc==SQLITE_OK ){
-    pRet->eDir = eDir;
-    int i1;
-    for(i1=0; rc==SQLITE_OK && i1<pRet->nCsr; i1++){
-      HctDbEdksCsr1 *p1 = &pRet->aCsr[i1];
-      rc = hctDbEdksCsr1Seek(pDb, p1, iStartKey, eDir);
-    }
-    if( rc==SQLITE_OK ){
-      rc = hctDbEdksCsrSetCurrent(pRet);
-    }
+    rc = hctDbEdksCsrSeek(pDb, pRet, iStartKey, eDir);
   }
 
   if( rc!=SQLITE_OK || hctDbEdksCsrEof(pRet) ){
@@ -2774,6 +2787,85 @@ static void hctDbEWriterIntkey(
   }
 }
 
+static int hctDbEWriterFlush(HctDbEWriter*, u64*, u32*);
+
+static void hctDbEWriterMerge(
+  HctDbEWriter *p, 
+  HctDbEdksFanEntry *aEntry, 
+  int *pnEntry
+){
+  int aHist[16] = {0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0};
+  int ii;
+  int nEntry = *pnEntry;
+  int iLvl;
+  HctDbEdksCsr *pCsr = 0;         /* Cursor for merge inputs */
+  int rc = SQLITE_OK;
+  HctDbEWriter merge; 
+
+  u64 iEdksVal = 0;
+  u32 iEdksRoot = 0;
+  int iOut = 0;
+
+  memset(&merge, 0, sizeof(merge));
+
+  /* Each entry in aEntry[] has an associated level - the number of times
+  ** it has already been merged. Find the level with the largest number of
+  ** entries. All EDKS on this level will be merge to a single structure. */
+  for(ii=0; ii<nEntry; ii++){
+    int nLevel = hctEdksValMergeCount(aEntry[ii].iEdksVal);
+    if( nLevel>=ArraySize(aHist) ){
+      rc = SQLITE_CORRUPT_BKPT;
+      break;
+    }
+    aHist[nLevel]++;
+  }
+  iLvl = 0;
+  for(ii=1; ii<ArraySize(aHist); ii++){
+    if( aHist[ii]>aHist[iLvl] ) ii = iLvl;
+  }
+
+  hctDbEWriterInit(&merge, p->pDb);
+
+  /* Open an EDKS cursor to merge and iterate through the contents of all
+  ** EDKS structures with level=iLvl.  */
+  for(ii=0; rc==SQLITE_OK && ii<nEntry; ii++){
+    if( hctEdksValMergeCount(aEntry[ii].iEdksVal)==iLvl ){
+      rc = hctDbEdksCsrBuild(p->pDb, aEntry[ii].iRoot, &pCsr);
+    }
+  }
+  if( rc==SQLITE_OK ){
+    rc = hctDbEdksCsrSeek(p->pDb, pCsr, SMALLEST_INT64, BTREE_DIR_FORWARD);
+  }
+  while( rc==SQLITE_OK && !hctDbEdksCsrEof(pCsr) ){
+    u64 iTid = 0;
+    i64 iKey = 0;
+    u32 iOld = hctDbEdksCsrEntry(pCsr, &iKey, &iTid);
+    hctDbEWriterIntkey(&merge, iKey, iTid, iOld);
+    hctDbEdksCsrNext(pCsr); /* todo - error code? */
+  }
+  hctDbEdksCsrClose(pCsr);
+
+  if( rc==SQLITE_OK ){
+    rc = hctDbEWriterFlush(&merge, &iEdksVal, &iEdksRoot);
+  }
+
+  for(ii=0; ii<nEntry; ii++){
+    if( hctEdksValMergeCount(aEntry[ii].iEdksVal)==iLvl ){
+      if( iEdksVal ){
+        aEntry[iOut].iEdksVal = iEdksVal;
+        aEntry[iOut].iRoot = iEdksRoot;
+        iEdksVal = 0;
+        iOut++;
+      }
+    }else{
+      aEntry[iOut++] = aEntry[ii];
+    }
+  }
+
+  *pnEntry = iOut;
+  p->rc = rc;
+}
+
 /*
 ** Add a pointer to the EDKS with root page iNewRoot and max TID iNewEdksVal to 
 ** the EDKS being written by (*p).
@@ -2782,7 +2874,12 @@ static void hctDbEWriterEDKS(HctDbEWriter *p, u64 iNewEdksVal, u32 iNewRoot){
   if( p->rc==SQLITE_OK ){
     HctDbEdksFan *pFan;
     HctDatabase *pDb = p->pDb;
+
+#if 0
     const int nMax = (pDb->pgsz - sizeof(*pFan)) / sizeof(HctDbEdksFanEntry);
+#else
+    const int nMax = 32;   /* TODO - this should be a configurable test param */
+#endif
 
     /* If there is no fan-page, allocate it now */
     pFan = (HctDbEdksFan*)p->fanpg.aNew;
@@ -2798,40 +2895,47 @@ static void hctDbEWriterEDKS(HctDbEWriter *p, u64 iNewEdksVal, u32 iNewRoot){
       HctFilePage pg;
       p->rc = sqlite3HctFilePageGetPhysical(pDb->pFile, iNewRoot, &pg);
       if( p->rc==SQLITE_OK ){
-        HctDbEdksFanEntry *aOld = 0;
-        int nByte = sizeof(*aOld) * pFan->pg.nEntry;
+        HctDbEdksFan *pNew = (HctDbEdksFan*)pg.aOld;
+        HctDbEdksFanEntry *aOut = 0;
+
+        /* Allocate the aOut[] array so that it is large enough to merge the
+        ** contents of both fan pages even if there are no duplicates.  */
+        int nByte = sizeof(*aOut) * (pFan->pg.nEntry + pNew->pg.nEntry);
         if( nByte ){
-          aOld = (HctDbEdksFanEntry*)sqlite3Malloc(nByte);
-          if( !aOld ) p->rc = SQLITE_NOMEM;
+          aOut = (HctDbEdksFanEntry*)sqlite3Malloc(nByte);
+          if( !aOut ) p->rc = SQLITE_NOMEM;
         }
+
+        /* Merge the contents of the two fan pages into the aOut[] array.
+        ** Then, if it is already small enough, copy aOut[] back into the
+        ** body of page pFan. Or, if aOut[] is too large, merge EDKS 
+        ** structures until that is no longer the case.  */
         if( p->rc==SQLITE_OK ){
-          HctDbEdksFan *pNew = (HctDbEdksFan*)pg.aOld;
           int iNew = 0;
-          int iOld = 0;
+          int iFan = 0;
           int iOut = 0;
 
-          if( nByte ) memcpy(aOld, pFan->aEntry, nByte);
-
-          while( iNew<pNew->pg.nEntry || iOld<pFan->pg.nEntry ){
+          while( iNew<pNew->pg.nEntry || iFan<pFan->pg.nEntry ){
             u32 iNewRoot = iNew<pNew->pg.nEntry ? pNew->aEntry[iNew].iRoot :0;
-            u32 iOldRoot = iOld<pFan->pg.nEntry ? aOld[iOld].iRoot :0;
-
-            if( iOut>=nMax ){
-              assert( 0 );
-            }
-
-            if( iOldRoot==0 || (iNewRoot && iNewRoot<iOldRoot) ){
-              pFan->aEntry[iOut] = pNew->aEntry[iNew++];
+            u32 iFanRoot = iFan<pFan->pg.nEntry ? pFan->aEntry[iFan].iRoot :0;
+            if( iFanRoot==0 || (iNewRoot && iNewRoot<iFanRoot) ){
+              aOut[iOut] = pNew->aEntry[iNew++];
             }else{
-              pFan->aEntry[iOut] = aOld[iOld++];
-              if( iOldRoot==iNewRoot ) iNew++;
+              aOut[iOut] = pFan->aEntry[iFan++];
+              if( iFanRoot==iNewRoot ) iNew++;
             }
             iOut++;
           }
-          sqlite3HctFilePageRelease(&pg);
+
+          while( p->rc==SQLITE_OK && iOut>nMax ){
+            hctDbEWriterMerge(p, aOut, &iOut);
+          }
+          memcpy(pFan->aEntry, aOut, sizeof(HctDbEdksFanEntry)*iOut);
           pFan->pg.nEntry = iOut;
         }
-        sqlite3_free(aOld);
+
+        sqlite3HctFilePageRelease(&pg);
+        sqlite3_free(aOut);
       }
     }else{
       HctDbEdksFanEntry *pEntry;
@@ -2862,11 +2966,9 @@ static int hctDbEWriterFlush(
   u64 *piEdksVal,
   u32 *piEdksRoot
 ){
-  int ii;
   int rc = p->rc;
   u32 iRoot = 0;
-
-  assert( p->nPg==0 || p->nPg==1 );
+  int ii;
   if( p->fanpg.aNew ){
     HctDbEdksFan *pFan = (HctDbEdksFan*)p->fanpg.aNew;
     iRoot = p->fanpg.iNewPg;
@@ -2880,8 +2982,8 @@ static int hctDbEWriterFlush(
       p->iMaxTid = MAX(p->iMaxTid, hctEdksValTid(pFan->aEntry[ii].iEdksVal));
     }
     p->iMaxTid = hctEdksValNew(p->iMaxTid, 0xFF);
-  }else{
-    iRoot = p->aPg[0].iNewPg;
+  }else if( p->nPg ){
+    iRoot = p->aPg[p->nPg-1].iNewPg;
   }
 
   if( rc==SQLITE_OK && p->fanpg.aNew ){

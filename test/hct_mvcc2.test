@@ -54,6 +54,15 @@ for {set i 0} {$i < $nRep} {incr i} {
     if {$b($x)=="" && [info exists T1($x)]==0} { unset b($x) }
   }
 
+  set pp_b [list]
+  foreach x [array names b] { 
+    lappend pp_b $x [string range $b($x) 0 9] 
+  }
+  set pp_a [list]
+  foreach x [array names a] { 
+    lappend pp_a $x [string range $a($x) 0 9] 
+  }
+
   set bConflict 0
   foreach x [array names a] {
     if {[info exists b($x)]} { set bConflict 1 }
@@ -120,10 +129,15 @@ for {set i 0} {$i < $nRep} {incr i} {
     SELECT * FROM t1 ORDER BY a
   } $res
 
+  set res [list]
+  foreach x [lsort -integer [array names T1]] {
+    lappend res $x
+  }
+  do_execsql_test 1.1.$i.5 {
+    SELECT a FROM t1 ORDER BY a
+  } $res
 }
 
 
 finish_test
-
-
 
