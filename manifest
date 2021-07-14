@@ -1,5 +1,5 @@
-C Further\swork\son\sb-tree\sEDKS.
-D 2021-07-10T21:26:21.102
+C Fix\sa\sproblem\swith\sa\sbalanc()\son\san\sinternal\sintkey\snode\sthat\sreduces\sthe\snumber\sof\speer\spages.
+D 2021-07-14T16:33:36.717
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -514,7 +514,7 @@ F src/hash.c 8d7dda241d0ebdafb6ffdeda3149a412d7df75102cecfc1021c98d6219823b19
 F src/hash.h 9d56a9079d523b648774c1784b74b89bd93fac7b365210157482e4319a468f38
 F src/hctInt.h 2a56f3422e767e3166e7ce312ccb6019740e2b11296330c22640003a352e39d4
 F src/hctTMapInt.h 5f2f541a2bb10f4bd989fa26c2d95b8bf5f21eda768ad8330f50891e42ba0eaa
-F src/hct_database.c 54675e1268a7f39887c70b8e94fe8d49dcdf5ee75683473ed3485c162edcffff
+F src/hct_database.c 14b5eab6927cd7f8cb4f1633c89d58952d1239abed3103df7bc95725b54daa5a
 F src/hct_file.c 1ce9b01182a968766403c7f2450b8a516d3e1ad2538099a1af4be64acff690c8
 F src/hct_tree.c 84f62ffc3d42e5bee9758529c47aadf12b478de03c6424ad8905b1ab407885f4
 F src/hctree.c 5a1891c9ac4e551207095d0fa231caef39ff17446f38677e568b498225d2256e
@@ -1942,8 +1942,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P 989bb758924042a27a35333264c1862e9bce73f82bbc5c7b62f90933f1c3c957
-R 16bf02f80b6a69acaa62e785c8a34541
+P 21feb2f60e4fb92b4411f82a460b30b103d3b306885144525806af9e63516656
+R bdbd3f4dc4e5142e7265324dcf48ab1b
 U dan
-Z 0c2bb559fe5257ea8f85ec1292548040
+Z 131fcb69b284f3ac012a0345af380b4d
 # Remove this line to create a well-formed Fossil manifest.

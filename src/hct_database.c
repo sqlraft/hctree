@@ -1318,7 +1318,6 @@ static int hctDbEdksCsrBuild(
   if( rc==SQLITE_OK ){
     HctDbPageHdr *pHdr = (HctDbPageHdr*)pg.aOld; 
     if( pHdr->hdrFlags==HCT_PAGETYPE_INTKEY_EDKS ){
-
       if( pCsr==0 || (pCsr->nCsr & (pCsr->nCsr-1))==0 ){
         int nNew = pCsr ? pCsr->nCsr*2 : 1;
         HctDbEdksCsr *pNew = (HctDbEdksCsr*)sqlite3_realloc(pCsr,
@@ -1343,6 +1342,7 @@ static int hctDbEdksCsrBuild(
     }else{
       int ii;
       HctDbEdksFan *pFan = (HctDbEdksFan*)pg.aOld;
+      assert( pCsr==0 );
       for(ii=0; ii<pFan->pg.nEntry; ii++){
         HctDbEdksFanEntry *pEntry = &pFan->aEntry[ii];
         rc = hctDbEdksCsrBuild(pDb, pEntry->iRoot, &pCsr);
@@ -3414,11 +3414,8 @@ static int hctDbBalanceIntkeyNode(
 
   /* Figure out how many output pages are required */
   nOut = (nTotal + (nMax-1)) / nMax;
-assert( nOut>=nIn );
-  if( nOut>nIn ){
-    rc = hctDbExtendWriteArray(pDb, p, iLeftPg+nIn, nOut-nIn);
-assert( rc==SQLITE_OK );
-  }
+  rc = hctDbExtendWriteArray(pDb, p, iLeftPg+1, nOut-nIn);
+  assert( rc==SQLITE_OK );  /* todo */
 
   /* Populate the output pages */
   if( rc==SQLITE_OK ){
