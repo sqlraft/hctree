@@ -119,6 +119,8 @@ struct HctFileServer {
   void *pHdr;                     /* Pointer to mapping of db header pages */
   HctMapping *pMapping;           /* Mapping of pagemap and db pages */
 
+  HctTMapServer *pTMapServer;     /* Transaction map server */
+
   i64 st_dev;                     /* File identification 1 */
   i64 st_ino;                     /* File identification 2 */
   HctFileServer *pServerNext;     /* Next object in g.pServerList list */
@@ -319,6 +321,7 @@ static int hctFileServerInit(HctFileServer *p, const char *zFile){
     i64 szChunkData;
     i64 szChunkPagemap;
 
+
     /* Open the data and page-map files */
     p->fdDb = hctFileOpen(&rc, zFile, "-data");
     p->fdMap = hctFileOpen(&rc, zFile, "-pagemap");
@@ -389,6 +392,12 @@ static int hctFileServerInit(HctFileServer *p, const char *zFile){
       hctFilePagemapSet(pMapping, 2, 0, 2|HCT_PGMAPFLAG_PHYSINUSE);
       sqlite3HctDbRootPageInit(0, a1, p->szPage);
       sqlite3HctDbMetaPageInit(a2, p->szPage);
+    }
+
+    /* Allocate a transaction map server */
+    if( rc==SQLITE_OK ){
+      u64 iFirst = hctFilePagemapGet(p->pMapping, HCT_PAGEMAP_TRANSID_EOF);
+      rc = sqlite3HctTMapServerNew(iFirst, &p->pTMapServer);
     }
   }
   return rc;
@@ -587,6 +596,10 @@ void sqlite3HctFileClose(HctFile *pFile){
       int szChunkMap = pDel->nPagePerChunk*sizeof(u64);
       int i;
       HctMapping *pMapping = pDel->pMapping;
+
+      sqlite3HctTMapServerFree(pDel->pTMapServer);
+      pDel->pTMapServer = 0;
+
       pDel->pMapping = 0;
       for(i=0; i<pMapping->nChunk; i++){
         HctMappingChunk *pChunk = &pMapping->aChunk[i];

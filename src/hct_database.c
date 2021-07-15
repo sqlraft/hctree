@@ -126,9 +126,15 @@ struct HctDbEdksCsr1 {
 /*
 ** A cursor to be used on the set of EDKS structures all linked to a single
 ** tree structure leaf page.
+**
+** bSkip:
+**   If true, then the cursor may skip over any entries with TIDs indicating
+**   that they are invisible to the current transaction (according to
+**   HctDatabase.iSnapshotId).
 */
 struct HctDbEdksCsr {
   HctDatabase *pDb;
+  int bSkip;                      /* True to skip deleted keys */
   int eDir;                       /* BTREE_DIR_FORWARD/REVERSE/NONE */
   int iCurrent;                   /* Current aCsr[] entry. Or -1 for EOF */
   int nCsr;
@@ -1408,59 +1414,88 @@ static int hctDbEdksCsr1Prev(HctDbEdksCsr1 *p){
 #endif
 
 /*
+** Return true if TID iTid maps to a commit-id visible to the current
+** client. Or false otherwise.
+*/
+static int hctDbTidIsVisible(HctDatabase *pDb, u64 iTid){
+  u64 iCid = hctDbTMapLookup(pDb, iTid);
+  return (iCid<=pDb->iSnapshotId);
+}
+
+/*
+** Return the TID of the entry that the
+*/
+static u64 hctDbEdksCsr1Tid(HctDbEdksCsr1 *p1){
+  int iCell = p1->aiCell[p1->iPg];
+  HctDbIntkeyEdksLeaf *pPg = (HctDbIntkeyEdksLeaf*)p1->aPg[p1->iPg].aOld;
+  assert( iCell>=0 && iCell<pPg->pg.nEntry );
+  return pPg->aEntry[iCell].iTid;
+}
+
+
+/*
 ** Advance the cursor passed as the only argument forwards (iDir==1) or
 ** backwards (iDir==-1).
 */
-static int hctDbEdksCsr1Advance(HctDatabase *pDb, HctDbEdksCsr1 *p, int iDir){
+static int hctDbEdksCsr1Advance(
+  HctDbEdksCsr *pCsr, 
+  HctDbEdksCsr1 *p1, 
+  int iDir
+){
+  HctDatabase *pDb = pCsr->pDb;
   HctDbIntkeyEdksLeaf *pLeaf;
   u32 iChild;
   assert( iDir==1 || iDir==-1 );
 
-  pLeaf = (HctDbIntkeyEdksLeaf*)p->aPg[p->iPg].aOld;
-  if( iDir==1 ){
-    iChild = pLeaf->aEntry[ p->aiCell[p->iPg] ].iChildPgno;
-    if( iChild==0 ){
-      while( p->iPg>=0 && p->aiCell[p->iPg]==(pLeaf->pg.nEntry-1) ){
-        sqlite3HctFilePageRelease(&p->aPg[p->iPg]);
-        p->iPg--;
-        pLeaf = (HctDbIntkeyEdksLeaf*)p->aPg[p->iPg].aOld;
-      }
-      if( p->iPg>=0 ){
-        p->aiCell[p->iPg]++;
-      }
-    }else{
-      do{
-        p->iPg++;
-        sqlite3HctFilePageGetPhysical(pDb->pFile, iChild, &p->aPg[p->iPg]);
-        pLeaf = (HctDbIntkeyEdksLeaf*)p->aPg[p->iPg].aOld;
-        p->aiCell[p->iPg] = -1;
-        iChild = pLeaf->pg.iPeerPg;
-      }while( iChild!=0 );
-      p->aiCell[p->iPg] = 0;
-    }
-  }else{
-    if( pLeaf->pg.nHeight==0 ){
-      p->aiCell[p->iPg]--;
-      while( p->iPg>=0 && p->aiCell[p->iPg]<0 ){
-        sqlite3HctFilePageRelease(&p->aPg[p->iPg]);
-        p->iPg--;
-      }
-    }else{
-      p->aiCell[p->iPg]--;
-      if( p->aiCell[p->iPg]>=0 ){
-        iChild = pLeaf->aEntry[ p->aiCell[p->iPg] ].iChildPgno;
+  do {
+    pLeaf = (HctDbIntkeyEdksLeaf*)p1->aPg[p1->iPg].aOld;
+    if( iDir==1 ){
+      iChild = pLeaf->aEntry[ p1->aiCell[p1->iPg] ].iChildPgno;
+      if( iChild==0 ){
+        while( p1->iPg>=0 && p1->aiCell[p1->iPg]==(pLeaf->pg.nEntry-1) ){
+          sqlite3HctFilePageRelease(&p1->aPg[p1->iPg]);
+          p1->iPg--;
+          pLeaf = (HctDbIntkeyEdksLeaf*)p1->aPg[p1->iPg].aOld;
+        }
+        if( p1->iPg>=0 ){
+          p1->aiCell[p1->iPg]++;
+        }
       }else{
-        iChild = pLeaf->pg.iPeerPg;
+        do{
+          p1->iPg++;
+          sqlite3HctFilePageGetPhysical(pDb->pFile, iChild, &p1->aPg[p1->iPg]);
+          pLeaf = (HctDbIntkeyEdksLeaf*)p1->aPg[p1->iPg].aOld;
+          p1->aiCell[p1->iPg] = -1;
+          iChild = pLeaf->pg.iPeerPg;
+        }while( iChild!=0 );
+        p1->aiCell[p1->iPg] = 0;
       }
-      do{
-        p->iPg++;
-        sqlite3HctFilePageGetPhysical(pDb->pFile, iChild, &p->aPg[p->iPg]);
-        pLeaf = (HctDbIntkeyEdksLeaf*)p->aPg[p->iPg].aOld;
-        p->aiCell[p->iPg] = pLeaf->pg.nEntry-1;
-        iChild = pLeaf->aEntry[ pLeaf->pg.nEntry-1 ].iChildPgno;
-      }while( iChild );
+    }else{
+      if( pLeaf->pg.nHeight==0 ){
+        p1->aiCell[p1->iPg]--;
+        while( p1->iPg>=0 && p1->aiCell[p1->iPg]<0 ){
+          sqlite3HctFilePageRelease(&p1->aPg[p1->iPg]);
+          p1->iPg--;
+        }
+      }else{
+        p1->aiCell[p1->iPg]--;
+        if( p1->aiCell[p1->iPg]>=0 ){
+          iChild = pLeaf->aEntry[ p1->aiCell[p1->iPg] ].iChildPgno;
+        }else{
+          iChild = pLeaf->pg.iPeerPg;
+        }
+        do{
+          p1->iPg++;
+          sqlite3HctFilePageGetPhysical(pDb->pFile, iChild, &p1->aPg[p1->iPg]);
+          pLeaf = (HctDbIntkeyEdksLeaf*)p1->aPg[p1->iPg].aOld;
+          p1->aiCell[p1->iPg] = pLeaf->pg.nEntry-1;
+          iChild = pLeaf->aEntry[ pLeaf->pg.nEntry-1 ].iChildPgno;
+        }while( iChild );
+      }
     }
-  }
+  }while( p1->iPg>=0 && pCsr->bSkip 
+       && hctDbTidIsVisible(pCsr->pDb, hctDbEdksCsr1Tid(p1))
+  );
 
   return SQLITE_OK; /* todo */
 }
@@ -1474,14 +1509,23 @@ static int hctDbEdksCsr1Last(HctDbEdksCsr1 *p1){
 #endif
 
 /*
-** Seek the cursor to point to the largest value smaller than or
-** equal to iKey.
+** Return the rowid value that the single EDKS cursor currently points to.
+*/
+static i64 hctDbEdksCsr1Intkey(HctDbEdksCsr1 *p1){
+  int iCell = p1->aiCell[p1->iPg];
+  HctDbIntkeyEdksLeaf *pPg = (HctDbIntkeyEdksLeaf*)p1->aPg[p1->iPg].aOld;
+  assert( iCell>=0 && iCell<pPg->pg.nEntry );
+  return pPg->aEntry[iCell].iRowid;
+}
+
+/*
+** Seek cursor p1, which is part of pCsr, to point to the largest value 
+** smaller than or equal to iKey.
 */
 static int hctDbEdksCsr1Seek(
-  HctDatabase *pDb, 
+  HctDbEdksCsr *pCsr, 
   HctDbEdksCsr1 *p1, 
-  i64 iKey,
-  int eDir
+  i64 iKey
 ){
   int rc = SQLITE_OK;
 
@@ -1524,25 +1568,41 @@ static int hctDbEdksCsr1Seek(
     }
 
     p1->iPg++;
-    rc = sqlite3HctFilePageGetPhysical(pDb->pFile, iChild, &p1->aPg[p1->iPg]);
+    rc = sqlite3HctFilePageGetPhysical(
+        pCsr->pDb->pFile, iChild, &p1->aPg[p1->iPg]
+    );
   }while( rc==SQLITE_OK );
 
   if( rc==SQLITE_OK ){
-    switch( eDir ){
+    switch( pCsr->eDir ){
       case BTREE_DIR_FORWARD:
-        rc = hctDbEdksCsr1Advance(pDb, p1, +1);
+        rc = hctDbEdksCsr1Advance(pCsr, p1, +1);
         assert( rc!=SQLITE_OK || p1->iPg<0 || p1->aiCell[p1->iPg]>=0 );
         break;
       case BTREE_DIR_NONE:
+        /* For a BTREE_DIR_NONE seek, if this is not an exact hit, move
+        ** the cursor to EOF. At this point it is known that the seek is
+        ** not an exact hit, as in that case the code jumps directly to
+        ** csr1_seek_done below.  */
         while( p1->iPg>=0 ){
           sqlite3HctFilePageRelease(&p1->aPg[p1->iPg]);
           p1->iPg--;
         }
         break;
-      default: assert( eDir==BTREE_DIR_REVERSE );
+
+      default: assert( pCsr->eDir==BTREE_DIR_REVERSE );
         while( p1->iPg>=0 && p1->aiCell[p1->iPg]<0 ){
           sqlite3HctFilePageRelease(&p1->aPg[p1->iPg]);
           p1->iPg--;
+        }
+
+        /* If bSkip is set, check if the current entry (a delete-key) is 
+        ** visible. If not, back up to the previous entry.  */
+        if( pCsr->bSkip && p1->iPg>0 ){
+          u64 iTid = hctDbEdksCsr1Tid(p1);
+          if( hctDbTidIsVisible(pCsr->pDb, iTid) ){
+            rc = hctDbEdksCsr1Advance(pCsr, p1, -1);
+          }
         }
         break;
     }
@@ -1552,15 +1612,6 @@ static int hctDbEdksCsr1Seek(
   return rc;
 }
 
-/*
-** Return the rowid value that the single EDKS cursor currently points to.
-*/
-static i64 hctDbEdksCsr1Intkey(HctDbEdksCsr1 *p){
-  int iCell = p->aiCell[p->iPg];
-  HctDbIntkeyEdksLeaf *pPg = (HctDbIntkeyEdksLeaf*)p->aPg[p->iPg].aOld;
-  assert( iCell>=0 && iCell<pPg->pg.nEntry );
-  return pPg->aEntry[iCell].iRowid;
-}
 
 /*
 ** Return true if the EDKS cursor is at EOF, false otherwise.
@@ -1581,7 +1632,7 @@ static int hctDbEdksCsrSeek(
   pCsr->eDir = eDir;
   for(i1=0; rc==SQLITE_OK && i1<pCsr->nCsr; i1++){
     HctDbEdksCsr1 *p1 = &pCsr->aCsr[i1];
-    rc = hctDbEdksCsr1Seek(pDb, p1, iKey, eDir);
+    rc = hctDbEdksCsr1Seek(pCsr, p1, iKey);
   }
   if( rc==SQLITE_OK ){
     rc = hctDbEdksCsrSetCurrent(pCsr);
@@ -1617,6 +1668,7 @@ static int hctDbEdksCsrInit(
   ** cursors. */
   rc = hctDbEdksCsrBuild(pDb, iRoot, &pRet);
   if( rc==SQLITE_OK ){
+    pRet->bSkip = (eDir!=BTREE_DIR_NONE);
     rc = hctDbEdksCsrSeek(pDb, pRet, iStartKey, eDir);
   }
 
@@ -1638,7 +1690,7 @@ static void hctDbEdksCsrAdvance(HctDbEdksCsr *pCsr, int iDir){
   for(ii=0; ii<pCsr->nCsr; ii++){
     HctDbEdksCsr1 *p2 = &pCsr->aCsr[ii];
     if( hctDbEdksCsr1Eof(p2)==0 && hctDbEdksCsr1Intkey(p2)==iKey ){
-      hctDbEdksCsr1Advance(pCsr->pDb, p2, iDir);
+      hctDbEdksCsr1Advance(pCsr, p2, iDir);
     }
   }
 
@@ -1696,15 +1748,6 @@ static int hctDbFindKeyInOldPage(HctDbCsr *pCsr){
 
   pCsr->iOldCell = iCell;
   return (iCell<0 ? SQLITE_CORRUPT_BKPT : SQLITE_OK);
-}
-
-/*
-** Return true if TID iTid maps to a commit-id visible to the current
-** client. Or false otherwise.
-*/
-static int hctDbTidIsVisible(HctDatabase *pDb, u64 iTid){
-  u64 iCid = hctDbTMapLookup(pDb, iTid);
-  return (iCid<=pDb->iSnapshotId);
 }
 
 /*
