@@ -63,7 +63,7 @@ struct HctTMap {
   /* Transaction map */
   u64 iFirstTid;                  /* TID corresponding to aaMap[0][0] */
   int nMap;                       /* Number of mapping pages in aaMap[] */
-  u64 **aaMap;                    /* Array of u64[HCTDB_TMAP_SIZE] arrays */
+  u64 **aaMap;                    /* Array of u64[HCT_TMAP_PAGESIZE] arrays */
 };
 
 /*

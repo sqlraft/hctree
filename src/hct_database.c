@@ -182,10 +182,9 @@ struct HctDatabase {
   int pgsz;                       /* Page size in bytes */
   HctDbCsr *pCsrList;             /* List of open cursors */
 
+  HctTMap *pTmap;                 /* Transaction map (non-NULL if trans open) */
   u64 iSnapshotId;                /* Snapshot id for reading */
-  HctDbTMap *pTMap;               /* Transaction map */
   u64 iTid;                    
-
   HctDbWriter pa;
 
   int bRollback;                  /* True when in rollback mode */
@@ -401,116 +400,16 @@ static void hctDbFreeGlobal(HctFileGlobal *pFileGlobal){
   }
 }
 
-/*
-** Update connection pDb to use the latest transaction-map.
-*/
-static int hctDbTMapGet(HctDatabase *pDb, int nMap){
-  int rc = SQLITE_OK;
-  HctDbGlobal *pGlobal = pDb->pGlobal;
-  HctDbTMap *pTMap = pDb->pTMap;
-  pDb->pTMap = 0;
-  sqlite3_mutex_enter(pGlobal->pMutex);
-  if( pTMap ){
-    if( pTMap->nRef==1 ){
-      sqlite3_free(pTMap);
-    }else{
-      pTMap->nRef--;
-    }
-  }
-  pTMap = pGlobal->pTMap;
-  if( pTMap->nMap<nMap ){
-    int nByte = sizeof(HctDbTMap) + sizeof(u64*)*nMap;
-    HctDbTMap *pNew = sqlite3MallocZero(nByte);
-    if( pNew==0 ){
-      rc = SQLITE_NOMEM_BKPT;
-    }else{
-      int ii;
-      pNew->nRef = 1;
-      pNew->iFirstTid = pTMap->iFirstTid;
-      pNew->nMap = nMap;
-      pNew->aaMap = (u64**)&pNew[1];
-      for(ii=0; rc==SQLITE_OK && ii<nMap; ii++){
-        if( ii<pTMap->nMap ){
-          pNew->aaMap[ii] = pTMap->aaMap[ii];
-        }else{
-          u64 *aNew = sqlite3_malloc(sizeof(u64)*HCTDB_TMAP_SIZE);
-          if( aNew==0 ){
-            rc = SQLITE_NOMEM_BKPT;
-          }else{
-            memset(aNew, 0xFF, sizeof(u64)*HCTDB_TMAP_SIZE);
-            pNew->aaMap[ii] = aNew;
-          }
-        }
-      }
-      if( rc==SQLITE_OK ){
-        if( pTMap->nRef==1 ){
-          sqlite3_free(pTMap);
-        }else{
-          pTMap->nRef--;
-        }
-        pGlobal->pTMap = pTMap = pNew;
-      }
-    }
-  }
-  if( rc==SQLITE_OK ){
-    pTMap->nRef++;
-    pDb->pTMap = pTMap;
-  }
-  sqlite3_mutex_leave(pGlobal->pMutex);
-  assert( rc==SQLITE_OK || nMap>0 );
-  return rc;
-}
-
-/*
-** Release connection pDb's transaction-map, if it has one.
-*/
-static void hctDbTMapRelease(HctDatabase *pDb){
-  if( pDb->pTMap ){
-    HctDbGlobal *pGlobal = pDb->pGlobal;
-    sqlite3_mutex_enter(pGlobal->pMutex);
-    pDb->pTMap->nRef--;
-    if( pDb->pTMap->nRef==0 ){
-      sqlite3_free(pDb->pTMap);
-    }
-    sqlite3_mutex_leave(pGlobal->pMutex);
-    pDb->pTMap = 0;
-  }
-}
-
-static int hctDbTMapInit(HctDatabase *pDb){
-  int rc = SQLITE_OK;
-  HctDbGlobal *pGlobal = pDb->pGlobal;
-  sqlite3_mutex_enter(pGlobal->pMutex);
-  if( pGlobal->pTMap==0 ){
-    HctDbTMap *pNew;
-    u64 *aPage;
-    pNew = (HctDbTMap*)sqlite3MallocZero(sizeof(HctDbTMap) + sizeof(u64*));
-    aPage = (u64*)sqlite3Malloc(sizeof(u64) * HCTDB_TMAP_SIZE);
-    if( pNew==0 || aPage==0 ){
-      sqlite3_free(pNew);
-      sqlite3_free(aPage);
-      rc = SQLITE_NOMEM_BKPT;
-    }else{
-      pNew->nRef = 1;
-      pNew->iFirstTid = sqlite3HctFileGetTransid(pDb->pFile) + 1;
-      pNew->nMap = 1;
-      pNew->aaMap = (u64**)&pNew[1];
-      pNew->aaMap[0] = aPage;
-      memset(aPage, 0xFF, sizeof(u64) * HCTDB_TMAP_SIZE);
-      pGlobal->pTMap = pNew;
-    }
-  }
-  sqlite3_mutex_leave(pGlobal->pMutex);
-  return rc;
-}
-
 static u64 hctDbTMapLookup(HctDatabase *pDb, u64 iTid){
-  HctDbTMap *pTMap = pDb->pTMap;
-  int iMap = (iTid - pTMap->iFirstTid) / HCTDB_TMAP_SIZE;
-  if( iMap>=0 && iMap<pTMap->nMap ){
-    int iOff = (iTid - pTMap->iFirstTid) % HCTDB_TMAP_SIZE;
-    return pTMap->aaMap[iMap][iOff];
+  HctTMap *pTmap = pDb->pTmap;
+  int iMap = (iTid - pTmap->iFirstTid) / HCT_TMAP_PAGESIZE;
+
+  assert( iMap<pTmap->nMap );
+  if( iMap>=0 && iMap<pTmap->nMap ){
+    int iOff = (iTid - pTmap->iFirstTid) % HCTDB_TMAP_SIZE;
+    return pTmap->aaMap[iMap][iOff];
   }
+
   return 0;
 }
 
@@ -531,8 +430,6 @@ int sqlite3HctDbOpen(const char *zFile, HctDatabase **ppDb){
     );
     if( pNew->pGlobal==0 ){
       rc = SQLITE_NOMEM_BKPT;
-    }else{
-      rc = hctDbTMapInit(pNew);
     }
   }
 
@@ -550,7 +447,6 @@ int sqlite3HctDbOpen(const char *zFile, HctDatabase **ppDb){
 void sqlite3HctDbClose(HctDatabase *p){
   if( p ){
     assert( p->pa.aWriteFpKey==0 );
-    hctDbTMapRelease(p);
     sqlite3HctFileClose(p->pFile);
     p->pFile = 0;
     sqlite3_free(p);
@@ -638,14 +534,13 @@ void sqlite3HctDbMetaPageInit(u8 *aPage, int szPage){
 }
 
 static void hctDbSnapshotOpen(HctDatabase *pDb){
+  assert( (pDb->iSnapshotId==0)==(pDb->pTmap==0) );
   if( pDb->iSnapshotId==0 ){
-    u64 iMaxTid = 0;
-    HctDbTMap *pTMap = pDb->pTMap;
-
-    pDb->iSnapshotId = sqlite3HctFileGetSnapshotid(pDb->pFile, &iMaxTid);
-    if( pTMap==0 || iMaxTid>=(pTMap->iFirstTid + pTMap->nMap*HCTDB_TMAP_SIZE) ){
-      hctDbTMapGet(pDb, 0);
-    }
+    HctTMapClient *pTMapClient = sqlite3HctFileTMapClient(pDb->pFile);
+    int rc = sqlite3HctTMapBegin(pTMapClient, &pDb->pTmap);
+    assert( rc==SQLITE_OK );  /* todo */
+    pDb->iSnapshotId = sqlite3HctFileGetSnapshotid(pDb->pFile);
+    assert( pDb->iSnapshotId>0 );
   }
 }
 
@@ -1396,24 +1291,6 @@ static int hctDbEdksCsrSetCurrent(HctDbEdksCsr *pCsr){
 }
 
 /*
-** Advance the single EDKS cursor one position. 
-*/
-#if 0
-static int hctDbEdksCsr1Next(HctDbEdksCsr1 *p){
-  p->iCell++;
-  return SQLITE_OK;
-}
-
-/*
-** Reverse the single EDKS cursor one position. 
-*/
-static int hctDbEdksCsr1Prev(HctDbEdksCsr1 *p){
-  p->iCell--;
-  return SQLITE_OK;
-}
-#endif
-
-/*
 ** Return true if TID iTid maps to a commit-id visible to the current
 ** client. Or false otherwise.
 */
@@ -1499,14 +1376,6 @@ static int hctDbEdksCsr1Advance(
 
   return SQLITE_OK; /* todo */
 }
-
-#if 0
-static int hctDbEdksCsr1Last(HctDbEdksCsr1 *p1){
-  HctDbIntkeyEdksLeaf *pLeaf = (HctDbIntkeyEdksLeaf*)p1->pg.aOld;
-  p1->iCell = pLeaf->pg.nEntry-1;
-  return SQLITE_OK;
-}
-#endif
 
 /*
 ** Return the rowid value that the single EDKS cursor currently points to.
@@ -1842,50 +1711,6 @@ static int hctDbCsrFindVersion(int *pRc, HctDbCsr *pCsr){
   }
   *pRc = rc;
   return 1;
-
-#if 0
-  if( *pRc==SQLITE_OK && (pCsr->iCell>=0 || pCsr->eEdks!=HCT_EDKS_NO) ){
-    u8 *aPage = pCsr->pg.aOld;
-    u8 flags = 0;
-    int iOff = hctDbCellOffset(aPage, pCsr->iCell, &flags);
-    assert( pCsr->oldpg.aOld==0 );
-    while( flags & HCTDB_HAS_TID ){
-      u64 iTid = hctGetU64(&aPage[iOff]);
-      u64 iCid = hctDbTMapLookup(pCsr->pDb, iTid);
-      if( iCid<=pCsr->pDb->iSnapshotId ){
-        break;
-      }
-
-      if( (flags & HCTDB_HAS_OLD)==0 ){
-        sqlite3HctFilePageRelease(&pCsr->oldpg);
-        return 0;
-      }else{
-        int rc;
-        HctFile *pFile = pCsr->pDb->pFile;
-        u32 iOld = hctGetU32(&aPage[iOff+8]);
-        
-        sqlite3HctFilePageRelease(&pCsr->oldpg);
-        rc = sqlite3HctFilePageGetPhysical(pFile, iOld, &pCsr->oldpg);
-        if( rc==SQLITE_OK ){
-          rc = hctDbFindKeyInOldPage(pCsr);
-        }
-
-        if( rc==SQLITE_OK ){
-          iOff = hctDbCellOffset(pCsr->oldpg.aOld, pCsr->iOldCell, &flags);
-        }
-        if( rc!=SQLITE_OK ){
-          *pRc = rc;
-          return 1;
-        }
-      }
-    }
-
-    /* This entry is visible to the snapshot. Return true if it is a
-    ** real version, or false if it is a delete key. */
-    return ((flags & HCTDB_IS_DELETE) ? 0 : 1);
-  }
-  return 1;
-#endif
 }
 
 static void hctDbCsrReset(HctDbCsr *pCsr){
@@ -2053,26 +1878,6 @@ static void hctDbCsrInit(HctDatabase *pDb, u32 iRoot, HctDbCsr *pCsr){
   pCsr->pDb = pDb;
   pCsr->iRoot = iRoot;
 }
-
-#if 0
-static void hctDbSplitcopy(
-  void *pTo,                      /* Target buffer */
-  void *pFrom,                    /* Source buffer */
-  int nEntry,                     /* Number of entries in source array */
-  int szEntry,                    /* Size of each array entry in bytes */
-  int iNew                        /* Index at which to insert gap */
-){
-  u8 *pDest = (u8*)pTo;
-  u8 *pSrc = (u8*)pFrom;
-  if( iNew>0 ){
-    memcpy(pDest, pSrc, iNew*szEntry);
-  }
-  if( iNew<nEntry ){
-    int nByte = (nEntry-iNew) * szEntry;
-    memcpy(&pDest[(iNew+1)*szEntry], &pSrc[iNew*szEntry], nByte);
-  }
-}
-#endif
 
 /*
 ** Return number of bytes required by a cell...
@@ -2339,57 +2144,6 @@ void sqlite3HctDbRollbackMode(HctDatabase *pDb, int bRollback){
 static HctDbIntkeyEntry *hctDbIntkeyEntry(u8 *aPg, int iCell){
   return iCell<0 ? 0 : (&((HctDbIntkeyLeaf*)aPg)->aEntry[iCell]);
 }
-
-#if 0
-static int hctDbFindRollback(
-  HctDatabase *pDb,
-  i64 iKey,
-  u8 *aPg,
-  int iCell,
-  int *pbDel,                     /* OUT: Value of bDel for rollback entry */
-  int *pnData,                    /* OUT: Value of nData for rollback entry */
-  const u8 **paData               /* OUT: Value of aData for rollback entry */
-){
-  HctDbIntkeyEntry *pEntry = hctDbIntkeyEntry(aPg, iCell);
-  int rc = SQLITE_OK;
-  if( pEntry==0 
-   || pEntry->iKey!=iKey
-   || (pEntry->flags & HCTDB_HAS_TID)==0
-   || hctGetU64(&aPg[pEntry->iOff])!=pDb->iTid
-  ){
-    return SQLITE_DONE;
-  }
-
-  if( (pEntry->flags & HCTDB_HAS_OLD)==0 ){
-    *pbDel = 1;
-    *pnData = 0;
-    *paData = 0;
-  }else{
-    u32 iOld = hctGetU32(&aPg[pEntry->iOff+8]);
-    rc = sqlite3HctFilePageGetPhysical(pDb->pFile,iOld,&pDb->pa.writecsr.oldpg);
-    if( rc==SQLITE_OK ){
-      int b;
-      int iCell = hctDbIntkeyLeafSearch(pDb->pa.writecsr.oldpg.aOld, iKey, &b);
-      pEntry = hctDbIntkeyEntry(pDb->pa.writecsr.oldpg.aOld, iCell);
-      if( (pEntry->flags & HCTDB_IS_DELETE) ){
-        *pbDel = 1;
-        *pnData = 0;
-        *paData = 0;
-      }else{
-        int iOff = pEntry->iOff 
-          + ((pEntry->flags & HCTDB_HAS_TID) ? 8 : 0)
-          + ((pEntry->flags & HCTDB_HAS_OLD) ? 4 : 0)
-          + ((pEntry->flags & HCTDB_HAS_OVFL) ? 4 : 0);
-        *pbDel = 0;
-        *pnData = pEntry->nSize;
-        *paData = &pDb->pa.writecsr.oldpg.aOld[iOff];
-      }
-    }
-  }
-
-  return rc;
-}
-#endif
 
 static int hctDbFindRollbackData(
   HctDatabase *pDb,
@@ -3965,42 +3719,52 @@ int sqlite3HctDbInsert(
 */
 int sqlite3HctDbStartWrite(HctDatabase *p){
   int rc = SQLITE_OK;
-  HctDbTMap *pTMap;
+  HctTMapClient *pTMapClient = sqlite3HctFileTMapClient(p->pFile);
+
   assert( p->iTid==0 );
   assert( p->bRollback==0 );
+
   p->iTid = sqlite3HctFileAllocateTransid(p->pFile);
-  pTMap = p->pTMap;
-  if( p->iTid>=(pTMap->iFirstTid + pTMap->nMap*HCTDB_TMAP_SIZE) ){
-    rc = hctDbTMapGet(p, 1+((p->iTid - pTMap->iFirstTid) / HCTDB_TMAP_SIZE));
-  }
+  rc = sqlite3HctTMapNewTID(pTMapClient, p->iSnapshotId, p->iTid, &p->pTmap);
   return rc;
 }
 
+/*
+** This is called once the current transaction has been completely 
+** written to disk.
+*/
 int sqlite3HctDbEndWrite(HctDatabase *p){
+  /* HctTMapClient *pTMapClient = sqlite3HctFileTMapClient(p->pFile); */
+  HctTMap *pTmap = p->pTmap;
   int rc = SQLITE_OK;
+  u64 iCID;                       /* Commit ID for transaction */
+  int iMap;
+  int iEntry;
+
   assert( p->bRollback==0 );
   assert( p->pa.nWritePg==0 );
   assert( p->pa.aWriteFpKey==0 );
-  if( rc==SQLITE_OK ){
-    HctDbTMap *pTMap = p->pTMap;
-    u64 iSnapshotid = sqlite3HctFileAllocateSnapshotid(p->pFile);
-    int iMap;
-    int iEntry;
+  assert( pTmap->iFirstTid<=p->iTid );
+  assert( pTmap->iFirstTid+(pTmap->nMap*HCT_TMAP_PAGESIZE)>p->iTid );
 
-    assert( pTMap->iFirstTid<=p->iTid );
-    assert( pTMap->iFirstTid+(pTMap->nMap*HCTDB_TMAP_SIZE)>p->iTid );
+  iCID = sqlite3HctFileAllocateCID(p->pFile);
+  iMap = (p->iTid - pTmap->iFirstTid) / HCT_TMAP_PAGESIZE;
+  iEntry = (p->iTid - pTmap->iFirstTid) % HCT_TMAP_PAGESIZE;
+  HctAtomicStore(&pTmap->aaMap[iMap][iEntry], iCID);
 
-    iMap = (p->iTid - pTMap->iFirstTid) / HCTDB_TMAP_SIZE;
-    iEntry = (p->iTid - pTMap->iFirstTid) % HCTDB_TMAP_SIZE;
-
-    HctAtomicStore(&pTMap->aaMap[iMap][iEntry], iSnapshotid);
-  }
+  /* sqlite3HctTMapNewTID(pTMapClient, iCID, p->iTid, &p->pTmap); */
   p->iTid = 0;
   return rc;
 }
 
-int sqlite3HctDbEndRead(HctDatabase *p){
-  p->iSnapshotId = 0;
+int sqlite3HctDbEndRead(HctDatabase *pDb){
+  HctTMapClient *pTMapClient = sqlite3HctFileTMapClient(pDb->pFile);
+  assert( (pDb->iSnapshotId==0)==(pDb->pTmap==0) );
+  if( pDb->iSnapshotId ){
+    sqlite3HctTMapEnd(pTMapClient, pDb->iSnapshotId);
+    pDb->pTmap = 0;
+    pDb->iSnapshotId = 0;
+  }
   return SQLITE_OK;
 }
 

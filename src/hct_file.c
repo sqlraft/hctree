@@ -130,6 +130,8 @@ struct HctFile {
   HctFileServer *pServer;         /* Connection to global db object */
   HctFile *pFileNext;             /* Next handle opened on same file */
 
+  HctTMapClient *pTMapClient;     /* Transaction map client object */
+
   /* Copies of HctFileServer variables */
   int szPage;
   HctMapping *pMapping;
@@ -382,12 +384,18 @@ static int hctFileServerInit(HctFileServer *p, const char *zFile){
     **
     **   2. Set the initial values of the largest logical and physical page 
     **      ids allocated fields (page-map slots 2 and 3).
+    **
+    **   3. Set the initial CID value (the value that corresponds to the
+    **      initial, empty, snapshot). This needs to be non-zero in order
+    **      to avoid confusing the upper layer (which uses iSnapshotId==0
+    **      to indicate no snapshot). We set it to 2020.
     */
     if( rc==SQLITE_OK && hctFilePagemapGet(pMapping, 1)==0 ){
       u8 *a1 = (u8*)hctPagePtr(pMapping, HCT_ROOTPAGE_SCHEMA);
       u8 *a2 = (u8*)hctPagePtr(pMapping, HCT_ROOTPAGE_META);
       hctFilePagemapSet(pMapping, HCT_PAGEMAP_LOGICAL_EOF, 0, 32);
       hctFilePagemapSet(pMapping, HCT_PAGEMAP_PHYSICAL_EOF, 0, 2);
+      hctFilePagemapSet(pMapping, HCT_PAGEMAP_COMMITID, 0, 2020);
       hctFilePagemapSet(pMapping, 1, 0, 1|HCT_PGMAPFLAG_PHYSINUSE);
       hctFilePagemapSet(pMapping, 2, 0, 2|HCT_PGMAPFLAG_PHYSINUSE);
       sqlite3HctDbRootPageInit(0, a1, p->szPage);
@@ -524,16 +532,27 @@ int sqlite3HctFileOpen(const char *zFile, HctFile **ppFile){
         pNew->pMapping->nRef++;
       }
       sqlite3_mutex_leave(pServer->pMutex);
+
+      if( rc==SQLITE_OK ){
+        sqlite3HctTMapClientNew(pServer->pTMapServer, &pNew->pTMapClient);
+      }
+    }else{
+      sqlite3_free(pNew);
+      pNew = 0;
     }
 
     if( rc!=SQLITE_OK ){
-      sqlite3_free(pNew);
+      sqlite3HctFileClose(pNew);
       pNew = 0;
     }
     *ppFile = pNew;
   }
 
   return rc;
+}
+
+HctTMapClient *sqlite3HctFileTMapClient(HctFile *pFile){
+  return pFile->pTMapClient;
 }
 
 HctFileGlobal *sqlite3HctFileGlobal(
@@ -568,6 +587,9 @@ void sqlite3HctFileClose(HctFile *pFile){
     HctFileServer *pDel = 0;
     HctFile **pp;
     HctFileServer *pServer = pFile->pServer;
+
+    /* Release the transaction map client */
+    sqlite3HctTMapClientFree(pFile->pTMapClient);
 
     /* Release the reference to the HctMapping object, if any */
     hctMappingUnref(pFile->pMapping);
@@ -862,7 +884,7 @@ u64 sqlite3HctFileAllocateTransid(HctFile *pFile){
   u64 iVal = hctFilePagemapIncr(pFile->pMapping, HCT_PAGEMAP_TRANSID_EOF, 1);
   return iVal & HCT_TID_MASK;
 }
-u64 sqlite3HctFileAllocateSnapshotid(HctFile *pFile){
+u64 sqlite3HctFileAllocateCID(HctFile *pFile){
   u64 iVal = hctFilePagemapIncr(pFile->pMapping, HCT_PAGEMAP_COMMITID, 1);
   return iVal & HCT_TID_MASK;
 }
@@ -872,15 +894,9 @@ u64 sqlite3HctFileGetTransid(HctFile *pFile){
   return iVal & HCT_TID_MASK;
 }
 
-u64 sqlite3HctFileGetSnapshotid(HctFile *pFile, u64 *piTid){
-  HctMapping *p = pFile->pMapping;
-  u64 iRet = hctFilePagemapGet(p, HCT_PAGEMAP_COMMITID) & HCT_TID_MASK;
-
-  /* We're assuming that this is a full-memory barrier. */
-  __sync_synchronize();
-
-  *piTid = hctFilePagemapGet(p, HCT_PAGEMAP_TRANSID_EOF) & HCT_TID_MASK;
-  return iRet;
+u64 sqlite3HctFileGetSnapshotid(HctFile *pFile){
+  HctMapping *pMap = pFile->pMapping;
+  return hctFilePagemapGet(pMap, HCT_PAGEMAP_COMMITID) & HCT_TID_MASK;
 }
 
 int sqlite3HctFileFinishTrans(HctFile *pFile){

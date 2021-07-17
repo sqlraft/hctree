@@ -232,6 +232,8 @@ int sqlite3BtreeClose(Btree *p){
     while(p->pCsrList){
       sqlite3BtreeCloseCursor(p->pCsrList);
     }
+    sqlite3BtreeRollback(p, SQLITE_OK, 0);
+    sqlite3BtreeCommit(p);
     if( p->xSchemaFree ){
       p->xSchemaFree(p->pSchema);
     }
