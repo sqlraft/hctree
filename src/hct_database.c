@@ -3438,7 +3438,7 @@ static int hctDbInsert(
     if( p->iHeight==0 ){
       rc = hctDbIndexSearch(pDb,
           p->aWritePg[iPg].aNew, pRec, &iInsert, &bClobber
-          );
+      );
       if( rc!=SQLITE_OK ) return rc;
     }else{
       iInsert = hctDbIndexNodeSearch(p->aWritePg[iPg].aNew, pRec, &bClobber);

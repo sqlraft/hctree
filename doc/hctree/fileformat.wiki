@@ -326,6 +326,31 @@ nodes. Notes:
      of 0. This indicates that there is no child page - the current entry
      is the last in the EDKS.
 
+<b>Index EDKS Leaf/Node Page Format:</b>
+
+<verbatim type="pikchr center">
+boxht=0.2 ; boxwid=0.6 ; linewid=0.2
+
+# total width is 7.5
+PGHDR: box "page hdr"        wid 0.8
+ARRAY:box "entry array"      wid 1.2
+box "free space"             wid 1.5
+box "record area"            wid 4.5
+
+text "8 bytes" at PGHDR - (0, 0.2)
+text "nEntry x 24 bytes" at ARRAY - (0, 0.2)
+</verbatim>
+
+Intkey EDKS leaf pages contain <i>nEntry</i> entries of 24 bytes each. Each
+entry consists of:
+
+  *  8 byte TID value,
+  *  4 byte physical old page number,
+  *  4 byte physical child page number (only used by nodes, not leaves).
+  *  4 byte key size,
+  *  2 byte key offset,
+  *  1 byte flags (only valid flag is HAS_OVFL),
+
 <b>EDKS Fan Page Format:</b>
 
 <verbatim type="pikchr center">
