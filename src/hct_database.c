@@ -12,6 +12,7 @@
 */
 
 #include "hctInt.h"
+#include "vdbeInt.h"
 #include <string.h>
 #include <assert.h>
 
@@ -3385,6 +3386,7 @@ static int hctDbInsert(
   int nDataFree;
   u32 pgOvfl = 0;
   int nWrite = nData;
+  u16 nRecField = (pRec ? pRec->nField : 0);
 
   p->nWriteKey++;
 
@@ -3397,6 +3399,18 @@ static int hctDbInsert(
       if( rc ) return rc;
       p->nWriteKey = 1;
     }
+  }
+
+  if( pRec && pRec->pKeyInfo->nUniqField ){
+    int ii;
+    u16 nUniqField = pRec->pKeyInfo->nUniqField;
+    for(ii=0; ii<nUniqField; ii++){
+      if( pRec->aMem[ii].flags & MEM_Null ){
+        nUniqField = nRecField;
+        break;
+      }
+    }
+    pRec->nField = nUniqField;
   }
 
   /* If the page array is empty, seek the write cursor to find the leaf
@@ -3453,6 +3467,7 @@ static int hctDbInsert(
       iInsert = hctDbIntkeyNodeSearch(p->aWritePg[iPg].aNew, iKey, &bClobber);
     }
   }
+  if( pRec ) pRec->nField = nRecField;
 
   /* Writes to an intkey internal node are handled separately. They are
   ** different because they used fixed size key/data pairs. All other types
@@ -4165,8 +4180,6 @@ static int hctdbClose(sqlite3_vtab_cursor *cur){
   sqlite3_free(pCur);
   return SQLITE_OK;
 }
-
-#include "vdbeInt.h"
 
 static char *hctDbRecordToText(sqlite3 *db, const u8 *aRec, int nRec){
   char *zRet = 0;

@@ -5286,6 +5286,7 @@ KeyInfo *sqlite3KeyInfoOfIndex(Parse *pParse, Index *pIdx){
     pKey = sqlite3KeyInfoAlloc(pParse->db, nCol, 0);
   }
   if( pKey ){
+    if( pIdx->onError ) pKey->nUniqField = pIdx->nKeyCol;
     assert( sqlite3KeyInfoIsWriteable(pKey) );
     for(i=0; i<nCol; i++){
       const char *zColl = pIdx->azColl[i];

@@ -2409,6 +2409,7 @@ struct FKey {
 struct KeyInfo {
   u32 nRef;           /* Number of references to this KeyInfo object */
   u8 enc;             /* Text encoding - one of the SQLITE_UTF* values */
+  u16 nUniqField;
   u16 nKeyField;      /* Number of key columns in the index */
   u16 nAllField;      /* Total columns, including key plus others */
   sqlite3 *db;        /* The database connection */

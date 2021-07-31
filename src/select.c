@@ -1388,6 +1388,7 @@ KeyInfo *sqlite3KeyInfoAlloc(sqlite3 *db, int N, int X){
     p->enc = ENC(db);
     p->db = db;
     p->nRef = 1;
+    p->nUniqField = 0;
     memset(&p[1], 0, nExtra);
   }else{
     sqlite3OomFault(db);
