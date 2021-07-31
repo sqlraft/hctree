@@ -29,8 +29,9 @@
 ** Or, if zName is not a system table, zero is returned.
 */
 static int isAlterableTable(Parse *pParse, Table *pTab){
-  if( 0==sqlite3StrNICmp(pTab->zName, "sqlite_", 7) 
+  if( 0==sqlite3StrNICmp(pTab->zName, "sqlite_", 7)
 #ifndef SQLITE_OMIT_VIRTUALTABLE
+   || (pTab->tabFlags & TF_Eponymous)!=0
    || ( (pTab->tabFlags & TF_Shadow)!=0
         && sqlite3ReadOnlyShadowTables(pParse->db)
    )
@@ -426,12 +427,12 @@ void sqlite3AlterFinishAddColumn(Parse *pParse, Token *pColDef){
     db->mDbFlags = savedDbFlags;
   }
 
-  /* Make sure the schema version is at least 3.  But do not upgrade
-  ** from less than 3 to 4, as that will corrupt any preexisting DESC
-  ** index.
-  */
   v = sqlite3GetVdbe(pParse);
   if( v ){
+    /* Make sure the schema version is at least 3.  But do not upgrade
+    ** from less than 3 to 4, as that will corrupt any preexisting DESC
+    ** index.
+    */
     r1 = sqlite3GetTempReg(pParse);
     sqlite3VdbeAddOp3(v, OP_ReadCookie, iDb, r1, BTREE_FILE_FORMAT);
     sqlite3VdbeUsesBtree(v, iDb);
@@ -440,10 +441,25 @@ void sqlite3AlterFinishAddColumn(Parse *pParse, Token *pColDef){
     VdbeCoverage(v);
     sqlite3VdbeAddOp3(v, OP_SetCookie, iDb, BTREE_FILE_FORMAT, 3);
     sqlite3ReleaseTempReg(pParse, r1);
-  }
 
-  /* Reload the table definition */
-  renameReloadSchema(pParse, iDb, INITFLAG_AlterRename);
+    /* Reload the table definition */
+    renameReloadSchema(pParse, iDb, INITFLAG_AlterRename);
+
+    /* Verify that constraints are still satisfied */
+    if( pNew->pCheck!=0
+     || (pCol->notNull && (pCol->colFlags & COLFLAG_GENERATED)!=0)
+    ){
+      sqlite3NestedParse(pParse,
+        "SELECT CASE WHEN quick_check GLOB 'CHECK*'"
+        " THEN raise(ABORT,'CHECK constraint failed')"
+        " ELSE raise(ABORT,'NOT NULL constraint failed')"
+        " END"
+        "  FROM pragma_quick_check(\"%w\",\"%w\")"
+        " WHERE quick_check GLOB 'CHECK*' OR quick_check GLOB 'NULL*'",
+        zTab, zDb
+      );
+    }
+  }
 }
 
 /*
@@ -799,15 +815,30 @@ static int renameUnmapExprCb(Walker *pWalker, Expr *pExpr){
 static void renameWalkWith(Walker *pWalker, Select *pSelect){
   With *pWith = pSelect->pWith;
   if( pWith ){
+    Parse *pParse = pWalker->pParse;
     int i;
+    With *pCopy = 0;
+    assert( pWith->nCte>0 );
+    if( (pWith->a[0].pSelect->selFlags & SF_Expanded)==0 ){
+      /* Push a copy of the With object onto the with-stack. We use a copy
+      ** here as the original will be expanded and resolved (flags SF_Expanded
+      ** and SF_Resolved) below. And the parser code that uses the with-stack
+      ** fails if the Select objects on it have already been expanded and
+      ** resolved.  */
+      pCopy = sqlite3WithDup(pParse->db, pWith);
+      pCopy = sqlite3WithPush(pParse, pCopy, 1);
+    }
     for(i=0; i<pWith->nCte; i++){
       Select *p = pWith->a[i].pSelect;
       NameContext sNC;
       memset(&sNC, 0, sizeof(sNC));
-      sNC.pParse = pWalker->pParse;
-      sqlite3SelectPrep(sNC.pParse, p, &sNC);
+      sNC.pParse = pParse;
+      if( pCopy ) sqlite3SelectPrep(sNC.pParse, p, &sNC);
       sqlite3WalkSelect(pWalker, p);
-      sqlite3RenameExprlistUnmap(pWalker->pParse, pWith->a[i].pCols);
+      sqlite3RenameExprlistUnmap(pParse, pWith->a[i].pCols);
+    }
+    if( pCopy && pParse->pWith==pCopy ){
+      pParse->pWith = pCopy->pOuter;
     }
   }
 }
@@ -834,7 +865,11 @@ static int renameUnmapSelectCb(Walker *pWalker, Select *p){
   Parse *pParse = pWalker->pParse;
   int i;
   if( pParse->nErr ) return WRC_Abort;
-  if( NEVER(p->selFlags & SF_View) ) return WRC_Prune;
+  if( p->selFlags & (SF_View|SF_CopyCte) ){
+    testcase( p->selFlags & SF_View );
+    testcase( p->selFlags & SF_CopyCte );
+    return WRC_Prune;
+  }
   if( ALWAYS(p->pEList) ){
     ExprList *pList = p->pEList;
     for(i=0; i<pList->nExpr; i++){
@@ -918,7 +953,9 @@ static RenameToken *renameTokenFind(
   void *pPtr
 ){
   RenameToken **pp;
-  assert( pPtr!=0 );
+  if( NEVER(pPtr==0) ){
+    return 0;
+  }
   for(pp=&pParse->pRename; (*pp); pp=&(*pp)->pNext){
     if( (*pp)->p==pPtr ){
       RenameToken *pToken = *pp;
@@ -940,7 +977,11 @@ static RenameToken *renameTokenFind(
 ** descend into sub-select statements.
 */
 static int renameColumnSelectCb(Walker *pWalker, Select *p){
-  if( p->selFlags & SF_View ) return WRC_Prune;
+  if( p->selFlags & (SF_View|SF_CopyCte) ){
+    testcase( p->selFlags & SF_View );
+    testcase( p->selFlags & SF_CopyCte );
+    return WRC_Prune;
+  }
   renameWalkWith(pWalker, p);
   return WRC_Continue;
 }
@@ -1134,13 +1175,13 @@ static int renameEditSql(
   const char *zNew,               /* New token text */
   int bQuote                      /* True to always quote token */
 ){
-  int nNew = sqlite3Strlen30(zNew);
-  int nSql = sqlite3Strlen30(zSql);
+  i64 nNew = sqlite3Strlen30(zNew);
+  i64 nSql = sqlite3Strlen30(zSql);
   sqlite3 *db = sqlite3_context_db_handle(pCtx);
   int rc = SQLITE_OK;
   char *zQuot = 0;
   char *zOut;
-  int nQuot = 0;
+  i64 nQuot = 0;
   char *zBuf1 = 0;
   char *zBuf2 = 0;
 
@@ -1470,9 +1511,11 @@ static void renameColumnFunc(
       assert( sParse.pNewTable->pSelect==0 );
       sCtx.pTab = sParse.pNewTable;
       if( bFKOnly==0 ){
-        renameTokenFind(
-            &sParse, &sCtx, (void*)sParse.pNewTable->aCol[iCol].zName
-        );
+        if( iCol<sParse.pNewTable->nCol ){
+          renameTokenFind(
+              &sParse, &sCtx, (void*)sParse.pNewTable->aCol[iCol].zName
+          );
+        }
         if( sCtx.iCol<0 ){
           renameTokenFind(&sParse, &sCtx, (void*)&sParse.pNewTable->iPKey);
         }
@@ -1574,8 +1617,12 @@ static int renameTableSelectCb(Walker *pWalker, Select *pSelect){
   int i;
   RenameCtx *p = pWalker->u.pRename;
   SrcList *pSrc = pSelect->pSrc;
-  if( pSelect->selFlags & SF_View ) return WRC_Prune;
-  if( pSrc==0 ){
+  if( pSelect->selFlags & (SF_View|SF_CopyCte) ){
+    testcase( pSelect->selFlags & SF_View );
+    testcase( pSelect->selFlags & SF_CopyCte );
+    return WRC_Prune;
+  }
+  if( NEVER(pSrc==0) ){
     assert( pWalker->pParse->db->mallocFailed );
     return WRC_Abort;
   }
@@ -2096,33 +2143,50 @@ void sqlite3AlterDropColumn(Parse *pParse, SrcList *pSrc, Token *pName){
     sqlite3OpenTable(pParse, iCur, iDb, pTab, OP_OpenWrite);
     addr = sqlite3VdbeAddOp1(v, OP_Rewind, iCur); VdbeCoverage(v);
     reg = ++pParse->nMem;
-    pParse->nMem += pTab->nCol;
     if( HasRowid(pTab) ){
       sqlite3VdbeAddOp2(v, OP_Rowid, iCur, reg);
+      pParse->nMem += pTab->nCol;
     }else{
       pPk = sqlite3PrimaryKeyIndex(pTab);
+      pParse->nMem += pPk->nColumn;
+      for(i=0; i<pPk->nKeyCol; i++){
+        sqlite3VdbeAddOp3(v, OP_Column, iCur, i, reg+i+1);
+      }
+      nField = pPk->nKeyCol;
     }
+    regRec = ++pParse->nMem;
     for(i=0; i<pTab->nCol; i++){
       if( i!=iCol && (pTab->aCol[i].colFlags & COLFLAG_VIRTUAL)==0 ){
         int regOut;
         if( pPk ){
           int iPos = sqlite3TableColumnToIndex(pPk, i);
           int iColPos = sqlite3TableColumnToIndex(pPk, iCol);
+          if( iPos<pPk->nKeyCol ) continue;
           regOut = reg+1+iPos-(iPos>iColPos);
         }else{
           regOut = reg+1+nField;
         }
-        sqlite3ExprCodeGetColumnOfTable(v, pTab, iCur, i, regOut);
+        if( i==pTab->iPKey ){
+          sqlite3VdbeAddOp2(v, OP_Null, 0, regOut);
+        }else{
+          sqlite3ExprCodeGetColumnOfTable(v, pTab, iCur, i, regOut);
+        }
         nField++;
       }
     }
-    regRec = reg + pTab->nCol;
+    if( nField==0 ){
+      /* dbsqlfuzz 5f09e7bcc78b4954d06bf9f2400d7715f48d1fef */
+      pParse->nMem++;
+      sqlite3VdbeAddOp2(v, OP_Null, 0, reg+1);
+      nField = 1;
+    }
     sqlite3VdbeAddOp3(v, OP_MakeRecord, reg+1, nField, regRec);
     if( pPk ){
       sqlite3VdbeAddOp4Int(v, OP_IdxInsert, iCur, regRec, reg+1, pPk->nKeyCol);
     }else{
       sqlite3VdbeAddOp3(v, OP_Insert, iCur, regRec, reg);
     }
+    sqlite3VdbeChangeP5(v, OPFLAG_SAVEPOSITION);
 
     sqlite3VdbeAddOp2(v, OP_Next, iCur, addr+1); VdbeCoverage(v);
     sqlite3VdbeJumpHere(v, addr);

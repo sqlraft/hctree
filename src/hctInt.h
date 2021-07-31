@@ -54,7 +54,7 @@ int sqlite3HctTreeBegin(HctTree *pTree, int iStmt);
 int sqlite3HctTreeRelease(HctTree *pTree, int iStmt);
 int sqlite3HctTreeRollbackTo(HctTree *pTree, int iStmt);
 
-int sqlite3HctTreeClearOne(HctTree *pTree, u32 iRoot, int *pnRow);
+int sqlite3HctTreeClearOne(HctTree *pTree, u32 iRoot, i64 *pnRow);
 
 int sqlite3HctTreeCsrOpen(HctTree *pTree, u32 iRoot, HctTreeCsr **ppCsr);
 int sqlite3HctTreeCsrClose(HctTreeCsr *pCsr);

@@ -1203,7 +1203,6 @@ int sqlite3BtreeMovetoUnpacked(
   int res1 = 0;
   int res2 = 0;
 
-
   rc = sqlite3HctTreeCsrSeek(pCur->pHctTreeCsr, pIdxKey, intKey, &res1);
   if( rc==SQLITE_OK && pCur->pHctDbCsr ){
     rc = sqlite3HctDbCsrSeek(pCur->pHctDbCsr, pIdxKey, intKey, &res2);
@@ -1266,6 +1265,22 @@ int sqlite3BtreeMovetoUnpacked(
   }
 
   return rc;
+}
+
+int sqlite3BtreeTableMoveto(
+  BtCursor *pCur,          /* The cursor to be moved */
+  i64 intKey,              /* The table key */
+  int biasRight,           /* If true, bias the search to the high end */
+  int *pRes                /* Write search results here */
+){
+  return sqlite3BtreeMovetoUnpacked(pCur, 0, intKey, biasRight, pRes);
+}
+int sqlite3BtreeIndexMoveto(
+  BtCursor *pCur,          /* The cursor to be moved */
+  UnpackedRecord *pIdxKey, /* Unpacked index key */
+  int *pRes                /* Write search results here */
+){
+  return sqlite3BtreeMovetoUnpacked(pCur, pIdxKey, 0, 0, pRes);
 }
 
 void sqlite3BtreeCursorDir(BtCursor *pCur, int eDir){
@@ -1582,7 +1597,7 @@ int sqlite3BtreeCreateTable(Btree *p, Pgno *piTable, int flags){
 ** integer value pointed to by pnChange is incremented by the number of
 ** entries in the table.
 */
-int sqlite3BtreeClearTable(Btree *p, int iTable, int *pnChange){
+int sqlite3BtreeClearTable(Btree *p, int iTable, i64 *pnChange){
   int rc = sqlite3HctTreeClearOne(p->pHctTree, iTable, pnChange);
   if( rc==SQLITE_OK && p->pHctDb ){
     int ii;
@@ -2028,12 +2043,10 @@ i64 sqlite3PagerJournalSizeLimit(Pager *pPager, i64 ii){
   return 0;
 }
 int sqlite3PagerOkToChangeJournalMode(Pager *pPager){
-  assert( 0 );
-  return 1;
+  return 0;
 }
 int sqlite3PagerSetJournalMode(Pager *pPager, int m){
-  assert( 0 );
-  return SQLITE_OK;
+  return m;
 }
 int sqlite3PagerMemUsed(Pager *pPager){
   assert( 0 );

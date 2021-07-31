@@ -890,7 +890,7 @@ void sqlite3HctTreeClear(HctTree *pTree){
   }
 }
 
-int sqlite3HctTreeClearOne(HctTree *pTree, u32 iRoot, int *pnRow){
+int sqlite3HctTreeClearOne(HctTree *pTree, u32 iRoot, i64 *pnRow){
   HctTreeCsr csr;
   int rc = SQLITE_OK;
   int nRow = 0;

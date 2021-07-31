@@ -279,7 +279,7 @@ SQLITE_WSD struct Sqlite3Config sqlite3Config = {
    0,                         /* xVdbeBranch */
    0,                         /* pVbeBranchArg */
 #endif
-#ifdef SQLITE_ENABLE_DESERIALIZE
+#ifndef SQLITE_OMIT_DESERIALIZE
    SQLITE_MEMDB_DEFAULT_MAXSIZE,   /* mxMemdbSize */
 #endif
 #ifndef SQLITE_UNTESTABLE
@@ -347,3 +347,23 @@ const unsigned char sqlite3OpcodeProperty[] = OPFLG_INITIALIZER;
 ** Name of the default collating sequence
 */
 const char sqlite3StrBINARY[] = "BINARY";
+
+/*
+** Standard typenames.  These names must match the COLTYPE_* definitions.
+** Adjust the SQLITE_N_STDTYPE value if adding or removing entries.
+*/
+const unsigned char sqlite3StdTypeLen[] = { 4, 3, 7, 4, 4 };
+const char sqlite3StdTypeAffinity[] = {
+  SQLITE_AFF_BLOB,
+  SQLITE_AFF_INTEGER,
+  SQLITE_AFF_INTEGER,
+  SQLITE_AFF_REAL,
+  SQLITE_AFF_TEXT
+};
+const char *sqlite3StdType[] = {
+  "BLOB",
+  "INT",
+  "INTEGER",
+  "REAL",
+  "TEXT"
+};
