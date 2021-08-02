@@ -1649,6 +1649,7 @@ static int hctDbCsrFindVersion(int *pRc, HctDbCsr *pCsr){
   HctFile *pFile = pCsr->pDb->pFile;
   u32 iOld = 0;
 
+  sqlite3HctFilePageRelease(&pCsr->oldpg);
   if( rc!=SQLITE_OK ) return 1;
   if( pCsr->iCell<0 && pCsr->eEdks==HCT_EDKS_NO ) return 1;    /* EOF */
 
@@ -1656,16 +1657,14 @@ static int hctDbCsrFindVersion(int *pRc, HctDbCsr *pCsr){
     u8 *aPage = pCsr->pg.aOld;
     u8 flags = 0;
     int iOff = hctDbCellOffset(aPage, pCsr->iCell, &flags);
-    int bVisible = 1;
 
     /* Check if the current entry is visible to the client. It is visible
     ** if either (a) there is no TID value, or (b) the TID value corresponds
     ** to a visible CID. If the current entry is visible, return 0 if it is
     ** a delete-key or 1 if it is a real entry.  */
-    if( flags & HCTDB_HAS_TID ){
-      bVisible = hctDbTidIsVisible(pCsr->pDb, hctGetU64(&aPage[iOff]));
-    }
-    if( bVisible ){
+    if( (flags & HCTDB_HAS_TID)==0                              /* (a) */
+     || hctDbTidIsVisible(pCsr->pDb, hctGetU64(&aPage[iOff]))   /* (b) */
+    ){
       return ((flags & HCTDB_IS_DELETE) ? 0 : 1);
     }
 
@@ -1701,15 +1700,33 @@ static int hctDbCsrFindVersion(int *pRc, HctDbCsr *pCsr){
     u64 iTid;
     iOld = hctDbEdksCsrEntry(pCsr->pEdks, 0, &iTid);
 
-    /* If this EDKS entry is visible to the client, return 0. */
+    /* If this EDKS entry is visible to the client, return 0 (because it
+    ** is a delete-key). */
     if( hctDbTidIsVisible(pCsr->pDb, iTid) ) return 0;
   }
 
-  sqlite3HctFilePageRelease(&pCsr->oldpg);
-  rc = sqlite3HctFilePageGetPhysical(pFile, iOld, &pCsr->oldpg);
-  if( rc==SQLITE_OK ){
-    rc = hctDbFindKeyInOldPage(pCsr);
+  while( rc==SQLITE_OK ){
+    sqlite3HctFilePageRelease(&pCsr->oldpg);
+    rc = sqlite3HctFilePageGetPhysical(pFile, iOld, &pCsr->oldpg);
+    if( rc==SQLITE_OK ){
+      rc = hctDbFindKeyInOldPage(pCsr);
+    }
+    if( rc==SQLITE_OK ){
+      u8 *aPage = pCsr->oldpg.aOld;
+      u8 flags = 0;
+      int iOff = hctDbCellOffset(aPage, pCsr->iOldCell, &flags);
+
+      if( (flags & HCTDB_HAS_TID)==0 
+       || hctDbTidIsVisible(pCsr->pDb, hctGetU64(&aPage[iOff]))
+      ){
+        return ((flags & HCTDB_IS_DELETE) ? 0 : 1);
+      }
+
+      if( (flags & HCTDB_HAS_OLD)==0 ) return 0;
+      iOld = hctGetU32(&aPage[iOff+8]);
+    }
   }
+
   *pRc = rc;
   return 1;
 }
