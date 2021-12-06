@@ -1,5 +1,5 @@
-C Do\snot\sallow\sSQLITE_LIMIT_LENGTH\sto\sbe\sset\slower\sthan\s1\sas\san\s\nSQLITE_LIMIT_LENGTH\sof\s0\scauses\slots\sof\sunnecessary\sproblems\sfor\nusers\sof\sthe\ssqlite3_str\sobject.
-D 2021-12-06T15:40:24.187
+C Create\snew\sbranch\snamed\s"ppvar_manage"
+D 2021-12-06T17:23:29.066
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -1933,8 +1933,11 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P 080e72d119b836c49916201bf135445aa7d53cefe40a47437a93448c4d0f41cd
+P 8fd5b8ec4ab9b5554d27f25a4638d56e347eab78b60900f24b15a815d3731330
 R c4a19d6efe230f8d42eba90fbf4c1b2a
-U drh
-Z 860c42735bbc5c02ee56a87604c8521a
+T *branch * ppvar_manage
+T *sym-ppvar_manage *
+T -sym-trunk *
+U larrybr
+Z 85a1d7826a096ef0cc3f9f24eba6ee83
 # Remove this line to create a well-formed Fossil manifest.
