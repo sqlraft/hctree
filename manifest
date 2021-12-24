@@ -1,5 +1,5 @@
-C Fix\sa\sminor\sproblem\sin\sthe\sCLI\sintroduced\sby\s[d156123885abe6bf],\sapparently.
-D 2021-12-24T19:44:11.241
+C Create\snew\sbranch\snamed\s"instr-bidir-more"
+D 2021-12-24T20:51:54.171
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -1934,8 +1934,11 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P 8af8c153f8c3fe16db1c2280571e005838c4ea3c48929ad7660a1686e49ed255
+P 37e6e10f4364f556c7503c80408fc62895cdccdd0372fb2b63aaca02c3a1ee30
 R b3820a24a997ecbc0d96c676f9253e0d
-U drh
-Z 32815daf40ab0d51da0a9e14b1eae912
+T *branch * instr-bidir-more
+T *sym-instr-bidir-more *
+T -sym-trunk *
+U larrybr
+Z 645ead014542e0049c563243f7366740
 # Remove this line to create a well-formed Fossil manifest.
