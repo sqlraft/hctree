@@ -55,8 +55,6 @@ for {set tn 0} {$tn < 20} {incr tn} {
   sqlite3_hct_cas_failure 0 0
 }
 
-
-
 finish_test
 
 

@@ -45,6 +45,12 @@
 typedef struct HctTMapServer HctTMapServer;
 
 /*
+** Each separate database connection holds a handle of this type for
+** the lifetime of the connection. Obtained and later released using
+** functions:
+**
+**     sqlite3HctTMapServerNew()
+**     sqlite3HctTMapServerFree()
 */
 typedef struct HctTMapClient HctTMapClient;
 
@@ -102,5 +108,4 @@ int sqlite3HctTMapEnd(HctTMapClient *p, u64 iCID);
 u64 sqlite3HctTMapActiveTID(HctTMapServer*);
 
 int sqlite3HctTMapNewTID(HctTMapClient *p, u64 iCid, u64 iTid, HctTMap **ppMap);
-
 

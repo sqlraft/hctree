@@ -23,11 +23,6 @@ set nVal   500
 
 expr srand(0)
 
-do_execsql_test 1.0 {
-  CREATE TABLE t1(a INTEGER PRIMARY KEY, b TEXT);
-}
-sqlite3 db2 test.db
-
 proc random_int {nRange} {
   expr int(rand()*$nRange)
 }
@@ -37,6 +32,16 @@ proc random_val {nMax} {
   set nText [expr int(rand()*$nMax)+1]
   return [string range [string repeat "x$nText." $nText] 0 [expr $nText-1]]
 }
+
+foreach {tn ct} {
+  1 { CREATE TABLE t1(a INTEGER PRIMARY KEY, b TEXT) }
+  2 { CREATE TABLE t1(a INT, b TEXT, PRIMARY KEY(a)) WITHOUT ROWID }
+} {
+
+reset_db
+do_execsql_test $tn.0 $ct
+sqlite3 db2 test.db
+catch { array unset T1 }
 
 for {set i 0} {$i < $nRep} {incr i} {
   array unset a
@@ -68,25 +73,37 @@ for {set i 0} {$i < $nRep} {incr i} {
     if {[info exists b($x)]} { set bConflict 1 }
   }
 
-  do_test 1.1.$i.1 {
+  do_test $tn.1.$i.1 {
     execsql BEGIN
     foreach k [array names a] {
       set v $a($k) 
       if {$v==""} {
+        #puts "1: DELETE FROM t1 WHERE a=$k "
         execsql { DELETE FROM t1 WHERE a=$k }
       } else {
+        #puts "1: REPLACE INTO t1 VALUES($k, $v) "
         execsql { REPLACE INTO t1 VALUES($k, $v) }
       }
     }
   } {}
 
-  do_test 1.1.$i.2 {
+  #integrity_check $tn.1.$i.1a
+
+if {0 && $tn==2 && $i==($nRep-1)} {
+execsql_pp { SELECT * FROM hctpgmap natural join hctdb }
+execsql_pp { SELECT * FROM hctpgmap natural join hctentry }
+breakpoint
+}
+
+  do_test $tn.1.$i.2 {
     execsql BEGIN db2
     foreach k [array names b] {
       set v $b($k) 
       if {$v==""} {
+        #puts "2: DELETE FROM t1 WHERE a=$k "
         execsql { DELETE FROM t1 WHERE a=$k } db2
       } else {
+        #puts "2: REPLACE INTO t1 VALUES($k, [string range $v 0 12]..) "
         execsql { REPLACE INTO t1 VALUES($k, $v) } db2
       }
     }
@@ -94,15 +111,20 @@ for {set i 0} {$i < $nRep} {incr i} {
   } {}
 
   if {$bConflict} {
-    do_catchsql_test 1.1.$i.3a {
+    do_catchsql_test $tn.1.$i.3a {
       COMMIT
     } {1 {database is locked}}
     execsql ROLLBACK
   } else {
-    do_catchsql_test 1.1.$i.3b {
+    do_catchsql_test $tn.1.$i.3b {
       COMMIT
     } {0 {}}
   }
+
+if {0 && $tn==2 && $i==($nRep-1)} {
+  execsql_pp { SELECT * FROM hctpgmap natural join hctdb }
+  execsql_pp { SELECT * FROM hctpgmap natural join hctentry }
+}
 
   foreach x [array names b] {
     if {$b($x)==""} {
@@ -125,17 +147,17 @@ for {set i 0} {$i < $nRep} {incr i} {
   foreach x [lsort -integer [array names T1]] {
     lappend res $x $T1($x)
   }
-  do_execsql_test 1.1.$i.4 {
-    SELECT * FROM t1 ORDER BY a
-  } $res
+  do_execsql_test $tn.1.$i.4 { SELECT * FROM t1 ORDER BY a } $res
 
   set res [list]
   foreach x [lsort -integer [array names T1]] {
     lappend res $x
   }
-  do_execsql_test 1.1.$i.5 {
+  do_execsql_test $tn.1.$i.5 {
     SELECT a FROM t1 ORDER BY a
   } $res
+}
+
 }
 
 

@@ -23,6 +23,8 @@ do_execsql_test 1.1 {
   CREATE INDEX t1b ON t1(b);
 }
 
+if 1 {
+
 do_execsql_test 1.2.1 {
   INSERT INTO t1 VALUES(1, 'one');
   INSERT INTO t1 VALUES(2, 'two');
@@ -46,7 +48,6 @@ do_execsql_test 1.5 {
   2 two 3 three 1 one 4 four 
 }
 
-if 1 {
 do_execsql_test 1.6.1 {
   DELETE FROM t1 WHERE a=2;
 }
@@ -64,8 +65,8 @@ do_execsql_test 1.7 {
 }
 }
 
+# execsql_pp { SELECT * FROM hctpgmap natural join hctdb }
 # execsql_pp { SELECT * FROM hctpgmap natural join hctentry }
-
 # execsql_pp { SELECT logical, keys FROM hctpgmap NATURAL JOIN hctdb }
 
 set nRow 5000

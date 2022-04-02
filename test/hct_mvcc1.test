@@ -165,7 +165,50 @@ c2 7.8                   "SELECT b FROM t1 ORDER BY a" {one two three}
 c2 7.9                 "END"
 c2 7.10                  "SELECT b FROM t1 ORDER BY a" {one TOO three}
 
+catch {db2 close}
+reset_db
+sqlite3 db2 test.db
+c1 7.1  "CREATE TABLE t1(a INTEGER PRIMARY KEY, b)"
+c1 7.2  "CREATE UNIQUE INDEX i1 ON t1(b)"
+c1 7.3  {
+  WITH s(i) AS (
+    VALUES(1) UNION ALL SELECT i+1 FROM s WHERE i<100
+  )
+  INSERT INTO t1 SELECT i, hex(randomblob(100)) FROM s;
+}
+c1 7.4  "BEGIN"
+c1 7.5    "UPDATE t1 SET b=hex(randomblob(50)) WHERE a IN (1,2,3,4,5,1000)"
+c1 7.6    "INSERT INTO t1 VALUES(1000, 'ZZ')"
+c2 7.7                           "INSERT INTO t1 VALUES(2000, 'ZZ')"
+c1 7.8  "COMMIT" {database is locked}
 
+do_execsql_test 7.8 {
+  PRAGMA integrity_check
+} {ok}
+
+
+foreach {tn sz} {
+  1 100
+  2 10000
+} {
+  catch {db2 close}
+  reset_db
+  sqlite3 db2 test.db
+  c1 8.$tn.1  "CREATE TABLE t1(a INTEGER PRIMARY KEY, b UNIQUE)"
+  c1 8.$tn.2  "CREATE TABLE t2(a INTEGER PRIMARY KEY, b)"
+  c1 8.$tn.3  "INSERT INTO t1 VALUES(1000, hex(randomblob($sz)))"
+  c1 8.$tn.4  "BEGIN"
+  c1 8.$tn.5    "INSERT INTO t2 VALUES(500, 'hello world')"
+  c2 8.$tn.6                    "INSERT INTO t2 VALUES(500, 'world hello')"
+  c1 8.$tn.7    "DELETE FROM t1 WHERE a=1000"
+  c1 8.$tn.8  "COMMIT" {database is locked}
+  c1 8.$tn.9  "ROLLBACK"
+}
+
+do_execsql_test 8.10 {
+  PRAGMA integrity_check;
+  SELECT a, length(b) FROM t1;
+} {ok 1000 20000}
 
 #execsql_pp { SELECT * FROM (hctpgmap NATURAL JOIN hctdb) NATURAL JOIN hctentry }
 #puts -------------------------

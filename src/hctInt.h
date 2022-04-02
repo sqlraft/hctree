@@ -158,8 +158,6 @@ HctFileGlobal *sqlite3HctFileGlobal(
   void (*xDelete)(HctFileGlobal*)
 );
 
-/* Return the page-size in bytes */
-int sqlite3HctFilePagesize(HctFile *pFile);
 u32 sqlite3HctFileMaxpage(HctFile *pFile);
 
 /*
@@ -182,17 +180,54 @@ struct HctFilePage {
   HctFile *pFile;
 };
 
+int sqlite3HctFilePageNew(HctFile *pFile, u32 iPg, HctFilePage *pPg);
+
 /*
-** Read, write and allocate database pages.
+** Obtain a read-only reference to logical page iPg.
 */
 int sqlite3HctFilePageGet(HctFile *pFile, u32 iPg, HctFilePage *pPg);
-int sqlite3HctFilePageNew(HctFile *pFile, u32 iPg, HctFilePage *pPg);
+
+/*
+** If the page is not already writable (if pPg->aNew==0), make it writable.
+** This involves allocating a new physical page and setting pPg->aNew
+** to point to the buffer.
+*/
 int sqlite3HctFilePageWrite(HctFilePage *pPg);
+
+/*
+** This is a no-op if the page is not writable.
+**
+** If the page is already writable, reverse this so that will not be
+** written out when PageRelease() or PageCommit() is called. This reclaims 
+** the physical page that was allocated by the earlier PageWrite() call
+** and sets pPg->aNew to NULL.
+*/
 void sqlite3HctFilePageUnwrite(HctFilePage *pPg);
+
+/*
+** This is a no-op if the page is not writable.
+**
+** Commit the new version of the page to disk (i.e. set the page-map entry 
+** so that the logical page number now maps to the new version of the page
+** in pPg->aNew). Then make pPg a non-writable reference to the logical
+** page (so that pPg->aOld points to the new version of the page and
+** pPg->aNew is NULL).
+*/
+int sqlite3HctFilePageCommit(HctFilePage *pPg);
+
+/*
+** Release a page reference obtained via an earlier call to 
+** sqlite3HctFilePageGet() or sqlite3HctFilePageNew(). After this call
+** pPg->aOld is NULL.
+**
+** If the page is writable, it is committed (see sqlite3HctFilePageCommit)
+** before the reference is released.
+*/
+int sqlite3HctFilePageRelease(HctFilePage *pPg);
+
+
 void sqlite3HctFilePageZero(HctFilePage *pPg);
 int sqlite3HctFilePageDelete(HctFilePage *pPg);
-int sqlite3HctFilePageRelease(HctFilePage *pPg);
-int sqlite3HctFilePageCommit(HctFilePage *pPg);
 int sqlite3HctFilePageGetPhysical(HctFile *pFile, u32 iPg, HctFilePage *pPg);
 int sqlite3HctFilePageNewPhysical(HctFile *pFile, HctFilePage *pPg);
 
@@ -201,7 +236,6 @@ int sqlite3HctFileFinishTrans(HctFile *pFile);
 
 u64 sqlite3HctFileAllocateTransid(HctFile *pFile);
 u64 sqlite3HctFileAllocateCID(HctFile *pFile);
-u64 sqlite3HctFileGetTransid(HctFile *pFile);
 u64 sqlite3HctFileGetSnapshotid(HctFile *pFile);
 
 HctTMapClient *sqlite3HctFileTMapClient(HctFile*);

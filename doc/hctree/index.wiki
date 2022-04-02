@@ -228,6 +228,17 @@ A commit proceeds as follows:
   #  The VALIDATING flag is cleared in the transaction map. The transaction
      is now committed and its keys may be read by readers.
 
+<div style="border:1px solid black; padding: 1ex; margin: auto; color: green; width:80%">
+Question: Why not just use the TID? What is the point of the extra layer of
+indirection provided by the TID-&gt;CID mapping?
+
+Without the CID, step 4 of the above procedure would have to wait for all
+transactions with TIDs smaller than that of the current transaction to finish
+writing to the database (i.e. steps 1 to 3) before validation could proceed.
+This is awkward to arrange, and causes extra interactions between threads
+committing otherwise entirely unrelated transactions.
+</div>
+
 To rollback, the database client:
 
   #  <p>Sets the transaction map entry for the transaction to ROLLBACK.
@@ -275,17 +286,18 @@ transaction was committed or rolled back.
      the list of keys and ranges that it reads during the transaction,
      it also records the 
      <a href=blink.wiki#overview>page-map value</a> for each logical page that
-     it reads. When validating a key or range of keys, it first comparse the
+     it reads. When validating a key or range of keys, it first compares the
      recorded page-map values with the current page-map value or values. If the
      page-map values have not changed, there is no need to proceed with the
      more expensive key level checks.
 
-  *  <b>This permits less concurrency than some other schemes</b>. This is 
-     largely a consequence of not wishing to validate read-only transactions.
-     The technique used most successfully to increase concurrency relative
-     to the scheme described above is Serializable Snapshot Isolation (SSI):
-     <p> [https://wiki.postgresql.org/wiki/Serializable]
-     <p>Another, similar, method is the Serial Safety Net:
+  *  <b>This permits less theoretical concurrency than some other schemes</b>.
+     This is largely a consequence of not wishing to validate read-only
+     transactions. The technique used most successfully to increase
+     concurrency relative to the scheme described above is Serializable
+     Snapshot Isolation (SSI): 
+     <p> [https://wiki.postgresql.org/wiki/Serializable] <p>Another, similar,
+     method is the Serial Safety Net:
      <p>[https://event.cwi.nl/damon2015/papers/damon15-wang.pdf]
 
 <h3> 2.3.1. Increasing Concurrency </h3>

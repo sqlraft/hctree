@@ -292,7 +292,9 @@ static i64 hctFileSize(int *pRc, int fd){
 static int hctFileTruncate(int *pRc, int fd, i64 sz){
   if( *pRc==SQLITE_OK ){
     int res = ftruncate(fd, (off_t)sz);
-    if( res ) *pRc = SQLITE_IOERR_TRUNCATE;
+    if( res ){
+      *pRc = SQLITE_IOERR_TRUNCATE;
+    }
   }
   return *pRc;
 }
@@ -652,10 +654,6 @@ void sqlite3HctFileClose(HctFile *pFile){
   }
 }
 
-int sqlite3HctFilePagesize(HctFile *pFile){
-  return pFile->szPage;
-}
-
 u32 sqlite3HctFileMaxpage(HctFile *pFile){
   u64 iVal = hctFilePagemapGet(pFile->pMapping, HCT_PAGEMAP_PHYSICAL_EOF);
   return (iVal & 0xFFFFFFFF);
@@ -886,11 +884,6 @@ u64 sqlite3HctFileAllocateTransid(HctFile *pFile){
 }
 u64 sqlite3HctFileAllocateCID(HctFile *pFile){
   u64 iVal = hctFilePagemapIncr(pFile->pMapping, HCT_PAGEMAP_COMMITID, 1);
-  return iVal & HCT_TID_MASK;
-}
-
-u64 sqlite3HctFileGetTransid(HctFile *pFile){
-  u64 iVal = hctFilePagemapGet(pFile->pMapping, HCT_PAGEMAP_TRANSID_EOF);
   return iVal & HCT_TID_MASK;
 }
 

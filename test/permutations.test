@@ -182,15 +182,16 @@ test_suite "hct" -prefix "" -description {
 } -files {
   hct_cas.test hct_misc1.test hct_misc2.test hct_misc3.test
   hct_misc4.test hct_misc5.test hct_misc6.test hct_misc7.test
-  hct_mvcc1.test hct_mvcc2.test hct_vtab1.test 
-  hct_delete.test
+  hct_delete.test hct_misc8.test trans2.test
+  hct_mvcc1.test hct_mvcc2.test
 
   update.test
   select2.test select3.test select4.test select5.test
   select6.test select7.test select8.test select9.test
   selectA.test
-  trans2.test
 }
+
+
   # trans2.test 
   # delete2.test delete3.test
 

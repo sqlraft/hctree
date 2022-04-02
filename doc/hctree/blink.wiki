@@ -41,13 +41,13 @@ the TID of the old version. If the TID indicates that the old version is
 not visible to the writer client, then attempting to write the new version
 is declared a conflict and the transaction rolled back. This, combined with
 the consistent snapshot view, provides something version close to "snapshot
-isolation" concurrency on top of which the systems serializable concurrency
+isolation" concurrency on top of which the system's serializable concurrency
 model is built.
 
 The database does not provide any special support for sub-transactions or
 rollback operations. If it is discovered that a transaction must be rolled
 back after one or more keys have been written into the database, the client
-must edit the database to remove each key using a methods similar to those
+must edit the database to remove each key using methods similar to those
 with which it was inserted in the first place.
 
 The remainder of this page describes the database design at a high level. 
@@ -59,7 +59,7 @@ The distinguishing feature of the database format is the <b>page-map</b>. The
 page-map is a very large array - large enough to contain an entry for each
 page in the database. It's primary purpose is to map between logical and
 physical page numbers (locations in the database file). In order to read the
-data from a page from disk given a logical page number, a client must first
+data for a page from disk given a logical page number, a client must first
 look up the physical page number within the page-map.
 
 The page-map is stored on disk and memory mapped into the database process
@@ -121,7 +121,7 @@ The first key on a page - either a leaf or internal node - is called the
 <b>fencepost key</b>. Once a page has been written to disk, its fencepost key
 never changes and the page will never contain a key smaller than the fencepost.
 The logical page number and the fencepost key value are indelibly coupled for
-all time. Even if the database entry itself is removed, the fencepost key is
+all time<sup>*</sup>. Even if the database entry itself is removed, the fencepost key is
 left on the page. The only exception is the leftmost peer node at each level of
 the tree structure - the fencepost key for this node is implicitly the smallest
 possible value in the keyspace.
@@ -132,6 +132,10 @@ Each child pointer in a parent node is accompanied by a copy of the fencepost
 key for the child node. This is different from the usual b-tree approach of N
 pointers and N-1 keys per internal node page - in this system an internal
 node with N pointer contains N keys.
+
+<sup>*</sup> Not really, of course, but as stated above for now we're
+pretending that physical and logical pages are unlimited resources that 
+need never be reused.
 
 <h2 id=leaves> B-Tree Leaf Node Operations </h2>
 

@@ -17,11 +17,15 @@ set testprefix hct_misc1
 
 if 1 {
 
-do_execsql_test 1.1 { 
+do_execsql_test 1.1a { 
   CREATE TABLE t1(a, b);
+}
+
+do_execsql_test 1.1b { 
   INSERT INTO t1 VALUES(1, 1);
   INSERT INTO t1 VALUES(2, 2);
 }
+
 
 #execsql_pp { SELECT rowid, sql FROM sqlite_schema }
 #execsql_pp { SELECT * FROM hctdb }
@@ -186,6 +190,9 @@ do_test 9.1.0 {
     execsql { INSERT INTO t1 VALUES($i, $t) }
   }
 } {}
+
+# execsql_pp { SELECT * FROM hctpgmap natural join hctdb }
+# execsql_pp { SELECT * FROM hctpgmap natural join hctentry }
 
 #execsql_pp { SELECT * FROM hctdb } 
 #execsql_pp { SELECT x, length(b) FROM t1 WHERE x=2 }
