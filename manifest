@@ -1,5 +1,5 @@
-C Remove\sEDKS\scode.\sToo\shard\sto\sget\sit\sright\swithout\sreal\stest\scases.
-D 2022-04-02T17:12:32.272
+C Update\sdocs\sregarding\slogical\spage\sid\smanagement.
+D 2022-04-09T17:04:17.840
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -38,7 +38,7 @@ F configure e8003577b8c433cf61371d27d4beeca3a3ed37611a504ff5f4d4286923b87d03 x
 F configure.ac 4e4b58b32f88c8da9914a2f2c3158f80e69907eccc019fcc7e3ba14ffd91c640
 F contrib/sqlitecon.tcl 210a913ad63f9f991070821e599d600bd913e0ad
 F doc/F2FS.txt c1d4a0ae9711cfe0e1d8b019d154f1c29e0d3abfe820787ba1e9ed7691160fcd
-F doc/hctree/blink.wiki 9450660193dad122282878b0268f87ba30dc21e56a661873aca5671dd7a0d726
+F doc/hctree/blink.wiki 2adc7831284cdea33801f88222b8a4d9b9d8376c8bda936efb54144a0281efb9
 F doc/hctree/btree_merge1.png 850d83122906431143a3ec302d12ab219a172283fe9cf3e90c820c8767faee8d
 F doc/hctree/btree_redistribute1.png 1666cf0e3a24d3f792a09081665307f79d469f4d10a9f2e08526544c75644a2c
 F doc/hctree/btree_split1.png c90032107fbcb0333f8770d94f5c6102155aa3abb6a2f769f55529969f67ab6d
@@ -1954,8 +1954,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P b84f81851f2d075f4731396bf5f5cc563a0f88c8768e1282df2ad325ac49fbf5
-R 493d59736b17653ab4b52c4ef159d18b
+P e92c6fc395fc5e11217337f69ddaace923fa7c61cf4a5af012c72dfef751e250
+R 909b201b77b41904b1225179729cba7a
 U dan
-Z 1a8ae6e82de4221a714e03c185aff2cd
+Z dd1872032c1127326d62ae8c3ac04276
 # Remove this line to create a well-formed Fossil manifest.
