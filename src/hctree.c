@@ -29,6 +29,7 @@ typedef struct BtNewRoot BtNewRoot;
 */
 struct Btree {
   sqlite3 *db;
+  HctConfig config;               /* Configuration for this connection */
   HctTree *pHctTree;              /* In-memory part of database */
   HctDatabase *pHctDb;            /* On-disk part of db, if any */
   void *pSchema;                  /* Schema memory from sqlite3BtreeSchema() */
@@ -207,13 +208,14 @@ int sqlite3BtreeOpen(
     pNew->iNextRoot = 2;
     pNew->db = db;
     pNew->openFlags = flags;
+    pNew->config.nPageSet = HCT_DEFAULT_NPAGESET;
     rc = sqlite3HctTreeNew(&pNew->pHctTree);
   }else{
     rc = SQLITE_NOMEM;
   }
 
   if( rc==SQLITE_OK && zFilename && zFilename[0] ){
-    rc = sqlite3HctDbOpen(zFilename, &pNew->pHctDb);
+    pNew->pHctDb = sqlite3HctDbOpen(&rc, zFilename, &pNew->config);
   }
 
   if( rc!=SQLITE_OK ){

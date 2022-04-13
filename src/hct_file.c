@@ -31,12 +31,6 @@
 #define HCT_HEADER_PAGESIZE      4096
 
 
-#ifndef HCT_TID_MASK
-# define HCT_TID_MASK     ((((u64)0x00FFFFFF)<<32)|0xFFFFFFFF)
-#endif
-
-#define HCT_PGNO_MASK     (u64)0xFFFFFFFF
-
 /*
 ** Pagemap slots used for special purposes.
 */
@@ -47,8 +41,14 @@
 #define HCT_PAGEMAP_TRANSID_EOF      5
 #define HCT_PAGEMAP_COMMITID         6
 
-#define HCT_PGMAPFLAG_PHYSINUSE  (((u64)0x00000001)<<56)
+#define HCT_PMF_PHYSICAL_IN_USE   (((u64)0x00000001)<<56)
+#define HCT_PMF_LOGICAL_IN_USE    (((u64)0x00000002)<<56)
+#define HCT_PMF_LOGICAL_IN_PARENT (((u64)0x00000004)<<56)
 
+#define HCT_PMF_LOGICAL_NOTFREE \
+    (HCT_PMF_LOGICAL_IN_USE | HCT_PMF_LOGICAL_IN_PARENT)
+
+#define HCT_FIRST_LOGICAL  33
 
 typedef struct HctFileServer HctFileServer;
 typedef struct HctMapping HctMapping;
@@ -120,17 +120,29 @@ struct HctFileServer {
   HctMapping *pMapping;           /* Mapping of pagemap and db pages */
 
   HctTMapServer *pTMapServer;     /* Transaction map server */
+  HctPManServer *pPManServer;     /* Page manager server */
 
   i64 st_dev;                     /* File identification 1 */
   i64 st_ino;                     /* File identification 2 */
   HctFileServer *pServerNext;     /* Next object in g.pServerList list */
 };
 
+/*
+** iCurrentTid:
+**   Most recent value returned by sqlite3HctFileAllocateTransid(). This
+**   is the current TID while the upper layer is writing the database, and
+**   meaningless at other times. Used by this object as the "current TID"
+**   when freeing a page.
+*/
 struct HctFile {
+  HctConfig *pConfig;             /* Connection configuration object */
   HctFileServer *pServer;         /* Connection to global db object */
   HctFile *pFileNext;             /* Next handle opened on same file */
 
   HctTMapClient *pTMapClient;     /* Transaction map client object */
+  HctPManClient *pPManClient;     /* Transaction map client object */
+
+  u64 iCurrentTid;
 
   /* Copies of HctFileServer variables */
   int szPage;
@@ -234,8 +246,8 @@ static int hctFilePagemapSetLogical(
 ){
   while( 1 ){
     u64 i1 = hctFilePagemapGet(p, iSlot);
-    u64 iOld1 = (iOld&~HCT_PGMAPFLAG_PHYSINUSE) | (i1&HCT_PGMAPFLAG_PHYSINUSE);
-    u64 iNew1 = (iNew&~HCT_PGMAPFLAG_PHYSINUSE) | (i1&HCT_PGMAPFLAG_PHYSINUSE);
+    u64 iOld1 = (iOld&~HCT_PMF_PHYSICAL_IN_USE) | (i1&HCT_PMF_PHYSICAL_IN_USE);
+    u64 iNew1 = (iNew&~HCT_PMF_PHYSICAL_IN_USE) | (i1&HCT_PMF_PHYSICAL_IN_USE);
 
     /* If a CAS instruction failure injection is scheduled, return 0
     ** to the caller.  */
@@ -390,16 +402,16 @@ static int hctFileServerInit(HctFileServer *p, const char *zFile){
     **   3. Set the initial CID value (the value that corresponds to the
     **      initial, empty, snapshot). This needs to be non-zero in order
     **      to avoid confusing the upper layer (which uses iSnapshotId==0
-    **      to indicate no snapshot). We set it to 2020.
+    **      to indicate no snapshot). We set it to 5.
     */
     if( rc==SQLITE_OK && hctFilePagemapGet(pMapping, 1)==0 ){
       u8 *a1 = (u8*)hctPagePtr(pMapping, HCT_ROOTPAGE_SCHEMA);
       u8 *a2 = (u8*)hctPagePtr(pMapping, HCT_ROOTPAGE_META);
-      hctFilePagemapSet(pMapping, HCT_PAGEMAP_LOGICAL_EOF, 0, 32);
+      hctFilePagemapSet(pMapping,HCT_PAGEMAP_LOGICAL_EOF,0,HCT_FIRST_LOGICAL-1);
       hctFilePagemapSet(pMapping, HCT_PAGEMAP_PHYSICAL_EOF, 0, 2);
-      hctFilePagemapSet(pMapping, HCT_PAGEMAP_COMMITID, 0, 2020);
-      hctFilePagemapSet(pMapping, 1, 0, 1|HCT_PGMAPFLAG_PHYSINUSE);
-      hctFilePagemapSet(pMapping, 2, 0, 2|HCT_PGMAPFLAG_PHYSINUSE);
+      hctFilePagemapSet(pMapping, HCT_PAGEMAP_COMMITID, 0, 5);
+      hctFilePagemapSet(pMapping, 1, 0, 1|HCT_PMF_PHYSICAL_IN_USE);
+      hctFilePagemapSet(pMapping, 2, 0, 2|HCT_PMF_PHYSICAL_IN_USE);
       sqlite3HctDbRootPageInit(0, a1, p->szPage);
       sqlite3HctDbMetaPageInit(a2, p->szPage);
     }
@@ -407,7 +419,25 @@ static int hctFileServerInit(HctFileServer *p, const char *zFile){
     /* Allocate a transaction map server */
     if( rc==SQLITE_OK ){
       u64 iFirst = hctFilePagemapGet(p->pMapping, HCT_PAGEMAP_TRANSID_EOF);
-      rc = sqlite3HctTMapServerNew(iFirst, &p->pTMapServer);
+      rc = sqlite3HctTMapServerNew((iFirst & HCT_TID_MASK), &p->pTMapServer);
+    }
+
+    /* Initialize the page-manager */
+    p->pPManServer = sqlite3HctPManServerNew(&rc, p);
+    if( rc==SQLITE_OK ){
+      u64 nPg1 = hctFilePagemapGet(pMapping, HCT_PAGEMAP_PHYSICAL_EOF);
+      u64 nPg2 = hctFilePagemapGet(pMapping, HCT_PAGEMAP_LOGICAL_EOF);
+      u32 iPg;
+      u32 nPg = MAX((nPg1 & 0xFFFFFFFF), (nPg2 & 0xFFFFFFFF));
+      for(iPg=1; iPg<=nPg; iPg++){
+        u64 iVal = hctFilePagemapGet(pMapping, iPg);
+        if( (iVal & HCT_PMF_PHYSICAL_IN_USE)==0 && iPg<=nPg1 ){
+          sqlite3HctPManServerInit(&rc, p->pPManServer, iPg, 0);
+        }
+        if( (iVal & HCT_PMF_LOGICAL_NOTFREE)==0 && iPg<=nPg2 ){
+          sqlite3HctPManServerInit(&rc, p->pPManServer, iPg, 1);
+        }
+      }
     }
   }
   return rc;
@@ -454,6 +484,16 @@ static int hctFileGrowMapping(HctFile *pFile, int nChunk){
     sqlite3_mutex_leave(p->pMutex);
   }
   return rc;
+}
+
+/*
+** Grow the mapping so that it is at least large enough to have an entry
+** for slot iSlot. Return SQLITE_OK if successful (or if the mapping does
+** not need to grow), or an SQLite error code otherwise.
+*/
+static int hctFileGrowMappingForSlot(HctFile *pFile, u32 iSlot){
+  assert( iSlot>0 );
+  return hctFileGrowMapping(pFile, 1 + ((iSlot-1) / HCT_DEFAULT_PAGEPERCHUNK));
 }
 
 static int hctFileServerFind(HctFile *pFile, const char *zFile){
@@ -513,16 +553,13 @@ static int hctFileServerFind(HctFile *pFile, const char *zFile){
 /*
 ** Open a connection to the database zFile.
 */
-int sqlite3HctFileOpen(const char *zFile, HctFile **ppFile){
-  int rc = SQLITE_OK;
+HctFile *sqlite3HctFileOpen(int *pRc, const char *zFile, HctConfig *pConfig){
+  int rc = *pRc;
   HctFile *pNew;
 
-  pNew = (HctFile*)sqlite3_malloc(sizeof(*pNew));
-  if( pNew==0 ){
-    rc = SQLITE_NOMEM_BKPT;
-  }else{
-    memset(pNew, 0, sizeof(*pNew));
-
+  pNew = (HctFile*)sqlite3HctMalloc(&rc, sizeof(*pNew));
+  if( pNew ){
+    pNew->pConfig = pConfig;
     rc = hctFileServerFind(pNew, zFile);
     if( rc==SQLITE_OK ){
       HctFileServer *pServer = pNew->pServer;
@@ -538,6 +575,11 @@ int sqlite3HctFileOpen(const char *zFile, HctFile **ppFile){
       if( rc==SQLITE_OK ){
         sqlite3HctTMapClientNew(pServer->pTMapServer, &pNew->pTMapClient);
       }
+      if( rc==SQLITE_OK ){
+        pNew->pPManClient = sqlite3HctPManClientNew(
+            &rc, pConfig, pServer->pPManServer, pNew
+        );
+      }
     }else{
       sqlite3_free(pNew);
       pNew = 0;
@@ -547,10 +589,11 @@ int sqlite3HctFileOpen(const char *zFile, HctFile **ppFile){
       sqlite3HctFileClose(pNew);
       pNew = 0;
     }
-    *ppFile = pNew;
   }
 
-  return rc;
+  assert( (rc==SQLITE_OK)==(pNew!=0) );
+  *pRc = rc;
+  return pNew;
 }
 
 HctTMapClient *sqlite3HctFileTMapClient(HctFile *pFile){
@@ -592,6 +635,11 @@ void sqlite3HctFileClose(HctFile *pFile){
 
     /* Release the transaction map client */
     sqlite3HctTMapClientFree(pFile->pTMapClient);
+    pFile->pTMapClient = 0;
+
+    /* Release the page-manager client */
+    sqlite3HctPManClientFree(pFile->pPManClient);
+    pFile->pPManClient = 0;
 
     /* Release the reference to the HctMapping object, if any */
     hctMappingUnref(pFile->pMapping);
@@ -623,6 +671,9 @@ void sqlite3HctFileClose(HctFile *pFile){
 
       sqlite3HctTMapServerFree(pDel->pTMapServer);
       pDel->pTMapServer = 0;
+
+      sqlite3HctPManServerFree(pDel->pPManServer);
+      pDel->pPManServer = 0;
 
       pDel->pMapping = 0;
       for(i=0; i<pMapping->nChunk; i++){
@@ -688,11 +739,11 @@ static int hctFileTmpAllocate(HctFile *pFile, int eType, u32 *piNew){
   return rc;
 }
 
+/*
+** Set the flags in mask within page-map slot iSlot.
+*/
 static int hctFileSetFlag(HctFile *pFile, u32 iSlot, u64 mask){
-  int rc;
-
-  assert( iSlot>0 );
-  rc = hctFileGrowMapping(pFile, 1 + ((iSlot-1) / HCT_DEFAULT_PAGEPERCHUNK));
+  int rc = hctFileGrowMappingForSlot(pFile, iSlot);
   if( rc==SQLITE_OK ){
     HctMapping *pMapping = pFile->pMapping;
     while( 1 ){
@@ -702,6 +753,23 @@ static int hctFileSetFlag(HctFile *pFile, u32 iSlot, u64 mask){
   }
   return rc;
 }
+
+/*
+** Clear the flags in mask within page-map slot iSlot.
+*/
+static int hctFileClearFlag(HctFile *pFile, u32 iSlot, u64 mask){
+  int rc = hctFileGrowMappingForSlot(pFile, iSlot);
+  if( rc==SQLITE_OK ){
+    HctMapping *pMapping = pFile->pMapping;
+    while( 1 ){
+      u64 iVal = hctFilePagemapGet(pMapping, iSlot);
+      if( hctFilePagemapSet(pMapping, iSlot, iVal, iVal & ~mask) ) break;
+    }
+  }
+  return rc;
+}
+
+
 
 int sqlite3HctFileRootNew(HctFile *pFile, u32 *piRoot){
   return hctFileTmpAllocate(pFile, HCT_PAGEMAP_LOGICAL_EOF, piRoot);
@@ -752,7 +820,7 @@ int sqlite3HctFilePageGetPhysical(HctFile *pFile, u32 iPg, HctFilePage *pPg){
   assert( iPg!=0 );
   memset(pPg, 0, sizeof(*pPg));
   rc = hctFilePagemapGetGrow(pFile, iPg, &iVal);
-  if( rc==SQLITE_OK && (iVal & HCT_PGMAPFLAG_PHYSINUSE) ){
+  if( rc==SQLITE_OK ){
     pPg->iPagemap = iVal;
     pPg->aOld = (u8*)hctPagePtr(pFile->pMapping, iPg);
   }
@@ -760,20 +828,68 @@ int sqlite3HctFilePageGetPhysical(HctFile *pFile, u32 iPg, HctFilePage *pPg){
 }
 
 /*
+** This function makes the page object pPg writable if it is not already
+** so. Specifically, it allocates a new physical page and sets the
+** following variables accordingly:
+**
+**   HctFilePage.iNewPg
+**   HctFilePage.aNew
+*/
+static void hctFilePageWrite(int *pRc, HctFilePage *pPg){
+  if( pPg->aNew==0 ){
+    u32 iNewPg = sqlite3HctPManAllocPg(pRc, pPg->pFile->pPManClient, 0);
+    if( iNewPg ){
+      hctFileSetFlag(pPg->pFile, iNewPg, HCT_PMF_PHYSICAL_IN_USE);
+      pPg->iNewPg = iNewPg;
+      pPg->aNew = (u8*)hctPagePtr(pPg->pFile->pMapping, iNewPg);
+    }
+  }
+}
+
+static int hctFilePageFlush(HctFilePage *pPg){
+  int rc = SQLITE_OK;
+  if( pPg->aNew ){
+    HctMapping *pMap = pPg->pFile->pMapping;
+    u32 iOld = pPg->iPagemap & HCT_PGNO_MASK;
+    if( !hctFilePagemapSetLogical(pMap, pPg->iPg, iOld, pPg->iNewPg) ){
+      rc = SQLITE_LOCKED;
+    }else{
+      if( iOld ){
+        u64 iTid = pPg->pFile->iCurrentTid;
+        sqlite3HctPManFreePg(&rc, pPg->pFile->pPManClient, iTid, iOld, 0);
+        hctFileClearFlag(pPg->pFile, iOld, HCT_PMF_PHYSICAL_IN_USE);
+      }
+      pPg->iPagemap = (pPg->iPagemap & ~HCT_PGNO_MASK) | pPg->iNewPg;
+      pPg->aOld = pPg->aNew;
+      pPg->aNew = 0;
+    }
+  }
+  return rc;
+}
+
+int sqlite3HctFilePageCommit(HctFilePage *pPg){
+  assert( pPg->iPg );
+  return hctFilePageFlush(pPg);
+}
+
+int sqlite3HctFilePageRelease(HctFilePage *pPg){
+  int rc = SQLITE_OK;
+  if( pPg->iPg ) rc = hctFilePageFlush(pPg);
+  memset(pPg, 0, sizeof(*pPg));
+  return rc;
+}
+
+
+
+/*
 ** Allocate a new physical page and set (*pPg) to refer to it. The new
 ** physical page number is available in HctFilePage.iNewPg.
 */
 int sqlite3HctFilePageNewPhysical(HctFile *pFile, HctFilePage *pPg){
-  int rc;
-  u32 iNewPg;                     /* New physical page id */
+  int rc = SQLITE_OK;
   memset(pPg, 0, sizeof(*pPg));
-  rc = hctFileTmpAllocate(pFile, HCT_PAGEMAP_PHYSICAL_EOF, &iNewPg);
-  if( rc==SQLITE_OK ){
-    rc = hctFileSetFlag(pFile, iNewPg, HCT_PGMAPFLAG_PHYSINUSE);
-    pPg->iNewPg = iNewPg;
-    pPg->aNew = (u8*)hctPagePtr(pFile->pMapping, iNewPg);
-    pPg->pFile = pFile;
-  }
+  pPg->pFile = pFile;
+  hctFilePageWrite(&rc, pPg);
   return rc;
 }
 
@@ -784,7 +900,6 @@ int sqlite3HctFilePageNewPhysical(HctFile *pFile, HctFilePage *pPg){
 */
 int sqlite3HctFilePageNew(HctFile *pFile, u32 iPg, HctFilePage *pPg){
   int rc = SQLITE_OK;             /* Return code */
-  u32 iNewPg;                     /* New physical page id */
   u32 iLPg = iPg;
 
   if( iPg==0 ){
@@ -792,15 +907,10 @@ int sqlite3HctFilePageNew(HctFile *pFile, u32 iPg, HctFilePage *pPg){
   }
   if( rc==SQLITE_OK ){
     memset(pPg, 0, sizeof(*pPg));
-    rc = hctFileTmpAllocate(pFile, HCT_PAGEMAP_PHYSICAL_EOF, &iNewPg);
-    if( rc==SQLITE_OK ){
-      rc = hctFileSetFlag(pFile, iNewPg, HCT_PGMAPFLAG_PHYSINUSE);
-      pPg->iPg = iLPg;
-      pPg->iNewPg = iNewPg;
-      pPg->aNew = (u8*)hctPagePtr(pFile->pMapping, iNewPg);
-      pPg->iPagemap = hctFilePagemapGet(pFile->pMapping, iLPg);
-      pPg->pFile = pFile;
-    }
+    pPg->pFile = pFile;
+    pPg->iPg = iLPg;
+    pPg->iPagemap = hctFilePagemapGet(pFile->pMapping, iLPg);
+    hctFilePageWrite(&rc, pPg);
   }
 
   return rc;
@@ -824,50 +934,13 @@ void sqlite3HctFilePageZero(HctFilePage *pPg){
 
 int sqlite3HctFilePageWrite(HctFilePage *pPg){
   int rc = SQLITE_OK;             /* Return code */
-
-  if( pPg->aNew==0 ){
-    u32 iNewPg;                     /* New physical page id */
-    rc = hctFileTmpAllocate(pPg->pFile, HCT_PAGEMAP_PHYSICAL_EOF, &iNewPg);
-    if( rc==SQLITE_OK ){
-      hctFileSetFlag(pPg->pFile, iNewPg, HCT_PGMAPFLAG_PHYSINUSE);
-      pPg->iNewPg = iNewPg;
-      pPg->aNew = (u8*)hctPagePtr(pPg->pFile->pMapping, iNewPg);
-    }
-  }
-
+  hctFilePageWrite(&rc, pPg);
   return rc;
 }
 
 int sqlite3HctFilePageDelete(HctFilePage *pPg){
   assert( 0 );
   return SQLITE_OK;
-}
-
-int sqlite3HctFilePageRelease(HctFilePage *pPg){
-  int rc = SQLITE_OK;
-  if( pPg->aNew && pPg->iPg ){
-    HctMapping *pMap = pPg->pFile->pMapping;
-    if( !hctFilePagemapSetLogical(pMap, pPg->iPg, pPg->iPagemap, pPg->iNewPg) ){
-      rc = SQLITE_LOCKED;
-    }
-  }
-  memset(pPg, 0, sizeof(*pPg));
-  return rc;
-}
-
-int sqlite3HctFilePageCommit(HctFilePage *pPg){
-  int rc = SQLITE_OK;
-  if( pPg->aNew ){
-    HctMapping *pMap = pPg->pFile->pMapping;
-    if( !hctFilePagemapSetLogical(pMap, pPg->iPg, pPg->iPagemap, pPg->iNewPg) ){
-      rc = SQLITE_LOCKED;
-    }else{
-      pPg->iPagemap = pPg->iNewPg;
-      pPg->aOld = pPg->aNew;
-      pPg->aNew = 0;
-    }
-  }
-  return rc;
 }
 
 u64 sqlite3HctFileStartTrans(HctFile *pFile){
@@ -880,7 +953,8 @@ u64 sqlite3HctFileStartTrans(HctFile *pFile){
 
 u64 sqlite3HctFileAllocateTransid(HctFile *pFile){
   u64 iVal = hctFilePagemapIncr(pFile->pMapping, HCT_PAGEMAP_TRANSID_EOF, 1);
-  return iVal & HCT_TID_MASK;
+  pFile->iCurrentTid = (iVal & HCT_TID_MASK);
+  return pFile->iCurrentTid;
 }
 u64 sqlite3HctFileAllocateCID(HctFile *pFile){
   u64 iVal = hctFilePagemapIncr(pFile->pMapping, HCT_PAGEMAP_COMMITID, 1);
@@ -899,6 +973,37 @@ int sqlite3HctFileFinishTrans(HctFile *pFile){
 int sqlite3HctFilePgsz(HctFile *pFile){
   return pFile->szPage;
 }
+
+/*
+** Return the current "safe" TID value.
+*/
+u64 sqlite3HctFileSafeTID(HctFile *pFile){
+  return sqlite3HctTMapSafeTID(pFile->pTMapClient);
+}
+
+/*
+** Allocate a block of nPg physical or logical page ids from the 
+** end of the current range.
+*/
+u32 sqlite3HctFilePageRangeAlloc(HctFile *pFile, int bLogical, int nPg){
+  u32 iSlot = HCT_PAGEMAP_PHYSICAL_EOF + bLogical;
+  u64 iNew = 0;
+
+  assert( bLogical==0 || iSlot==HCT_PAGEMAP_LOGICAL_EOF );
+  assert( bLogical!=0 || iSlot==HCT_PAGEMAP_PHYSICAL_EOF );
+
+  /* Increment the selected slot by nPg. The returned value, iNew, is the 
+  ** new value of the slot - the last page in the range allocated. */
+  iNew = hctFilePagemapIncr(pFile->pMapping, iSlot, nPg);
+
+  /* Return the first page number in the range of nPg allocated */
+  return (iNew+1 - nPg);
+}
+
+
+/*************************************************************************
+** Beginning of vtab implemetation.
+*************************************************************************/
 
 
 /* 

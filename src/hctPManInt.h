@@ -25,8 +25,18 @@
 */
 typedef struct HctPManServer HctPManServer;
 
-HctPManServer *sqlite3HctPManServerNew(int *pRc);
+HctPManServer *sqlite3HctPManServerNew(
+  int *pRc,                       /* IN/OUT: Error code */
+  HctFileServer *pFileServer      /* Associated file-server object */
+);
 void sqlite3HctPManServerFree(HctPManServer*);
+
+/*
+** This function is called multiple times while scanning the page-map
+** during initialization. To load the initial set of free physical and
+** logical pages.
+*/
+void sqlite3HctPManServerInit(int *pRc, HctPManServer*, u32 iPg, int bLogical);
 
 /*
 ** Each separate database connection holds a handle of this type for
@@ -34,21 +44,20 @@ void sqlite3HctPManServerFree(HctPManServer*);
 */
 typedef struct HctPManClient HctPManClient;
 
-HctPManClient *sqlite3HctPManClientNew(int *pRc, HctPManServer*, HctFile*);
+HctPManClient *sqlite3HctPManClientNew(
+  int *pRc, 
+  HctConfig*, 
+  HctPManServer*, 
+  HctFile*
+);
 void sqlite3HctPManClientFree(HctPManClient*);
 
 /*
 ** Allocate a new logical or physical page.
-**
-** Parameter iCid is the smallest CID value that any current or future
-** may read the snapshot of. In other words, the caller is guaranteeing that
-** no reader, current or future, will ever read from a snapshot with an
-** id smaller than iCid.
 */
 u32 sqlite3HctPManAllocPg(
   int *pRc,                       /* IN/OUT: Error code */
   HctPManClient *p,               /* page-manager client handle */
-  i64 iCid,
   int bLogical
 );
 
@@ -70,11 +79,6 @@ void sqlite3HctPManFreePg(
   u32 iPg,                        /* Page number */
   int bLogical                    /* True for logical, false for physical */
 );
-
-
-
-
-
 
 
 

@@ -103,7 +103,7 @@ struct HctTMapClient {
 struct HctTMapServer {
   sqlite3_mutex *pMutex;          /* Mutex to protect this object */
   int nTidStep;
-  u64 iMinMinTid;                 /* Smallest active iMinTid value */
+  u64 iMinMinTid;                 /* Smallest iMinTid value in pList */
   HctTMapFull *pList;             /* List of tmaps. Newest first */
 };
 
@@ -137,6 +137,7 @@ static int hctTMapInit(HctTMapServer *p, u64 iFirstTid){
   HctTMapFull *pNew;
 
   assert( p->pList==0 );
+  assert( (iFirstTid & HCT_TID_MASK)==iFirstTid );
 
   pNew = (HctTMapFull*)sqlite3MallocZero(sizeof(HctTMapFull) * sizeof(u64*)*3);
   if( pNew==0 ){
@@ -291,7 +292,7 @@ static void hctTMapDropRef(HctTMapServer *p, HctTMapRef *pRef){
       }
       *pp = pMap->pNext;
       if( pMap->pNext==0 ){
-        p->iMinMinTid = iVal;
+        AtomicStore(&p->iMinMinTid, iVal);
       }
       sqlite3_free(pMap);
     }
@@ -466,8 +467,8 @@ static HctTMapFull *hctTMapNewObject(
 /*
 ** Return the largest TID for which it is safe to reuse freed pages.
 */
-u64 sqlite3HctTMapActiveTID(HctTMapServer *p){
-  return AtomicLoad(&p->iMinMinTid);
+u64 sqlite3HctTMapSafeTID(HctTMapClient *p){
+  return AtomicLoad(&p->pServer->iMinMinTid);
 }
 
 /*
@@ -490,7 +491,9 @@ int sqlite3HctTMapNewTID(
   int rc = SQLITE_OK;
   HctTMapFull *pMap = p->aRef[p->iRef].pMap;
   int nTidStep = p->pServer->nTidStep;
-  int nMapReq = ((iTid - pMap->m.iFirstTid + nTidStep - 1) / nTidStep);
+  int nMapReq = (
+      (iTid - pMap->m.iFirstTid + HCT_TMAP_PAGESIZE - 1) / HCT_TMAP_PAGESIZE
+  );
 
   assert( p->eState!=HCT_CLIENT_NONE );
   assert( (p->aRef[p->iRef].refMask & HCT_TMAPREF_CLIENT) );

@@ -105,7 +105,7 @@ int sqlite3HctTMapEnd(HctTMapClient *p, u64 iCID);
 ** or smaller than the returned value may now be reused without disturbing
 ** current or future readers.
 */
-u64 sqlite3HctTMapActiveTID(HctTMapServer*);
+u64 sqlite3HctTMapSafeTID(HctTMapClient*);
 
 int sqlite3HctTMapNewTID(HctTMapClient *p, u64 iCid, u64 iTid, HctTMap **ppMap);
 

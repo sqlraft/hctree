@@ -7,11 +7,18 @@ typedef unsigned int u32;
 
 # define HctAtomicStore(PTR,VAL)  __atomic_store_n((PTR),(VAL),__ATOMIC_RELAXED)
 
-#include <hctTMapInt.h>
 
+typedef struct HctConfig HctConfig;
 struct HctConfig {
-  int nMaxEdksFan;
+  int nPageSet;                   /* Used by hct_pman.c */
 };
+
+#define HCT_TID_MASK  ((((u64)0x00FFFFFF) << 32)|0xFFFFFFFF)
+#define HCT_PGNO_MASK ((u64)0xFFFFFFFF)
+
+#define HCT_DEFAULT_NPAGESET 64
+
+#include <hctTMapInt.h>
 
 /*************************************************************************
 ** Interface to code in hct_tree.c
@@ -94,7 +101,7 @@ void sqlite3HctTreeClear(HctTree *pTree);
 typedef struct HctDatabase HctDatabase;
 typedef struct HctDbCsr HctDbCsr;
 
-int sqlite3HctDbOpen(const char *zFile, HctDatabase **ppDb);
+HctDatabase *sqlite3HctDbOpen(int*, const char *zFile, HctConfig*);
 void sqlite3HctDbClose(HctDatabase *pDb);
 
 int sqlite3HctDbRootNew(HctDatabase *p, u32 *piRoot);
@@ -141,12 +148,16 @@ int sqlite3HctDbIsIndex(HctDatabase *pDb, u32 iRoot, int *pbIndex);
 ** Interface to code in hct_file.c
 */
 
+
+typedef struct HctFileServer HctFileServer;
 typedef struct HctFile HctFile;
+
 HctFile *sqlite3HctDbFile(HctDatabase *pDb);
 
-int sqlite3HctFileOpen(
+HctFile *sqlite3HctFileOpen(
+  int *pRc,
   const char *zFile, 
-  HctFile **ppFile
+  HctConfig *pConfig
 );
 void sqlite3HctFileClose(HctFile *pFile);
 
@@ -245,3 +256,12 @@ HctDatabase *sqlite3HctDbFind(sqlite3*, int);
 int sqlite3HctFilePgsz(HctFile *pFile);
 int sqlite3HctFileVtabInit(sqlite3 *db);
 
+u64 sqlite3HctFileSafeTID(HctFile*);
+u32 sqlite3HctFilePageRangeAlloc(HctFile*, int bLogical, int nPg);
+
+#include <hctPManInt.h>
+
+/*************************************************************************
+** Utility functions:
+*/
+void *sqlite3HctMalloc(int *pRc, i64 nByte);

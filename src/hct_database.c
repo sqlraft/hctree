@@ -133,6 +133,7 @@ struct HctDbWriter {
 struct HctDatabase {
   HctFile *pFile;
   HctDbGlobal *pGlobal;           /* Shared by all connections to same db */
+  HctConfig *pConfig;
   int pgsz;                       /* Page size in bytes */
   u8 *aTmp;                       /* Temp buffer pgsz bytes in size */
   HctDbCsr *pCsrList;             /* List of open cursors */
@@ -295,15 +296,17 @@ static u64 hctDbTMapLookup(HctDatabase *pDb, u64 iTid){
   return 0;
 }
 
-int sqlite3HctDbOpen(const char *zFile, HctDatabase **ppDb){
-  int rc = SQLITE_OK;
-  HctDatabase *pNew;
+HctDatabase *sqlite3HctDbOpen(
+  int *pRc,
+  const char *zFile, 
+  HctConfig *pConfig
+){
+  int rc = *pRc;
+  HctDatabase *pNew = 0;
 
-  pNew = (HctDatabase*)sqlite3MallocZero(sizeof(*pNew));
+  pNew = (HctDatabase*)sqlite3HctMalloc(&rc, sizeof(*pNew));
   if( pNew ){
-    rc = sqlite3HctFileOpen(zFile, &pNew->pFile);
-  }else{
-    rc = SQLITE_NOMEM_BKPT;
+    pNew->pFile = sqlite3HctFileOpen(&rc, zFile, pConfig);
   }
 
   if( rc==SQLITE_OK ){
@@ -314,8 +317,8 @@ int sqlite3HctDbOpen(const char *zFile, HctDatabase **ppDb){
       rc = SQLITE_NOMEM_BKPT;
     }else{
       pNew->pgsz = sqlite3HctFilePgsz(pNew->pFile);
-      pNew->aTmp = (u8*)sqlite3_malloc(pNew->pgsz);
-      if( pNew->aTmp==0 ) rc = SQLITE_NOMEM_BKPT;
+      pNew->aTmp = (u8*)sqlite3HctMalloc(&rc, pNew->pgsz);
+      pNew->pConfig = pConfig;
     }
   }
 
@@ -326,8 +329,8 @@ int sqlite3HctDbOpen(const char *zFile, HctDatabase **ppDb){
     pNew->pgsz = sqlite3HctFilePgsz(pNew->pFile);
   }
 
-  *ppDb = pNew;
-  return rc;
+  *pRc = rc;
+  return pNew;
 }
 
 void sqlite3HctDbClose(HctDatabase *p){
