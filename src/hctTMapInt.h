@@ -29,10 +29,10 @@
 /*
 ** Transaction state - stored in the MSB of the 8-byte transaction map entry.
 */
-#define HCT_TMAP_WRITING     (((u64)0x01) << 56)
-#define HCT_TMAP_VALIDATING  (((u64)0x02) << 56)
-#define HCT_TMAP_ROLLBACK    (((u64)0x03) << 56)
-#define HCT_TMAP_COMMITTED   (((u64)0x04) << 56)
+#define HCT_TMAP_WRITING     (((u64)0x00) << 56)
+#define HCT_TMAP_VALIDATING  (((u64)0x01) << 56)
+#define HCT_TMAP_ROLLBACK    (((u64)0x02) << 56)
+#define HCT_TMAP_COMMITTED   (((u64)0x03) << 56)
 
 #define HCT_TMAP_STATE_MASK  (((u64)0x07) << 56)
 #define HCT_TMAP_CID_MASK   ~(((u64)0x07) << 56)

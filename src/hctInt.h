@@ -109,7 +109,6 @@ int sqlite3HctDbRootFree(HctDatabase *p, u32 iRoot);
 
 int sqlite3HctDbRootInit(HctDatabase *p, int bIndex, u32 iRoot);
 void sqlite3HctDbRootPageInit(int bIndex, u8 *aPage, int szPage);
-void sqlite3HctDbMetaPageInit(u8 *aPage, int szPage);
 int sqlite3HctDbGetMeta(HctDatabase *p, u8 *aBuf, int nBuf);
 
 int sqlite3HctDbInsert(
@@ -237,7 +236,6 @@ int sqlite3HctFilePageCommit(HctFilePage *pPg);
 int sqlite3HctFilePageRelease(HctFilePage *pPg);
 
 
-void sqlite3HctFilePageZero(HctFilePage *pPg);
 int sqlite3HctFilePageDelete(HctFilePage *pPg);
 int sqlite3HctFilePageGetPhysical(HctFile *pFile, u32 iPg, HctFilePage *pPg);
 int sqlite3HctFilePageNewPhysical(HctFile *pFile, HctFilePage *pPg);
@@ -258,6 +256,8 @@ int sqlite3HctFileVtabInit(sqlite3 *db);
 
 u64 sqlite3HctFileSafeTID(HctFile*);
 u32 sqlite3HctFilePageRangeAlloc(HctFile*, int bLogical, int nPg);
+
+int sqlite3HctFileClearInUse(HctFilePage *pPg);
 
 #include <hctPManInt.h>
 

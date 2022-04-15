@@ -17,15 +17,49 @@ set testprefix hct_pman1
 
 do_execsql_test 1.0 {
   CREATE TABLE t1(a INTEGER PRIMARY KEY, b BLOB);
+  CREATE INDEX i1 ON t1(b);
+}
+
+proc dumpdb {} {
+  execsql_pp { 
+    SELECT * FROM hctpgmap, hctdb 
+      WHERE logical_in_use AND hctpgmap.pgno=hctdb.pgno
+  }
+  if 0 {
+  execsql_pp { 
+    SELECT * FROM hctpgmap, hctentry 
+      WHERE logical_in_use AND hctpgmap.pgno=hctentry.pgno
+  }
+  }
+
+  execsql_pp {
+    WITH map AS (
+      SELECT * FROM hctpgmap, hctdb 
+      WHERE logical_in_use AND hctpgmap.pgno=hctdb.pgno
+    ),
+
+    chain(s, l, c) AS (
+      SELECT logical, logical, logical FROM map WHERE logical NOT IN (
+        SELECT peer FROM map
+      ) 
+      UNION ALL
+      SELECT s, peer, c || '->' || peer FROM chain, map WHERE l=logical
+    )
+
+    SELECT * FROM chain WHERE l NOT IN (
+      SELECT logical FROM map
+    )
+  }
+
 }
 
 set nStep 1000
-for {set ii 0} {$ii < $nStep} {incr ii} {
+for {set ii 1} {$ii <= $nStep} {incr ii} {
   do_execsql_test 1.$ii {
-    INSERT INTO t1 VALUES($ii, randomblob(100));
+    REPLACE INTO t1 VALUES(($ii % 100), randomblob(100));
   }
+  integrity_check 1.$ii.ic
 }
-
 
 finish_test
 

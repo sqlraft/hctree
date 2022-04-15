@@ -283,17 +283,19 @@ static void hctDbFreeGlobal(HctFileGlobal *pFileGlobal){
   HctDbGlobal *p = (HctDbGlobal*)pFileGlobal;
 }
 
-static u64 hctDbTMapLookup(HctDatabase *pDb, u64 iTid){
+static u64 hctDbTMapLookup(HctDatabase *pDb, u64 iTid, u64 *peState){
+  u64 iVal = 0;
   HctTMap *pTmap = pDb->pTmap;
   int iMap = (iTid - pTmap->iFirstTid) / HCT_TMAP_PAGESIZE;
 
   assert( iMap<pTmap->nMap );
   if( iMap>=0 && iMap<pTmap->nMap ){
     int iOff = (iTid - pTmap->iFirstTid) % HCT_TMAP_PAGESIZE;
-    return pTmap->aaMap[iMap][iOff];
+    iVal = AtomicLoad(&pTmap->aaMap[iMap][iOff]);
   }
 
-  return 0;
+  *peState = (iVal & HCT_TMAP_STATE_MASK);
+  return (iVal & HCT_TMAP_CID_MASK);
 }
 
 HctDatabase *sqlite3HctDbOpen(
@@ -406,23 +408,6 @@ static void hctDbRootPageInit(
   }
 }
 
-void sqlite3HctDbMetaPageInit(u8 *aPage, int szPage){
-  HctDbIntkeyLeaf *pPg = (HctDbIntkeyLeaf*)aPage;
-  HctDbIntkeyEntry *pEntry = &pPg->aEntry[0];
-  const int nRecord = 8 + 4 + SQLITE_N_BTREE_META*4;
-  int nFree;
-
-  memset(aPage, 0, szPage);
-  pPg->pg.hdrFlags = HCT_PAGETYPE_INTKEY|HCT_PAGETYPE_LEFTMOST;
-  pPg->pg.nEntry = 1;
-  nFree = szPage - sizeof(HctDbIntkeyLeaf) - sizeof(HctDbIntkeyEntry) - nRecord;
-  pPg->hdr.nFreeBytes = pPg->hdr.nFreeGap = nFree;
-  pEntry->iKey = 0;
-  pEntry->nSize = SQLITE_N_BTREE_META*4;
-  pEntry->iOff = szPage - nRecord;
-  pEntry->flags = HCTDB_HAS_TID | HCTDB_HAS_OLD;
-}
-
 static void hctDbSnapshotOpen(HctDatabase *pDb){
   assert( (pDb->iSnapshotId==0)==(pDb->pTmap==0) );
   if( pDb->iSnapshotId==0 ){
@@ -445,6 +430,53 @@ static u32 hctGetU32(const u8 *a){
   return ret;
 }
 
+/*
+** Return true if TID iTid maps to a commit-id visible to the current
+** client. Or false otherwise.
+*/
+static int hctDbTidIsVisible(HctDatabase *pDb, u64 iTid){
+
+  while( 1 ){
+    u64 eState = 0;
+    u64 iCid = hctDbTMapLookup(pDb, iTid, &eState);
+    if( eState==HCT_TMAP_WRITING || eState==HCT_TMAP_ROLLBACK ) return 0;
+    if( eState==HCT_TMAP_COMMITTED ){
+      return (iCid <= pDb->iSnapshotId);
+    }
+  }
+
+  return 0;
+}
+
+/*
+** This is called when writing keys to the database as part of committing
+** a transaction. One of the writes will clobber a key associated with
+** transaction-id iTid. This function returns true if this represents
+** a write/write conflict and the transaction should be rolled back, or
+** false if the write should proceed.
+*/
+static int hctDbTidIsWriteWriteConflict(HctDatabase *pDb, u64 iTid){
+  u64 eState = 0;
+  u64 iCid = hctDbTMapLookup(pDb, iTid, &eState);
+  if( eState==HCT_TMAP_WRITING || eState==HCT_TMAP_VALIDATING ) return 1;
+
+  /* It's tempting to return 0 here - how can a key that has been rolled
+  ** back be a conflict? The problem is that the previous version of the
+  ** key - the one before this rolled back version - may be a write/write
+  ** conflict. Ideally, this code would check that and return accordingly. */
+  if( eState==HCT_TMAP_ROLLBACK ) return 1;
+
+  assert( eState==HCT_TMAP_COMMITTED );
+  return (iCid > pDb->iSnapshotId);
+}
+
+
+static int hctDbOffset(int iOff, int flags){
+  return iOff 
+    + ((flags & HCTDB_HAS_TID) ? 8 : 0)
+    + ((flags & HCTDB_HAS_OLD) ? 4 : 0)
+    + ((flags & HCTDB_HAS_OVFL) ? 4 : 0);
+}
 
 /*
 ** Load the meta-data record from the database and store it in buffer aBuf
@@ -455,30 +487,38 @@ int sqlite3HctDbGetMeta(HctDatabase *pDb, u8 *aBuf, int nBuf){
   HctFilePage pg;
   int rc;
 
+  memset(aBuf, 0, nBuf);
   hctDbSnapshotOpen(pDb);
   rc = sqlite3HctFilePageGet(pDb->pFile, 2, &pg);
   while( rc==SQLITE_OK ){
     HctDbIntkeyLeaf *pLeaf = (HctDbIntkeyLeaf*)pg.aOld;
-    u64 iTid;
-    u32 iOld;
     int iOff;
+    u8 flags;
+
+    if( pLeaf->pg.nEntry==0 ){
+      break;
+    }
 
     assert( pLeaf->pg.nEntry==1 );
     assert( pLeaf->aEntry[0].iKey==0 );
     assert( pLeaf->aEntry[0].nSize==nBuf );
-    assert( pLeaf->aEntry[0].flags==(HCTDB_HAS_TID|HCTDB_HAS_OLD) );
     iOff = pLeaf->aEntry[0].iOff;
+    flags = pLeaf->aEntry[0].flags;
 
-    iTid = hctGetU64(&pg.aOld[iOff]);
-    iOld = hctGetU32(&pg.aOld[iOff+8]);
-    if( hctDbTMapLookup(pDb, iTid)<=pDb->iSnapshotId ){
-      memcpy(aBuf, &pg.aOld[iOff+12], nBuf);
+    assert( flags==HCTDB_HAS_TID || flags==(HCTDB_HAS_OLD|HCTDB_HAS_TID) );
+    if( (flags & HCTDB_HAS_OLD)
+     && 0==hctDbTidIsVisible(pDb, hctGetU64(&pg.aOld[iOff])) 
+    ){
+      u32 iOld = hctGetU32(&pg.aOld[iOff+8]);
+      if( iOld==0 ) break;
+      sqlite3HctFilePageRelease(&pg);
+      rc = sqlite3HctFilePageGetPhysical(pDb->pFile, iOld, &pg);
+    }else{
+      iOff = hctDbOffset(iOff, pLeaf->aEntry[0].flags );
+      memcpy(aBuf, &pg.aOld[iOff], nBuf);
       sqlite3HctFilePageRelease(&pg);
       break;
     }
-
-    sqlite3HctFilePageRelease(&pg);
-    rc = sqlite3HctFilePageGetPhysical(pDb->pFile, iOld, &pg);
   }
 
   return rc;
@@ -502,14 +542,6 @@ static i64 hctDbIntkeyFPKey(const void *aPg){
   }
   return ((HctDbIntkeyNode*)aPg)->aEntry[0].iKey;
 }
-
-static int hctDbOffset(int iOff, int flags){
-  return iOff 
-    + ((flags & HCTDB_HAS_TID) ? 8 : 0)
-    + ((flags & HCTDB_HAS_OLD) ? 4 : 0)
-    + ((flags & HCTDB_HAS_OVFL) ? 4 : 0);
-}
-
 
 /*
 ** Buffer aPg contains an intkey leaf page.
@@ -994,15 +1026,6 @@ static int hctDbAllocateUnpacked(HctDbCsr *pCsr){
 }
 
 /*
-** Return true if TID iTid maps to a commit-id visible to the current
-** client. Or false otherwise.
-*/
-static int hctDbTidIsVisible(HctDatabase *pDb, u64 iTid){
-  u64 iCid = hctDbTMapLookup(pDb, iTid);
-  return (iCid<=pDb->iSnapshotId);
-}
-
-/*
 ** Find the cell in page HctDbCsr.oldpg with a key identical to the current
 ** cell in HctDbCsr.pg. Set HctDbCsr.iOldCell to the cell index.
 **
@@ -1467,10 +1490,9 @@ nCall++;
     }
   }
 
+  /* For each page now removed from its list, clear the LOGICAL_IN_USE flag. */
   for(ii=0; ii<p->nDiscard; ii++){
-    /* TODO: Why are we doing this? Might the mapping still not be required
-    ** by some client traversing the list of peer pages? */
-    sqlite3HctFilePageZero(&p->aDiscard[ii]);
+    sqlite3HctFileClearInUse(&p->aDiscard[ii]);
   }
 
   hctDbInsertDiscard(p);
@@ -2709,8 +2731,7 @@ nCall++;
         }
       }else{
         /* Check for a write conflict */
-        u64 iCid = hctDbTMapLookup(pDb, iClobberTid);
-        if( iCid>pDb->iSnapshotId ){
+        if( hctDbTidIsWriteWriteConflict(pDb, iClobberTid) ){
           rc = SQLITE_BUSY;
         }
       }
@@ -2896,7 +2917,6 @@ int sqlite3HctDbStartWrite(HctDatabase *p){
 ** written to disk.
 */
 int sqlite3HctDbEndWrite(HctDatabase *p){
-  /* HctTMapClient *pTMapClient = sqlite3HctFileTMapClient(p->pFile); */
   HctTMap *pTmap = p->pTmap;
   int rc = SQLITE_OK;
   u64 iCID;                       /* Commit ID for transaction */
@@ -2909,12 +2929,15 @@ int sqlite3HctDbEndWrite(HctDatabase *p){
   assert( pTmap->iFirstTid<=p->iTid );
   assert( pTmap->iFirstTid+(pTmap->nMap*HCT_TMAP_PAGESIZE)>p->iTid );
 
-  iCID = sqlite3HctFileAllocateCID(p->pFile);
   iMap = (p->iTid - pTmap->iFirstTid) / HCT_TMAP_PAGESIZE;
   iEntry = (p->iTid - pTmap->iFirstTid) % HCT_TMAP_PAGESIZE;
-  HctAtomicStore(&pTmap->aaMap[iMap][iEntry], iCID);
+  assert( pTmap->aaMap[iMap][iEntry]==0 );
 
+  HctAtomicStore(&pTmap->aaMap[iMap][iEntry], HCT_TMAP_VALIDATING);
+  iCID = sqlite3HctFileAllocateCID(p->pFile);
+  HctAtomicStore(&pTmap->aaMap[iMap][iEntry], iCID | HCT_TMAP_COMMITTED);
   p->iTid = 0;
+
   return rc;
 }
 
@@ -3269,6 +3292,20 @@ static int hctdbClose(sqlite3_vtab_cursor *cur){
   return SQLITE_OK;
 }
 
+static char *hex_encode(const u8 *aIn, int nIn){
+  char *zRet = sqlite3MallocZero(nIn*2+1);
+  if( zRet ){
+    static const char aDigit[] = "0123456789ABCDEF";
+    int i;
+    for(i=0; i<nIn; i++){
+      zRet[i*2] = aDigit[ (aIn[i] >> 4) ];
+      zRet[i*2+1] = aDigit[ (aIn[i] & 0xF) ];
+    }
+  }
+  return zRet;
+}
+
+
 static char *hctDbRecordToText(sqlite3 *db, const u8 *aRec, int nRec){
   char *zRet = 0;
   const char *zSep = "";
@@ -3312,11 +3349,20 @@ static char *hctDbRecordToText(sqlite3 *db, const u8 *aRec, int nRec){
         break;
       }
 
-      default:
+      case SQLITE_BLOB: {
+        int nBlob = sqlite3_value_bytes(&mem);
+        const u8 *aBlob = (const u8*)sqlite3_value_blob(&mem);
+        zRet = sqlite3_mprintf("%zX'%z'", zRet, hex_encode(aBlob, nBlob));
+        break;
+      }
+
+
+      default: {
         zRet = sqlite3_mprintf("%z%sunsupported(%d)", zRet, zSep, 
             sqlite3_value_type(&mem)
         );
         break;
+      }
     }
 
     zSep = ",";

@@ -429,7 +429,7 @@ static HctTMapFull *hctTMapNewObject(
     int i;
     u64 iMinTid;
     u64 iEof = pPrev->m.iFirstTid + pPrev->m.nMap*HCT_TMAP_PAGESIZE;
-    for(iMinTid=pPrev->m.iMinTid; iMinTid<iEof; iMinTid++){
+    for(iMinTid=pPrev->m.iMinTid; iMinTid<(iEof-1); iMinTid++){
       u64 iVal = AtomicLoad( hctTMapFind(pPrev, iMinTid+1) );
       if( (iVal & HCT_TMAP_STATE_MASK)!=HCT_TMAP_COMMITTED
        || (iVal & HCT_TMAP_CID_MASK)>iCid
@@ -492,7 +492,7 @@ int sqlite3HctTMapNewTID(
   HctTMapFull *pMap = p->aRef[p->iRef].pMap;
   int nTidStep = p->pServer->nTidStep;
   int nMapReq = (
-      (iTid - pMap->m.iFirstTid + HCT_TMAP_PAGESIZE - 1) / HCT_TMAP_PAGESIZE
+      (iTid - pMap->m.iFirstTid + HCT_TMAP_PAGESIZE) / HCT_TMAP_PAGESIZE
   );
 
   assert( p->eState!=HCT_CLIENT_NONE );
