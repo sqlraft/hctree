@@ -26,10 +26,10 @@ proc dumpdb {} {
       WHERE logical_in_use AND hctpgmap.pgno=hctdb.pgno
   }
   if 0 {
-  execsql_pp { 
-    SELECT * FROM hctpgmap, hctentry 
-      WHERE logical_in_use AND hctpgmap.pgno=hctentry.pgno
-  }
+    execsql_pp { 
+      SELECT * FROM hctpgmap, hctentry 
+        WHERE logical_in_use AND hctpgmap.pgno=hctentry.pgno
+    }
   }
 
   execsql_pp {
@@ -38,28 +38,34 @@ proc dumpdb {} {
       WHERE logical_in_use AND hctpgmap.pgno=hctdb.pgno
     ),
 
-    chain(s, l, c) AS (
-      SELECT logical, logical, logical FROM map WHERE logical NOT IN (
+    chain(type, s, l, c) AS (
+      SELECT pgtype, logical, logical, logical FROM map WHERE logical NOT IN (
         SELECT peer FROM map
       ) 
       UNION ALL
-      SELECT s, peer, c || '->' || peer FROM chain, map WHERE l=logical
+      SELECT type, s, peer, c || '->' || peer FROM chain, map WHERE l=logical
     )
 
-    SELECT * FROM chain WHERE l NOT IN (
+    SELECT type, c FROM chain WHERE l NOT IN (
       SELECT logical FROM map
     )
   }
 
+  execsql_pp {
+    SELECT * FROM hctpgmap WHERE physical_in_use OR logical_in_use;
+  }
+
 }
 
-set nStep 1000
+set nStep 100
 for {set ii 1} {$ii <= $nStep} {incr ii} {
   do_execsql_test 1.$ii {
     REPLACE INTO t1 VALUES(($ii % 100), randomblob(100));
   }
   integrity_check 1.$ii.ic
 }
+
+dumpdb
 
 finish_test
 

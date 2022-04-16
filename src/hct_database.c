@@ -2049,8 +2049,12 @@ struct HctDbCellSz {
 
 /* 
 ** Populate the aSz[] array with the sizes and locations of each cell
+**
+** (bClobber && nNewCell==0)   ->   full-delete
+** (bClobber)                  ->   clobber
+** (bClobber==0)               ->   insert of new key
 */
-static void hctDbBalanceGetCellSzNew(
+static void hctDbBalanceGetCellSz(
   HctDatabase *pDb,
   int iPg,
   int iInsert,
@@ -2058,45 +2062,72 @@ static void hctDbBalanceGetCellSzNew(
   int nNewCell,                     /* Bytes stored on page for new cell */
   u8 **aPgCopy,
   int nPgCopy,
-  HctDbCellSz *aSz
+  HctDbCellSz *aSz,
+  int *pnSz                         /* OUT: number of entries in aSz[] */
 ){
-  int ii;
-  int iSz = 0;
+  int ii;                           /* Current index in aPgCopy[] */
+  int iCell;                        /* Current cell of aPgCopy[ii] */
+  int iSz = 0;                      /* Current populated size of aSz[] */
   int szEntry = hctDbPageEntrySize(aPgCopy[0]);
+  int iIns = iInsert;
+  u64 iSafeTid = sqlite3HctFileSafeTID(pDb->pFile);
 
-  /* Set to -1 if this is a full-delete, 0 if it is a clobber, or +1 if
-  ** it is an insert of a new key */
-  int nAdj = (bClobber ? (nNewCell==0 ? -1 : 0) : +1);
+  assert( bClobber || nNewCell>0 );
 
-  for(ii=0; ii<nPgCopy; ii++){
-    HctDbCellSz *pSz;
-    int iEntry;
+  ii = 0;
+  iCell = 0;
+  for(iSz=0; ii<nPgCopy; iSz++){
     HctDbPageHdr *pPg = (HctDbPageHdr*)aPgCopy[ii];
-    for(iEntry=0; iEntry<pPg->nEntry; iEntry++){
-      if( bClobber==0 || ii!=iPg || iEntry!=iInsert ){
-        int iSzIdx = iSz + iEntry + ((ii==iPg && iEntry>=iInsert) ? nAdj : 0);
-        pSz = &aSz[iSzIdx];
-        pSz->nByte = szEntry + hctDbPageRecordSize(pPg, pDb->pgsz, iEntry);
-        pSz->iPg = ii;
-        pSz->iEntry = iEntry;
+    HctDbCellSz *pSz = &aSz[iSz];
+
+    if( ii==iPg && iCell==iIns ){
+      assert( nNewCell>0 || bClobber );
+      if( nNewCell ){
+        pSz->nByte = szEntry + nNewCell;
+        pSz->iPg = -1;
+      }else{
+        iSz--;
       }
+      if( bClobber ){
+        iCell++;
+      }
+      iIns = -1;
+    }else{
+      int bSkip = 0;
+      if( iSz>0 ){
+        int flags = 0;
+        int iOff = hctDbEntryInfo((void*)pPg, iCell, 0, &flags);
+        if( flags & HCTDB_IS_DELETE ){
+          u64 iTid = hctGetU64(&((u8*)pPg)[iOff]);
+          if( iSz>0 && iTid<=iSafeTid ) bSkip = 1;
+          assert( flags & HCTDB_HAS_TID );
+        }
+      }
+      if( bSkip==0 ){
+        pSz->nByte = szEntry + hctDbPageRecordSize(pPg, pDb->pgsz, iCell);
+        pSz->iPg = ii;
+        pSz->iEntry = iCell;
+      }else{
+        iSz--;
+      }
+      iCell++;
     }
 
-    if( nAdj>=0 && ii==iPg ){
-      pSz = &aSz[iSz + iInsert];
-      pSz->nByte = szEntry + nNewCell;
-      pSz->iPg = -1;
+    if( iCell>=pPg->nEntry && (ii!=iPg || iCell!=iIns) ){
+      iCell = 0;
+      ii++;
     }
-
-    iSz += pPg->nEntry + (ii==iPg ? nAdj : 0);
   }
+  *pnSz = iSz;
 }
 
 
 /*
-** Rebalance routine for intkey leaves, index leaves and index nodes.
+** Rebalance routine for pages with variably-sized records - intkey leaves,
+** index leaves and index nodes.
+** 
 */
-static int hctDbBalanceNew(
+static int hctDbBalance(
   HctDatabase *pDb,
   HctDbWriter *p,
   int *piPg,                      /* IN/OUT: Page for new cell */
@@ -2116,6 +2147,7 @@ static int hctDbBalanceNew(
   int iEntry0 = 0;
 
   HctDbCellSz *aSz = 0;
+  int nSzAlloc = 0;
   int nSz = 0;
   int iSz = 0;
 
@@ -2148,17 +2180,18 @@ static int hctDbBalanceNew(
     iLeftPg--;
   }
 
-  /* Figure out how many cells there will be following the rebalance. */
+  /* Figure out an upper limit on how many cells there will be involved
+  ** in the rebalance. This is used to size the allocation of aSz[] only,
+  ** the actual number of cells is calculated by hctDbBalanceGetCellSz(). */
+  nSzAlloc = 1;
   for(ii=iLeftPg; ii<iLeftPg+nIn; ii++){
     HctDbPageHdr *pPg = (HctDbPageHdr*)p->aWritePg[ii].aNew;
-    nSz += pPg->nEntry;
+    nSzAlloc += pPg->nEntry;
   }
-  if( nNewCell>0 ) nSz++;
-  if( bClobber ) nSz--;
 
   /* Allocate enough space for the cell-size array and for a copy of 
   ** each input page. */
-  pFree = (u8*)sqlite3MallocZero(nIn*pDb->pgsz + nSz*sizeof(HctDbCellSz));
+  pFree = (u8*)sqlite3MallocZero(nIn*pDb->pgsz + nSzAlloc*sizeof(HctDbCellSz));
   if( pFree==0 ) return SQLITE_NOMEM;
   aSz = (HctDbCellSz*)&pFree[pDb->pgsz * nIn];
 
@@ -2169,8 +2202,8 @@ static int hctDbBalanceNew(
   }
 
   /* Populate the aSz[] array with the sizes and locations of each cell */
-  hctDbBalanceGetCellSzNew(
-      pDb, iPg-iLeftPg, iIns, bClobber, nNewCell, aPgCopy, nIn, aSz
+  hctDbBalanceGetCellSz(
+      pDb, iPg-iLeftPg, iIns, bClobber, nNewCell, aPgCopy, nIn, aSz, &nSz
   );
   for(ii=1; ii<nSz; ii++){
     assert( aSz[ii].nByte>0 );
@@ -2827,7 +2860,7 @@ nCall++;
     assert( bFullDel==0 || aEntry==0 );
     assert( bFullDel==0 || nEntry==0 );
     assert_page_is_ok(aTarget, pDb->pgsz);
-    rc = hctDbBalanceNew(pDb, p, &iPg, &iInsert, bClobber, nEntry);
+    rc = hctDbBalance(pDb, p, &iPg, &iInsert, bClobber, nEntry);
     assert_page_is_ok(aTarget, pDb->pgsz);
     aTarget = p->aWritePg[iPg].aNew;
   }else{
@@ -3352,7 +3385,8 @@ static char *hctDbRecordToText(sqlite3 *db, const u8 *aRec, int nRec){
       case SQLITE_BLOB: {
         int nBlob = sqlite3_value_bytes(&mem);
         const u8 *aBlob = (const u8*)sqlite3_value_blob(&mem);
-        zRet = sqlite3_mprintf("%zX'%z'", zRet, hex_encode(aBlob, nBlob));
+        char *zHex = hex_encode(aBlob, nBlob);
+        zRet = sqlite3_mprintf("%z%sX'%z'", zRet, zSep, zHex);
         break;
       }
 
