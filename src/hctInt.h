@@ -185,7 +185,7 @@ struct HctFilePage {
   /* Used internally by hct_file.c */
   u32 iPg;                        /* logical page number */
   u32 iNewPg;                     /* New physical page number */
-  u64 iPagemap;                   /* Value read from page-map slot */
+  u32 iOldPg;                     /* Original physical page number */
   int bDelete;                    /* True when page marked for deletion */
   HctFile *pFile;
 };

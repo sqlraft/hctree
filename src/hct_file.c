@@ -372,7 +372,7 @@ static int hctFileServerInit(HctFileServer *p, const char *zFile){
 
     /* TODO - map and read stuff from the the header pages. */
     p->szPage = HCT_DEFAULT_PAGESIZE;
-    p->nPagePerChunk = HCT_DEFAULT_PAGESIZE;
+    p->nPagePerChunk = HCT_DEFAULT_PAGEPERCHUNK;
     szChunkData = p->nPagePerChunk * p->szPage;
     szChunkPagemap = p->nPagePerChunk * sizeof(u64);
 
@@ -804,6 +804,18 @@ static int hctFilePagemapGetGrow(HctFile *pFile, u32 iPg, u64 *piVal){
   return rc;
 }
 
+/*
+** Obtain the lower 32-bits of the value currently stored in slot iSlot.
+*/
+static int hctFilePagemapGetGrow32(HctFile *pFile, u32 iSlot, u32 *piVal){
+  int rc;
+  u64 val = 0;
+  rc = hctFilePagemapGetGrow(pFile, iSlot, &val);
+  *piVal = (u32)(val & 0xFFFFFFFF);
+  return rc;
+}
+
+
 static int hctFilePagemapPtr(HctFile *pFile, u32 iPg, u8 **paData){
   int rc = hctFileGrowMapping(pFile, 1+(iPg>>pFile->pMapping->mapShift));
   if( rc==SQLITE_OK ){
@@ -818,9 +830,9 @@ int sqlite3HctFilePageGet(HctFile *pFile, u32 iPg, HctFilePage *pPg){
   memset(pPg, 0, sizeof(*pPg));
   pPg->pFile = pFile;
   pPg->iPg = iPg;
-  rc = hctFilePagemapGetGrow(pFile, iPg, &pPg->iPagemap);
+  rc = hctFilePagemapGetGrow32(pFile, iPg, &pPg->iOldPg);
   if( rc==SQLITE_OK ){
-    u32 iPhys = (pPg->iPagemap & 0xFFFFFFFF);
+    u32 iPhys = pPg->iOldPg;
     assert( iPhys!=0 );
     rc = hctFilePagemapPtr(pFile, iPhys, &pPg->aOld);
   }
@@ -831,13 +843,13 @@ int sqlite3HctFilePageGet(HctFile *pFile, u32 iPg, HctFilePage *pPg){
 ** Obtain a reference to physical page iPg.
 */
 int sqlite3HctFilePageGetPhysical(HctFile *pFile, u32 iPg, HctFilePage *pPg){
-  u64 iVal;
+  u32 iVal;
   int rc;
   assert( iPg!=0 );
   memset(pPg, 0, sizeof(*pPg));
-  rc = hctFilePagemapGetGrow(pFile, iPg, &iVal);
+  rc = hctFilePagemapGetGrow32(pFile, iPg, &iVal);
   if( rc==SQLITE_OK ){
-    pPg->iPagemap = iVal;
+    pPg->iOldPg = iVal;
     pPg->aOld = (u8*)hctPagePtr(pFile->pMapping, iPg);
   }
   return rc;
@@ -886,7 +898,7 @@ static int hctFilePageFlush(HctFilePage *pPg){
   int rc = SQLITE_OK;
   if( pPg->aNew ){
     HctMapping *pMap = pPg->pFile->pMapping;
-    u32 iOld = pPg->iPagemap & HCT_PGNO_MASK;
+    u32 iOld = pPg->iOldPg;
     if( !hctFilePagemapSetLogical(pMap, pPg->iPg, iOld, pPg->iNewPg) ){
       rc = SQLITE_LOCKED;
     }else{
@@ -895,7 +907,7 @@ static int hctFilePageFlush(HctFilePage *pPg){
         sqlite3HctPManFreePg(&rc, pPg->pFile->pPManClient, iTid, iOld, 0);
         hctFileClearFlag(pPg->pFile, iOld, HCT_PMF_PHYSICAL_IN_USE);
       }
-      pPg->iPagemap = (pPg->iPagemap & ~HCT_PGNO_MASK) | pPg->iNewPg;
+      pPg->iOldPg = pPg->iNewPg;
       pPg->aOld = pPg->aNew;
       pPg->aNew = 0;
     }
@@ -947,7 +959,7 @@ int sqlite3HctFilePageNew(HctFile *pFile, u32 iPg, HctFilePage *pPg){
     pPg->iPg = iLPg;
 
     hctFilePagemapZeroValue(pFile->pMapping, iLPg);
-    pPg->iPagemap = hctFilePagemapGet(pFile->pMapping, iLPg);
+    pPg->iOldPg = (u32)hctFilePagemapGet(pFile->pMapping, iLPg);
 
     hctFilePageWrite(&rc, pPg);
   }
@@ -962,8 +974,10 @@ int sqlite3HctFileRootNew(HctFile *pFile, u32 *piRoot){
 }
 
 void sqlite3HctFilePageUnwrite(HctFilePage *pPg){
+  int rc = SQLITE_OK;
   if( pPg->aNew ){
-    /* TODO: Reclaim resources properly */
+    hctFileClearFlag(pPg->pFile, pPg->iNewPg, HCT_PMF_PHYSICAL_IN_USE);
+    sqlite3HctPManFreePg(&rc, pPg->pFile->pPManClient, 0, pPg->iNewPg, 0);
     pPg->iNewPg = 0;
     pPg->aNew = 0;
   }
@@ -1044,7 +1058,7 @@ u32 sqlite3HctFilePageRangeAlloc(HctFile *pFile, int bLogical, int nPg){
 int sqlite3HctFileClearInUse(HctFilePage *pPg){
   int rc = SQLITE_OK;
   u64 iTid = pPg->pFile->iCurrentTid;
-  u32 iPhysPg = (pPg->iPagemap & HCT_PGNO_MASK);
+  u32 iPhysPg = pPg->iOldPg;
 
   /* TODO: Should it be possible to assert() that the LOGICAL_EVICTED
   ** flag is set here? */

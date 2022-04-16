@@ -2657,9 +2657,9 @@ nCall++;
     rc = hctDbSetWriteFpKey(pDb, p);
     if( rc ) return rc;
     
-    /* TODO: Do not like this. HctFilePage.iPagemap should not be accessed
+    /* TODO: Do not like this. HctFilePage.iOldPg should not be accessed
     ** outside of hct_file.c. */
-    p->iOldPgno = (p->aWritePg[0].iPagemap & 0xFFFFFFFF);
+    p->iOldPgno = p->aWritePg[0].iOldPg;
   }
   assert( p->nWritePg>0 && p->aWritePg[0].aNew );
 

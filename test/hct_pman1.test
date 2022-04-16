@@ -21,10 +21,13 @@ do_execsql_test 1.0 {
 }
 
 proc dumpdb {} {
+  if 0 {
   execsql_pp { 
     SELECT * FROM hctpgmap, hctdb 
       WHERE logical_in_use AND hctpgmap.pgno=hctdb.pgno
   }
+  }
+
   if 0 {
     execsql_pp { 
       SELECT * FROM hctpgmap, hctentry 
@@ -52,18 +55,26 @@ proc dumpdb {} {
   }
 
   execsql_pp {
-    SELECT * FROM hctpgmap WHERE physical_in_use OR logical_in_use;
+    SELECT count(*) FROM hctpgmap WHERE physical_in_use;
+    SELECT count(*) FROM hctpgmap WHERE logical_in_use;
   }
 
+  execsql_pp {
+    WITH fname(i, s) AS ( VALUES
+        (3, 'logical_eof'), (4, 'physical_eof'), 
+        (5, 'transid'), (6, 'commitid')
+    )
+    SELECT s, pgno FROM hctpgmap, fname WHERE logical=i;
+  }
 }
 
-set nStep 100
+set nStep 10000
 for {set ii 1} {$ii <= $nStep} {incr ii} {
   do_execsql_test 1.$ii {
-    REPLACE INTO t1 VALUES(($ii % 100), randomblob(100));
+    REPLACE INTO t1 VALUES($ii%500, randomblob(100));
   }
-  integrity_check 1.$ii.ic
 }
+integrity_check 1.$ii.ic
 
 dumpdb
 
