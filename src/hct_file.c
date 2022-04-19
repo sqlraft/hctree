@@ -980,6 +980,11 @@ void sqlite3HctFilePageUnwrite(HctFilePage *pPg){
     sqlite3HctPManFreePg(&rc, pPg->pFile->pPManClient, 0, pPg->iNewPg, 0);
     pPg->iNewPg = 0;
     pPg->aNew = 0;
+    if( pPg->iOldPg==0 ){
+      assert( pPg->aOld==0 );
+      sqlite3HctPManFreePg(&rc, pPg->pFile->pPManClient, 0, pPg->iPg, 1);
+      pPg->iPg = 0;
+    }
   }
 }
 

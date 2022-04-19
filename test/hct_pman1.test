@@ -68,15 +68,32 @@ proc dumpdb {} {
   }
 }
 
+proc do_pageleak_test {tn} {
+  set nPhys [db one {SELECT count(*) FROM hctpgmap WHERE physical_in_use}]
+  set nLog  [db one {SELECT count(*) FROM hctpgmap WHERE logical_in_use}]
+
+  uplevel list [do_test $tn [list expr $nPhys] $nLog]
+  if {$nLog!=$nPhys} {
+    execsql_pp {
+      SELECT logical AS "leaked_physical_page" FROM hctpgmap WHERE 
+        physical_in_use AND 
+        logical NOT IN (
+          SELECT pgno FROM hctpgmap WHERE logical_in_use
+        )
+    }
+  }
+}
+
 set nStep 10000
 for {set ii 1} {$ii <= $nStep} {incr ii} {
   do_execsql_test 1.$ii {
     REPLACE INTO t1 VALUES($ii%500, randomblob(100));
   }
-}
-integrity_check 1.$ii.ic
+  do_pageleak_test 1.$ii.pageleak
+} 
 
-dumpdb
+integrity_check 1.$ii.ic
+# dumpdb
 
 finish_test
 

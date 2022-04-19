@@ -1778,7 +1778,7 @@ static int hctVCRFindCell(VarCellReader *p, int iCell, int *pnByte){
 
 static void assert_page_is_ok(const u8 *aData, int nData){
 
-  if( hctIsVarRecords(aData) ){
+  if( aData && hctIsVarRecords(aData) ){
     HctDbIndexNode *p = (HctDbIndexNode*)aData;
     VarCellReader vcr;
     int iEnd = nData;
@@ -1895,6 +1895,8 @@ static int hctDbExtendWriteArray(
     p->nWritePg--;
     if( p->aWritePg[iRem].aOld ){
       p->aDiscard[p->nDiscard++] = p->aWritePg[iRem];
+    }else{
+      sqlite3HctFilePageUnwrite(&p->aWritePg[iRem]);
     }
     if( iRem!=p->nWritePg ){
       int nByte = sizeof(HctFilePage) * (p->nWritePg-iRem);
