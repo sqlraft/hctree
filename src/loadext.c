@@ -483,6 +483,23 @@ static const sqlite3_api_routines sqlite3Apis = {
   /* Version 3.36.1 and later */
   sqlite3_changes64,
   sqlite3_total_changes64,
+  /* Version 3.37.0 and later */
+  sqlite3_autovacuum_pages,
+  /* Version 3.38.0 and later */
+  sqlite3_error_offset,
+  sqlite3_vtab_rhs_value,
+  sqlite3_vtab_distinct,
+  sqlite3_vtab_in,
+  sqlite3_vtab_in_first,
+  sqlite3_vtab_in_next,
+  /* Version 3.39.0 and later */
+#ifndef SQLITE_OMIT_DESERIALIZE
+  sqlite3_deserialize,
+  sqlite3_serialize
+#else
+  0,
+  0
+#endif
 };
 
 /* True if x is the directory separator character

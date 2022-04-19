@@ -386,7 +386,7 @@ static int seriesBestIndex(
     ** the preferred case */
     pIdxInfo->estimatedCost = (double)(2 - ((idxNum&4)!=0));
     pIdxInfo->estimatedRows = 1000;
-    if( pIdxInfo->nOrderBy==1 ){
+    if( pIdxInfo->nOrderBy>=1 && pIdxInfo->aOrderBy[0].iColumn==0 ){
       if( pIdxInfo->aOrderBy[0].desc ){
         idxNum |= 8;
       }else{
@@ -448,7 +448,7 @@ int sqlite3_series_init(
   int rc = SQLITE_OK;
   SQLITE_EXTENSION_INIT2(pApi);
 #ifndef SQLITE_OMIT_VIRTUALTABLE
-  if( sqlite3_libversion_number()<3008012 ){
+  if( sqlite3_libversion_number()<3008012 && pzErrMsg!=0 ){
     *pzErrMsg = sqlite3_mprintf(
         "generate_series() requires SQLite 3.8.12 or later");
     return SQLITE_ERROR;

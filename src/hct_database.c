@@ -3363,7 +3363,8 @@ static char *hctDbRecordToText(sqlite3 *db, const u8 *aRec, int nRec){
     mem.db = db;
     mem.enc = ENC(db);
     pHdr += sqlite3GetVarint(pHdr, &iSerialType);
-    pBody += sqlite3VdbeSerialGet(pBody, (u32)iSerialType, &mem);
+    sqlite3VdbeSerialGet(pBody, (u32)iSerialType, &mem);
+    pBody += sqlite3VdbeSerialTypeLen((u32)iSerialType);
     switch( sqlite3_value_type(&mem) ){
       case SQLITE_TEXT: {
         int nText = sqlite3_value_bytes(&mem);

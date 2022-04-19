@@ -581,7 +581,7 @@ static void noopValueFunc(sqlite3_context *p){ UNUSED_PARAMETER(p); /*no-op*/ }
 /* Window functions that use all window interfaces: xStep, xFinal,
 ** xValue, and xInverse */
 #define WINDOWFUNCALL(name,nArg,extra) {                                   \
-  nArg, (SQLITE_UTF8|SQLITE_FUNC_WINDOW|extra), 0, 0,                      \
+  nArg, (SQLITE_FUNC_BUILTIN|SQLITE_UTF8|SQLITE_FUNC_WINDOW|extra), 0, 0,  \
   name ## StepFunc, name ## FinalizeFunc, name ## ValueFunc,               \
   name ## InvFunc, name ## Name, {0}                                       \
 }
@@ -589,7 +589,7 @@ static void noopValueFunc(sqlite3_context *p){ UNUSED_PARAMETER(p); /*no-op*/ }
 /* Window functions that are implemented using bytecode and thus have
 ** no-op routines for their methods */
 #define WINDOWFUNCNOOP(name,nArg,extra) {                                  \
-  nArg, (SQLITE_UTF8|SQLITE_FUNC_WINDOW|extra), 0, 0,                      \
+  nArg, (SQLITE_FUNC_BUILTIN|SQLITE_UTF8|SQLITE_FUNC_WINDOW|extra), 0, 0,  \
   noopStepFunc, noopValueFunc, noopValueFunc,                              \
   noopStepFunc, name ## Name, {0}                                          \
 }
@@ -598,7 +598,7 @@ static void noopValueFunc(sqlite3_context *p){ UNUSED_PARAMETER(p); /*no-op*/ }
 ** same routine for xFinalize and xValue and which never call
 ** xInverse. */
 #define WINDOWFUNCX(name,nArg,extra) {                                     \
-  nArg, (SQLITE_UTF8|SQLITE_FUNC_WINDOW|extra), 0, 0,                      \
+  nArg, (SQLITE_FUNC_BUILTIN|SQLITE_UTF8|SQLITE_FUNC_WINDOW|extra), 0, 0,  \
   name ## StepFunc, name ## ValueFunc, name ## ValueFunc,                  \
   noopStepFunc, name ## Name, {0}                                          \
 }
@@ -724,7 +724,7 @@ void sqlite3WindowUpdate(
       }
     }
   }
-  pWin->pFunc = pFunc;
+  pWin->pWFunc = pFunc;
 }
 
 /*
@@ -941,7 +941,8 @@ static int sqlite3WindowExtraAggFuncDepth(Walker *pWalker, Expr *pExpr){
 
 static int disallowAggregatesInOrderByCb(Walker *pWalker, Expr *pExpr){
   if( pExpr->op==TK_AGG_FUNCTION && pExpr->pAggInfo==0 ){
-    sqlite3ErrorMsg(pWalker->pParse,
+    assert( !ExprHasProperty(pExpr, EP_IntValue) );
+     sqlite3ErrorMsg(pWalker->pParse,
          "misuse of aggregate: %s()", pExpr->u.zToken);
   }
   return WRC_Continue;
@@ -956,7 +957,11 @@ static int disallowAggregatesInOrderByCb(Walker *pWalker, Expr *pExpr){
 */
 int sqlite3WindowRewrite(Parse *pParse, Select *p){
   int rc = SQLITE_OK;
-  if( p->pWin && p->pPrior==0 && ALWAYS((p->selFlags & SF_WinRewrite)==0) ){
+  if( p->pWin
+   && p->pPrior==0
+   && ALWAYS((p->selFlags & SF_WinRewrite)==0)
+   && ALWAYS(!IN_RENAME_OBJECT)
+  ){
     Vdbe *v = sqlite3GetVdbe(pParse);
     sqlite3 *db = pParse->db;
     Select *pSub = 0;             /* The subquery */
@@ -1029,8 +1034,11 @@ int sqlite3WindowRewrite(Parse *pParse, Select *p){
     ** window function - one for the accumulator, another for interim
     ** results.  */
     for(pWin=pMWin; pWin; pWin=pWin->pNextWin){
-      ExprList *pArgs = pWin->pOwner->x.pList;
-      if( pWin->pFunc->funcFlags & SQLITE_FUNC_SUBTYPE ){
+      ExprList *pArgs;
+      assert( ExprUseXList(pWin->pOwner) );
+      assert( pWin->pWFunc!=0 );
+      pArgs = pWin->pOwner->x.pList;
+      if( pWin->pWFunc->funcFlags & SQLITE_FUNC_SUBTYPE ){
         selectWindowRewriteEList(pParse, pMWin, pSrc, pArgs, pTab, &pSublist);
         pWin->iArgCol = (pSublist ? pSublist->nExpr : 0);
         pWin->bExprArgs = 1;
@@ -1066,6 +1074,9 @@ int sqlite3WindowRewrite(Parse *pParse, Select *p){
        ("New window-function subquery in FROM clause of (%u/%p)\n",
        p->selId, p));
     p->pSrc = sqlite3SrcListAppend(pParse, 0, 0, 0);
+    assert( pSub!=0 || p->pSrc==0 ); /* Due to db->mallocFailed test inside
+                                     ** of sqlite3DbMallocRawNN() called from
+                                     ** sqlite3SrcListAppend() */
     if( p->pSrc ){
       Table *pTab2;
       p->pSrc->a[0].pSelect = pSub;
@@ -1093,15 +1104,14 @@ int sqlite3WindowRewrite(Parse *pParse, Select *p){
       sqlite3SelectDelete(db, pSub);
     }
     if( db->mallocFailed ) rc = SQLITE_NOMEM;
-    sqlite3DbFree(db, pTab);
+
+    /* Defer deleting the temporary table pTab because if an error occurred,
+    ** there could still be references to that table embedded in the
+    ** result-set or ORDER BY clause of the SELECT statement p.  */
+    sqlite3ParserAddCleanup(pParse, sqlite3DbFree, pTab);
   }
 
-  if( rc ){
-    if( pParse->nErr==0 ){
-      assert( pParse->db->mallocFailed );
-      sqlite3ErrorToParser(pParse->db, SQLITE_NOMEM);
-    }
-  }
+  assert( rc==SQLITE_OK || pParse->nErr!=0 );
   return rc;
 }
 
@@ -1342,7 +1352,12 @@ void sqlite3WindowLink(Select *pSel, Window *pWin){
 ** different, or 2 if it cannot be determined if the objects are identical
 ** or not. Identical window objects can be processed in a single scan.
 */
-int sqlite3WindowCompare(Parse *pParse, Window *p1, Window *p2, int bFilter){
+int sqlite3WindowCompare(
+  const Parse *pParse,
+  const Window *p1,
+  const Window *p2,
+  int bFilter
+){
   int res;
   if( NEVER(p1==0) || NEVER(p2==0) ) return 1;
   if( p1->eFrmType!=p2->eFrmType ) return 1;
@@ -1405,7 +1420,7 @@ void sqlite3WindowCodeInit(Parse *pParse, Select *pSelect){
   }
 
   for(pWin=pMWin; pWin; pWin=pWin->pNextWin){
-    FuncDef *p = pWin->pFunc;
+    FuncDef *p = pWin->pWFunc;
     if( (p->funcFlags & SQLITE_FUNC_MINMAX) && pWin->eStart!=TK_UNBOUNDED ){
       /* The inline versions of min() and max() require a single ephemeral
       ** table and 3 registers. The registers are used as follows:
@@ -1414,12 +1429,15 @@ void sqlite3WindowCodeInit(Parse *pParse, Select *pSelect){
       **   regApp+1: integer value used to ensure keys are unique
       **   regApp+2: output of MakeRecord
       */
-      ExprList *pList = pWin->pOwner->x.pList;
-      KeyInfo *pKeyInfo = sqlite3KeyInfoFromExprList(pParse, pList, 0, 0);
+      ExprList *pList;
+      KeyInfo *pKeyInfo;
+      assert( ExprUseXList(pWin->pOwner) );
+      pList = pWin->pOwner->x.pList;
+      pKeyInfo = sqlite3KeyInfoFromExprList(pParse, pList, 0, 0);
       pWin->csrApp = pParse->nTab++;
       pWin->regApp = pParse->nMem+1;
       pParse->nMem += 3;
-      if( pKeyInfo && pWin->pFunc->zName[1]=='i' ){
+      if( pKeyInfo && pWin->pWFunc->zName[1]=='i' ){
         assert( pKeyInfo->aSortFlags[0]==0 );
         pKeyInfo->aSortFlags[0] = KEYINFO_ORDER_DESC;
       }
@@ -1503,7 +1521,9 @@ static void windowCheckValue(Parse *pParse, int reg, int eCond){
 ** with the object passed as the only argument to this function.
 */
 static int windowArgCount(Window *pWin){
-  ExprList *pList = pWin->pOwner->x.pList;
+  const ExprList *pList;
+  assert( ExprUseXList(pWin->pOwner) );
+  pList = pWin->pOwner->x.pList;
   return (pList ? pList->nExpr : 0);
 }
 
@@ -1640,7 +1660,7 @@ static void windowAggStep(
   Vdbe *v = sqlite3GetVdbe(pParse);
   Window *pWin;
   for(pWin=pMWin; pWin; pWin=pWin->pNextWin){
-    FuncDef *pFunc = pWin->pFunc;
+    FuncDef *pFunc = pWin->pWFunc;
     int regArg;
     int nArg = pWin->bExprArgs ? 0 : windowArgCount(pWin);
     int i;
@@ -1688,6 +1708,7 @@ static void windowAggStep(
       int addrIf = 0;
       if( pWin->pFilter ){
         int regTmp;
+        assert( ExprUseXList(pWin->pOwner) );
         assert( pWin->bExprArgs || !nArg ||nArg==pWin->pOwner->x.pList->nExpr );
         assert( pWin->bExprArgs || nArg  ||pWin->pOwner->x.pList==0 );
         regTmp = sqlite3GetTempReg(pParse);
@@ -1701,6 +1722,7 @@ static void windowAggStep(
         int iOp = sqlite3VdbeCurrentAddr(v);
         int iEnd;
 
+        assert( ExprUseXList(pWin->pOwner) );
         nArg = pWin->pOwner->x.pList->nExpr;
         regArg = sqlite3GetTempRange(pParse, nArg);
         sqlite3ExprCodeExprList(pParse, pWin->pOwner->x.pList, regArg, 0, 0);
@@ -1715,6 +1737,7 @@ static void windowAggStep(
       if( pFunc->funcFlags & SQLITE_FUNC_NEEDCOLL ){
         CollSeq *pColl;
         assert( nArg>0 );
+        assert( ExprUseXList(pWin->pOwner) );
         pColl = sqlite3ExprNNCollSeq(pParse, pWin->pOwner->x.pList->a[0].pExpr);
         sqlite3VdbeAddOp4(v, OP_CollSeq, 0,0,0, (const char*)pColl, P4_COLLSEQ);
       }
@@ -1751,7 +1774,7 @@ static void windowAggFinal(WindowCodeArg *p, int bFin){
 
   for(pWin=pMWin; pWin; pWin=pWin->pNextWin){
     if( pMWin->regStartRowid==0
-     && (pWin->pFunc->funcFlags & SQLITE_FUNC_MINMAX) 
+     && (pWin->pWFunc->funcFlags & SQLITE_FUNC_MINMAX) 
      && (pWin->eStart!=TK_UNBOUNDED)
     ){
       sqlite3VdbeAddOp2(v, OP_Null, 0, pWin->regResult);
@@ -1765,12 +1788,12 @@ static void windowAggFinal(WindowCodeArg *p, int bFin){
       int nArg = windowArgCount(pWin);
       if( bFin ){
         sqlite3VdbeAddOp2(v, OP_AggFinal, pWin->regAccum, nArg);
-        sqlite3VdbeAppendP4(v, pWin->pFunc, P4_FUNCDEF);
+        sqlite3VdbeAppendP4(v, pWin->pWFunc, P4_FUNCDEF);
         sqlite3VdbeAddOp2(v, OP_Copy, pWin->regAccum, pWin->regResult);
         sqlite3VdbeAddOp2(v, OP_Null, 0, pWin->regAccum);
       }else{
         sqlite3VdbeAddOp3(v, OP_AggValue,pWin->regAccum,nArg,pWin->regResult);
-        sqlite3VdbeAppendP4(v, pWin->pFunc, P4_FUNCDEF);
+        sqlite3VdbeAppendP4(v, pWin->pWFunc, P4_FUNCDEF);
       }
     }
   }
@@ -1899,7 +1922,8 @@ static void windowReturnOneRow(WindowCodeArg *p){
     Window *pWin;
 
     for(pWin=pMWin; pWin; pWin=pWin->pNextWin){
-      FuncDef *pFunc = pWin->pFunc;
+      FuncDef *pFunc = pWin->pWFunc;
+      assert( ExprUseXList(pWin->pOwner) );
       if( pFunc->zName==nth_valueName
        || pFunc->zName==first_valueName
       ){
@@ -1970,7 +1994,7 @@ static int windowInitAccum(Parse *pParse, Window *pMWin){
   int nArg = 0;
   Window *pWin;
   for(pWin=pMWin; pWin; pWin=pWin->pNextWin){
-    FuncDef *pFunc = pWin->pFunc;
+    FuncDef *pFunc = pWin->pWFunc;
     assert( pWin->regAccum );
     sqlite3VdbeAddOp2(v, OP_Null, 0, pWin->regAccum);
     nArg = MAX(nArg, windowArgCount(pWin));
@@ -2000,7 +2024,7 @@ static int windowCacheFrame(Window *pMWin){
   Window *pWin;
   if( pMWin->regStartRowid ) return 1;
   for(pWin=pMWin; pWin; pWin=pWin->pNextWin){
-    FuncDef *pFunc = pWin->pFunc;
+    FuncDef *pFunc = pWin->pWFunc;
     if( (pFunc->zName==nth_valueName)
      || (pFunc->zName==first_valueName)
      || (pFunc->zName==leadName)
@@ -2358,7 +2382,7 @@ Window *sqlite3WindowDup(sqlite3 *db, Expr *pOwner, Window *p){
       pNew->zName = sqlite3DbStrDup(db, p->zName);
       pNew->zBase = sqlite3DbStrDup(db, p->zBase);
       pNew->pFilter = sqlite3ExprDup(db, p->pFilter, 0);
-      pNew->pFunc = p->pFunc;
+      pNew->pWFunc = p->pWFunc;
       pNew->pPartition = sqlite3ExprListDup(db, p->pPartition, 0);
       pNew->pOrderBy = sqlite3ExprListDup(db, p->pOrderBy, 0);
       pNew->eFrmType = p->eFrmType;
