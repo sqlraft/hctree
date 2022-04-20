@@ -38,25 +38,27 @@ proc dumpdb {} {
   execsql_pp {
     WITH map AS (
       SELECT * FROM hctpgmap, hctdb 
-      WHERE logical_in_use AND hctpgmap.pgno=hctdb.pgno
+      WHERE logical_in_use AND hctpgmap.value=hctdb.pgno
     ),
 
     chain(type, s, l, c) AS (
-      SELECT pgtype, logical, logical, logical FROM map WHERE logical NOT IN (
+      SELECT pgtype, slot, slot, slot FROM map WHERE slot NOT IN (
         SELECT peer FROM map
       ) 
       UNION ALL
-      SELECT type, s, peer, c || '->' || peer FROM chain, map WHERE l=logical
+      SELECT type, s, peer, c || '->' || peer FROM chain, map WHERE l=slot
     )
 
     SELECT type, c FROM chain WHERE l NOT IN (
-      SELECT logical FROM map
+      SELECT slot FROM map
     )
   }
 
   execsql_pp {
-    SELECT count(*) FROM hctpgmap WHERE physical_in_use;
-    SELECT count(*) FROM hctpgmap WHERE logical_in_use;
+    SELECT 'physical_in_use' AS type, count(*) 
+    FROM hctpgmap WHERE physical_in_use;
+    SELECT 'logical_in_use' AS type, count(*) 
+    FROM hctpgmap WHERE logical_in_use;
   }
 
   execsql_pp {
@@ -64,15 +66,24 @@ proc dumpdb {} {
         (3, 'logical_eof'), (4, 'physical_eof'), 
         (5, 'transid'), (6, 'commitid')
     )
-    SELECT s, pgno FROM hctpgmap, fname WHERE logical=i;
+    SELECT s, value FROM hctpgmap, fname WHERE slot=i;
+  }
+
+  execsql_pp {
+    SELECT type, location, count(*) FROM hctpman GROUP BY 1, 2;
+    -- SELECT * FROM hctpman
   }
 }
 
 proc do_pageleak_test {tn} {
+
+  # Check that there are the same number of physical as logical pages
+  # in use. This is not generally true - but it is true for databases
+  # with no overflow pages.
   set nPhys [db one {SELECT count(*) FROM hctpgmap WHERE physical_in_use}]
   set nLog  [db one {SELECT count(*) FROM hctpgmap WHERE logical_in_use}]
+  uplevel [list do_test $tn.1 [list expr $nPhys] $nLog]
 
-  uplevel list [do_test $tn [list expr $nPhys] $nLog]
   if {$nLog!=$nPhys} {
     execsql_pp {
       SELECT logical AS "leaked_physical_page" FROM hctpgmap WHERE 
@@ -82,9 +93,32 @@ proc do_pageleak_test {tn} {
         )
     }
   }
+
+  # Check that each physical page not marked as IN_USE on disk
+  # is managed by the page-manager.
+  set lPhys [db eval {
+    SELECT slot FROM hctpgmap WHERE physical_in_use=0 AND slot<=(
+      SELECT value from hctpgmap WHERE slot=4
+    )
+  }]
+  set lPhys2 [db eval {
+    SELECT pgno FROM hctpman WHERE type='physical' ORDER BY 1
+  }]
+  uplevel [list do_test $tn.2 [list set res $lPhys2] $lPhys]
+
+  # Same for logical
+  set lLog [db eval {
+    SELECT slot FROM hctpgmap WHERE logical_in_use=0 AND slot<=(
+      SELECT value from hctpgmap WHERE slot=3
+    ) AND (slot=1 OR slot=2 OR slot>=33)
+  }]
+  set lLog2 [db eval {
+    SELECT pgno FROM hctpman WHERE type='logical' ORDER BY 1
+  }]
+  uplevel [list do_test $tn.2 [list set res $lLog2] $lLog]
 }
 
-set nStep 10000
+set nStep 1000
 for {set ii 1} {$ii <= $nStep} {incr ii} {
   do_execsql_test 1.$ii {
     REPLACE INTO t1 VALUES($ii%500, randomblob(100));
@@ -93,7 +127,7 @@ for {set ii 1} {$ii <= $nStep} {incr ii} {
 } 
 
 integrity_check 1.$ii.ic
-# dumpdb
+dumpdb
 
 finish_test
 

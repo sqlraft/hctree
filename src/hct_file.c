@@ -619,6 +619,10 @@ HctFile *sqlite3HctFileOpen(int *pRc, const char *zFile, HctConfig *pConfig){
 HctTMapClient *sqlite3HctFileTMapClient(HctFile *pFile){
   return pFile->pTMapClient;
 }
+HctPManClient *sqlite3HctFilePManClient(HctFile *pFile){
+  return pFile->pPManClient;
+}
+
 
 HctFileGlobal *sqlite3HctFileGlobal(
   HctFile *pFile,
@@ -1082,12 +1086,11 @@ int sqlite3HctFileClearInUse(HctFilePage *pPg){
 
 #define HCT_PGMAP_SCHEMA        \
 "  CREATE TABLE hct_pgmap("     \
-"    logical INTEGER,"          \
-"    pgno INTEGER,"             \
+"    slot INTEGER,"             \
+"    value INTEGER,"            \
 "    physical_in_use BOOLEAN,"  \
-"    logical_in_use BOOLEAN,"   \
-"    logical_in_parent BOOLEAN" \
-"  );" 
+"    logical_in_use BOOLEAN"    \
+"  );"
 
 /* 
 ** Virtual table type for "hctpgmap".
@@ -1247,7 +1250,7 @@ static int pgmapRowid(sqlite3_vtab_cursor *cur, sqlite_int64 *pRowid){
 ** pgmapEof().
 */
 static int pgmapFilter(
-  sqlite3_vtab_cursor *pVtabCursor, 
+  sqlite3_vtab_cursor *pVtabCursor,
   int idxNum, const char *idxStr,
   int argc, sqlite3_value **argv
 ){

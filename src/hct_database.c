@@ -4010,5 +4010,8 @@ int sqlite3HctVtabInit(sqlite3 *db){
   if( rc==SQLITE_OK ){
     rc = sqlite3HctFileVtabInit(db);
   }
+  if( rc==SQLITE_OK ){
+    rc = sqlite3HctPManVtabInit(db);
+  }
   return rc;
 }

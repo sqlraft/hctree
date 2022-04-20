@@ -190,6 +190,7 @@ struct HctFilePage {
   HctFile *pFile;
 };
 
+
 int sqlite3HctFilePageNew(HctFile *pFile, u32 iPg, HctFilePage *pPg);
 
 /*
@@ -260,6 +261,7 @@ u32 sqlite3HctFilePageRangeAlloc(HctFile*, int bLogical, int nPg);
 int sqlite3HctFileClearInUse(HctFilePage *pPg);
 
 #include <hctPManInt.h>
+HctPManClient *sqlite3HctFilePManClient(HctFile*);
 
 /*************************************************************************
 ** Utility functions:

@@ -80,5 +80,6 @@ void sqlite3HctPManFreePg(
   int bLogical                    /* True for logical, false for physical */
 );
 
+int sqlite3HctPManVtabInit(sqlite3 *db);
 
 
