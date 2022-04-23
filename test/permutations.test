@@ -180,10 +180,23 @@ lappend ::testsuitelist xxx
 
 test_suite "hct" -prefix "" -description {
 } -files {
-  hct_cas.test hct_misc1.test hct_misc2.test hct_misc3.test
-  hct_misc4.test hct_misc5.test hct_misc6.test hct_misc7.test
-  hct_delete.test hct_misc8.test trans2.test
-  hct_mvcc1.test hct_mvcc2.test
+
+hct_cas.test
+hct_delete2.test
+hct_delete.test
+hct_misc1.test
+hct_misc2.test
+hct_misc3.test
+hct_misc4.test
+hct_misc5.test
+hct_misc6.test
+hct_misc7.test
+hct_misc8.test
+hct_mvcc1.test
+hct_mvcc2.test
+hct_pman1.test
+hct_reopen1.test
+hct_simple_rollback.test
 
   update.test
   select2.test select4.test select5.test

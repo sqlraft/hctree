@@ -59,6 +59,8 @@ proc dumpdb {} {
     FROM hctpgmap WHERE physical_in_use;
     SELECT 'logical_in_use' AS type, count(*) 
     FROM hctpgmap WHERE logical_in_use;
+    SELECT 'logical_evicted' AS type, count(*) 
+    FROM hctpgmap WHERE logical_evicted;
   }
 
   execsql_pp {

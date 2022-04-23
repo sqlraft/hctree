@@ -358,5 +358,10 @@ do_execsql_test 14.2 {
   SELECT * FROM t1
 } {1 one 3 three}
 
+db close
+db2 close
+sqlite3 db test.db
+# do_execsql_test 14.3 { SELECT * FROM t1 } {1 one 3 three}
+
 finish_test
 

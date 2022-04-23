@@ -26,7 +26,14 @@
 ** based its transaction. The iMinTid value is set to the largest
 ** TID value for which it and all smaller TID values map to fully
 ** committed transactions with CID values smaller than or equal
-** to iMinCid.
+** to iMinCid. This means that:
+**
+**   * The new object may be used by any client accessing a snapshot
+**     with a snapshot-id >= iMinCid.
+**
+**   * So long as this object exists, it is not safe to reuse any
+**     page ids (logical or physical) freed by transactions with
+**     TID values > iMinTid.
 **
 ** The HctTMap object may then be used to access any snapshot with
 ** a CID value greater than or equal to iMinCid. While the HctTMap
@@ -145,6 +152,7 @@ static int hctTMapInit(HctTMapServer *p, u64 iFirstTid){
   }else{
     int i;
     pNew->m.iMinCid = 1;
+    pNew->m.iMinTid = iFirstTid-1;
     pNew->m.iFirstTid = iFirstTid;
     pNew->m.nMap = 3;
     pNew->m.aaMap = (u64**)&pNew[1];
@@ -251,6 +259,28 @@ static void hctTMapGetRef(HctTMapServer *p, HctTMapRef *pRef){
   pRef->pMap = pMap;
 }
 
+static void hctTMapDropMap(HctTMapServer *p, HctTMapFull *pMap){
+  HctTMapFull **pp;
+  u64 iVal = 0;
+
+  assert( sqlite3_mutex_held(p->pMutex) );
+  assert( pMap->pRefList==0 && pMap!=p->pList );
+
+  for(pp=&p->pList; *pp!=pMap; pp=&(*pp)->pNext){
+    iVal = (*pp)->m.iMinTid;
+  }
+  *pp = pMap->pNext;
+#if 0
+  printf("dropping tmap object - iVal = %lld, last=%s\n", (i64)iVal,
+      pMap->pNext ? "no" : "yes"
+  );
+#endif
+  if( pMap->pNext==0 ){
+    AtomicStore(&p->iMinMinTid, iVal);
+  }
+  sqlite3_free(pMap);
+}
+
 /*
 ** Called to drop the reference held by object pRef, if any. The server 
 ** mutex must be held to call this function.
@@ -285,16 +315,7 @@ static void hctTMapDropRef(HctTMapServer *p, HctTMapRef *pRef){
     **   3. free the object itself.
     */
     if( pMap->pRefList==0 && pMap!=p->pList ){
-      HctTMapFull **pp;
-      u64 iVal = 0;
-      for(pp=&p->pList; *pp!=pMap; pp=&(*pp)->pNext){
-        iVal = (*pp)->m.iMinTid;
-      }
-      *pp = pMap->pNext;
-      if( pMap->pNext==0 ){
-        AtomicStore(&p->iMinMinTid, iVal);
-      }
-      sqlite3_free(pMap);
+      hctTMapDropMap(p, pMap);
     }
   }
   assert( pRef->refMask==0 );
@@ -429,6 +450,7 @@ static HctTMapFull *hctTMapNewObject(
     int i;
     u64 iMinTid;
     u64 iEof = pPrev->m.iFirstTid + pPrev->m.nMap*HCT_TMAP_PAGESIZE;
+    assert( (pPrev->m.iMinTid+1)>=pPrev->m.iFirstTid );
     for(iMinTid=pPrev->m.iMinTid; iMinTid<(iEof-1); iMinTid++){
       u64 iVal = AtomicLoad( hctTMapFind(pPrev, iMinTid+1) );
       if( (iVal & HCT_TMAP_STATE_MASK)!=HCT_TMAP_COMMITTED
@@ -507,8 +529,11 @@ int sqlite3HctTMapNewTID(
       if( pNew==0 ){
         rc = SQLITE_NOMEM_BKPT;
       }else{
-        pNew->pNext = p->pServer->pList;
+        HctTMapFull *pOld = pNew->pNext = p->pServer->pList;
         p->pServer->pList = pNew;
+        if( pOld->pRefList==0 ){
+          hctTMapDropMap(p->pServer, pOld);
+        }
       }
     }
     hctTMapUpdateSafe(p);

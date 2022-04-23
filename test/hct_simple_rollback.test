@@ -16,7 +16,7 @@ source $testdir/tester.tcl
 set testprefix hct_simple_rollback
 
 foreach {tn str1 str2} {
-  1 "abcdefghij" "abcdefghij"
+  1 "abcdefghij" "ABCDEFGHIJ"
 } {
   reset_db
   sqlite3 db2 test.db
@@ -44,9 +44,7 @@ foreach {tn str1 str2} {
 
   do_catchsql_test 1.4 {
     COMMIT;
-  } {1 {...}}
-
-
+  } {1 {database is locked}}
 }
 
 

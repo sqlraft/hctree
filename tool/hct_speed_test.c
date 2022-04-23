@@ -1,0 +1,461 @@
+
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+#include <stdio.h>
+#include <pthread.h>
+#include <assert.h>
+#include <sys/types.h> 
+#include <sys/stat.h> 
+#include <sys/time.h> 
+#include <fcntl.h>
+#include <errno.h>
+
+#include "sqlite3.h"
+
+typedef sqlite3_int64 i64;
+
+#define HST_DATABASE_NAME "hct_speed.db"
+
+typedef struct Error Error;
+typedef struct Thread Thread;
+typedef struct Threadset Threadset;
+
+struct Error {
+  int rc;
+  int iLine;
+  char *zErr;
+};
+
+struct Thread {
+  int iTid;                       /* Thread number within test */
+  void* pArg;                     /* Pointer argument passed by caller */
+
+  pthread_t tid;                  /* Thread id */
+  char *(*xProc)(int, void*);     /* Thread main proc */
+  char *zRes;                     /* Value returned by xProc */
+  Thread *pNext;                  /* Next in this list of threads */
+};
+
+struct Threadset {
+  int iMaxTid;                    /* Largest iTid value allocated so far */
+  Thread *pThread;                /* Linked list of threads */
+};
+
+/*
+** State of a simple PRNG used for the per-connection and per-pager
+** pseudo-random number generators.
+*/
+typedef struct FastPrng FastPrng;
+struct FastPrng {
+  unsigned int x, y;
+};
+
+/*
+** Generate N bytes of pseudo-randomness using a FastPrng
+*/
+static void hstFastRandomness(FastPrng *pPrng, int N, void *P){
+  unsigned char *pOut = (unsigned char*)P;
+  while( N-->0 ){
+    pPrng->x = ((pPrng->x)>>1) ^ ((1+~((pPrng->x)&1)) & 0xd0000001);
+    pPrng->y = (pPrng->y)*1103515245 + 12345;
+    *(pOut++) = (pPrng->x ^ pPrng->y) & 0xff;
+  }
+}
+
+static void frandomFunc(sqlite3_context *ctx, int nArg, sqlite3_value **aArg){
+  FastPrng *p = (FastPrng*)sqlite3_user_data(ctx);
+  i64 ret;
+  hstFastRandomness(p, sizeof(ret), &ret);
+  sqlite3_result_int64(ctx, ret);
+}
+
+static void frandomBlobFunc(
+  sqlite3_context *ctx, 
+  int nArg, 
+  sqlite3_value **aArg
+){
+  FastPrng *p = (FastPrng*)sqlite3_user_data(ctx);
+  int nBlob = sqlite3_value_int(aArg[0]);
+  unsigned char *aBlob = 0;
+
+  aBlob = (unsigned char*)sqlite3_malloc(nBlob);
+  hstFastRandomness(p, nBlob, aBlob);
+  sqlite3_result_blob(ctx, aBlob, nBlob, SQLITE_TRANSIENT);
+  sqlite3_free(aBlob);
+}
+
+
+
+static sqlite3 *hst_sqlite3_open(const char *zDb){
+  sqlite3 *db = 0;
+  int flags = SQLITE_OPEN_CREATE|SQLITE_OPEN_READWRITE|SQLITE_OPEN_NOMUTEX;
+  int rc = sqlite3_open_v2(zDb, &db, flags, 0);
+  if( rc!=SQLITE_OK ){
+    fprintf(stderr, "error in sqlite3_open: (%d) %s\n", rc, sqlite3_errmsg(db));
+    exit(1);
+  }else{
+    FastPrng *p = (FastPrng*)sqlite3_malloc(sizeof(FastPrng));
+    sqlite3_randomness(sizeof(FastPrng), (void*)p);
+    p->x |= 1;
+    sqlite3_create_function(
+        db, "frandom", 0, SQLITE_ANY, (void*)p, frandomFunc, 0, 0
+    );
+    sqlite3_create_function(
+        db, "frandomblob", 1, SQLITE_ANY, (void*)p, frandomBlobFunc, 0, 0
+    );
+  }
+  return db;
+}
+
+static void hst_sqlite3_exec(sqlite3 *db, const char *zSql){
+  char *zErr = 0;
+  int rc = sqlite3_exec(db, zSql, 0, 0, &zErr);
+  if( rc!=SQLITE_OK ){
+    fprintf(stderr, "error in sqlite3_exec: (%d) %s\n", rc, zErr);
+    exit(1);
+  }
+}
+
+#define SEL(e) ((e)->iLine = ((e)->rc ? (e)->iLine : __LINE__))
+
+static sqlite3_stmt *hst_sqlite3_prepare(
+  Error *pErr, 
+  sqlite3 *db, 
+  const char *zSql
+){
+  sqlite3_stmt *pRet = 0;
+  if( pErr->rc==SQLITE_OK ){
+    int rc = sqlite3_prepare_v2(db, zSql, -1, &pRet, 0);
+    if( rc!=SQLITE_OK ){
+      pErr->rc = rc;
+      pErr->zErr = sqlite3_mprintf("sqlite3_prepare: %s", sqlite3_errmsg(db));
+    }
+  }
+  return pRet;
+}
+#define hst_sqlite3_prepare(pErr, db, zSql) ( \
+  SEL(pErr),                                  \
+  hst_sqlite3_prepare(pErr, db, zSql)         \
+)
+
+static void hst_free_err(Error *pErr){
+  sqlite3_free(pErr->zErr);
+  memset(pErr, 0, sizeof(Error));
+}
+
+static void hst_print_and_free_err(Error *pErr){
+  if( pErr->rc!=SQLITE_OK ){
+    printf("Error: line %d: (rc=%d) %s\n", pErr->iLine, pErr->rc, pErr->zErr);
+  }
+  hst_free_err(pErr);
+}
+
+static void hst_sqlite3_reset(Error *pErr, sqlite3_stmt *pStmt){
+  if( pErr->rc==SQLITE_OK ){
+    int rc = sqlite3_reset(pStmt);
+    if( rc!=SQLITE_OK ){
+      pErr->rc = rc;
+      pErr->zErr = sqlite3_mprintf(
+          "sqlite3_reset: %s\n", sqlite3_errmsg(sqlite3_db_handle(pStmt))
+      );
+    }
+  }
+}
+#define hst_sqlite3_reset(pErr, pStmt) ( \
+  SEL(pErr),                             \
+  hst_sqlite3_reset(pErr, pStmt)         \
+)
+
+static void system_error(Error *pErr, int iSys){
+  pErr->rc = iSys;
+  pErr->zErr = (char *)sqlite3_malloc(512);
+  strerror_r(iSys, pErr->zErr, 512);
+  pErr->zErr[511] = '\0';
+}
+
+static void *launch_thread_main(void *pArg){
+  Thread *p = (Thread *)pArg;
+  p->zRes = p->xProc(p->iTid, p->pArg);
+  return 0;
+}
+
+static void hst_launch_thread(
+  Error *pErr,                    /* IN/OUT: Error code */
+  Threadset *pThreads,            /* Thread set */
+  char *(*xProc)(int, void*),     /* Proc to run */
+  void *pArg                      /* Argument passed to thread proc */
+){
+  if( pErr->rc==SQLITE_OK ){
+    int iTid = ++pThreads->iMaxTid;
+    Thread *p;
+    int rc;
+
+    p = (Thread *)sqlite3_malloc(sizeof(Thread));
+    memset(p, 0, sizeof(Thread));
+    p->iTid = iTid;
+    p->pArg = pArg;
+    p->xProc = xProc;
+
+    rc = pthread_create(&p->tid, NULL, launch_thread_main, (void *)p);
+    if( rc!=0 ){
+      system_error(pErr, rc);
+      sqlite3_free(p);
+    }else{
+      p->pNext = pThreads->pThread;
+      pThreads->pThread = p;
+    }
+  }
+}
+
+static sqlite3_int64 hst_current_time(){
+  struct timeval sNow;
+  gettimeofday(&sNow, 0);
+  return (sqlite3_int64)sNow.tv_sec*1000 + sNow.tv_usec/1000;
+}
+
+
+static void hst_join_threads(
+  Error *pErr,                    /* IN/OUT: Error code */
+  Threadset *pThreads             /* Thread set */
+){
+  Thread *p;
+  Thread *pNext;
+  for(p=pThreads->pThread; p; p=pNext){
+    void *ret = 0;
+    int rc = SQLITE_OK;
+    pNext = p->pNext;
+
+    rc = pthread_join(p->tid, &ret);
+
+    if( rc!=0 ){
+      if( pErr->rc==SQLITE_OK ) system_error(pErr, rc);
+    }else{
+      printf("Thread %d says: %s\n", p->iTid, (p->zRes==0 ? "..." : p->zRes));
+      fflush(stdout);
+    }
+    sqlite3_free(p->zRes);
+    sqlite3_free(p);
+  }
+  pThreads->pThread = 0;
+}
+
+
+///////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////
+
+typedef struct Testcase Testcase;
+struct Testcase {
+  int nSecond;
+  int nBlob;
+  int nIdx;
+  int nRow;
+  int nUpdate;
+  int nThread;
+};
+
+/*
+** Globals used by this test program.
+*/
+static struct TestGlobal {
+  sqlite3_int64 iTimeToStop;
+} g;
+
+static char *test_thread(int iTid, void *pArg){
+  Testcase *pTst = (Testcase*)pArg;
+  sqlite3 *db = 0;
+  sqlite3_stmt *pBegin = 0;
+  sqlite3_stmt *pCommit = 0;
+  sqlite3_stmt *pRollback = 0;
+  sqlite3_stmt *pWrite = 0;
+
+  const i64 nInterval = 2000;
+  i64 iStartTime = 0;              /* Start of first loop */
+  i64 iEndTime = 0;                /* Start of first loop */
+  i64 iIntervalTime = 0;           /* Start of current interval */
+  int iIntervalWrite = 0;          /* nWrite @ start of interval */
+  int nWrite = 0;                  /* Total number of writes */
+  int nBusy = 0;                   /* Total number of SQLITE_BUSY errors */
+  char *zRet = 0;
+
+  Error err = {0,0,0};
+
+  db = hst_sqlite3_open(HST_DATABASE_NAME);
+  hst_sqlite3_exec(db, "PRAGMA journal_mode = off");
+  pBegin = hst_sqlite3_prepare(&err, db, "BEGIN");
+  pCommit = hst_sqlite3_prepare(&err, db, "COMMIT");
+  pRollback = hst_sqlite3_prepare(&err, db, "ROLLBACK");
+  pWrite = hst_sqlite3_prepare(&err, db, 
+    "UPDATE tbl SET b=frandomblob(?), c=hex(frandomblob(32)) "
+    "WHERE a = (abs(frandom()) % ?) + 1"
+  );
+  if( err.rc ) goto test_out;
+
+  sqlite3_bind_int(pWrite, 1, pTst->nBlob);
+  sqlite3_bind_int(pWrite, 2, pTst->nRow);
+
+  iStartTime = iIntervalTime = hst_current_time();
+  while( err.rc==SQLITE_OK ){
+    i64 iNow = hst_current_time();
+    if( iNow>=(iIntervalTime + nInterval) ){
+      i64 nIntervalWrite = nWrite - iIntervalWrite;
+      printf("t%d: %d transactions at %d/second\n", iTid, (int)nIntervalWrite, 
+          (int)((nIntervalWrite * 1000) / (iNow - iIntervalTime))
+      );
+      iIntervalTime = iNow;
+      iIntervalWrite = nWrite;
+    }
+
+    if( iNow>=g.iTimeToStop && nWrite>100000 ){
+      break;
+    }else{
+      int ii = 0;
+      sqlite3_step(pBegin);
+      hst_sqlite3_reset(&err, pBegin);
+
+      for(ii=0; ii<pTst->nUpdate; ii++){
+        sqlite3_step(pWrite);
+        hst_sqlite3_reset(&err, pWrite);
+      }
+
+      sqlite3_step(pCommit);
+      hst_sqlite3_reset(&err, pCommit);
+      if( err.rc==SQLITE_BUSY ){
+        hst_free_err(&err);
+        nBusy++;
+        sqlite3_step(pRollback);
+        hst_sqlite3_reset(&err, pRollback);
+      }
+      nWrite++;
+    }
+  }
+
+  iEndTime = hst_current_time();
+  if( iEndTime<=iStartTime ) iEndTime = iStartTime + 1;
+  zRet = sqlite3_mprintf("%d transactions (%d busy) at %d/second", nWrite, 
+      nBusy, (int)(((i64)nWrite * 1000) / (iEndTime - iStartTime))
+  );
+
+  sqlite3_finalize(pBegin);
+  sqlite3_finalize(pCommit);
+  sqlite3_finalize(pRollback);
+  sqlite3_finalize(pWrite);
+
+ test_out:
+  hst_print_and_free_err(&err);
+  return zRet;
+}
+
+static void runtest(Testcase *pTst){
+  sqlite3 *db = 0;
+  sqlite3_stmt *pIns = 0;
+  int ii;
+
+  Error err;
+  Threadset threadset;
+
+  memset(&err, 0, sizeof(err));
+  memset(&threadset, 0, sizeof(threadset));
+
+  system("rm -rf " HST_DATABASE_NAME);
+
+  db = hst_sqlite3_open(HST_DATABASE_NAME);
+  hst_sqlite3_exec(db,
+      " CREATE TABLE tbl("
+      "   a INTEGER PRIMARY KEY,"
+      "   b BLOB,"
+      "   c CHAR(64)"
+      ")"
+  );
+  for(ii=0; ii<pTst->nIdx; ii++){
+    char *zSql = sqlite3_mprintf(
+        "CREATE INDEX tbl_iN ON tbl(substr(c, %d, 16));", ii
+    );
+    hst_sqlite3_exec(db, zSql);
+    sqlite3_free(zSql);
+  }
+
+  printf("building initial database."); 
+  fflush(stdout);
+  pIns = hst_sqlite3_prepare(&err, db, 
+      "INSERT INTO tbl VALUES(NULL, zeroblob(?), hex(frandomblob(32)))"
+  );
+  sqlite3_bind_int(pIns, 1, pTst->nBlob);
+  hst_sqlite3_exec(db, "BEGIN");
+  for(ii=0; ii<pTst->nRow; ii++){
+    if( ((ii+1) % (pTst->nRow / 20))==0 ){
+      printf(".");
+      fflush(stdout);
+    }
+
+    sqlite3_step(pIns);
+    hst_sqlite3_reset(&err, pIns);
+  }
+  hst_sqlite3_exec(db, "COMMIT");
+  sqlite3_finalize(pIns);
+  printf("\n");
+
+  sqlite3_close(db);
+
+  /* Set the "time-to-stop" global */
+  g.iTimeToStop = hst_current_time() + (i64)pTst->nSecond * 1000;
+
+  printf("launching %d threads\n", pTst->nThread);
+  for(ii=0; ii<pTst->nThread; ii++){
+    hst_launch_thread(&err, &threadset, test_thread, (void*)pTst);
+  }
+  hst_join_threads(&err, &threadset);
+}
+
+static void usage(const char *zPrg){
+  fprintf(stderr, "Usage: %s...", zPrg);
+  exit(-1);
+}
+
+int main(int argc, char **argv){
+  int iArg;
+  Testcase tst;
+
+  memset(&tst, 0, sizeof(Testcase));
+  tst.nBlob = 200;
+  tst.nRow = 1000000;
+  tst.nUpdate = 1;
+  tst.nSecond = 10;
+
+  for(iArg=1; iArg<argc; iArg++){
+    const char *zArg = argv[iArg];
+    if( zArg[0]=='+' ){
+      tst.nThread = strtol(&zArg[1], 0, 0);
+      runtest(&tst);
+    }else{
+      int nArg = strlen(zArg);
+      int *pnVal = 0;
+      if( nArg>2 && nArg<=6 && memcmp("-nblob", zArg, nArg)==0 ){
+        pnVal = &tst.nBlob;
+      }else
+      if( nArg>2 && nArg<=5 && memcmp("-nidx", zArg, nArg)==0 ){
+        pnVal = &tst.nIdx;
+      }else
+      if( nArg>2 && nArg<=5 && memcmp("-nrow", zArg, nArg)==0 ){
+        pnVal = &tst.nRow;
+      }else
+      if( nArg>2 && nArg<=8 && memcmp("-nsecond", zArg, nArg)==0 ){
+        pnVal = &tst.nSecond;
+      }else
+      if( nArg>2 && nArg<=8 && memcmp("-nupdate", zArg, nArg)==0 ){
+        pnVal = &tst.nUpdate;
+      }else{
+        usage(argv[0]);
+      }
+
+      iArg++;
+      if( iArg==argc ) usage(argv[0]);
+      *pnVal = strtol(argv[iArg], 0, 0);
+    }
+  }
+
+  return 0;
+}
+
+

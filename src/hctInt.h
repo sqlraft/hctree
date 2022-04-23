@@ -101,6 +101,8 @@ void sqlite3HctTreeClear(HctTree *pTree);
 typedef struct HctDatabase HctDatabase;
 typedef struct HctDbCsr HctDbCsr;
 
+HctDatabase *sqlite3HctDbFind(sqlite3*, int);
+
 HctDatabase *sqlite3HctDbOpen(int*, const char *zFile, HctConfig*);
 void sqlite3HctDbClose(HctDatabase *pDb);
 
@@ -227,6 +229,15 @@ void sqlite3HctFilePageUnwrite(HctFilePage *pPg);
 int sqlite3HctFilePageCommit(HctFilePage *pPg);
 
 /*
+** Evict the page from the data structure - i.e. set the LOGICAL_EVICTED
+** flag for it. This operation fails if the LOGICAL_EVICTED flag has 
+** already been set, or if the page has been written since it was read.
+*/
+int sqlite3HctFilePageEvict(HctFilePage *pPg);
+
+void sqlite3HctFilePageUnevict(HctFilePage *pPg);
+
+/*
 ** Release a page reference obtained via an earlier call to 
 ** sqlite3HctFilePageGet() or sqlite3HctFilePageNew(). After this call
 ** pPg->aOld is NULL.
@@ -237,20 +248,14 @@ int sqlite3HctFilePageCommit(HctFilePage *pPg);
 int sqlite3HctFilePageRelease(HctFilePage *pPg);
 
 
-int sqlite3HctFilePageDelete(HctFilePage *pPg);
 int sqlite3HctFilePageGetPhysical(HctFile *pFile, u32 iPg, HctFilePage *pPg);
 int sqlite3HctFilePageNewPhysical(HctFile *pFile, HctFilePage *pPg);
-
-u64 sqlite3HctFileStartTrans(HctFile *pFile);
-int sqlite3HctFileFinishTrans(HctFile *pFile);
 
 u64 sqlite3HctFileAllocateTransid(HctFile *pFile);
 u64 sqlite3HctFileAllocateCID(HctFile *pFile);
 u64 sqlite3HctFileGetSnapshotid(HctFile *pFile);
 
 HctTMapClient *sqlite3HctFileTMapClient(HctFile*);
-
-HctDatabase *sqlite3HctDbFind(sqlite3*, int);
 
 int sqlite3HctFilePgsz(HctFile *pFile);
 int sqlite3HctFileVtabInit(sqlite3 *db);

@@ -576,6 +576,10 @@ dbhash$(EXE):	$(TOP)/tool/dbhash.c sqlite3.c sqlite3.h
 	$(TCCX) -o dbhash$(EXE) -DSQLITE_THREADSAFE=0 \
 		$(TOP)/tool/dbhash.c sqlite3.c $(TLIBS) $(THREADLIB)
 
+hct_speed_test$(EXE): $(TOP)/tool/hct_speed_test.c libsqlite3.a sqlite3.h
+	$(TCCX) -o hct_speed_test$(EXE) \
+		$(TOP)/tool/hct_speed_test.c libsqlite3.a $(TLIBS) $(THREADLIB)
+
 scrub$(EXE):	$(TOP)/ext/misc/scrub.c sqlite3.o
 	$(TCC) -I. -DSCRUB_STANDALONE -o scrub$(EXE) $(TOP)/ext/misc/scrub.c sqlite3.o $(THREADLIB)
 

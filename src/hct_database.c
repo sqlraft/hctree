@@ -286,15 +286,19 @@ static void hctDbFreeGlobal(HctFileGlobal *pFileGlobal){
 static u64 hctDbTMapLookup(HctDatabase *pDb, u64 iTid, u64 *peState){
   u64 iVal = 0;
   HctTMap *pTmap = pDb->pTmap;
-  int iMap = (iTid - pTmap->iFirstTid) / HCT_TMAP_PAGESIZE;
+  if( iTid<pTmap->iFirstTid ){
+    *peState = HCT_TMAP_COMMITTED;
+  }else{
+    int iMap = (iTid - pTmap->iFirstTid) / HCT_TMAP_PAGESIZE;
 
-  assert( iMap<pTmap->nMap );
-  if( iMap>=0 && iMap<pTmap->nMap ){
-    int iOff = (iTid - pTmap->iFirstTid) % HCT_TMAP_PAGESIZE;
-    iVal = AtomicLoad(&pTmap->aaMap[iMap][iOff]);
+    assert( iMap<pTmap->nMap );
+    if( iMap<pTmap->nMap ){
+      int iOff = (iTid - pTmap->iFirstTid) % HCT_TMAP_PAGESIZE;
+      iVal = AtomicLoad(&pTmap->aaMap[iMap][iOff]);
+    }
+
+    *peState = (iVal & HCT_TMAP_STATE_MASK);
   }
-
-  *peState = (iVal & HCT_TMAP_STATE_MASK);
   return (iVal & HCT_TMAP_CID_MASK);
 }
 
@@ -951,6 +955,7 @@ int hctDbCsrSeek(
           if( bGotoPeer ){
             SWAP(HctFilePage, pCsr->pg, peer);
             sqlite3HctFilePageRelease(&peer);
+            assert( pCsr->pg.aOld );
             iPg = 0;
             continue;
           }
@@ -965,6 +970,7 @@ int hctDbCsrSeek(
       }
 
       sqlite3HctFilePageRelease(&pCsr->pg);
+      assert( rc!=SQLITE_OK || iPg!=0 );
     }
   }
 
@@ -1288,6 +1294,7 @@ static void hctDbInsertDiscard(HctDbWriter *p){
     sqlite3HctFilePageRelease(&p->aWritePg[ii]);
   }
   for(ii=0; ii<p->nDiscard; ii++){
+    sqlite3HctFilePageUnevict(&p->aDiscard[ii]);
     sqlite3HctFilePageRelease(&p->aDiscard[ii]);
   }
 
@@ -1894,6 +1901,7 @@ static int hctDbExtendWriteArray(
     assert( p->nWritePg>1 );
     p->nWritePg--;
     if( p->aWritePg[iRem].aOld ){
+      /* TODO: Is this necessary? */
       p->aDiscard[p->nDiscard++] = p->aWritePg[iRem];
     }else{
       sqlite3HctFilePageUnwrite(&p->aWritePg[iRem]);
@@ -1950,36 +1958,48 @@ static int hctDbLoadPeers(HctDatabase *pDb, HctDbWriter *p, int *piPg){
       int bDummy;
       HctFilePage *pCopy = &p->aDiscard[p->nDiscard++];
 
-      hctDbCsrInit(pDb, p->writecsr.iRoot, &csr);
-      if( hctPagetype(pLeft->aNew)==HCT_PAGETYPE_INTKEY ){
-        i64 iKey = hctDbIntkeyFPKey(pLeft->aNew);
-        assert( iKey!=SMALLEST_INT64 );
-        rc = hctDbCsrSeek(&csr, p->iHeight, 0, iKey-1, &bDummy);
-      }else{
-        UnpackedRecord *pRec = 0;
-        HctBuffer buf;
-        int nData = 0;
-        const u8 *aData = 0;
-        memset(&buf, 0, sizeof(buf));
-        rc = hctDbLoadRecord(pDb, &buf, pLeft->aNew, 0, &nData, &aData);
-        if( rc==SQLITE_OK ){
-          rc = hctDbAllocateUnpacked(&p->writecsr);
-        }
-        if( rc==SQLITE_OK ){
-          pRec = p->writecsr.pRec;
-          sqlite3VdbeRecordUnpack(p->writecsr.pKeyInfo, nData, aData, pRec);
-          hctDbRecordTrim(pRec);
-          pRec->default_rc = 1;
-          hctDbCsrSeek(&csr, p->iHeight, pRec, 0, &bDummy);
-          pRec->default_rc = 0;
+      /* First, evict the page currently in p->aWritePg[0]. If we 
+      ** successfully evict the page here, then of course no other thread
+      ** can - which guarantees that the seek operation below really does
+      ** find the left-hand peer (assuming the db is not corrupt).  */
+      rc = sqlite3HctFilePageEvict(pLeft);
 
-          assert( csr.pg.iPg!=pLeft->iPg );
+      /* Assuming the LOGICAL_EVICTED flag was successfully set, seek 
+      ** cursor csr to the leaf page immediately to the left of pLeft. */
+      if( rc==SQLITE_OK ){
+        hctDbCsrInit(pDb, p->writecsr.iRoot, &csr);
+        if( hctPagetype(pLeft->aNew)==HCT_PAGETYPE_INTKEY ){
+          i64 iKey = hctDbIntkeyFPKey(pLeft->aNew);
+          assert( iKey!=SMALLEST_INT64 );
+          rc = hctDbCsrSeek(&csr, p->iHeight, 0, iKey-1, &bDummy);
+        }else{
+          UnpackedRecord *pRec = 0;
+          HctBuffer buf;
+          int nData = 0;
+          const u8 *aData = 0;
+          memset(&buf, 0, sizeof(buf));
+          rc = hctDbLoadRecord(pDb, &buf, pLeft->aNew, 0, &nData, &aData);
+          if( rc==SQLITE_OK ){
+            rc = hctDbAllocateUnpacked(&p->writecsr);
+          }
+          if( rc==SQLITE_OK ){
+            pRec = p->writecsr.pRec;
+            sqlite3VdbeRecordUnpack(p->writecsr.pKeyInfo, nData, aData, pRec);
+            hctDbRecordTrim(pRec);
+            pRec->default_rc = 1;
+            rc = hctDbCsrSeek(&csr, p->iHeight, pRec, 0, &bDummy);
+            pRec->default_rc = 0;
+
+            assert( csr.pg.iPg!=pLeft->iPg );
+          }
+          hctBufferFree(&buf);
         }
-        hctBufferFree(&buf);
       }
 
       if( rc==SQLITE_OK ){
+        /* These may fail if the db is corrupt */
         assert( csr.pg.iPg!=pLeft->iPg );
+        assert( ((HctDbPageHdr*)csr.pg.aOld)->iPeerPg==pLeft->iPg );
         *pCopy = *pLeft;
         *pLeft = csr.pg;
         rc = sqlite3HctFilePageWrite(pLeft);
@@ -1995,13 +2015,16 @@ static int hctDbLoadPeers(HctDatabase *pDb, HctDbWriter *p, int *piPg){
       }
     }
 
-#if 1
     if( rc==SQLITE_OK ){
       HctDbPageHdr *pHdr = (HctDbPageHdr*)p->aWritePg[p->nWritePg-1].aNew;
       if( pHdr->iPeerPg ){
         HctFilePage *pPg = &p->aWritePg[p->nWritePg++];
         HctFilePage *pCopy = &p->aDiscard[p->nDiscard++];
         rc = sqlite3HctFilePageGet(pDb->pFile, pHdr->iPeerPg, pCopy);
+        if( rc==SQLITE_OK ){
+          /* Evict the page immediately */
+          rc = sqlite3HctFilePageEvict(pCopy);
+        }
         if( rc==SQLITE_OK ){
           rc = sqlite3HctFilePageNew(pDb->pFile, 0, pPg);
         }
@@ -2012,7 +2035,6 @@ static int hctDbLoadPeers(HctDatabase *pDb, HctDbWriter *p, int *piPg){
         }
       }
     }
-#endif
   }
 
   return rc;
@@ -2405,6 +2427,8 @@ static int hctDbInsertIntkeyNode(
   int nMin = hctDbMinCellsPerIntkeyNode(pDb->pgsz);
   HctDbIntkeyNode *pNode;
   int rc = SQLITE_OK;
+
+  assert( bDel || bClobber==0 );
 
   pNode = (HctDbIntkeyNode*)p->aWritePg[iPg].aNew;
   if( (pNode->pg.nEntry>=nMax && bClobber==0) ){
