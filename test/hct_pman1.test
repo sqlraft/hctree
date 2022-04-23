@@ -51,7 +51,7 @@ proc dumpdb {} {
 
     SELECT type, c FROM chain WHERE l NOT IN (
       SELECT slot FROM map
-    )
+    );
   }
 
   execsql_pp {

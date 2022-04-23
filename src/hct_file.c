@@ -327,7 +327,7 @@ static int hctFileSetEvicted(
     }
     if( inject_cas_failure() ) return 0;
 
-    if( hctBoolCAS64(pPtr, iOld, iOld | HCT_PMF_LOGICAL_IN_USE) ) return 1;
+    if( hctBoolCAS64(pPtr, iOld, iOld | HCT_PMF_LOGICAL_EVICTED) ) return 1;
   }
 
   assert( !"unreachable" );

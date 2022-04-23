@@ -1998,8 +1998,8 @@ static int hctDbLoadPeers(HctDatabase *pDb, HctDbWriter *p, int *piPg){
 
       if( rc==SQLITE_OK ){
         /* These may fail if the db is corrupt */
-        assert( csr.pg.iPg!=pLeft->iPg );
         assert( ((HctDbPageHdr*)csr.pg.aOld)->iPeerPg==pLeft->iPg );
+        assert( csr.pg.iPg!=pLeft->iPg );
         *pCopy = *pLeft;
         *pLeft = csr.pg;
         rc = sqlite3HctFilePageWrite(pLeft);
