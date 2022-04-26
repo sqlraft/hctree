@@ -20,6 +20,13 @@ struct HctConfig {
 
 #include <hctTMapInt.h>
 
+#ifdef SQLITE_DEBUG
+# define SQLITE_LOCKED_ERR sqlite3HctLockedErr()
+ int sqlite3HctLockedErr(void);
+#else
+# define SQLITE_LOCKED_ERR SQLITE_LOCKED
+#endif
+
 /*************************************************************************
 ** Interface to code in hct_tree.c
 */

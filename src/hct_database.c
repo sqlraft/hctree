@@ -1292,14 +1292,14 @@ static int hctDbMinCellsPerIntkeyNode(int pgsz){
   return (pgsz - sizeof(HctDbIntkeyNode)) / (3*sizeof(HctDbIntkeyNodeEntry));
 }
 
-static void hctDbInsertDiscard(HctDbWriter *p){
+static void hctDbInsertDiscard(HctDbWriter *p, int bUnevict){
   int ii;
   for(ii=0; ii<p->nWritePg; ii++){
     sqlite3HctFilePageUnwrite(&p->aWritePg[ii]);
     sqlite3HctFilePageRelease(&p->aWritePg[ii]);
   }
   for(ii=0; ii<p->nDiscard; ii++){
-    sqlite3HctFilePageUnevict(&p->aDiscard[ii]);
+    if( bUnevict ) sqlite3HctFilePageUnevict(&p->aDiscard[ii]);
     sqlite3HctFilePageRelease(&p->aDiscard[ii]);
   }
 
@@ -1419,6 +1419,7 @@ static int hctDbInsertFlushWrite(HctDatabase *pDb, HctDbWriter *p){
   int ii;
   int eType = hctPagetype(p->aWritePg[0].aNew);
   HctFilePage root;
+  int bUnevict = 0;
 
 static int nCall = 0;
 nCall++;
@@ -1456,6 +1457,10 @@ nCall++;
   /* If there is one, write the new root page to disk */
   if( rc==SQLITE_OK ){
     rc = sqlite3HctFilePageRelease(&root);
+  }
+
+  if( rc!=SQLITE_OK ){
+    bUnevict = 1;
   }
 
   if( (p->nWritePg>1 || p->nDiscard>0) && rc==SQLITE_OK ){
@@ -1502,12 +1507,14 @@ nCall++;
     }
   }
 
-  /* For each page now removed from its list, clear the LOGICAL_IN_USE flag. */
-  for(ii=0; ii<p->nDiscard; ii++){
-    sqlite3HctFileClearInUse(&p->aDiscard[ii]);
+  if( rc==SQLITE_OK ){
+    for(ii=0; ii<p->nDiscard; ii++){
+      sqlite3HctFileClearInUse(&p->aDiscard[ii]);
+    }
   }
 
-  hctDbInsertDiscard(p);
+  /* Clean up the Writer object */
+  hctDbInsertDiscard(p, bUnevict);
   return rc;
 }
 
@@ -1965,7 +1972,7 @@ static int hctDbLoadPeers(HctDatabase *pDb, HctDbWriter *p, int *piPg){
     if( 0==hctIsLeftmost(pLeft->aNew) ){
       HctDbCsr csr;
       int bDummy;
-      HctFilePage *pCopy = &p->aDiscard[p->nDiscard++];
+      HctFilePage *pCopy = 0;
 
       /* First, evict the page currently in p->aWritePg[0]. If we 
       ** successfully evict the page here, then of course no other thread
@@ -2009,6 +2016,7 @@ static int hctDbLoadPeers(HctDatabase *pDb, HctDbWriter *p, int *piPg){
         /* These may fail if the db is corrupt */
         assert( ((HctDbPageHdr*)csr.pg.aOld)->iPeerPg==pLeft->iPg );
         assert( csr.pg.iPg!=pLeft->iPg );
+        pCopy = &p->aDiscard[p->nDiscard++];
         *pCopy = *pLeft;
         *pLeft = csr.pg;
         rc = sqlite3HctFilePageWrite(pLeft);
@@ -2818,7 +2826,7 @@ nCall++;
     if( rc==SQLITE_DONE ){
       hctDbInsertFlushWrite(pDb, p);
     }else{
-      hctDbInsertDiscard(p);
+      hctDbInsertDiscard(p, 1);
     }
     return rc;
   }
@@ -2939,6 +2947,9 @@ nCall++;
 //print_out_page(z, aTarget, pDb->pgsz);
   }
 
+  if( rc!=SQLITE_OK ){
+    hctDbInsertDiscard(p, 1);
+  }
   assert_page_is_ok(aTarget, pDb->pgsz);
   return rc;
 }

@@ -298,7 +298,9 @@ static int hctFilePagemapSetLogical(
     /* This operation fails if LOGICAL_EVICTED has been set. */
     iOld1 &= ~HCT_PMF_LOGICAL_EVICTED;
 
-    if( hctFilePagemapSet(p, iLogical, iOld1, iNew1) ) return 1;
+    if( hctFilePagemapSet(p, iLogical, iOld1, iNew1) ){
+      return 1;
+    }
     if( i1!=iOld1 ) return 0;
   }
 
@@ -339,7 +341,7 @@ static int hctFileSetEvicted(
 static void hctFilePagemapZeroValue(HctMapping *p, u32 iSlot){
   while( 1 ){
     u64 i1 = hctFilePagemapGet(p, iSlot);
-    u64 i2 = (i1 & HCT_PAGEMAP_FMASK);
+    u64 i2 = (i1 & HCT_PAGEMAP_FMASK) & ~HCT_PMF_LOGICAL_EVICTED;
     if( hctFilePagemapSet(p, iSlot, i1, i2) ) return;
   }
 }
@@ -944,7 +946,7 @@ static int hctFilePageFlush(HctFilePage *pPg){
     HctMapping *pMap = pPg->pFile->pMapping;
     u32 iOld = pPg->iOldPg;
     if( !hctFilePagemapSetLogical(pMap, pPg->iPg, iOld, pPg->iNewPg) ){
-      rc = SQLITE_LOCKED;
+      rc = SQLITE_LOCKED_ERR;
     }else{
       if( iOld ){
         u64 iTid = pPg->pFile->iCurrentTid;
@@ -967,7 +969,7 @@ int sqlite3HctFilePageCommit(HctFilePage *pPg){
 
 int sqlite3HctFilePageEvict(HctFilePage *pPg){
   int ret = hctFileSetEvicted(pPg->pFile->pMapping, pPg->iPg, pPg->iOldPg);
-  return (ret ? SQLITE_OK : SQLITE_LOCKED);
+  return (ret ? SQLITE_OK : SQLITE_LOCKED_ERR);
 }
 
 void sqlite3HctFilePageUnevict(HctFilePage *pPg){

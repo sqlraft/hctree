@@ -2063,6 +2063,12 @@ int sqlite3BtreeTransferRow(BtCursor *p1, BtCursor *p2, i64 iKey){
   return SQLITE_LOCKED;
 }
 
+int sqlite3HctLockedErr(void){
+  static int nCall = 0;
+  nCall++;
+  return SQLITE_LOCKED;
+}
+
 /*
 ** The following set of routines are used to disable the simulated
 ** I/O error mechanism.  These routines are used to avoid simulated
