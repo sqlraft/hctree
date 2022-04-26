@@ -283,6 +283,8 @@ static char *test_thread(int iTid, void *pArg){
 
   db = hst_sqlite3_open(HST_DATABASE_NAME);
   hst_sqlite3_exec(db, "PRAGMA journal_mode = off");
+  hst_sqlite3_exec(db, "PRAGMA mmap_size = 1000000000");
+  hst_sqlite3_exec(db, "PRAGMA locking_mode = exclusive");
   pBegin = hst_sqlite3_prepare(&err, db, "BEGIN");
   pCommit = hst_sqlite3_prepare(&err, db, "COMMIT");
   pRollback = hst_sqlite3_prepare(&err, db, "ROLLBACK");
@@ -384,7 +386,7 @@ static void runtest(Testcase *pTst){
   sqlite3_bind_int(pIns, 1, pTst->nBlob);
   hst_sqlite3_exec(db, "BEGIN");
   for(ii=0; ii<pTst->nRow; ii++){
-    if( ((ii+1) % (pTst->nRow / 20))==0 ){
+    if( pTst->nRow>20 && ((ii+1) % (pTst->nRow / 20))==0 ){
       printf(".");
       fflush(stdout);
     }

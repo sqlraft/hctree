@@ -23,15 +23,13 @@ do_execsql_test 1.0 {
 proc dumpdb {} {
   if 0 {
   execsql_pp { 
-    SELECT * FROM hctpgmap, hctdb 
-      WHERE logical_in_use AND hctpgmap.pgno=hctdb.pgno
+    SELECT * FROM hctpgmap, hctdb WHERE logical_in_use AND hctpgmap.pgno=hctdb.pgno
   }
   }
 
   if 0 {
     execsql_pp { 
-      SELECT * FROM hctpgmap, hctentry 
-        WHERE logical_in_use AND hctpgmap.pgno=hctentry.pgno
+      SELECT * FROM hctpgmap, hctentry WHERE logical_in_use AND hctpgmap.value=hctentry.pgno
     }
   }
 

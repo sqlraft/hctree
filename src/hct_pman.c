@@ -268,8 +268,14 @@ void sqlite3HctPManClientFree(HctPManClient *pClient){
 }
 
 #if 0
-static void pman_debug(const char *zOp, int bLogical, u32 iPg, i64 iTid){
-  fprintf(stderr, "pman: %s %s page %d - tid=%lld\n", 
+static void pman_debug(
+  HctPManClient *pClient, 
+  const char *zOp, 
+  int bLogical, 
+  u32 iPg, 
+  i64 iTid
+){
+  printf("pman: (%p) %s %s page %d - tid=%lld\n", pClient,
     zOp, bLogical ? "LOGICAL" : "PHYSICAL", (int)iPg, iTid
   );
 }
@@ -280,14 +286,14 @@ static void pman_debug_new_pageset(
   u64 iSafeTid,
   u64 iServerTid
 ){
-  fprintf(stderr, 
+  printf(
       "pman: new %s pageset - safetid=%lld servertid=%lld\n",
       bLogical ? "LOGICAL" : "PHYSICAL", iSafeTid, iServerTid
   );
 }
 #else
 
-# define pman_debug(a,b,c,d)
+# define pman_debug(a,b,c,d,e)
 # define pman_debug_new_pageset(a,b,c,d)
 
 #endif
@@ -345,7 +351,7 @@ u32 sqlite3HctPManAllocPg(
   if( pUse ){
     assert( pUse->nPg>0 );
     iRet = pUse->aPg[pUse->nPg-1];
-    pman_debug("using", bLogical, iRet, pUse->iMaxTid);
+    pman_debug(pClient, "using", bLogical, iRet, pUse->iMaxTid);
     pUse->nPg--;
     if( pUse->nPg==0 ){
       sqlite3_free(pUse);
@@ -370,7 +376,7 @@ void sqlite3HctPManFreePg(
   HctPManPageset *pAcc = pClient->apAcc[bLogical];
   HctPManPageset *pUse = pClient->apUse[bLogical];
 
-  pman_debug("freeing", bLogical, iPg, iTid);
+  pman_debug(pClient, "freeing", bLogical, iPg, iTid);
 
   if( iTid==0 && pUse && pUse->nPg<pUse->nAlloc ){
     pUse->aPg[pUse->nPg++] = iPg;

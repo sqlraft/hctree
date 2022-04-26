@@ -291,7 +291,12 @@ static u64 hctDbTMapLookup(HctDatabase *pDb, u64 iTid, u64 *peState){
   }else{
     int iMap = (iTid - pTmap->iFirstTid) / HCT_TMAP_PAGESIZE;
 
-    assert( iMap<pTmap->nMap );
+    if( iMap>=pTmap->nMap ){
+      HctTMapClient *pTMapClient = sqlite3HctFileTMapClient(pDb->pFile);
+      sqlite3HctTMapUpdate(pTMapClient, &pDb->pTmap);
+      pTmap = pDb->pTmap;
+      assert( iMap<pTmap->nMap );
+    }
     if( iMap<pTmap->nMap ){
       int iOff = (iTid - pTmap->iFirstTid) % HCT_TMAP_PAGESIZE;
       iVal = AtomicLoad(&pTmap->aaMap[iMap][iOff]);
@@ -1747,6 +1752,7 @@ static void print_out_page(const char *zCaption, const u8 *aData, int nData){
       pLeaf->hdr.nFreeBytes
     );
     printf("%s: %s\n", zCaption, zPrint);
+    fflush(stdout);
     sqlite3_free(zPrint);
   }
 
@@ -1754,8 +1760,10 @@ static void print_out_page(const char *zCaption, const u8 *aData, int nData){
 }
 
 #define assert_or_print(E)                         \
-  if( !(E) ) print_out_page("page", aData, nData); \
-  assert( E );
+  if( !(E) ){                                      \
+    print_out_page("page", aData, nData);          \
+    assert( E );                                   \
+  }
 
 typedef struct VarCellReader VarCellReader;
 struct VarCellReader {
@@ -1799,6 +1807,7 @@ static void assert_page_is_ok(const u8 *aData, int nData){
       int sz = 0;
       int iOff = hctVCRFindCell(&vcr, ii, &sz);
       if( iOff ){
+        assert_or_print( (iOff+sz)<=nData );
         iEnd = MIN(iEnd, iOff);
         nRecTotal += sz;
       }else{
@@ -2604,6 +2613,9 @@ static void hctDbInsertEntry(
 
   iEntry0 = hctDbEntryArrayDim(aTarget, &szEntry);
 
+  /* This might fail if the db is corrupt */
+  assert( p->hdr.nFreeGap>=(nEntry + szEntry) );
+
   /* Insert the new zeroed entry into the aEntry[] array */
   aFrom = &aTarget[iEntry0 + szEntry*iIns];
   if( iIns<p->pg.nEntry ){
@@ -2899,9 +2911,12 @@ nCall++;
 
   /* Unless this is a full-delete operation, update rest of the aEntry[]
   ** entry fields for the new cell. */
-  if( bFullDel==0 ){
+  if( rc==SQLITE_OK && bFullDel==0 ){
     int eType = hctPagetype(aTarget);
     assert_page_is_ok(aTarget, pDb->pgsz);
+    
+//char *z = sqlite3_mprintf("before %d (physical=%d)", p->aWritePg[iPg].iPg, p->aWritePg[iPg].iNewPg);
+// print_out_page(z, aTarget, pDb->pgsz);
     hctDbInsertEntry(pDb, aTarget, iInsert, aEntry, nEntry);
 
     assert( (pRec==0)==(eType==HCT_PAGETYPE_INTKEY) );
@@ -2920,6 +2935,8 @@ nCall++;
       pE->flags = entryFlags;
       pE->iChildPg = iChildPg;
     }
+//z = sqlite3_mprintf("after %d (physical=%d)", p->aWritePg[iPg].iPg, p->aWritePg[iPg].iNewPg);
+//print_out_page(z, aTarget, pDb->pgsz);
   }
 
   assert_page_is_ok(aTarget, pDb->pgsz);
@@ -2965,6 +2982,7 @@ int sqlite3HctDbStartWrite(HctDatabase *p){
 
   assert( p->iTid==0 );
   assert( p->bRollback==0 );
+  memset(&p->pa, 0, sizeof(p->pa));
 
   p->iTid = sqlite3HctFileAllocateTransid(p->pFile);
   rc = sqlite3HctTMapNewTID(pTMapClient, p->iSnapshotId, p->iTid, &p->pTmap);

@@ -327,6 +327,8 @@ static int hctFileSetEvicted(
     }
     if( inject_cas_failure() ) return 0;
 
+    assert( iOld & HCT_PMF_LOGICAL_IN_USE );
+
     if( hctBoolCAS64(pPtr, iOld, iOld | HCT_PMF_LOGICAL_EVICTED) ) return 1;
   }
 
@@ -507,10 +509,15 @@ static int hctFileServerInit(HctFileServer *p, const char *zFile){
       u64 nPg1 = hctFilePagemapGet(pMapping, HCT_PAGEMAP_PHYSICAL_EOF);
       u64 nPg2 = hctFilePagemapGet(pMapping, HCT_PAGEMAP_LOGICAL_EOF);
       u32 iPg;
-      u32 nPg = MAX((nPg1 & 0xFFFFFFFF), (nPg2 & 0xFFFFFFFF));
+      u32 nPg;
+      
+      nPg1 = nPg1 & HCT_PAGEMAP_VMASK;
+      nPg2 = nPg2 & HCT_PAGEMAP_VMASK;
+
+      nPg = MAX((nPg1 & 0xFFFFFFFF), (nPg2 & 0xFFFFFFFF));
       for(iPg=1; iPg<=nPg; iPg++){
         u64 iVal = hctFilePagemapGet(pMapping, iPg);
-        if( (iVal & HCT_PMF_PHYSICAL_IN_USE)==0 && iPg<=nPg1 ){
+        if( (iVal & HCT_PMF_PHYSICAL_IN_USE)==0 && (iPg<=nPg1) ){
           sqlite3HctPManServerInit(&rc, p->pPManServer, iPg, 0);
         }
         if( (iVal & HCT_PMF_LOGICAL_IN_USE)==0 
@@ -946,6 +953,7 @@ static int hctFilePageFlush(HctFilePage *pPg){
       }
       pPg->iOldPg = pPg->iNewPg;
       pPg->aOld = pPg->aNew;
+      pPg->iNewPg = 0;
       pPg->aNew = 0;
     }
   }
@@ -1095,6 +1103,7 @@ int sqlite3HctFileClearInUse(HctFilePage *pPg){
 
   /* TODO: Should it be possible to assert() that the LOGICAL_EVICTED
   ** flag is set here? */
+  assert( hctFilePagemapGet(pPg->pFile->pMapping, pPg->iPg) & HCT_PMF_LOGICAL_EVICTED );
 
   hctFileClearFlag(pPg->pFile, pPg->iPg, HCT_PMF_LOGICAL_IN_USE);
   hctFileClearFlag(pPg->pFile, iPhysPg, HCT_PMF_PHYSICAL_IN_USE);

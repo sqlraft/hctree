@@ -280,7 +280,7 @@ int sqlite3BtreeSetSpillSize(Btree *p, int mxPage){
 ** memory mapped.
 */
 int sqlite3BtreeSetMmapLimit(Btree *p, sqlite3_int64 szMmap){
-  assert( 0 );
+  /* assert( 0 ); */
   return SQLITE_OK;
 }
 #endif /* SQLITE_MAX_MMAP_SIZE>0 */
