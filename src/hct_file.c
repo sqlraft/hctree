@@ -124,6 +124,8 @@ struct HctFileServer {
   sqlite3_mutex *pMutex;          /* Mutex to protect this object */
   HctFile *pFileList;
 
+  int iNextDebugId;
+
   HctFileGlobal *pGlobal;
   void (*xGFree)(HctFileGlobal*);
 
@@ -155,6 +157,7 @@ struct HctFile {
   HctConfig *pConfig;             /* Connection configuration object */
   HctFileServer *pServer;         /* Connection to global db object */
   HctFile *pFileNext;             /* Next handle opened on same file */
+  int iDebugId;                   /* Id used for debugging output */
 
   HctTMapClient *pTMapClient;     /* Transaction map client object */
   HctPManClient *pPManClient;     /* Transaction map client object */
@@ -254,7 +257,7 @@ static int hctFilePagemapSet(HctMapping *p, u32 iSlot, u64 iOld, u64 iNew){
 }
 
 static u64 hctFilePagemapGet(HctMapping *p, u32 iSlot){
-  return *(hctPagemapPtr(p, iSlot));
+  return AtomicLoad( hctPagemapPtr(p, iSlot) );
 }
 
 /*
@@ -297,6 +300,7 @@ static int hctFilePagemapSetLogical(
 
     /* This operation fails if LOGICAL_EVICTED has been set. */
     iOld1 &= ~HCT_PMF_LOGICAL_EVICTED;
+    iNew1 &= ~HCT_PMF_LOGICAL_EVICTED;
 
     if( hctFilePagemapSet(p, iLogical, iOld1, iNew1) ){
       return 1;
@@ -331,7 +335,9 @@ static int hctFileSetEvicted(
 
     assert( iOld & HCT_PMF_LOGICAL_IN_USE );
 
-    if( hctBoolCAS64(pPtr, iOld, iOld | HCT_PMF_LOGICAL_EVICTED) ) return 1;
+    if( hctBoolCAS64(pPtr, iOld, iOld | HCT_PMF_LOGICAL_EVICTED) ){
+      return 1;
+    }
   }
 
   assert( !"unreachable" );
@@ -660,6 +666,7 @@ HctFile *sqlite3HctFileOpen(int *pRc, const char *zFile, HctConfig *pConfig){
         pNew->szPage = pServer->szPage;
         pNew->pMapping = pServer->pMapping;
         pNew->pMapping->nRef++;
+        pNew->iDebugId = pServer->iNextDebugId++;
       }
       sqlite3_mutex_leave(pServer->pMutex);
 
@@ -940,13 +947,63 @@ static void hctFilePageWrite(int *pRc, HctFilePage *pPg){
   }
 }
 
+
+#if 0 
+static void debug_printf(const char *zFmt, ...){
+  va_list ap;
+  va_start(ap, zFmt);
+  vprintf(zFmt, ap);
+  va_end(ap);
+}
+
+static void debug_slot_value(HctFile *pFile, u32 iSlot){
+  u64 iVal = hctFilePagemapGet(pFile->pMapping, iSlot);
+  printf("[flags=%02x val=%lld]", (u32)(iVal>>56), iVal & HCT_PAGEMAP_VMASK);
+}
+
+#define DEBUG_PAGE_MUTEX_ENTER(pPg) \
+    sqlite3_mutex_enter(pPg->pFile->pServer->pMutex)
+
+#define DEBUG_PAGE_MUTEX_LEAVE(pPg) \
+    sqlite3_mutex_leave(pPg->pFile->pServer->pMutex)
+
+#define DEBUG_PRINTF(...) debug_printf(__VA_ARGS__)
+#define DEBUG_SLOT_VALUE(pFile, iSlot) debug_slot_value(pFile, iSlot)
+
+void sqlite3HctFileDebugPrint(HctFile *pFile, const char *zFmt, ...){
+  va_list ap;
+  sqlite3_mutex_enter(pFile->pServer->pMutex);
+  printf("f=%d: ", pFile->iDebugId);
+  va_start(ap, zFmt);
+  vprintf(zFmt, ap);
+  va_end(ap);
+  sqlite3_mutex_leave(pFile->pServer->pMutex);
+}
+
+#else
+# define DEBUG_PAGE_MUTEX_ENTER(x)
+# define DEBUG_PAGE_MUTEX_LEAVE(x)
+# define DEBUG_PRINTF(...)
+# define DEBUG_SLOT_VALUE(x,y)
+void sqlite3HctFileDebugPrint(HctFile *pFile, const char *zFmt, ...){ }
+#endif
+
+
 static int hctFilePageFlush(HctFilePage *pPg){
   int rc = SQLITE_OK;
   if( pPg->aNew ){
     HctMapping *pMap = pPg->pFile->pMapping;
     u32 iOld = pPg->iOldPg;
+
+    DEBUG_PAGE_MUTEX_ENTER(pPg);
+    DEBUG_PRINTF("f=%d: Flushing page %d orig=", pPg->pFile->iDebugId,pPg->iPg);
+    DEBUG_SLOT_VALUE(pPg->pFile, pPg->iPg);
+
+    DEBUG_PRINTF("\n");
+    DEBUG_PAGE_MUTEX_LEAVE(pPg);
+
     if( !hctFilePagemapSetLogical(pMap, pPg->iPg, iOld, pPg->iNewPg) ){
-      rc = SQLITE_LOCKED_ERR;
+      rc = SQLITE_LOCKED_ERR(pPg->iPg);
     }else{
       if( iOld ){
         u64 iTid = pPg->pFile->iCurrentTid;
@@ -958,6 +1015,14 @@ static int hctFilePageFlush(HctFilePage *pPg){
       pPg->iNewPg = 0;
       pPg->aNew = 0;
     }
+
+    DEBUG_PAGE_MUTEX_ENTER(pPg);
+    DEBUG_PRINTF("f=%d:", pPg->pFile->iDebugId);
+
+    DEBUG_PRINTF(" rc=%d final=", rc);
+    DEBUG_SLOT_VALUE(pPg->pFile, pPg->iPg);
+    DEBUG_PRINTF("%s\n", rc==SQLITE_LOCKED ? "  SQLITE_LOCKED" : "");
+    DEBUG_PAGE_MUTEX_LEAVE(pPg);
   }
   return rc;
 }
@@ -968,12 +1033,33 @@ int sqlite3HctFilePageCommit(HctFilePage *pPg){
 }
 
 int sqlite3HctFilePageEvict(HctFilePage *pPg){
-  int ret = hctFileSetEvicted(pPg->pFile->pMapping, pPg->iPg, pPg->iOldPg);
-  return (ret ? SQLITE_OK : SQLITE_LOCKED_ERR);
+  int ret;
+
+  DEBUG_PAGE_MUTEX_ENTER(pPg);
+  DEBUG_PRINTF("f=%d: Evicting page %d orig=", pPg->pFile->iDebugId, pPg->iPg);
+  DEBUG_SLOT_VALUE(pPg->pFile, pPg->iPg);
+
+  ret = hctFileSetEvicted(pPg->pFile->pMapping, pPg->iPg, pPg->iOldPg);
+  ret = (ret ? SQLITE_OK : SQLITE_LOCKED_ERR(pPg->iPg));
+
+  DEBUG_PRINTF(" rc=%d final=", ret);
+  DEBUG_SLOT_VALUE(pPg->pFile, pPg->iPg);
+  DEBUG_PRINTF("%s\n", ret==SQLITE_LOCKED ? "  SQLITE_LOCKED" : "");
+  DEBUG_PAGE_MUTEX_LEAVE(pPg);
+  return ret;
 }
 
 void sqlite3HctFilePageUnevict(HctFilePage *pPg){
+  DEBUG_PAGE_MUTEX_ENTER(pPg);
+  DEBUG_PRINTF("f=%d: Unevicting page %d orig=", pPg->pFile->iDebugId,pPg->iPg);
+  DEBUG_SLOT_VALUE(pPg->pFile, pPg->iPg);
+
   hctFileClearFlag(pPg->pFile, pPg->iPg, HCT_PMF_LOGICAL_EVICTED);
+
+  DEBUG_PRINTF(" final=");
+  DEBUG_SLOT_VALUE(pPg->pFile, pPg->iPg);
+  DEBUG_PRINTF("\n");
+  DEBUG_PAGE_MUTEX_LEAVE(pPg);
 }
 
 int sqlite3HctFilePageRelease(HctFilePage *pPg){
@@ -1095,22 +1181,37 @@ u32 sqlite3HctFilePageRangeAlloc(HctFile *pFile, int bLogical, int nPg){
 }
 
 /*
-** This function is called by the upper layer to clear the LOGICAL_IN_USE
-** flag for the specified page.
+** This function is called by the upper layer to clear the:
+**
+**   * LOGICAL_IN_USE flag on the specified page id, and the
+**   * PHYSICAL_IN_USE flag on currently mapped physical page id.
+**
+** If parameter bReuseNow is true, then the page was never properly linked
+** into a list, and so the logical and physical page ids can be reused 
+** immediately. Otherwise, they are handled as if freed by the current
+** transaction.
 */
-int sqlite3HctFileClearInUse(HctFilePage *pPg){
+int sqlite3HctFileClearInUse(HctFilePage *pPg, int bReuseNow){
   int rc = SQLITE_OK;
-  u64 iTid = pPg->pFile->iCurrentTid;
-  u32 iPhysPg = pPg->iOldPg;
+  if( pPg->pFile ){
+    u64 iTid = pPg->pFile->iCurrentTid;
+    u32 iPhysPg = pPg->iOldPg;
 
-  /* TODO: Should it be possible to assert() that the LOGICAL_EVICTED
-  ** flag is set here? */
-  assert( hctFilePagemapGet(pPg->pFile->pMapping, pPg->iPg) & HCT_PMF_LOGICAL_EVICTED );
+    assert( pPg->iPg>0 );
+    assert( pPg->iOldPg>0 );
 
-  hctFileClearFlag(pPg->pFile, pPg->iPg, HCT_PMF_LOGICAL_IN_USE);
-  hctFileClearFlag(pPg->pFile, iPhysPg, HCT_PMF_PHYSICAL_IN_USE);
-  sqlite3HctPManFreePg(&rc, pPg->pFile->pPManClient, iTid, pPg->iPg, 1);
-  sqlite3HctPManFreePg(&rc, pPg->pFile->pPManClient, iTid, iPhysPg, 0);
+#ifdef SQLITE_DEBUG
+    if( bReuseNow==0 ){
+      u64 iVal = hctFilePagemapGet(pPg->pFile->pMapping, pPg->iPg);
+      assert( iVal & HCT_PMF_LOGICAL_EVICTED );
+    }
+#endif
+
+    hctFileClearFlag(pPg->pFile, pPg->iPg, HCT_PMF_LOGICAL_IN_USE);
+    hctFileClearFlag(pPg->pFile, iPhysPg, HCT_PMF_PHYSICAL_IN_USE);
+    sqlite3HctPManFreePg(&rc, pPg->pFile->pPManClient, iTid, pPg->iPg, 1);
+    sqlite3HctPManFreePg(&rc, pPg->pFile->pPManClient, iTid, iPhysPg, 0);
+  }
 
   return rc;
 }

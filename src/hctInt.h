@@ -21,10 +21,10 @@ struct HctConfig {
 #include <hctTMapInt.h>
 
 #ifdef SQLITE_DEBUG
-# define SQLITE_LOCKED_ERR sqlite3HctLockedErr()
- int sqlite3HctLockedErr(void);
+# define SQLITE_LOCKED_ERR(x) sqlite3HctLockedErr(x)
+ int sqlite3HctLockedErr(u32 pgno);
 #else
-# define SQLITE_LOCKED_ERR SQLITE_LOCKED
+# define SQLITE_LOCKED_ERR(x) SQLITE_LOCKED
 #endif
 
 /*************************************************************************
@@ -270,7 +270,9 @@ int sqlite3HctFileVtabInit(sqlite3 *db);
 u64 sqlite3HctFileSafeTID(HctFile*);
 u32 sqlite3HctFilePageRangeAlloc(HctFile*, int bLogical, int nPg);
 
-int sqlite3HctFileClearInUse(HctFilePage *pPg);
+int sqlite3HctFileClearInUse(HctFilePage *pPg, int bReuseNow);
+
+void sqlite3HctFileDebugPrint(HctFile *pFile, const char *zFmt, ...);
 
 #include <hctPManInt.h>
 HctPManClient *sqlite3HctFilePManClient(HctFile*);

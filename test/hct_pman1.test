@@ -20,18 +20,7 @@ do_execsql_test 1.0 {
   CREATE INDEX i1 ON t1(b);
 }
 
-proc dumpdb {} {
-  if 0 {
-  execsql_pp { 
-    SELECT * FROM hctpgmap, hctdb WHERE logical_in_use AND hctpgmap.pgno=hctdb.pgno
-  }
-  }
-
-  if 0 {
-    execsql_pp { 
-      SELECT * FROM hctpgmap, hctentry WHERE logical_in_use AND hctpgmap.value=hctentry.pgno
-    }
-  }
+proc show_db_lists {} {
 
   execsql_pp {
     WITH map AS (
@@ -51,6 +40,23 @@ proc dumpdb {} {
       SELECT slot FROM map
     );
   }
+
+}
+
+proc dumpdb {} {
+  if 0 {
+  execsql_pp { 
+    SELECT * FROM hctpgmap, hctdb WHERE logical_in_use AND hctpgmap.pgno=hctdb.pgno
+  }
+  }
+
+  if 0 {
+    execsql_pp { 
+      SELECT * FROM hctpgmap, hctentry WHERE logical_in_use AND hctpgmap.value=hctentry.pgno
+    }
+  }
+
+  show_db_lists
 
   execsql_pp {
     SELECT 'physical_in_use' AS type, count(*) 
@@ -73,6 +79,14 @@ proc dumpdb {} {
     SELECT type, location, count(*) FROM hctpman GROUP BY 1, 2;
     -- SELECT * FROM hctpman
   }
+}
+
+proc do_evictinuse_test {tn} {
+  set nBad [db one {
+    SELECT count(*) FROM hctpgmap WHERE logical_in_use AND logical_evicted
+  }]
+
+  uplevel [list do_test $tn [list expr $nBad] 0]
 }
 
 proc do_pageleak_test {tn} {
@@ -115,7 +129,7 @@ proc do_pageleak_test {tn} {
   set lLog2 [db eval {
     SELECT pgno FROM hctpman WHERE type='logical' ORDER BY 1
   }]
-  uplevel [list do_test $tn.2 [list set res $lLog2] $lLog]
+  uplevel [list do_test $tn.3 [list set res $lLog2] $lLog]
 }
 
 set nStep 1000
@@ -124,6 +138,21 @@ for {set ii 1} {$ii <= $nStep} {incr ii} {
     REPLACE INTO t1 VALUES($ii%500, randomblob(100));
   }
   do_pageleak_test 1.$ii.pageleak
+} 
+
+integrity_check 1.$ii.ic
+dumpdb
+
+set nStep 1000
+for {set ii 1} {$ii <= $nStep} {incr ii} {
+  sqlite3_hct_cas_failure [expr ($ii%10)+1] 0
+  do_execsql_test 2.$ii {
+    REPLACE INTO t1 VALUES($ii%500, randomblob(100));
+  }
+  sqlite3_hct_cas_failure 0 0
+
+  do_pageleak_test 2.$ii.pageleak
+  do_evictinuse_test 2.$ii.evictinuse
 } 
 
 integrity_check 1.$ii.ic
