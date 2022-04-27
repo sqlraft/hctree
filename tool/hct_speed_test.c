@@ -14,6 +14,9 @@
 
 #include "sqlite3.h"
 
+#include <valgrind/callgrind.h>
+
+
 typedef sqlite3_int64 i64;
 
 #define HST_DATABASE_NAME "hct_speed.db"
@@ -309,7 +312,7 @@ static char *test_thread(int iTid, void *pArg){
       iIntervalWrite = nWrite;
     }
 
-    if( iNow>=g.iTimeToStop && nWrite>100000 ){
+    if( iNow>=g.iTimeToStop ){
       break;
     }else{
       int ii = 0;

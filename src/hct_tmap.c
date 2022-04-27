@@ -450,6 +450,7 @@ static HctTMapFull *hctTMapNewObject(
     int i;
     u64 iMinTid;
     u64 iEof = pPrev->m.iFirstTid + pPrev->m.nMap*HCT_TMAP_PAGESIZE;
+    int nSkip;
     assert( (pPrev->m.iMinTid+1)>=pPrev->m.iFirstTid );
     for(iMinTid=pPrev->m.iMinTid; iMinTid<(iEof-1); iMinTid++){
       u64 iVal = AtomicLoad( hctTMapFind(pPrev, iMinTid+1) );
@@ -463,17 +464,21 @@ static HctTMapFull *hctTMapNewObject(
     pNew->m.iMinCid = MAX(pPrev->m.iMinCid, iCid);
     pNew->m.iMinTid = iMinTid;
 
-    pNew->m.nMap = nMap;
+    nSkip = (pNew->m.iMinTid - pNew->m.iFirstTid) / HCT_TMAP_PAGESIZE;
+    if( nSkip<0 ) nSkip = 0;
+    pNew->m.iFirstTid += (nSkip * HCT_TMAP_PAGESIZE);
+
+    pNew->m.nMap = nMap-nSkip;
     pNew->m.aaMap = (u64**)&pNew[1];
-    for(i=0; i<nMap; i++){
+    for(i=nSkip; i<nMap; i++){
       if( i<pPrev->m.nMap ){
-        pNew->m.aaMap[i] = pPrev->m.aaMap[i];
+        pNew->m.aaMap[i-nSkip] = pPrev->m.aaMap[i];
       }else{
         int sz = sizeof(u64) * HCT_TMAP_PAGESIZE;
-        pNew->m.aaMap[i] = (u64*)sqlite3MallocZero(sz);
-        if( pNew->m.aaMap[i]==0 ){
+        pNew->m.aaMap[i-nSkip] = (u64*)sqlite3MallocZero(sz);
+        if( pNew->m.aaMap[i-nSkip]==0 ){
           for(i=pPrev->m.nMap; i<nMap; i++){
-            sqlite3_free(pNew->m.aaMap[i]);
+            sqlite3_free(pNew->m.aaMap[i-nSkip]);
           }
           sqlite3_free(pNew);
           pNew = 0;
@@ -481,6 +486,7 @@ static HctTMapFull *hctTMapNewObject(
         }
       }
     }
+
   }
 
   return pNew;

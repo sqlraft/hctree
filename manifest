@@ -1,5 +1,5 @@
-C More\sfixes\sfor\sthreading\sproblems.
-D 2022-04-27T17:16:58.337
+C Discard\stransaction\smap\spages\sonce\sthey\sare\sno\slonger\srequired.
+D 2022-04-27T21:09:35.424
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -527,7 +527,7 @@ F src/hctTMapInt.h 5d5407435259ccdb4d369c89ed45a335aa63beb57b391f631ef63e591a40f
 F src/hct_database.c 3b840a5c869ce851bf391eef171d02de6f9f2d7194673b5c71f555645d1a2645
 F src/hct_file.c bc895efc139b00c80ab752428e5ccd30b628ec32aff8e43cb8ddcb19c2a6ff47
 F src/hct_pman.c 15ff9ece5c09ff8b178f6b72a6d80286333e6cb5f72427ebe4fe234cd862c37a
-F src/hct_tmap.c 618ed41197ebf3004b9fbe978594347e8804cac6b5c027b924776a7ab9e6a058
+F src/hct_tmap.c dd62f6187808f5f464547a86be83d3b244c5b547361a9ea32749faed266ea0c1
 F src/hct_tree.c 5129553cafc33c3d37b9ea020dd0c0c2581874c76297f47f84b9f58f51d2f807
 F src/hctree.c 5ef1f9c341522264db3a20d23a862f5b6fb0c2bc30ac23064846b07f95c29f91
 F src/hwtime.h cb1d7e3e1ed94b7aa6fde95ae2c2daccc3df826be26fc9ed7fd90d1750ae6144
@@ -1898,7 +1898,7 @@ F tool/fuzzershell.c e1d90a03ca790d7c331c2aae08ca46ff435f1ae1faa6cb9cc48f4687c18
 F tool/genfkey.README cf68fddd4643bbe3ff8e31b8b6d8b0a1b85e20f4
 F tool/genfkey.test b6afd7b825d797a1e1274f519ab5695373552ecad5cd373530c63533638a5a4f
 F tool/getlock.c f4c39b651370156cae979501a7b156bdba50e7ce
-F tool/hct_speed_test.c 2f765ab4e7f6f6a6685d8cf669e23efb9a32775a7f93ebdd9de31ee5aa195d6c
+F tool/hct_speed_test.c 0a73f3fd4e48ffcc63cceba01bc7bd14b91bc55356ffdeb4fc580d4662a52f25
 F tool/index_usage.c f62a0c701b2c7ff2f3e21d206f093c123f222dbf07136a10ffd1ca15a5c706c5
 F tool/kvtest-speed.sh 4761a9c4b3530907562314d7757995787f7aef8f
 F tool/lemon.c ea5c8589c7749e9bd32ba10432aeeed3c16e215de72a12ada2bc707884837149
@@ -1983,8 +1983,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P 564c36a0b8d684b8964ab8ce4d2cf7ad902597f1b411c0e08740bf38886c2a0a
-R 4822197d4a77dbba7172b7cc214bf895
+P d507257daec420de6339950c1c36c5a3071a98fad89f8ee4fd83ec4d037820fe
+R 9c189162e5f6137dc496c84c5b2d9ce3
 U dan
-Z 4d904d34939929facbab20234b0945cc
+Z e4c2eac8cd5cee7a081c8c70dbe0142d
 # Remove this line to create a well-formed Fossil manifest.
