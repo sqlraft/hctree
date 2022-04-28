@@ -104,8 +104,8 @@ struct HctTMapClient {
 
 /*
 ** iMinMinTid:
-**   This value is set only when the mutex is held, using AtomicStore().
-**   It may be read, using AtomicLoad(), at any time.
+**   This value is set only when the mutex is held, using HctAtomicStore().
+**   It may be read, using HctAtomicLoad(), at any time.
 */
 struct HctTMapServer {
   sqlite3_mutex *pMutex;          /* Mutex to protect this object */
@@ -132,7 +132,7 @@ struct HctTMapFull {
 **   return 1;
 */
 static int hctTMapBoolCAS32(u32 *pPtr, u32 iOld, u32 iNew){
-  return (int)(__sync_bool_compare_and_swap(pPtr, iOld, iNew));
+  return HctCASBool(pPtr, iOld, iNew);
 }
 
 /*
@@ -276,7 +276,7 @@ static void hctTMapDropMap(HctTMapServer *p, HctTMapFull *pMap){
   );
 #endif
   if( pMap->pNext==0 ){
-    AtomicStore(&p->iMinMinTid, iVal);
+    HctAtomicStore(&p->iMinMinTid, iVal);
   }
   sqlite3_free(pMap);
 }
@@ -335,7 +335,7 @@ int sqlite3HctTMapBegin(HctTMapClient *pClient, HctTMap **ppMap){
       pClient->eState = HCT_CLIENT_OPEN;
       break;
     }else{
-      assert( AtomicLoad(&pRef->refMask)==0 );
+      assert( HctAtomicLoad(&pRef->refMask)==0 );
       sqlite3_mutex_enter(pClient->pServer->pMutex);
       hctTMapGetRef(pClient->pServer, pRef);
       sqlite3_mutex_leave(pClient->pServer->pMutex);
@@ -393,7 +393,7 @@ int sqlite3HctTMapEnd(HctTMapClient *pClient, u64 iCID){
   /* If the client currently holds two references, drop the older of the two */
   if( pClient->eState==HCT_CLIENT_UP ){
     pRef = &pClient->aRef[!pClient->iRef];
-    assert( AtomicLoad(&pRef->refMask) & HCT_TMAPREF_CLIENT );
+    assert( HctAtomicLoad(&pRef->refMask) & HCT_TMAPREF_CLIENT );
     sqlite3_mutex_enter(pClient->pServer->pMutex);
     hctTMapDropRef(pClient->pServer, pRef);
     sqlite3_mutex_leave(pClient->pServer->pMutex);
@@ -453,7 +453,7 @@ static HctTMapFull *hctTMapNewObject(
     int nSkip;
     assert( (pPrev->m.iMinTid+1)>=pPrev->m.iFirstTid );
     for(iMinTid=pPrev->m.iMinTid; iMinTid<(iEof-1); iMinTid++){
-      u64 iVal = AtomicLoad( hctTMapFind(pPrev, iMinTid+1) );
+      u64 iVal = HctAtomicLoad( hctTMapFind(pPrev, iMinTid+1) );
       if( (iVal & HCT_TMAP_STATE_MASK)!=HCT_TMAP_COMMITTED
        || (iVal & HCT_TMAP_CID_MASK)>iCid
       ){
@@ -496,7 +496,7 @@ static HctTMapFull *hctTMapNewObject(
 ** Return the largest TID for which it is safe to reuse freed pages.
 */
 u64 sqlite3HctTMapSafeTID(HctTMapClient *p){
-  return AtomicLoad(&p->pServer->iMinMinTid);
+  return HctAtomicLoad(&p->pServer->iMinMinTid);
 }
 
 /*

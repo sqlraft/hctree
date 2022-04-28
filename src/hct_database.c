@@ -1298,7 +1298,9 @@ static int hctDbMinCellsPerIntkeyNode(int pgsz){
 static void hctDbWriterCleanup(HctDatabase *pDb, HctDbWriter *p, int bRevert){
   int ii;
 
-  sqlite3HctFileDebugPrint(pDb->pFile, "writer cleanup bRevert=%d\n", bRevert);
+  sqlite3HctFileDebugPrint(pDb->pFile, 
+      "writer cleanup height=%d bRevert=%d\n", p->iHeight, bRevert
+  );
 
   for(ii=0; ii<p->nWritePg; ii++){
     HctFilePage *pPg = &p->aWritePg[ii];
@@ -1521,6 +1523,8 @@ nCall++;
 
       if( rc==SQLITE_OK ){
         rc = hctDbInsertFlushWrite(pDb, &wr);
+      }else{
+        hctDbWriterCleanup(pDb, &wr, 1);
       }
     }while( rc==SQLITE_LOCKED );
   }
@@ -2374,6 +2378,7 @@ static int hctDbBalanceIntkeyNode(
   u8 *aPgCopy[3];
   u8 *pFree = 0;
 
+  assert( p->aWritePg[p->nWritePg-1].aNew );
   rc = hctDbLoadPeers(pDb, p, &iPg);
   if( rc!=SQLITE_OK ){
     return rc;
@@ -2386,8 +2391,9 @@ static int hctDbBalanceIntkeyNode(
     nIn = MIN(p->nWritePg, 3);
     iLeftPg -= (nIn-1);
   }else{
-    nIn = 3;
+    nIn = MIN(p->nWritePg, 3);
     iLeftPg--;
+    assert( iLeftPg+nIn<=p->nWritePg );
   }
 
   /* Take a copy of each input page. Make the buffer used to store each
@@ -2472,25 +2478,28 @@ static int hctDbInsertIntkeyNode(
   HctDbIntkeyNode *pNode;
   int rc = SQLITE_OK;
 
-  assert( bDel || bClobber==0 );
+  /* If bDel is set, then bClobber must also be set. */
+  assert( bDel==0 || bClobber );
 
   pNode = (HctDbIntkeyNode*)p->aWritePg[iPg].aNew;
-  if( (pNode->pg.nEntry>=nMax && bClobber==0) ){
+  if( (pNode->pg.nEntry>=nMax && bClobber==0 && bDel==0 ) ){
     /* Need to do a balance operation to make room for the new entry */
     rc = hctDbBalanceIntkeyNode(pDb, p, iPg, iInsert, iKey, iChildPg);
   }else if( bDel ){
     assert( iInsert<pNode->pg.nEntry );
     if( iInsert==0 ){
-      hctDbLoadPeers(pDb, p, &iPg);
+      rc = hctDbLoadPeers(pDb, p, &iPg);
       pNode = (HctDbIntkeyNode*)p->aWritePg[iPg].aNew;
     }
-    if( iInsert<(pNode->pg.nEntry-1) ){
-      int nByte = sizeof(HctDbIntkeyNodeEntry) * (pNode->pg.nEntry-1-iInsert);
-      memmove(&pNode->aEntry[iInsert], &pNode->aEntry[iInsert+1], nByte);
-    }
-    pNode->pg.nEntry--;
-    if( iInsert==0 || pNode->pg.nEntry<nMin ){
-      rc = hctDbBalanceIntkeyNode(pDb, p, iPg, -1, 0, 0);
+    if( rc==SQLITE_OK ){
+      if( iInsert<(pNode->pg.nEntry-1) ){
+        int nByte = sizeof(HctDbIntkeyNodeEntry) * (pNode->pg.nEntry-1-iInsert);
+        memmove(&pNode->aEntry[iInsert], &pNode->aEntry[iInsert+1], nByte);
+      }
+      pNode->pg.nEntry--;
+      if( iInsert==0 || pNode->pg.nEntry<nMin ){
+        rc = hctDbBalanceIntkeyNode(pDb, p, iPg, -1, 0, 0);
+      }
     }
   }else{
     if( bClobber==0 ){
@@ -2671,6 +2680,23 @@ static void hctDbInsertEntry(
   ((HctDbIndexEntry*)aFrom)->iOff = iOff;
 }
 
+/*
+** Parameter aTarget points to a buffer containing an intkey or index
+** internal node. Return the child-page number for entry iInsert on
+** that page.
+*/
+u32 hctDbGetChildPage(u8 *aTarget, int iInsert){
+  const int eType = hctPagetype(aTarget);
+  u32 iChildPg;
+  if( eType==HCT_PAGETYPE_INTKEY ){
+    iChildPg = ((HctDbIntkeyNode*)aTarget)->aEntry[iInsert].iChildPg;
+  }else{
+    assert( eType==HCT_PAGETYPE_INDEX );
+    iChildPg = ((HctDbIndexNode*)aTarget)->aEntry[iInsert].iChildPg;
+  }
+  return iChildPg;
+}
+
 static int hctDbInsert(
   HctDatabase *pDb,
   HctDbWriter *p,
@@ -2698,7 +2724,6 @@ static int hctDbInsert(
 
 static int nCall = 0;
 nCall++;
-
 
   p->nWriteKey++;
 
@@ -2773,6 +2798,31 @@ nCall++;
     }
   }
   aTarget = p->aWritePg[iPg].aNew;
+
+  /* At this point, once the page that will be modified has been loaded
+  ** and marked as writable, if the operation is on an internal list:
+  **
+  **   1) For an insert, check if the child page has already been marked
+  **      as EVICTED by some other client. If so, return early.
+  **
+  **   2) For a delete, check that there is an entry to delete. And if so,
+  **      that the value of its child-page field matches iChildPg. If
+  **      not, return early.
+  */
+  assert( rc==SQLITE_OK );
+  if( p->iHeight>0 ){
+    if( bDel==0 && sqlite3HctFilePageIsEvicted(pDb->pFile, iChildPg) ){
+      return SQLITE_OK;
+    }
+    if( bDel ){
+      if( bClobber==0 ){
+        return SQLITE_OK;
+      }else{
+        u32 iChild = hctDbGetChildPage(aTarget, iInsert);
+        if( iChild!=iChildPg ) return SQLITE_OK;
+      }
+    }
+  }
 
   /* Writes to an intkey internal node are handled separately. They are
   ** different because they used fixed size key/data pairs. All other types

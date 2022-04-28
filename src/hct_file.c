@@ -187,7 +187,7 @@ static int hctLog2(int n){
 **   }
 */
 static int hctBoolCAS64(u64 *pPtr, u64 iOld, u64 iNew){
-  return (int)(__sync_bool_compare_and_swap(pPtr, iOld, iNew));
+  return HctCASBool(pPtr, iOld, iNew);
 }
 
 static int hctBoolCompareAndSwap64(u64 *pPtr, u64 iOld, u64 iNew){
@@ -197,7 +197,7 @@ static int hctBoolCompareAndSwap64(u64 *pPtr, u64 iOld, u64 iNew){
       return 0;
     }
   }
-  return (int)(__sync_bool_compare_and_swap(pPtr, iOld, iNew));
+  return HctCASBool(pPtr, iOld, iNew);
 }
 
 /*
@@ -257,7 +257,7 @@ static int hctFilePagemapSet(HctMapping *p, u32 iSlot, u64 iOld, u64 iNew){
 }
 
 static u64 hctFilePagemapGet(HctMapping *p, u32 iSlot){
-  return AtomicLoad( hctPagemapPtr(p, iSlot) );
+  return HctAtomicLoad( hctPagemapPtr(p, iSlot) );
 }
 
 /*
@@ -965,7 +965,7 @@ static void debug_slot_value(HctFile *pFile, u32 iSlot){
     sqlite3_mutex_enter(pPg->pFile->pServer->pMutex)
 
 #define DEBUG_PAGE_MUTEX_LEAVE(pPg) \
-    sqlite3_mutex_leave(pPg->pFile->pServer->pMutex)
+    fflush(stdout); sqlite3_mutex_leave(pPg->pFile->pServer->pMutex)
 
 #define DEBUG_PRINTF(...) debug_printf(__VA_ARGS__)
 #define DEBUG_SLOT_VALUE(pFile, iSlot) debug_slot_value(pFile, iSlot)
@@ -1060,6 +1060,12 @@ void sqlite3HctFilePageUnevict(HctFilePage *pPg){
   DEBUG_SLOT_VALUE(pPg->pFile, pPg->iPg);
   DEBUG_PRINTF("\n");
   DEBUG_PAGE_MUTEX_LEAVE(pPg);
+}
+
+int sqlite3HctFilePageIsEvicted(HctFile *pFile, u32 iPgno){
+  return (
+      (hctFilePagemapGet(pFile->pMapping, iPgno) & HCT_PMF_LOGICAL_EVICTED)!=0
+  );
 }
 
 int sqlite3HctFilePageRelease(HctFilePage *pPg){

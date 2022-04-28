@@ -5,8 +5,14 @@ typedef sqlite3_int64 i64;
 typedef unsigned char u8;
 typedef unsigned int u32;
 
-# define HctAtomicStore(PTR,VAL)  __atomic_store_n((PTR),(VAL),__ATOMIC_RELAXED)
+/*
+** Primitives for atomic load and store.
+*/
+#define HctAtomicStore(PTR,VAL)  __atomic_store_n((PTR),(VAL), __ATOMIC_SEQ_CST)
+#define HctAtomicLoad(PTR)  __atomic_load_n((PTR), __ATOMIC_SEQ_CST)
 
+#define HctCASBool(PTR,OLD,NEW) \
+    (int)__sync_bool_compare_and_swap((PTR),(OLD),(NEW))
 
 typedef struct HctConfig HctConfig;
 struct HctConfig {
@@ -243,6 +249,8 @@ int sqlite3HctFilePageCommit(HctFilePage *pPg);
 int sqlite3HctFilePageEvict(HctFilePage *pPg);
 
 void sqlite3HctFilePageUnevict(HctFilePage *pPg);
+
+int sqlite3HctFilePageIsEvicted(HctFile *pFile, u32 iPgno);
 
 /*
 ** Release a page reference obtained via an earlier call to 
