@@ -1325,6 +1325,7 @@ static void hctDbWriterCleanup(HctDatabase *pDb, HctDbWriter *p, int bRevert){
   /* Free/zero various buffers and caches */
   if( p->writecsr.pKeyInfo ){
     sqlite3DbFree(p->writecsr.pKeyInfo->db, p->writecsr.pRec);
+    p->writecsr.pRec = 0;
   }
   hctDbCsrReset(&p->writecsr);
   hctBufferFree(&p->writecsr.rec);
