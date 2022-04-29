@@ -18,6 +18,7 @@
 
 
 typedef sqlite3_int64 i64;
+typedef unsigned int u32;
 
 #define HST_DATABASE_NAME "hct_speed.db"
 
@@ -52,7 +53,7 @@ struct Threadset {
 */
 typedef struct FastPrng FastPrng;
 struct FastPrng {
-  unsigned int x, y;
+  u32 x, y;
 };
 
 /*
@@ -265,6 +266,47 @@ static struct TestGlobal {
   sqlite3_int64 iTimeToStop;
 } g;
 
+typedef struct TestUpdate TestUpdate;
+struct TestUpdate {
+  int iRow;
+  u32 iVal;
+};
+
+
+/*
+** Implementation of SQL function:
+**
+**   updateblob(BLOB, IDX, IVAL)
+**
+** This function treats the input blob as an array of 32-bit unsigned 
+** integers. In machine byte order. It returns a copy of BLOB with entry
+** IDX set to IVAL.
+*/
+static void updateBlobFunc(
+  sqlite3_context *pCtx, 
+  int nArg, 
+  sqlite3_value **apArg
+){
+  int nBlob = 0;
+  u32 *aBlob = 0;
+  u32 *aCopy= 0;
+  int iIdx = 0;
+  u32 iVal = 0;
+
+  nBlob = sqlite3_value_bytes(apArg[0]);
+  aBlob = (u32*)sqlite3_value_blob(apArg[0]);
+
+  iIdx = sqlite3_value_int(apArg[1]);
+  iVal = (u32)(sqlite3_value_int64(apArg[2]) & 0xFFFFFFFF);
+
+  aCopy = sqlite3_malloc(nBlob);
+  memcpy(aCopy, aBlob, nBlob);
+  aCopy[iIdx] = iVal;
+
+  sqlite3_result_blob(pCtx, aCopy, nBlob, SQLITE_TRANSIENT);
+  sqlite3_free(aCopy);
+}
+
 static char *test_thread(int iTid, void *pArg){
   Testcase *pTst = (Testcase*)pArg;
   sqlite3 *db = 0;
@@ -272,6 +314,7 @@ static char *test_thread(int iTid, void *pArg){
   sqlite3_stmt *pCommit = 0;
   sqlite3_stmt *pRollback = 0;
   sqlite3_stmt *pWrite = 0;
+  sqlite3_stmt *pSelect = 0;
 
   const i64 nInterval = 2000;
   i64 iStartTime = 0;              /* Start of first loop */
@@ -282,9 +325,20 @@ static char *test_thread(int iTid, void *pArg){
   int nBusy = 0;                   /* Total number of SQLITE_BUSY errors */
   char *zRet = 0;
 
+  FastPrng prng = {0,0};
   Error err = {0,0,0};
+  int nError = 0;
 
+  TestUpdate *aUpdate = 0;
+  u32 *aVal = 0;
+  aUpdate = sqlite3_malloc(sizeof(TestUpdate) * pTst->nUpdate);
+  aVal = sqlite3_malloc(sizeof(u32) * (pTst->nRow+1));
+  memset(aVal, 0, (pTst->nRow+1) * sizeof(u32));
+
+  sqlite3_randomness(sizeof(FastPrng), (void*)&prng);
   db = hst_sqlite3_open(HST_DATABASE_NAME);
+  sqlite3_create_function(db,"updateblob",3,SQLITE_UTF8,0,updateBlobFunc,0 ,0);
+
   hst_sqlite3_exec(db, "PRAGMA journal_mode = off");
   hst_sqlite3_exec(db, "PRAGMA mmap_size = 1000000000");
   hst_sqlite3_exec(db, "PRAGMA locking_mode = exclusive");
@@ -292,13 +346,10 @@ static char *test_thread(int iTid, void *pArg){
   pCommit = hst_sqlite3_prepare(&err, db, "COMMIT");
   pRollback = hst_sqlite3_prepare(&err, db, "ROLLBACK");
   pWrite = hst_sqlite3_prepare(&err, db, 
-    "UPDATE tbl SET b=frandomblob(?), c=hex(frandomblob(32)) "
-    "WHERE a = (abs(frandom()) % ?) + 1"
+    "UPDATE tbl SET b=updateblob(b, ?, ?), c=hex(frandomblob(32)) WHERE a = ?"
   );
   if( err.rc ) goto test_out;
-
-  sqlite3_bind_int(pWrite, 1, pTst->nBlob);
-  sqlite3_bind_int(pWrite, 2, pTst->nRow);
+  sqlite3_bind_int(pWrite, 1, iTid);
 
   iStartTime = iIntervalTime = hst_current_time();
   while( err.rc==SQLITE_OK ){
@@ -318,8 +369,12 @@ static char *test_thread(int iTid, void *pArg){
       int ii = 0;
       sqlite3_step(pBegin);
       hst_sqlite3_reset(&err, pBegin);
+      hstFastRandomness(&prng, sizeof(TestUpdate)*pTst->nUpdate, aUpdate);
 
       for(ii=0; ii<pTst->nUpdate; ii++){
+        aUpdate[ii].iRow = 1+((aUpdate[ii].iRow & 0x7FFFFFFF) % pTst->nRow);
+        sqlite3_bind_int64(pWrite, 2, aUpdate[ii].iVal);
+        sqlite3_bind_int(pWrite, 3, aUpdate[ii].iRow);
         sqlite3_step(pWrite);
         hst_sqlite3_reset(&err, pWrite);
       }
@@ -331,6 +386,10 @@ static char *test_thread(int iTid, void *pArg){
         nBusy++;
         sqlite3_step(pRollback);
         hst_sqlite3_reset(&err, pRollback);
+      }else{
+        for(ii=0; ii<pTst->nUpdate; ii++){
+          aVal[ aUpdate[ii].iRow ] = aUpdate[ii].iVal;
+        }
       }
       nWrite++;
     }
@@ -338,9 +397,26 @@ static char *test_thread(int iTid, void *pArg){
 
   iEndTime = hst_current_time();
   if( iEndTime<=iStartTime ) iEndTime = iStartTime + 1;
-  zRet = sqlite3_mprintf("%d transactions (%d busy) at %d/second", nWrite, 
-      nBusy, (int)(((i64)nWrite * 1000) / (iEndTime - iStartTime))
+
+  /* Check that no updates made by this thread have been lost. */
+  nError = 0;
+  pSelect = hst_sqlite3_prepare(&err, db, "SELECT a, b FROM tbl");
+  if( pSelect ){
+    while( SQLITE_ROW==sqlite3_step(pSelect) ){
+      int iRow = sqlite3_column_int(pSelect, 0);
+      u32 *aBlob = (u32*)sqlite3_column_blob(pSelect, 1);
+      if( aBlob[iTid]!=aVal[iRow] ) nError++;
+    }
+    sqlite3_finalize(pSelect);
+  }
+
+  zRet = sqlite3_mprintf(
+      "%d transactions (%d busy) at %d/second (%d lost updates)", nWrite, 
+      nBusy, (int)(((i64)nWrite * 1000) / (iEndTime - iStartTime)), nError
   );
+
+  sqlite3_free(aUpdate);
+  sqlite3_free(aVal);
 
   sqlite3_finalize(pBegin);
   sqlite3_finalize(pCommit);
@@ -355,6 +431,7 @@ static char *test_thread(int iTid, void *pArg){
 static void runtest(Testcase *pTst){
   sqlite3 *db = 0;
   sqlite3_stmt *pIns = 0;
+  sqlite3_stmt *pIC = 0;
   int ii;
 
   Error err;
@@ -373,12 +450,16 @@ static void runtest(Testcase *pTst){
       "   c CHAR(64)"
       ")"
   );
-  for(ii=0; ii<pTst->nIdx; ii++){
-    char *zSql = sqlite3_mprintf(
-        "CREATE INDEX tbl_iN ON tbl(substr(c, %d, 16));", ii
-    );
-    hst_sqlite3_exec(db, zSql);
-    sqlite3_free(zSql);
+  if( pTst->nIdx==1 ){
+      hst_sqlite3_exec(db, "CREATE INDEX i1 ON tbl(c)");
+  }else{
+    for(ii=0; ii<pTst->nIdx; ii++){
+      char *zSql = sqlite3_mprintf(
+          "CREATE INDEX tbl_i%d ON tbl(substr(c, %d, 16));", ii, ii
+      );
+      hst_sqlite3_exec(db, zSql);
+      sqlite3_free(zSql);
+    }
   }
 
   printf("building initial database."); 
@@ -411,6 +492,17 @@ static void runtest(Testcase *pTst){
     hst_launch_thread(&err, &threadset, test_thread, (void*)pTst);
   }
   hst_join_threads(&err, &threadset);
+
+  db = hst_sqlite3_open(HST_DATABASE_NAME);
+  pIC = hst_sqlite3_prepare(&err, db, "PRAGMA integrity_check");
+  if( pIC ){
+    while( sqlite3_step(pIC)==SQLITE_ROW ){
+      printf("Integrity check: %s\n", sqlite3_column_text(pIC, 0));
+    }
+    sqlite3_finalize(pIC);
+  }
+
+  hst_print_and_free_err(&err);
 }
 
 static void usage(const char *zPrg){

@@ -902,7 +902,7 @@ int sqlite3HctFilePageGetPhysical(HctFile *pFile, u32 iPg, HctFilePage *pPg){
   memset(pPg, 0, sizeof(*pPg));
   rc = hctFilePagemapGetGrow32(pFile, iPg, &iVal);
   if( rc==SQLITE_OK ){
-    pPg->iOldPg = iVal;
+    pPg->iOldPg = iPg;
     pPg->aOld = (u8*)hctPagePtr(pFile->pMapping, iPg);
   }
   return rc;

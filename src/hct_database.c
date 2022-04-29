@@ -896,7 +896,6 @@ static int hctDbCompareFPKey(
   HctBuffer buf = {0,0,0};
 
   rc = hctDbLoadRecord(pDb, &buf, aPg, 0, &nFP, &aFP);
-assert( rc==SQLITE_OK );
   res = sqlite3VdbeRecordCompare(nFP, aFP, pRec);
   hctBufferFree(&buf);
 
@@ -1046,15 +1045,17 @@ static int hctDbAllocateUnpacked(HctDbCsr *pCsr){
 static int hctDbFindKeyInOldPage(HctDbCsr *pCsr){
   int iCell;
   if( pCsr->pKeyInfo ){
+    HctDbIndexLeaf *pLeaf = (HctDbIndexLeaf*)pCsr->pg.aOld;
+    HctDbIndexEntry *p = &pLeaf->aEntry[pCsr->iCell];
+
     int rc;
     int bExact;
-    HctDbIndexEntry *p = &((HctDbIndexLeaf*)pCsr->pg.aOld)->aEntry[pCsr->iCell];
     u8 *aCell = &pCsr->pg.aOld[hctDbOffset(p->iOff, p->flags)];
 
     rc = hctDbAllocateUnpacked(pCsr);
     if( rc==SQLITE_OK ){
       sqlite3VdbeRecordUnpack(pCsr->pKeyInfo, p->nSize, aCell, pCsr->pRec);
-      rc = hctDbIndexSearch(pCsr->pDb, pCsr->pg.aOld, pCsr->pRec, &iCell, &bExact);
+      rc = hctDbIndexSearch(pCsr->pDb, pCsr->oldpg.aOld, pCsr->pRec, &iCell, &bExact);
     }
     if( rc ) return rc;
     if( bExact==0 ) iCell = -1;
