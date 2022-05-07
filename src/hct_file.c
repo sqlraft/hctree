@@ -1256,13 +1256,14 @@ int sqlite3HctFileClearInUse(HctFilePage *pPg, int bReuseNow){
 ** Beginning of vtab implemetation.
 *************************************************************************/
 
-#define HCT_PGMAP_SCHEMA        \
-"  CREATE TABLE hct_pgmap("     \
-"    slot INTEGER,"             \
-"    value INTEGER,"            \
-"    physical_in_use BOOLEAN,"  \
-"    logical_in_use BOOLEAN,"   \
-"    logical_evicted BOOLEAN"   \
+#define HCT_PGMAP_SCHEMA         \
+"  CREATE TABLE hct_pgmap("      \
+"    slot INTEGER,"              \
+"    value INTEGER,"             \
+"    physical_in_use BOOLEAN,"   \
+"    logical_in_use BOOLEAN,"    \
+"    logical_evicted BOOLEAN,"   \
+"    logical_irrevicted BOOLEAN" \
 "  );"
 
 /* 
@@ -1400,17 +1401,11 @@ static int pgmapColumn(
       break;
     }
     case 4: {  /* logical_evicted */
-      const char *zVal = "";
-      int bEvicted = (pCur->iVal & HCT_PMF_LOGICAL_EVICTED) ? 1 : 0;
-      int bIrrevicted = (pCur->iVal & HCT_PMF_LOGICAL_IRREVICTED) ? 1 : 0;
-      assert( bIrrevicted==0 || bEvicted==1 );
-
-      if( bIrrevicted ){
-        zVal = "irrevicted";
-      }else if( bEvicted ){
-        zVal = "evicted";
-      }
-      sqlite3_result_text(ctx, zVal, -1, SQLITE_STATIC);
+      sqlite3_result_int64(ctx, (pCur->iVal & HCT_PMF_LOGICAL_EVICTED)?1:0);
+      break;
+    }
+    case 5: {  /* logical_irrevicted */
+      sqlite3_result_int64(ctx, (pCur->iVal & HCT_PMF_LOGICAL_IRREVICTED)?1:0);
       break;
     }
   }
@@ -1470,6 +1465,71 @@ static int pgmapBestIndex(
   return SQLITE_OK;
 }
 
+/* 
+** This function is the implementation of the xUpdate callback used by 
+** hctpgmap virtual tables. It is invoked by SQLite each time a row is 
+** to be inserted, updated or deleted.
+**
+** A delete specifies a single argument - the rowid of the row to remove.
+** 
+** Update and insert operations pass:
+**
+**   1. The "old" rowid (for an UPDATE), or NULL (for an INSERT).
+**   2. The "new" rowid.
+**   3. Values for each of the 6 columns.
+**
+** Specifically:
+**
+**   apVal[2]: slot
+**   apVal[3]: value
+**   apVal[4]: physical_in_use
+**   apVal[5]: logical_in_use
+**   apVal[6]: logical_evicted
+**   apVal[7]: logical_irrevicted
+*/
+static int pgmapUpdate(
+  sqlite3_vtab *pVtab, 
+  int nVal, 
+  sqlite3_value **apVal, 
+  sqlite3_int64 *piRowid
+){
+  pgmap_vtab *p = (pgmap_vtab*)pVtab;
+  HctFile *pFile = sqlite3HctDbFile(sqlite3HctDbFind(p->db, 0));
+  u32 iSlot = 0;
+  u64 val = 0;
+  u64 *pPtr = 0;
+
+  i64 iValue = 0;
+  int bPhysicalInUse = 0;
+  int bLogicalInUse = 0;
+  int bLogicalEvicted = 0;
+  int bLogicalIrrevicted = 0;
+
+
+  if( nVal==1 || sqlite3_value_type(apVal[0])!=SQLITE_INTEGER ){
+    return SQLITE_CONSTRAINT;
+  }
+  iSlot = sqlite3_value_int64(apVal[0]);
+
+  iValue = sqlite3_value_int64(apVal[3]);
+  bPhysicalInUse = sqlite3_value_int(apVal[4]);
+  bLogicalInUse = sqlite3_value_int(apVal[5]);
+  bLogicalEvicted = sqlite3_value_int(apVal[6]);
+  bLogicalIrrevicted = sqlite3_value_int(apVal[7]);
+
+  val = iValue & HCT_PAGEMAP_VMASK;
+  val |= (bPhysicalInUse ? HCT_PMF_PHYSICAL_IN_USE : 0);
+  val |= (bLogicalInUse ? HCT_PMF_LOGICAL_IN_USE : 0);
+  val |= (bLogicalEvicted ? HCT_PMF_LOGICAL_EVICTED : 0);
+  val |= (bLogicalIrrevicted ? HCT_PMF_LOGICAL_IRREVICTED : 0);
+
+  pPtr = hctPagemapPtr(pFile->pMapping, iSlot);
+  AtomicStore(pPtr, val);
+
+  *piRowid = iSlot;
+  return SQLITE_OK;
+}
+
 int sqlite3HctFileVtabInit(sqlite3 *db){
   static sqlite3_module pgmapModule = {
     /* iVersion    */ 0,
@@ -1485,7 +1545,7 @@ int sqlite3HctFileVtabInit(sqlite3 *db){
     /* xEof        */ pgmapEof,
     /* xColumn     */ pgmapColumn,
     /* xRowid      */ pgmapRowid,
-    /* xUpdate     */ 0,
+    /* xUpdate     */ pgmapUpdate,
     /* xBegin      */ 0,
     /* xSync       */ 0,
     /* xCommit     */ 0,

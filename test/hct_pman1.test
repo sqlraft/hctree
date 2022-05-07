@@ -20,6 +20,46 @@ do_execsql_test 1.0 {
   CREATE INDEX i1 ON t1(b);
 }
 
+
+# Return a list of logical page numbers linked into list structures
+# within the database.
+#
+proc logical_in_use {{db db}} {
+  $db eval {
+    WITH roots(pgno) AS (
+        SELECT 1 UNION ALL 
+        SELECT 2 UNION ALL 
+        SELECT rootpage FROM sqlite_schema
+    ),
+  
+    leftchilds(pgno, leftchild) AS (
+      SELECT slot, child FROM hctpgmap, hctentry WHERE 
+          logical_in_use 
+      AND hctpgmap.value=hctentry.pgno 
+      AND hctentry.entry=0 
+      AND child IS NOT NULL
+    ),
+  
+    lefts AS (
+      SELECT pgno FROM roots
+      UNION ALL
+      SELECT leftchild FROM lefts, leftchilds WHERE lefts.pgno=leftchilds.pgno
+    ),
+  
+    allpages(pgno) AS (
+      SELECT pgno FROM lefts
+      UNION ALL
+      SELECT peer FROM hctpgmap, hctdb, allpages WHERE
+          logical_in_use 
+      AND hctpgmap.value=hctdb.pgno 
+      AND allpages.pgno=hctpgmap.slot
+      AND peer>0
+    )
+  
+    SELECT * FROM allpages ORDER BY 1
+  }
+}
+
 proc show_db_lists {} {
 
   execsql_pp {
@@ -91,6 +131,16 @@ proc do_evictinuse_test {tn} {
 
 proc do_pageleak_test {tn} {
 
+  # Obtain a list of logical pages in use by traversing the tree 
+  # structures (variable $lLogic). Then get the list of pages for
+  # which the logical_in_use flag is set (variable $lLogic2). Check 
+  # that they match.
+  set lLogic  [logical_in_use]
+  set lLogic2 [db eval {
+    SELECT slot FROM hctpgmap WHERE logical_in_use ORDER BY 1
+  }]
+  uplevel [list do_test $tn.0 [list set {} $lLogic2] $lLogic]
+
   # Check that there are the same number of physical as logical pages
   # in use. This is not generally true - but it is true for databases
   # with no overflow pages.
@@ -100,13 +150,14 @@ proc do_pageleak_test {tn} {
 
   if {$nLog!=$nPhys} {
     execsql_pp {
-      SELECT logical AS "leaked_physical_page" FROM hctpgmap WHERE 
-        physical_in_use AND 
-        logical NOT IN (
-          SELECT pgno FROM hctpgmap WHERE logical_in_use
+      SELECT slot AS "leaked_physical_page" FROM hctpgmap WHERE 
+        physical_in_use AND slot NOT IN (
+          SELECT value FROM hctpgmap WHERE logical_in_use
         )
     }
   }
+
+  return
 
   # Check that each physical page not marked as IN_USE on disk
   # is managed by the page-manager.
@@ -120,7 +171,8 @@ proc do_pageleak_test {tn} {
   }]
   uplevel [list do_test $tn.2 [list set res $lPhys2] $lPhys]
 
-  # Same for logical
+  # Check that each logical page not marked as IN_USE on disk
+  # is managed by the page-manager.
   set lLog [db eval {
     SELECT slot FROM hctpgmap WHERE logical_in_use=0 AND slot<=(
       SELECT value from hctpgmap WHERE slot=3
@@ -155,8 +207,21 @@ for {set ii 1} {$ii <= $nStep} {incr ii} {
   do_evictinuse_test 2.$ii.evictinuse
 } 
 
-integrity_check 1.$ii.ic
-dumpdb
+integrity_check 2.$ii.ic
+
+do_execsql_test 3.0 {
+  UPDATE hctpgmap SET logical_evicted=1 WHERE slot IN (
+    SELECT peer FROM hctpgmap, hctdb WHERE 
+      logical_in_use AND 
+      hctpgmap.value=hctdb.pgno 
+  )
+}
+
+do_execsql_test 3.1 {
+  UPDATE t1 SET b = randomblob(100) WHERE a = ( SELECT max(a) FROM t1 )
+}
+
+do_pageleak_test 3.pageleak
 
 finish_test
 
