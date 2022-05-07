@@ -17,12 +17,14 @@ typedef unsigned int u32;
 typedef struct HctConfig HctConfig;
 struct HctConfig {
   int nPageSet;                   /* Used by hct_pman.c */
+  int nTryBeforeUnevict;
 };
 
 #define HCT_TID_MASK  ((((u64)0x00FFFFFF) << 32)|0xFFFFFFFF)
 #define HCT_PGNO_MASK ((u64)0xFFFFFFFF)
 
-#define HCT_DEFAULT_NPAGESET 64
+#define HCT_DEFAULT_NPAGESET           64
+#define HCT_DEFAULT_NTRYBEFOREUNEVICT 100
 
 #include <hctTMapInt.h>
 
@@ -246,7 +248,7 @@ int sqlite3HctFilePageCommit(HctFilePage *pPg);
 ** flag for it. This operation fails if the LOGICAL_EVICTED flag has 
 ** already been set, or if the page has been written since it was read.
 */
-int sqlite3HctFilePageEvict(HctFilePage *pPg);
+int sqlite3HctFilePageEvict(HctFilePage *pPg, int bIrrevocable);
 
 void sqlite3HctFilePageUnevict(HctFilePage *pPg);
 

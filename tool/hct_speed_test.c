@@ -9,6 +9,7 @@
 #include <sys/types.h> 
 #include <sys/stat.h> 
 #include <sys/time.h> 
+#include <sys/resource.h> 
 #include <fcntl.h>
 #include <errno.h>
 
@@ -123,6 +124,27 @@ static void hst_sqlite3_exec(sqlite3 *db, const char *zSql){
 }
 
 #define SEL(e) ((e)->iLine = ((e)->rc ? (e)->iLine : __LINE__))
+
+static void hst_sqlite3_exec_printf(
+  Error *pErr,
+  sqlite3 *db, 
+  const char *zFmt, ...
+){
+  if( pErr->rc==SQLITE_OK ){
+    int rc;
+    char *zSql = 0;
+    va_list ap;
+    va_start(ap, zFmt);
+    zSql = sqlite3_vmprintf(zFmt, ap);
+    va_end(ap);
+
+    rc = sqlite3_exec(db, zSql, 0, 0, 0);
+    if( rc!=SQLITE_OK ){
+      pErr->rc = rc;
+      pErr->zErr = sqlite3_mprintf("sqlite3_prepare: %s", sqlite3_errmsg(db));
+    }
+  }
+}
 
 static sqlite3_stmt *hst_sqlite3_prepare(
   Error *pErr, 
@@ -257,6 +279,7 @@ struct Testcase {
   int nRow;
   int nUpdate;
   int nThread;
+  int nTryBeforeUnevict;
 };
 
 /*
@@ -342,6 +365,9 @@ static char *test_thread(int iTid, void *pArg){
   hst_sqlite3_exec(db, "PRAGMA journal_mode = off");
   hst_sqlite3_exec(db, "PRAGMA mmap_size = 1000000000");
   hst_sqlite3_exec(db, "PRAGMA locking_mode = exclusive");
+  hst_sqlite3_exec_printf(&err,
+      db, "PRAGMA hct_try_before_unevict = %d", pTst->nTryBeforeUnevict
+  );
   pBegin = hst_sqlite3_prepare(&err, db, "BEGIN");
   pCommit = hst_sqlite3_prepare(&err, db, "COMMIT");
   pRollback = hst_sqlite3_prepare(&err, db, "ROLLBACK");
@@ -422,6 +448,8 @@ static char *test_thread(int iTid, void *pArg){
   sqlite3_finalize(pCommit);
   sqlite3_finalize(pRollback);
   sqlite3_finalize(pWrite);
+
+  sqlite3_close(db);
 
  test_out:
   hst_print_and_free_err(&err);
@@ -514,11 +542,17 @@ int main(int argc, char **argv){
   int iArg;
   Testcase tst;
 
+  struct rlimit rlim;
+  getrlimit(RLIMIT_FSIZE, &rlim);
+  rlim.rlim_cur = 1 * 1024*1024*1024;
+  setrlimit(RLIMIT_FSIZE, &rlim);
+
   memset(&tst, 0, sizeof(Testcase));
   tst.nBlob = 200;
   tst.nRow = 1000000;
   tst.nUpdate = 1;
   tst.nSecond = 10;
+  tst.nTryBeforeUnevict = 100;
 
   for(iArg=1; iArg<argc; iArg++){
     const char *zArg = argv[iArg];
@@ -539,6 +573,9 @@ int main(int argc, char **argv){
       }else
       if( nArg>2 && nArg<=8 && memcmp("-nsecond", zArg, nArg)==0 ){
         pnVal = &tst.nSecond;
+      }else
+      if( nArg>2 && nArg<=8 && memcmp("-ntrybeforeunevict", zArg, nArg)==0 ){
+        pnVal = &tst.nTryBeforeUnevict;
       }else
       if( nArg>2 && nArg<=8 && memcmp("-nupdate", zArg, nArg)==0 ){
         pnVal = &tst.nUpdate;

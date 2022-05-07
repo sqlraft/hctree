@@ -41,9 +41,10 @@
 #define HCT_PAGEMAP_TRANSID_EOF      5
 #define HCT_PAGEMAP_COMMITID         6
 
-#define HCT_PMF_LOGICAL_EVICTED   (((u64)0x00000001)<<56)
-#define HCT_PMF_PHYSICAL_IN_USE   (((u64)0x00000002)<<56)
-#define HCT_PMF_LOGICAL_IN_USE    (((u64)0x00000004)<<56)
+#define HCT_PMF_LOGICAL_EVICTED    (((u64)0x00000001)<<56)
+#define HCT_PMF_LOGICAL_IRREVICTED (((u64)0x00000002)<<56)
+#define HCT_PMF_PHYSICAL_IN_USE    (((u64)0x00000004)<<56)
+#define HCT_PMF_LOGICAL_IN_USE     (((u64)0x00000008)<<56)
 
 #define HCT_FIRST_LOGICAL  33
 
@@ -313,31 +314,55 @@ static int hctFilePagemapSetLogical(
 }
 
 /*
-** Set the EVICTED flag on page iLogical.
+** Set the EVICTED or IRREVICTED flag on page iLogical.
 */
 static int hctFileSetEvicted(
   HctMapping *p,
   u32 iLogical,
-  u32 iOldPg
+  u32 iOldPg,
+  int bIrrevocable
 ){
   u64 *pPtr = hctPagemapPtr(p, iLogical);
   while( 1 ){
-    u64 iOld = *pPtr;
+    u64 iOld = HctAtomicLoad(pPtr);
+    u64 iNew = iOld | (
+        bIrrevocable ? HCT_PMF_LOGICAL_IRREVICTED : HCT_PMF_LOGICAL_EVICTED
+    );
 
     /* Fail if either the current physical page mapped to logical page iLogical
     ** is not iOldPg, or if the LOGICAL_EVICTED flag has already been set. */
     if( (iOld & HCT_PAGEMAP_VMASK)!=iOldPg 
-     || (iOld & HCT_PMF_LOGICAL_EVICTED) 
+     || ((iOld & HCT_PMF_LOGICAL_EVICTED) && !bIrrevocable)
+     || ((iOld & HCT_PMF_LOGICAL_EVICTED)==0 && bIrrevocable)
+     || ((iOld & HCT_PMF_LOGICAL_IN_USE)==0)
     ){
       return 0;
     }
     if( inject_cas_failure() ) return 0;
 
-    assert( iOld & HCT_PMF_LOGICAL_IN_USE );
-
-    if( hctBoolCAS64(pPtr, iOld, iOld | HCT_PMF_LOGICAL_EVICTED) ){
+    if( hctBoolCAS64(pPtr, iOld, iNew) ){
       return 1;
     }
+  }
+
+  assert( !"unreachable" );
+  return 0;
+}
+
+/*
+** Clear the LOGICAL_EVICTED flag from page-map entry iLogical. This will
+** fail if the LOGICAL_IRREVICTED flag is already set. Return 1 if the
+** flag is successfully cleared, or 0 otherwise.
+*/ 
+static int hctFileClearEvicted(HctMapping *p, u32 iLogical){
+  u64 *pPtr = hctPagemapPtr(p, iLogical);
+  while( 1 ){
+    u64 iOld = HctAtomicLoad(pPtr);
+    u64 iNew = iOld & ~HCT_PMF_LOGICAL_EVICTED;
+
+    if( (iOld & HCT_PMF_LOGICAL_IRREVICTED) ) return 0;
+    if( inject_cas_failure() ) return 0;
+    if( hctBoolCAS64(pPtr, iOld, iNew) ) return 1;
   }
 
   assert( !"unreachable" );
@@ -347,7 +372,7 @@ static int hctFileSetEvicted(
 static void hctFilePagemapZeroValue(HctMapping *p, u32 iSlot){
   while( 1 ){
     u64 i1 = hctFilePagemapGet(p, iSlot);
-    u64 i2 = (i1 & HCT_PAGEMAP_FMASK) & ~HCT_PMF_LOGICAL_EVICTED;
+    u64 i2 = (i1 & HCT_PMF_PHYSICAL_IN_USE);
     if( hctFilePagemapSet(p, iSlot, i1, i2) ) return;
   }
 }
@@ -998,6 +1023,7 @@ static int hctFilePageFlush(HctFilePage *pPg){
     DEBUG_PAGE_MUTEX_ENTER(pPg);
     DEBUG_PRINTF("f=%d: Flushing page %d orig=", pPg->pFile->iDebugId,pPg->iPg);
     DEBUG_SLOT_VALUE(pPg->pFile, pPg->iPg);
+    DEBUG_PRINTF(" (ioldpg=%d)", pPg->iOldPg);
 
     DEBUG_PRINTF("\n");
     DEBUG_PAGE_MUTEX_LEAVE(pPg);
@@ -1032,14 +1058,18 @@ int sqlite3HctFilePageCommit(HctFilePage *pPg){
   return hctFilePageFlush(pPg);
 }
 
-int sqlite3HctFilePageEvict(HctFilePage *pPg){
+int sqlite3HctFilePageEvict(HctFilePage *pPg, int bIrrevocable){
   int ret;
 
   DEBUG_PAGE_MUTEX_ENTER(pPg);
-  DEBUG_PRINTF("f=%d: Evicting page %d orig=", pPg->pFile->iDebugId, pPg->iPg);
+  DEBUG_PRINTF("f=%d: Evicting page %d (irrecocable=%d) orig=", 
+      pPg->pFile->iDebugId, pPg->iPg, bIrrevocable
+  );
   DEBUG_SLOT_VALUE(pPg->pFile, pPg->iPg);
 
-  ret = hctFileSetEvicted(pPg->pFile->pMapping, pPg->iPg, pPg->iOldPg);
+  ret = hctFileSetEvicted(
+      pPg->pFile->pMapping, pPg->iPg, pPg->iOldPg, bIrrevocable
+  );
   ret = (ret ? SQLITE_OK : SQLITE_LOCKED_ERR(pPg->iPg));
 
   DEBUG_PRINTF(" rc=%d final=", ret);
@@ -1054,7 +1084,7 @@ void sqlite3HctFilePageUnevict(HctFilePage *pPg){
   DEBUG_PRINTF("f=%d: Unevicting page %d orig=", pPg->pFile->iDebugId,pPg->iPg);
   DEBUG_SLOT_VALUE(pPg->pFile, pPg->iPg);
 
-  hctFileClearFlag(pPg->pFile, pPg->iPg, HCT_PMF_LOGICAL_EVICTED);
+  hctFileClearEvicted(pPg->pFile->pMapping, pPg->iPg);
 
   DEBUG_PRINTF(" final=");
   DEBUG_SLOT_VALUE(pPg->pFile, pPg->iPg);
@@ -1370,7 +1400,17 @@ static int pgmapColumn(
       break;
     }
     case 4: {  /* logical_evicted */
-      sqlite3_result_int64(ctx, (pCur->iVal & HCT_PMF_LOGICAL_EVICTED)?1:0);
+      const char *zVal = "";
+      int bEvicted = (pCur->iVal & HCT_PMF_LOGICAL_EVICTED) ? 1 : 0;
+      int bIrrevicted = (pCur->iVal & HCT_PMF_LOGICAL_IRREVICTED) ? 1 : 0;
+      assert( bIrrevicted==0 || bEvicted==1 );
+
+      if( bIrrevicted ){
+        zVal = "irrevicted";
+      }else if( bEvicted ){
+        zVal = "evicted";
+      }
+      sqlite3_result_text(ctx, zVal, -1, SQLITE_STATIC);
       break;
     }
   }

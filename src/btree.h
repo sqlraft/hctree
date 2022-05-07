@@ -419,4 +419,6 @@ int sqlite3HctVtabInit(sqlite3*);
 # define sqlite3BtreeCursorDir(a,b)
 #endif
 
+int sqlite3BtreePragma(Btree *pBtree, char **aFnctl);
+
 #endif /* SQLITE_BTREE_H */

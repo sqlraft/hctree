@@ -209,6 +209,7 @@ int sqlite3BtreeOpen(
     pNew->db = db;
     pNew->openFlags = flags;
     pNew->config.nPageSet = HCT_DEFAULT_NPAGESET;
+    pNew->config.nTryBeforeUnevict = HCT_DEFAULT_NTRYBEFOREUNEVICT;
     rc = sqlite3HctTreeNew(&pNew->pHctTree);
   }else{
     rc = SQLITE_NOMEM;
@@ -1698,6 +1699,40 @@ int sqlite3BtreeUpdateMeta(Btree *p, int idx, u32 iMeta){
   p->aMeta[idx] = iMeta;
   p->eMetaState = HCT_METASTATE_DIRTY;
   return SQLITE_OK;
+}
+
+static char *hctDbMPrintf(int *pRc, const char *zFormat, ...){
+  char *zRet = 0;
+  if( *pRc==SQLITE_OK ){
+    va_list ap;
+    va_start(ap, zFormat);
+    zRet = sqlite3_vmprintf(zFormat, ap);
+    va_end(ap);
+    if( !zRet ) *pRc = SQLITE_NOMEM_BKPT;
+  }
+  return zRet;
+}
+
+int sqlite3BtreePragma(Btree *p, char **aFnctl){
+  int rc = SQLITE_NOTFOUND;
+  const char *zLeft = aFnctl[1];
+  const char *zRight = aFnctl[2];
+  char *zRet = 0;
+
+  if( 0==sqlite3_stricmp("hct_try_before_unevict", zLeft) ){
+    int iVal = 0;
+    if( zRight ){
+      iVal = sqlite3Atoi(zRight);
+    }
+    if( iVal>0 ){
+      p->config.nTryBeforeUnevict = iVal;
+    }
+    rc = SQLITE_OK;
+    zRet = hctDbMPrintf(&rc, "%d", p->config.nTryBeforeUnevict);
+  }
+
+  aFnctl[0] = zRet;
+  return rc;
 }
 
 /*
