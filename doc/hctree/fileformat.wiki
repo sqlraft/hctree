@@ -11,6 +11,7 @@
       <li>[#overflow    | 4.5. Overflow Chain Format]
       <li>[#edks        | 4.6. EDKS Page Formats]
     </ul>
+  *   [#logfile | 5. Log File Format]
 
 <h1 id=overall>1. Overall Structure </h1>
 
@@ -373,5 +374,24 @@ entry consists of:
 
 Entries are rounded up to 16 bytes each to preserve 8 byte alignment.
 
+<h1 id=logfile> 5. Log File Format </h1>
+
+Each valid log file begins with a log file header consisting of:
+
+  *  8 byte TID,
+
+Following this there are a series of records. Each record consists of:
+
+  *  4 byte root page number,
+  *  for intkey tables, an 8 bytes integer key, or
+  *  for index tables, a 4 byte key size followed by the key itself.
+
+The log is terminated by a 4-byte zero value.
+
+When a client commits a transaction, it first writes the log file with the
+TID value set to zero. Once it has obtained the TID, it writes it into the
+log file and then sets about writing to the database. Once the transaction
+is done - committed or rolled back - the TID field in the log file is set to
+zero to invalidate it.
 
 

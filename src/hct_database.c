@@ -1231,6 +1231,10 @@ int sqlite3HctDbIsIndex(HctDatabase *pDb, u32 iRoot, int *pbIndex){
   return rc;
 }
 
+char *sqlite3HctDbLogFile(HctDatabase *pDb){
+  return sqlite3HctFileLogFile(pDb->pFile);
+}
+
 static void hctDbCsrInit(HctDatabase *pDb, u32 iRoot, HctDbCsr *pCsr){
   memset(pCsr, 0, sizeof(HctDbCsr));
   pCsr->pDb = pDb;
@@ -2152,8 +2156,6 @@ static int hctDbLoadPeers(HctDatabase *pDb, HctDbWriter *p, int *piPg){
 
     assert( iPg==0 );
     if( 0==hctIsLeftmost(pLeft->aNew) ){
-      HctDbCsr csr;
-      int bDummy;
       HctFilePage *pCopy = 0;
 
       /* First, evict the page currently in p->aWritePg[0]. If we 
@@ -3193,7 +3195,7 @@ int sqlite3HctDbInsert(
 /*
 ** Start the write-phase of a transaction.
 */
-int sqlite3HctDbStartWrite(HctDatabase *p){
+int sqlite3HctDbStartWrite(HctDatabase *p, u64 *piTid){
   int rc = SQLITE_OK;
   HctTMapClient *pTMapClient = sqlite3HctFileTMapClient(p->pFile);
 
@@ -3203,6 +3205,7 @@ int sqlite3HctDbStartWrite(HctDatabase *p){
 
   p->iTid = sqlite3HctFileAllocateTransid(p->pFile);
   rc = sqlite3HctTMapNewTID(pTMapClient, p->iSnapshotId, p->iTid, &p->pTmap);
+  *piTid = p->iTid;
   return rc;
 }
 
@@ -3244,6 +3247,29 @@ int sqlite3HctDbEndRead(HctDatabase *pDb){
     pDb->iSnapshotId = 0;
   }
   return SQLITE_OK;
+}
+
+/*
+** If recovery is still required, this function grabs the file-server
+** mutex and returns non-zero. Or, if recovery is not required, returns
+** zero without grabbing the mutex.
+*/
+int sqlite3HctDbStartRecovery(HctDatabase *pDb){
+  assert( pDb->bRollback==0 );
+  if( sqlite3HctFileStartRecovery(pDb->pFile) ){
+    pDb->bRollback = 1;
+  }
+  return pDb->bRollback;
+}
+
+int sqlite3HctDbRecoverTid(HctDatabase *pDb, u64 iTid){
+  pDb->iTid = iTid;
+}
+
+int sqlite3HctDbFinishRecovery(HctDatabase *pDb, int rc){
+  pDb->iTid = 0;
+  pDb->bRollback = 0;
+  return sqlite3HctFileFinishRecovery(pDb->pFile, rc);
 }
 
 /*

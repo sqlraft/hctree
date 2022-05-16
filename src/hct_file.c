@@ -22,6 +22,8 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 
+#include <dirent.h>
+
 // #define HCT_DEFAULT_PAGESIZE     512
 #define HCT_DEFAULT_PAGESIZE     4096
 
@@ -125,11 +127,13 @@ struct HctFileServer {
   sqlite3_mutex *pMutex;          /* Mutex to protect this object */
   HctFile *pFileList;
 
-  int iNextDebugId;
+  int iNextFileId;
 
   HctFileGlobal *pGlobal;
   void (*xGFree)(HctFileGlobal*);
 
+  char *zPath;                    /* Path to database (fdDb) */
+  char *zDir;                     /* Directory component of zPath */
   int fdDb;                       /* Read/write file descriptor */
   int fdMap;                      /* Read/write file descriptor for page-map */
   int fdHdr;                      /* Read/write file descriptor for hdr file */
@@ -141,6 +145,7 @@ struct HctFileServer {
 
   HctTMapServer *pTMapServer;     /* Transaction map server */
   HctPManServer *pPManServer;     /* Page manager server */
+  int bNeedRollback;              /* True if rollback still required */
 
   i64 st_dev;                     /* File identification 1 */
   i64 st_ino;                     /* File identification 2 */
@@ -158,7 +163,8 @@ struct HctFile {
   HctConfig *pConfig;             /* Connection configuration object */
   HctFileServer *pServer;         /* Connection to global db object */
   HctFile *pFileNext;             /* Next handle opened on same file */
-  int iDebugId;                   /* Id used for debugging output */
+  int iFileId;                    /* Id used for debugging output */
+  int bNeedRollback;
 
   HctTMapClient *pTMapClient;     /* Transaction map client object */
   HctPManClient *pPManClient;     /* Transaction map client object */
@@ -424,6 +430,10 @@ static int hctFileTruncate(int *pRc, int fd, i64 sz){
   return *pRc;
 }
 
+static void hctFileUnlink(int *pRc, const char *zFile){
+  if( *pRc==SQLITE_OK ) unlink(zFile);
+}
+
 static void *hctFileMmap(int *pRc, int fd, i64 nByte, int iChunk){
   void *pRet = 0;
   if( *pRc==SQLITE_OK ){
@@ -435,6 +445,71 @@ static void *hctFileMmap(int *pRc, int fd, i64 nByte, int iChunk){
   }
   return pRet;
 }
+
+static char *hctStrdup(int *pRc, const char *zIn){
+  char *zRet = 0;
+  if( *pRc==SQLITE_OK ){
+    zRet = sqlite3_mprintf("%s", zIn);
+    if( zRet==0 ) *pRc = SQLITE_NOMEM_BKPT;
+  }
+  return zRet;
+}
+
+
+/*
+** Given local path zFile, return the associated canonical path in a buffer
+** obtained from sqlite3_malloc(). It is the responsibility of the caller
+** to eventually free this buffer using sqlite3_free().
+*/
+static char *fileGetFullPath(int *pRc, const char *zFile){
+  char *zRet = 0;
+  if( *pRc==SQLITE_OK ){
+    char *zFree = realpath(zFile, 0);
+    if( zFree==0 ){
+      *pRc = SQLITE_CANTOPEN_BKPT;
+    }else{
+      zRet = hctStrdup(pRc, zFree);
+      free(zFree);
+    }
+  }
+  return zRet;
+}
+
+static int hctFileFindLogs(
+  HctFileServer *pServer, 
+  void *pCtx,
+  int (*xLog)(void*, const char*)
+){
+  DIR *d;
+  const char *zName = &pServer->zPath[strlen(pServer->zDir)];
+  int nName = strlen(zName);
+  int rc = SQLITE_OK;
+
+  d = opendir(pServer->zDir);
+  if (d) {
+    struct dirent *dir;
+    while( rc==SQLITE_OK && (dir = readdir(d))!=NULL ){
+      const char *zFile = (const char*)dir->d_name;
+      int nFile = strlen(zFile);
+      if( nFile>(nName+5) 
+       && memcmp(zFile, zName, nName)==0
+       && memcmp(&zFile[nName], "-log-", 5)==0
+      ){
+        rc = xLog(pCtx, zFile);
+      }
+    }
+    closedir(d);
+  }
+
+  return rc;
+}
+
+static int hctFileServerInitUnlinkLog(void *pDummy, const char *zFile){
+  int rc = SQLITE_OK;
+  hctFileUnlink(&rc, zFile); 
+  return rc;
+}
+
 
 static int hctFileServerInit(HctFileServer *p, const char *zFile){
   int rc = SQLITE_OK;
@@ -450,10 +525,17 @@ static int hctFileServerInit(HctFileServer *p, const char *zFile){
     i64 szChunkData;
     i64 szChunkPagemap;
 
-
     /* Open the data and page-map files */
     p->fdDb = hctFileOpen(&rc, zFile, "-data");
     p->fdMap = hctFileOpen(&rc, zFile, "-pagemap");
+    p->zPath = fileGetFullPath(&rc, zFile);
+
+    if( rc==SQLITE_OK ){
+      int n = strlen(p->zPath);
+      while( p->zPath[n-1]!='/' && n>1 ) n--;
+      p->zDir = sqlite3_mprintf("%.*s", n, p->zPath);
+      if( p->zDir==0 ) rc = SQLITE_NOMEM_BKPT;
+    }
 
     /* If the header file is zero bytes in size, the database is empty -
     ** regardless of the contents of the *-data or *-pagemap file. Truncate
@@ -464,6 +546,8 @@ static int hctFileServerInit(HctFileServer *p, const char *zFile){
       hctFileTruncate(&rc, p->fdMap, 0);
       hctFileTruncate(&rc, p->fdDb, 0);
       hctFileTruncate(&rc, p->fdHdr, HCT_HEADER_PAGESIZE*2);
+      hctFileFindLogs(p, 0, hctFileServerInitUnlinkLog);
+
       /* TODO - initialize header pages */
     }
 
@@ -561,6 +645,11 @@ static int hctFileServerInit(HctFileServer *p, const char *zFile){
         }
       }
     }
+
+    /* TODO: Figure out if rollback may be required by checking for log
+    ** files in the database directory. For now, just assume they are
+    ** present.  */
+    p->bNeedRollback = 1;
   }
   return rc;
 }
@@ -618,6 +707,7 @@ static int hctFileGrowMappingForSlot(HctFile *pFile, u32 iSlot){
   return hctFileGrowMapping(pFile, 1 + ((iSlot-1) / HCT_DEFAULT_PAGEPERCHUNK));
 }
 
+
 static int hctFileServerFind(HctFile *pFile, const char *zFile){
   int rc = SQLITE_OK;
   struct stat sStat;
@@ -672,6 +762,7 @@ static int hctFileServerFind(HctFile *pFile, const char *zFile){
   return rc;
 }
 
+
 /*
 ** Open a connection to the database zFile.
 */
@@ -691,7 +782,8 @@ HctFile *sqlite3HctFileOpen(int *pRc, const char *zFile, HctConfig *pConfig){
         pNew->szPage = pServer->szPage;
         pNew->pMapping = pServer->pMapping;
         pNew->pMapping->nRef++;
-        pNew->iDebugId = pServer->iNextDebugId++;
+        pNew->iFileId = pServer->iNextFileId++;
+        pNew->bNeedRollback = pServer->bNeedRollback;
       }
       sqlite3_mutex_leave(pServer->pMutex);
 
@@ -713,7 +805,6 @@ HctFile *sqlite3HctFileOpen(int *pRc, const char *zFile, HctConfig *pConfig){
       pNew = 0;
     }
   }
-
   assert( (rc==SQLITE_OK)==(pNew!=0) );
   *pRc = rc;
   return pNew;
@@ -998,7 +1089,7 @@ static void debug_slot_value(HctFile *pFile, u32 iSlot){
 void sqlite3HctFileDebugPrint(HctFile *pFile, const char *zFmt, ...){
   va_list ap;
   sqlite3_mutex_enter(pFile->pServer->pMutex);
-  printf("f=%d: ", pFile->iDebugId);
+  printf("f=%d: ", pFile->iFileId);
   va_start(ap, zFmt);
   vprintf(zFmt, ap);
   va_end(ap);
@@ -1021,7 +1112,7 @@ static int hctFilePageFlush(HctFilePage *pPg){
     u32 iOld = pPg->iOldPg;
 
     DEBUG_PAGE_MUTEX_ENTER(pPg);
-    DEBUG_PRINTF("f=%d: Flushing page %d orig=", pPg->pFile->iDebugId,pPg->iPg);
+    DEBUG_PRINTF("f=%d: Flushing page %d orig=", pPg->pFile->iFileId, pPg->iPg);
     DEBUG_SLOT_VALUE(pPg->pFile, pPg->iPg);
     DEBUG_PRINTF(" (ioldpg=%d)", pPg->iOldPg);
 
@@ -1043,7 +1134,7 @@ static int hctFilePageFlush(HctFilePage *pPg){
     }
 
     DEBUG_PAGE_MUTEX_ENTER(pPg);
-    DEBUG_PRINTF("f=%d:", pPg->pFile->iDebugId);
+    DEBUG_PRINTF("f=%d:", pPg->pFile->iFileId);
 
     DEBUG_PRINTF(" rc=%d final=", rc);
     DEBUG_SLOT_VALUE(pPg->pFile, pPg->iPg);
@@ -1063,7 +1154,7 @@ int sqlite3HctFilePageEvict(HctFilePage *pPg, int bIrrevocable){
 
   DEBUG_PAGE_MUTEX_ENTER(pPg);
   DEBUG_PRINTF("f=%d: Evicting page %d (irrecocable=%d) orig=", 
-      pPg->pFile->iDebugId, pPg->iPg, bIrrevocable
+      pPg->pFile->iFileId, pPg->iPg, bIrrevocable
   );
   DEBUG_SLOT_VALUE(pPg->pFile, pPg->iPg);
 
@@ -1081,7 +1172,7 @@ int sqlite3HctFilePageEvict(HctFilePage *pPg, int bIrrevocable){
 
 void sqlite3HctFilePageUnevict(HctFilePage *pPg){
   DEBUG_PAGE_MUTEX_ENTER(pPg);
-  DEBUG_PRINTF("f=%d: Unevicting page %d orig=", pPg->pFile->iDebugId,pPg->iPg);
+  DEBUG_PRINTF("f=%d: Unevicting page %d orig=", pPg->pFile->iFileId, pPg->iPg);
   DEBUG_SLOT_VALUE(pPg->pFile, pPg->iPg);
 
   hctFileClearEvicted(pPg->pFile->pMapping, pPg->iPg);
@@ -1251,6 +1342,58 @@ int sqlite3HctFileClearInUse(HctFilePage *pPg, int bReuseNow){
 
   return rc;
 }
+
+char *sqlite3HctFileLogFile(HctFile *pFile){
+  char *zRet = 0;
+  HctFileServer *pServer = pFile->pServer;
+  sqlite3_mutex_enter(pServer->pMutex);
+  zRet = sqlite3_mprintf("%s-log-%d", pServer->zPath, pFile->iFileId);
+  sqlite3_mutex_leave(pServer->pMutex);
+  return zRet;
+}
+
+const char *sqlite3HctFileDir(HctFile *pFile){
+  return pFile->pServer->zDir;
+}
+const char *sqlite3HctFilePath(HctFile *pFile){
+  return pFile->pServer->zPath;
+}
+const char *sqlite3HctFileName(HctFile *pFile){
+  int nDir = strlen(pFile->pServer->zDir);
+  return &pFile->pServer->zPath[nDir];
+}
+
+int sqlite3HctFileStartRecovery(HctFile *pFile){
+  int bRet = 0;
+  if( pFile->bNeedRollback ){
+    HctFileServer *pServer = pFile->pServer;
+    sqlite3_mutex_enter(pServer->pMutex);
+    if( pServer->bNeedRollback ){
+      bRet = 1;
+    }else{
+      pFile->bNeedRollback = 0;
+      sqlite3_mutex_leave(pServer->pMutex);
+    }
+  }
+  return bRet;
+}
+
+int sqlite3HctFileFinishRecovery(HctFile *pFile, int rc){
+  if( rc==SQLITE_OK ){
+    pFile->bNeedRollback = 0;
+    pFile->pServer->bNeedRollback = 0;
+  }
+  sqlite3_mutex_leave(pFile->pServer->pMutex);
+}
+
+int sqlite3HctFileFindLogs(
+  HctFile *pFile, 
+  void *pCtx,
+  int (*xLog)(void*, const char*)
+){
+  return hctFileFindLogs(pFile->pServer, pCtx, xLog);
+}
+
 
 /*************************************************************************
 ** Beginning of vtab implemetation.

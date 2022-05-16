@@ -136,7 +136,7 @@ int sqlite3HctDbInsert(
   int *pnRetry
 );
 int sqlite3HctDbInsertFlush(HctDatabase *pDb, int *pnRetry);
-int sqlite3HctDbStartWrite(HctDatabase*);
+int sqlite3HctDbStartWrite(HctDatabase*, u64*);
 int sqlite3HctDbEndWrite(HctDatabase*);
 int sqlite3HctDbEndRead(HctDatabase*);
 
@@ -159,6 +159,12 @@ int sqlite3HctDbCsrData(HctDbCsr *pCsr, int *pnData, const u8 **paData);
 int sqlite3HctDbCsrLoadAndDecode(HctDbCsr *pCsr, UnpackedRecord **ppRec);
 
 int sqlite3HctDbIsIndex(HctDatabase *pDb, u32 iRoot, int *pbIndex);
+
+int sqlite3HctDbStartRecovery(HctDatabase *pDb);
+int sqlite3HctDbFinishRecovery(HctDatabase *db, int rc);
+int sqlite3HctDbRecoverTid(HctDatabase *db, u64 iTid);
+
+char *sqlite3HctDbLogFile(HctDatabase*);
 
 /*************************************************************************
 ** Interface to code in hct_file.c
@@ -283,6 +289,17 @@ u32 sqlite3HctFilePageRangeAlloc(HctFile*, int bLogical, int nPg);
 int sqlite3HctFileClearInUse(HctFilePage *pPg, int bReuseNow);
 
 void sqlite3HctFileDebugPrint(HctFile *pFile, const char *zFmt, ...);
+
+char *sqlite3HctFileLogFile(HctFile *pFile);
+int sqlite3HctFileStartRecovery(HctFile *pFile);
+int sqlite3HctFileFinishRecovery(HctFile *pFile, int rc);
+
+const char *sqlite3HctFileDir(HctFile *pFile);
+const char *sqlite3HctFilePath(HctFile *pFile);
+const char *sqlite3HctFileName(HctFile *pFile);
+
+int sqlite3HctFileFindLogs(HctFile*, void*, int(*)(void*, const char*));
+
 
 #include <hctPManInt.h>
 HctPManClient *sqlite3HctFilePManClient(HctFile*);
