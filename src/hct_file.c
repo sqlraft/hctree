@@ -1384,6 +1384,7 @@ int sqlite3HctFileFinishRecovery(HctFile *pFile, int rc){
     pFile->pServer->bNeedRollback = 0;
   }
   sqlite3_mutex_leave(pFile->pServer->pMutex);
+  return rc;
 }
 
 int sqlite3HctFileFindLogs(

@@ -1066,7 +1066,7 @@ int sqlite3BtreeCursor(
   struct KeyInfo *pKeyInfo,                   /* First arg to xCompare() */
   BtCursor *pCur                              /* Write new cursor here */
 ){
-  int rc;
+  int rc = SQLITE_OK;
 
   assert( p->eTrans!=SQLITE_TXN_NONE );
   assert( pCur->pHctTreeCsr==0 );
