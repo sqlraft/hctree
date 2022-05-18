@@ -707,10 +707,10 @@ static int btreeFlushToDisk(Btree *p){
   int rc = SQLITE_OK;
   int rcok = SQLITE_OK;
   u64 iTid = 0;
+  u64 iCid = 0;
 
 static int nCall = 0;
 nCall++;
-
 
   /* Write a log file for this transaction. The TID field is still set
   ** to zero at this point.  */
@@ -721,7 +721,8 @@ nCall++;
     rc = btreeWriteTid(p, iTid);
   }
 
-  /* Initialize any root pages created by this transaction */
+  /* Initialize any root pages created by this transaction. Then flush
+  ** the data to disk.  */
   for(i=0; rc==SQLITE_OK && i<p->nNewRoot; i++){
     BtNewRoot *pRoot = &p->aNewRoot[i];
     rc = sqlite3HctDbRootInit(p->pHctDb, pRoot->bIndex, pRoot->pgnoRoot);
@@ -730,20 +731,28 @@ nCall++;
     rc = btreeFlushData(p, 0);
   }
 
+  /* Assuming the data has been flushed to disk without error or a
+  ** write/write conflict, allocate a CID and validate the transaction. */
+  if( rc==SQLITE_OK ){
+    rc = sqlite3HctDbValidate(p->pHctDb, &iCid);
+  }
+
+  /* If conflicts have been detected, roll back the transaction */
   if( rc==SQLITE_BUSY ){
-    /* The transaction hit a conflict. Undo it. */ 
     rcok = SQLITE_BUSY;
     rc = btreeFlushData(p, 1);
+    if( rc==SQLITE_DONE ) rc = SQLITE_OK;
   }
-  
-  if( rc!=SQLITE_OK && rc!=SQLITE_DONE ){
-    assert( 0 );        /* TODO: fix this */
-  }else{
+
+  /* Zero the log file and set the entry in the transaction-map to 
+  ** finish the transaction. */
+  if( rc==SQLITE_OK ){
     rc = btreeWriteTid(p, 0);
-    if( rc==SQLITE_OK ){
-      rc = sqlite3HctDbEndWrite(p->pHctDb);
-    }
   }
+  if( rc==SQLITE_OK ){
+    rc = sqlite3HctDbEndWrite(p->pHctDb, (rcok==SQLITE_OK ? iCid : 0));
+  }
+  assert( rc==SQLITE_OK );
 
   return (rc==SQLITE_OK ? rcok : rc);
 }

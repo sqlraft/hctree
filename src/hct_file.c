@@ -129,9 +129,6 @@ struct HctFileServer {
 
   int iNextFileId;
 
-  HctFileGlobal *pGlobal;
-  void (*xGFree)(HctFileGlobal*);
-
   char *zPath;                    /* Path to database (fdDb) */
   char *zDir;                     /* Directory component of zPath */
   int fdDb;                       /* Read/write file descriptor */
@@ -817,34 +814,6 @@ HctPManClient *sqlite3HctFilePManClient(HctFile *pFile){
   return pFile->pPManClient;
 }
 
-
-HctFileGlobal *sqlite3HctFileGlobal(
-  HctFile *pFile,
-  int nGlobal,
-  void (*xDelete)(HctFileGlobal*)
-){
-  HctFileServer *pServer = pFile->pServer;
-  HctFileGlobal *pRet = 0;
-  sqlite3_mutex_enter(pServer->pMutex);
-  pRet = pServer->pGlobal;
-  if( pRet==0 ){
-    pRet = sqlite3_malloc(sizeof(HctFileGlobal) + nGlobal);
-    if( pRet ){
-      memset(pRet, 0, sizeof(HctFileGlobal) + nGlobal);
-      pRet->pMutex = sqlite3_mutex_alloc(SQLITE_MUTEX_RECURSIVE);
-      if( pRet->pMutex==0 ){
-        sqlite3_free(pRet);
-        pRet = 0;
-      }else{
-        pServer->pGlobal = pRet;
-        pServer->xGFree = xDelete;
-      }
-    }
-  }
-  sqlite3_mutex_leave(pServer->pMutex);
-  return pRet;
-}
-
 void sqlite3HctFileClose(HctFile *pFile){
   if( pFile ){
     HctFileServer *pDel = 0;
@@ -900,13 +869,6 @@ void sqlite3HctFileClose(HctFile *pFile){
         if( pChunk->pData ) munmap(pChunk->pData, szChunkData);
       }
       hctMappingUnref(pMapping);
-
-      if( pDel->pGlobal ){
-        pDel->xGFree(pDel->pGlobal);
-        sqlite3_mutex_free(pDel->pGlobal->pMutex);
-        sqlite3_free(pDel->pGlobal);
-        pDel->pGlobal = 0;
-      }
 
       if( pDel->pHdr ){
         munmap(pDel->pHdr, HCT_HEADER_PAGESIZE*2);

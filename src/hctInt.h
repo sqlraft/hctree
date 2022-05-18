@@ -137,8 +137,9 @@ int sqlite3HctDbInsert(
 );
 int sqlite3HctDbInsertFlush(HctDatabase *pDb, int *pnRetry);
 int sqlite3HctDbStartWrite(HctDatabase*, u64*);
-int sqlite3HctDbEndWrite(HctDatabase*);
+int sqlite3HctDbEndWrite(HctDatabase*, u64);
 int sqlite3HctDbEndRead(HctDatabase*);
+int sqlite3HctDbValidate(HctDatabase*, u64 *piCid);
 
 void sqlite3HctDbRollbackMode(HctDatabase*,int);
 
@@ -162,7 +163,7 @@ int sqlite3HctDbIsIndex(HctDatabase *pDb, u32 iRoot, int *pbIndex);
 
 int sqlite3HctDbStartRecovery(HctDatabase *pDb);
 int sqlite3HctDbFinishRecovery(HctDatabase *db, int rc);
-int sqlite3HctDbRecoverTid(HctDatabase *db, u64 iTid);
+void sqlite3HctDbRecoverTid(HctDatabase *db, u64 iTid);
 
 char *sqlite3HctDbLogFile(HctDatabase*);
 
@@ -182,14 +183,6 @@ HctFile *sqlite3HctFileOpen(
   HctConfig *pConfig
 );
 void sqlite3HctFileClose(HctFile *pFile);
-
-typedef struct HctFileGlobal HctFileGlobal;
-struct HctFileGlobal { sqlite3_mutex *pMutex; };
-HctFileGlobal *sqlite3HctFileGlobal(
-  HctFile *pFile,
-  int nGlobal,
-  void (*xDelete)(HctFileGlobal*)
-);
 
 u32 sqlite3HctFileMaxpage(HctFile *pFile);
 
