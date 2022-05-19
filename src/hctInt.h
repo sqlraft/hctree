@@ -298,6 +298,15 @@ int sqlite3HctFileFindLogs(HctFile*, void*, int(*)(void*, const char*));
 HctPManClient *sqlite3HctFilePManClient(HctFile*);
 
 /*************************************************************************
+** Interface to code in hct_record.c
+*/
+int sqlite3HctSerializeRecord(
+  UnpackedRecord *pRec,           /* Record to serialize */
+  u8 **ppRec,                     /* OUT: buffer containing serialization */
+  int *pnRec                      /* OUT: size of (*ppRec) in bytes */
+);
+
+/*************************************************************************
 ** Utility functions:
 */
 void *sqlite3HctMalloc(int *pRc, i64 nByte);

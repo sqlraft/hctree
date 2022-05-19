@@ -78,7 +78,8 @@ LIBOBJ+= vdbe.o parse.o \
 	 vdbetrace.o vdbevtab.o \
          wal.o walker.o where.o wherecode.o whereexpr.o \
          utf.o vtab.o window.o \
-         hct_tree.o hct_file.o hct_database.o hct_tmap.o hct_pman.o
+         hct_tree.o hct_file.o hct_database.o hct_tmap.o hct_pman.o \
+         hct_record.o
 
 LIBOBJ += sqlite3session.o
 

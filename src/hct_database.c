@@ -1166,7 +1166,7 @@ static void hctDbCsrReset(HctDbCsr *pCsr){
   /* pCsr->eDir = 0; */
 }
 
-static int hctDbCsrScanStart(HctDbCsr *pCsr, i64 iKey){
+static int hctDbCsrScanStart(HctDbCsr *pCsr, UnpackedRecord *pRec, i64 iKey){
   int rc = SQLITE_OK;
 
   if( pCsr->pDb->iTid==0 ){
@@ -1181,12 +1181,16 @@ static int hctDbCsrScanStart(HctDbCsr *pCsr, i64 iKey){
         pCsr->pIntkeyOps = pOp;
       }
     }else{
-      HctCsrIntkeyOp *pOp = 0;
+      HctCsrIndexOp *pOp = 0;
       pOp = sqlite3MallocZero(sizeof(HctCsrIndexOp));
       if( pOp==0 ){
         rc = SQLITE_NOMEM_BKPT;
       }else{
-        pOp->iFirst = pOp->iLast = iKey;
+        if( pRec ){
+          rc = sqlite3HctSerializeRecord(pRec, &pOp->pFirst, &pOp->nFirst);
+          pOp->pLast = pOp->pFirst;
+          pOp->nLast = pOp->nFirst;
+        }
         pOp->pNextOp = pCsr->pIndexOps;
         pCsr->pIndexOps = pOp;
       }
@@ -1201,26 +1205,55 @@ static int hctDbCsrScanVisit(HctDbCsr *pCsr, u32 iLogical, u32 iPhysical){
 }
 
 static int hctDbCsrScanFinish(HctDbCsr *pCsr){
-  HctCsrIntkeyOp *pOp = pCsr->pIntkeyOps;
   int rc = SQLITE_OK;
+  if( pCsr->eDir!=BTREE_DIR_NONE ){
+    if( pCsr->pKeyInfo==0 ){
+      HctCsrIntkeyOp *pOp = pCsr->pIntkeyOps;
+      if( pOp ){
+        i64 iVal = 0; 
+        if( sqlite3HctDbCsrEof(pCsr) ){
+          if( pCsr->eDir==BTREE_DIR_FORWARD ){
+            iVal = LARGEST_INT64;
+          }else{
+            iVal = SMALLEST_INT64;
+          }
+        }else{
+          sqlite3HctDbCsrKey(pCsr, &iVal);
+        }
 
-  if( pOp && pCsr->eDir!=BTREE_DIR_NONE ){
-    i64 iVal = 0; 
-    if( sqlite3HctDbCsrEof(pCsr) ){
-      if( pCsr->eDir==BTREE_DIR_FORWARD ){
-        iVal = LARGEST_INT64;
-      }else{
-        iVal = SMALLEST_INT64;
+        if( iVal>=pOp->iFirst ){
+          pOp->iLast = iVal;
+        }else{
+          pOp->iLast = pOp->iFirst;
+          pOp->iFirst = iVal;
+        }
       }
     }else{
-      sqlite3HctDbCsrKey(pCsr, &iVal);
-    }
+      HctCsrIndexOp *pOp = pCsr->pIndexOps;
+      if( pOp ){
+        int nKey = 0;
+        u8 *aCopy = 0;
+        if( !sqlite3HctDbCsrEof(pCsr) ){
+          const u8 *aKey = 0;
+          rc = sqlite3HctDbCsrData(pCsr, &nKey, &aKey);
+          if( rc==SQLITE_OK ){
+            aCopy = sqlite3_malloc(nKey);
+            if( aCopy==0 ){
+              rc = SQLITE_NOMEM_BKPT;
+            }else{
+              memcpy(aCopy, aKey, nKey);
+            }
+          }
+        }
 
-    if( iVal>=pOp->iFirst ){
-      pOp->iLast = iVal;
-    }else{
-      pOp->iLast = pOp->iFirst;
-      pOp->iFirst = iVal;
+        if( pCsr->eDir==BTREE_DIR_FORWARD ){
+          pOp->pLast = aCopy;
+          pOp->nLast = nKey;
+        }else{
+          pOp->pFirst = aCopy;
+          pOp->nFirst = nKey;
+        }
+      }
     }
   }
 
@@ -1256,7 +1289,7 @@ int sqlite3HctDbCsrSeek(
     rc = hctDbCsrScanFinish(pCsr);
     if( rc==SQLITE_OK ){
       hctDbCsrReset(pCsr);
-      rc = hctDbCsrScanStart(pCsr, iKey);
+      rc = hctDbCsrScanStart(pCsr, pRec, iKey);
     }
   }
 
@@ -3326,6 +3359,15 @@ static void hctDbFreeCsr(HctDbCsr *pCsr){
     pCsr->pIntkeyOps = pOp->pNextOp;
     sqlite3_free(pOp);
   }
+  while( pCsr->pIndexOps ){
+    HctCsrIndexOp *pOp = pCsr->pIndexOps;
+    pCsr->pIndexOps = pOp->pNextOp;
+    if( pOp->pLast!=pOp->pFirst ){
+      sqlite3_free(pOp->pLast);
+    }
+    sqlite3_free(pOp->pFirst);
+    sqlite3_free(pOp);
+  }
   if( pCsr->pRec ) sqlite3DbFree(pCsr->pKeyInfo->db, pCsr->pRec);
   hctBufferFree(&pCsr->rec);
   sqlite3_free(pCsr);
@@ -3486,13 +3528,11 @@ static int hctDbCsrFirst(HctDbCsr *pCsr){
 int sqlite3HctDbCsrFirst(HctDbCsr *pCsr){
   int rc = SQLITE_OK;
 
-  if( pCsr->pKeyInfo==0 ){
-    rc = hctDbCsrScanFinish(pCsr);
-    if( rc==SQLITE_OK ){
-      hctDbCsrReset(pCsr);
-      pCsr->eDir = BTREE_DIR_FORWARD;
-      rc = hctDbCsrScanStart(pCsr, SMALLEST_INT64);
-    }
+  rc = hctDbCsrScanFinish(pCsr);
+  if( rc==SQLITE_OK ){
+    hctDbCsrReset(pCsr);
+    pCsr->eDir = BTREE_DIR_FORWARD;
+    rc = hctDbCsrScanStart(pCsr, 0, SMALLEST_INT64);
   }
   pCsr->eDir = BTREE_DIR_FORWARD;
 
@@ -3525,7 +3565,7 @@ int sqlite3HctDbCsrLast(HctDbCsr *pCsr){
     if( rc==SQLITE_OK ){
       hctDbCsrReset(pCsr);
       pCsr->eDir = BTREE_DIR_REVERSE;
-      rc = hctDbCsrScanStart(pCsr, LARGEST_INT64);
+      rc = hctDbCsrScanStart(pCsr, 0, LARGEST_INT64);
     }
   }
 
@@ -3644,6 +3684,110 @@ int sqlite3HctDbCsrData(HctDbCsr *pCsr, int *pnData, const u8 **paData){
   return hctDbLoadRecord(pCsr->pDb, &pCsr->rec, pPg, iCell, pnData, paData);
 }
 
+static int hctDbValidateEntry(HctDatabase *pDb, HctDbCsr *pCsr){
+  u8 flags;
+  int iOff = hctDbCellOffset(pCsr->pg.aOld, pCsr->iCell, &flags);
+  if( flags & HCTDB_HAS_TID ){
+    u64 iTid = hctGetU64(&pCsr->pg.aOld[iOff]);
+    if( iTid!=pDb->iTid && hctDbTidIsVisible(pCsr->pDb, iTid)==0 ){
+      return SQLITE_BUSY;
+    }
+  }
+  return SQLITE_OK;
+}
+
+static int hctDbValidateIntkey(HctDatabase *pDb, HctDbCsr *pCsr){
+  int rc = SQLITE_OK;
+  HctCsrIntkeyOp *pOpList = pCsr->pIntkeyOps;
+  HctCsrIntkeyOp *pOp;
+  pCsr->pIntkeyOps = 0;
+  for(pOp=pOpList; pOp && rc==SQLITE_OK; pOp=pOp->pNextOp){
+    assert( pOp->iFirst<=pOp->iLast );
+    if( pOp->iFirst==SMALLEST_INT64 ){
+      pCsr->eDir = BTREE_DIR_FORWARD;
+      rc = hctDbCsrFirst(pCsr);
+    }else{
+      int bDummy = 0;
+      if( pOp->iFirst==pOp->iLast ){
+        pCsr->eDir = BTREE_DIR_NONE;
+      }else{
+        pCsr->eDir = BTREE_DIR_FORWARD;
+      }
+      rc = hctDbCsrSeek(pCsr, 0, 0, pOp->iFirst, &bDummy);
+    }
+
+    while( rc==SQLITE_OK && !sqlite3HctDbCsrEof(pCsr) ){
+      i64 iKey = 0;
+      sqlite3HctDbCsrKey(pCsr, &iKey);
+      if( iKey>=pOp->iFirst && iKey<=pOp->iLast ){
+        rc = hctDbValidateEntry(pDb, pCsr);
+      }
+      if( rc!=SQLITE_OK || iKey>=pOp->iLast ) break;
+      rc = hctDbCsrNext(pCsr);
+    }
+    hctDbCsrReset(pCsr);
+  }
+  assert( pCsr->pIntkeyOps==0 );
+  pCsr->pIntkeyOps = pOpList;
+
+  return rc;
+}
+
+static int hctDbValidateIndex(HctDatabase *pDb, HctDbCsr *pCsr){
+  int rc = SQLITE_OK;
+  HctCsrIndexOp *pOpList = pCsr->pIndexOps;
+  HctCsrIndexOp *pOp;
+  pCsr->pIndexOps = 0;
+
+  rc = hctDbAllocateUnpacked(pCsr);
+  for(pOp=pOpList; pOp && rc==SQLITE_OK; pOp=pOp->pNextOp){
+    UnpackedRecord *pRec = pCsr->pRec;
+    hctDbCsrReset(pCsr);
+    pCsr->eDir = (pOp->pFirst==pOp->pLast) ? BTREE_DIR_NONE : BTREE_DIR_FORWARD;
+    if( pOp->pFirst==0 ){
+      rc = hctDbCsrFirst(pCsr);
+    }else{
+      int bExact = 0;
+      sqlite3VdbeRecordUnpack(pCsr->pKeyInfo, pOp->nFirst, pOp->pFirst, pRec);
+      rc = hctDbCsrSeek(pCsr, 0, pRec, 0, &bExact);
+      if( rc==SQLITE_OK && bExact==0 ){
+        rc = hctDbCsrNext(pCsr);
+      }
+    }
+    if( pOp->pLast && pOp->pLast!=pOp->pFirst ){
+      sqlite3VdbeRecordUnpack(pCsr->pKeyInfo, pOp->nLast, pOp->pLast, pRec);
+    }else{
+      pRec = 0;
+    }
+    if( rc!=SQLITE_OK ) break;
+
+    if( pOp->pLast==pOp->pFirst ){
+      assert( !sqlite3HctDbCsrEof(pCsr) );
+      rc = hctDbValidateEntry(pDb, pCsr);
+    }else{
+      while( !sqlite3HctDbCsrEof(pCsr) ){
+        int res = -1;
+        if( pRec ){
+          const u8 *aKey = 0;
+          int nKey = 0;
+          rc = sqlite3HctDbCsrData(pCsr, &nKey, &aKey);
+          if( rc!=SQLITE_OK ) break;
+          res = sqlite3VdbeRecordCompare(nKey, aKey, pRec);
+          if( res<0 ) break;
+        }
+        rc = hctDbValidateEntry(pDb, pCsr);
+        if( res==0 || rc!=SQLITE_OK ) break;
+        rc = hctDbCsrNext(pCsr);
+        if( rc!=SQLITE_OK ) break;
+      }
+    }
+  }
+
+  assert( pCsr->pIndexOps==0 );
+  pCsr->pIndexOps = pOpList;
+  return rc;
+}
+
 int sqlite3HctDbValidate(HctDatabase *pDb, u64 *piCid){
   HctDbCsr *pCsr = 0;
   u64 *pEntry = hctDbFindTMapEntry(pDb->pTmap, pDb->iTid);
@@ -3657,45 +3801,11 @@ int sqlite3HctDbValidate(HctDatabase *pDb, u64 *piCid){
   assert( pDb->bValidate==0 );
   pDb->bValidate = 1;
   for(pCsr=pDb->pScannerList; pCsr && rc==SQLITE_OK; pCsr=pCsr->pNextScanner){
-    HctCsrIntkeyOp *pOpList = pCsr->pIntkeyOps;
-    HctCsrIntkeyOp *pOp;
-    pCsr->pIntkeyOps = 0;
-    for(pOp=pOpList; pOp && rc==SQLITE_OK; pOp=pOp->pNextOp){
-      assert( pOp->iFirst<=pOp->iLast );
-      if( pOp->iFirst==SMALLEST_INT64 ){
-        pCsr->eDir = BTREE_DIR_FORWARD;
-        rc = hctDbCsrFirst(pCsr);
-      }else{
-        int bDummy = 0;
-        if( pOp->iFirst==pOp->iLast ){
-          pCsr->eDir = BTREE_DIR_NONE;
-        }else{
-          pCsr->eDir = BTREE_DIR_FORWARD;
-        }
-        rc = hctDbCsrSeek(pCsr, 0, 0, pOp->iFirst, &bDummy);
-      }
-
-      while( rc==SQLITE_OK && !sqlite3HctDbCsrEof(pCsr) ){
-        i64 iKey = 0;
-        sqlite3HctDbCsrKey(pCsr, &iKey);
-        if( iKey>=pOp->iFirst && iKey<=pOp->iLast ){
-          u8 flags;
-          int iOff = hctDbCellOffset(pCsr->pg.aOld, pCsr->iCell, &flags);
-          if( flags & HCTDB_HAS_TID ){
-            u64 iTid = hctGetU64(&pCsr->pg.aOld[iOff]);
-            if( iTid!=pDb->iTid && hctDbTidIsVisible(pCsr->pDb, iTid)==0 ){
-              rc = SQLITE_BUSY;
-              break;
-            }
-          }
-        }
-        if( iKey>=pOp->iLast ) break;
-        rc = hctDbCsrNext(pCsr);
-      }
-      hctDbCsrReset(pCsr);
+    if( pCsr->pKeyInfo==0 ){
+      rc = hctDbValidateIntkey(pDb, pCsr);
+    }else{
+      rc = hctDbValidateIndex(pDb, pCsr);
     }
-    assert( pCsr->pIntkeyOps==0 );
-    pCsr->pIntkeyOps = pOpList;
   }
 
   pDb->bValidate = 0;
