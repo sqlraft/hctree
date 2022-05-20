@@ -1260,6 +1260,52 @@ static int hctDbCsrScanFinish(HctDbCsr *pCsr){
   return rc;
 }
 
+static int hctDbCsrFirst(HctDbCsr *pCsr){
+  int rc = SQLITE_OK;
+
+  /* Starting at the root of the tree structure, follow the left-most 
+  ** pointers to find the left-most node in the list of leaves. */
+  u32 iPg = pCsr->iRoot;
+  HctFile *pFile = pCsr->pDb->pFile;
+  HctFilePage pg;
+  while( 1 ){
+    HctDbPageHdr *pPg;
+    rc = sqlite3HctFilePageGet(pFile, iPg, &pg);
+    if( rc!=SQLITE_OK ) break;
+    pPg = (HctDbPageHdr*)pg.aOld;
+    if( pPg->nHeight==0 ){
+      break;
+    }else if( hctPagetype(pPg)==HCT_PAGETYPE_INTKEY ){
+      iPg = ((HctDbIntkeyNode*)pPg)->aEntry[0].iChildPg;
+    }else{
+      iPg = ((HctDbIndexNode*)pPg)->aEntry[0].iChildPg;
+    }
+    sqlite3HctFilePageRelease(&pg);
+  }
+  memcpy(&pCsr->pg, &pg, sizeof(pg));
+  if( ((HctDbPageHdr*)pCsr->pg.aOld)->nEntry>0 ){
+    pCsr->iCell = 0;
+  }else{
+    pCsr->iCell = -1;
+  }
+  return rc;
+}
+
+static int hctDbCsrFirstValid(HctDbCsr *pCsr){
+  int rc = SQLITE_OK;
+
+  rc = hctDbCsrFirst(pCsr);
+
+  /* Skip forward to the first visible entry, if any. */
+  if( rc==SQLITE_OK ){
+    pCsr->iCell = -1;
+    rc = sqlite3HctDbCsrNext(pCsr);
+  }
+
+  return rc;
+}
+
+
 /*
 ** An integer is written into *pRes which is the result of
 ** comparing the key with the entry to which the cursor is 
@@ -1305,7 +1351,7 @@ int sqlite3HctDbCsrSeek(
       ** at EOF. Otherwise, if the cursor is BTREE_DIR_FORWARD, attempt
       ** to move it to the first valid entry. */
       if( pCsr->eDir==BTREE_DIR_FORWARD ){
-        rc = sqlite3HctDbCsrFirst(pCsr);
+        rc = hctDbCsrFirstValid(pCsr);
         *pRes = sqlite3HctDbCsrEof(pCsr) ? -1 : +1;
       }else{
         *pRes = -1;
@@ -3488,37 +3534,6 @@ int sqlite3HctDbCsrEof(HctDbCsr *pCsr){
   return pCsr==0 || pCsr->iCell<0;
 }
 
-static int hctDbCsrFirst(HctDbCsr *pCsr){
-  int rc = SQLITE_OK;
-
-  /* Starting at the root of the tree structure, follow the left-most 
-  ** pointers to find the left-most node in the list of leaves. */
-  u32 iPg = pCsr->iRoot;
-  HctFile *pFile = pCsr->pDb->pFile;
-  HctFilePage pg;
-  while( 1 ){
-    HctDbPageHdr *pPg;
-    rc = sqlite3HctFilePageGet(pFile, iPg, &pg);
-    if( rc!=SQLITE_OK ) break;
-    pPg = (HctDbPageHdr*)pg.aOld;
-    if( pPg->nHeight==0 ){
-      break;
-    }else if( hctPagetype(pPg)==HCT_PAGETYPE_INTKEY ){
-      iPg = ((HctDbIntkeyNode*)pPg)->aEntry[0].iChildPg;
-    }else{
-      iPg = ((HctDbIndexNode*)pPg)->aEntry[0].iChildPg;
-    }
-    sqlite3HctFilePageRelease(&pg);
-  }
-  memcpy(&pCsr->pg, &pg, sizeof(pg));
-  if( ((HctDbPageHdr*)pCsr->pg.aOld)->nEntry>0 ){
-    pCsr->iCell = 0;
-  }else{
-    pCsr->iCell = -1;
-  }
-  return rc;
-}
-
 /*
 ** Set the cursor to point to the first entry in its table. If it is
 ** stepped, this cursor will be stepped with sqlite3HctDbCsrNext().
@@ -3535,13 +3550,7 @@ int sqlite3HctDbCsrFirst(HctDbCsr *pCsr){
   pCsr->eDir = BTREE_DIR_FORWARD;
 
   if( rc==SQLITE_OK ){
-    rc = hctDbCsrFirst(pCsr);
-  }
-
-  /* Skip forward to the first visible entry, if any. */
-  if( rc==SQLITE_OK ){
-    pCsr->iCell = -1;
-    rc = sqlite3HctDbCsrNext(pCsr);
+    rc = hctDbCsrFirstValid(pCsr);
   }
 
   return rc;

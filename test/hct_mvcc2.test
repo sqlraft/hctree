@@ -73,6 +73,7 @@ for {set i 0} {$i < $nRep} {incr i} {
     if {[info exists b($x)]} { set bConflict 1 }
   }
 
+if {$i==18} breakpoint
   do_test $tn.1.$i.1 {
     execsql BEGIN
     foreach k [array names a] {
@@ -92,7 +93,6 @@ for {set i 0} {$i < $nRep} {incr i} {
 if {0 && $tn==2 && $i==($nRep-1)} {
 execsql_pp { SELECT * FROM hctpgmap natural join hctdb }
 execsql_pp { SELECT * FROM hctpgmap natural join hctentry }
-breakpoint
 }
 
   do_test $tn.1.$i.2 {
@@ -110,11 +110,10 @@ breakpoint
     execsql COMMIT db2
   } {}
 
-if {$tn==2 && $i==0} {
+if 0 {
   puts "a: [lsort -integer [array names a]]"
   puts "b: [lsort -integer [array names b]]"
   puts "bConflict=$bConflict"
-  breakpoint
 }
   if {$bConflict} {
     do_catchsql_test $tn.1.$i.3a {
@@ -122,6 +121,7 @@ if {$tn==2 && $i==0} {
     } {1 {database is locked}}
     execsql ROLLBACK
   } else {
+  # execsql_pp { SELECT * FROM hctvalid }
     do_catchsql_test $tn.1.$i.3b {
       COMMIT
     } {0 {}}
