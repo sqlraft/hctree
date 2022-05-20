@@ -1285,12 +1285,10 @@ int sqlite3HctDbCsrSeek(
   int rc = SQLITE_OK;
   int bExact;
 
-  if( pCsr->pKeyInfo==0 ){
-    rc = hctDbCsrScanFinish(pCsr);
-    if( rc==SQLITE_OK ){
-      hctDbCsrReset(pCsr);
-      rc = hctDbCsrScanStart(pCsr, pRec, iKey);
-    }
+  rc = hctDbCsrScanFinish(pCsr);
+  if( rc==SQLITE_OK ){
+    hctDbCsrReset(pCsr);
+    rc = hctDbCsrScanStart(pCsr, pRec, iKey);
   }
 
   if( rc==SQLITE_OK ){
@@ -3560,13 +3558,11 @@ int sqlite3HctDbCsrLast(HctDbCsr *pCsr){
   HctDbPageHdr *pPg = 0;
   HctFilePage pg;
 
-  if( pCsr->pKeyInfo==0 ){
-    rc = hctDbCsrScanFinish(pCsr);
-    if( rc==SQLITE_OK ){
-      hctDbCsrReset(pCsr);
-      pCsr->eDir = BTREE_DIR_REVERSE;
-      rc = hctDbCsrScanStart(pCsr, 0, LARGEST_INT64);
-    }
+  rc = hctDbCsrScanFinish(pCsr);
+  if( rc==SQLITE_OK ){
+    hctDbCsrReset(pCsr);
+    pCsr->eDir = BTREE_DIR_REVERSE;
+    rc = hctDbCsrScanStart(pCsr, 0, LARGEST_INT64);
   }
 
   /* Find the last page in the leaf page list. */
@@ -3817,7 +3813,8 @@ int sqlite3HctDbValidate(HctDatabase *pDb, u64 *piCid){
 
 /*************************************************************************
 **************************************************************************
-** Below are the virtual table implementations.
+** Below are the virtual table implementations. These are debugging 
+** aids only.
 */
 
 typedef struct hctdb_vtab hctdb_vtab;
@@ -4534,6 +4531,171 @@ static int hctentryBestIndex(
   return SQLITE_OK;
 }
 
+typedef struct hctvalid_vtab hctvalid_vtab;
+typedef struct hctvalid_cursor hctvalid_cursor;
+struct hctvalid_vtab {
+  sqlite3_vtab base;              /* Base class - must be first */
+  sqlite3 *db;
+};
+struct hctvalid_cursor {
+  sqlite3_vtab_cursor base;  /* Base class - must be first */
+  HctDatabase *pDb;          /* Database to report on */
+  int iEntry;                /* Current entry (i.e. rowid) */
+
+  u32 rootpgno;              /* Value of rootpgno column */
+  char *zFirst;
+  char *zLast;
+  char *zPglist;
+};
+static int hctvalidConnect(
+  sqlite3 *db,
+  void *pAux,
+  int argc, const char *const*argv,
+  sqlite3_vtab **ppVtab,
+  char **pzErr
+){
+  hctvalid_vtab *pNew = 0;
+  int rc = SQLITE_OK;
+
+  *ppVtab = 0;
+  rc = sqlite3_declare_vtab(db,
+      "CREATE TABLE x(rootpgno, first, last, pglist)"
+  );
+
+  if( rc==SQLITE_OK ){
+    pNew = sqlite3MallocZero( sizeof(*pNew) );
+    *ppVtab = (sqlite3_vtab*)pNew;
+    if( pNew==0 ) return SQLITE_NOMEM;
+    pNew->db = db;
+  }
+  return rc;
+}
+static int hctvalidBestIndex(
+  sqlite3_vtab *tab,
+  sqlite3_index_info *pIdxInfo
+){
+  pIdxInfo->estimatedCost = (double)10000;
+  pIdxInfo->estimatedRows = 10000;
+  return SQLITE_OK;
+}
+static int hctvalidDisconnect(sqlite3_vtab *pVtab){
+  hctvalid_vtab *p = (hctvalid_vtab*)pVtab;
+  sqlite3_free(p);
+  return SQLITE_OK;
+}
+static int hctvalidOpen(sqlite3_vtab *p, sqlite3_vtab_cursor **ppCursor){
+  hctvalid_cursor *pCur;
+  pCur = sqlite3MallocZero(sizeof(*pCur));
+  if( pCur==0 ) return SQLITE_NOMEM;
+  *ppCursor = &pCur->base;
+  return SQLITE_OK;
+}
+static int hctvalidClose(sqlite3_vtab_cursor *cur){
+  hctvalid_cursor *pCur = (hctvalid_cursor*)cur;
+  sqlite3_free(pCur);
+  return SQLITE_OK;
+}
+static int hctvalidNext(sqlite3_vtab_cursor *cur){
+  hctvalid_cursor *pCsr = (hctvalid_cursor*)cur;
+  hctvalid_vtab *pTab = (hctvalid_vtab*)(pCsr->base.pVtab);
+  int ii;
+  HctDbCsr *pDbCsr = 0;
+  HctCsrIntkeyOp *pIntkeyOp = 0;
+  HctCsrIndexOp *pIndexOp = 0;
+
+  sqlite3_free(pCsr->zFirst);
+  sqlite3_free(pCsr->zLast);
+  sqlite3_free(pCsr->zPglist);
+  pCsr->zFirst = 0;
+  pCsr->zLast = 0;
+  pCsr->zPglist = 0;
+  pCsr->rootpgno = 0;
+  pCsr->iEntry++;
+  pDbCsr = pCsr->pDb->pScannerList;
+  pIntkeyOp = pDbCsr->pIntkeyOps;
+  pIndexOp = pDbCsr->pIndexOps;
+  for(ii=0; pDbCsr && ii<pCsr->iEntry; ii++){
+    if( pIntkeyOp ) pIntkeyOp = pIntkeyOp->pNextOp;
+    if( pIndexOp ) pIndexOp = pIndexOp->pNextOp;
+    if( pIntkeyOp==0 && pIndexOp==0 ){
+      pDbCsr = pDbCsr->pNextScanner;
+      if( pDbCsr ){
+        pIntkeyOp = pDbCsr->pIntkeyOps;
+        pIndexOp = pDbCsr->pIndexOps;
+      }
+    }
+  }
+
+  if( pDbCsr ){
+    pCsr->rootpgno = pDbCsr->iRoot;
+    if( pIntkeyOp ){
+      if( pIntkeyOp->iFirst!=SMALLEST_INT64 ){
+        pCsr->zFirst = sqlite3_mprintf("%lld", pIntkeyOp->iFirst);
+      }
+      if( pIntkeyOp->iFirst!=LARGEST_INT64 ){
+        pCsr->zLast = sqlite3_mprintf("%lld", pIntkeyOp->iLast);
+      }
+    }else{
+      if( pIndexOp->pFirst ){
+        pCsr->zFirst = hctDbRecordToText(
+            pTab->db, pIndexOp->pFirst, pIndexOp->nFirst
+        );
+      }
+      if( pIndexOp->pLast ){
+        pCsr->zLast = hctDbRecordToText(
+            pTab->db, pIndexOp->pLast, pIndexOp->nLast
+        );
+      }
+    }
+  }
+
+  return SQLITE_OK;
+}
+static int hctvalidFilter(
+  sqlite3_vtab_cursor *cur, 
+  int idxNum, const char *idxStr,
+  int argc, sqlite3_value **argv
+){
+  hctvalid_cursor *pCsr = (hctvalid_cursor*)cur;
+  hctvalid_vtab *pTab = (hctvalid_vtab*)(pCsr->base.pVtab);
+ 
+  pCsr->pDb = sqlite3HctDbFind(pTab->db, 0);
+  pCsr->iEntry = -1;
+  return hctvalidNext(cur);
+}
+static int hctvalidEof(sqlite3_vtab_cursor *cur){
+  hctvalid_cursor *pCsr = (hctvalid_cursor*)cur;
+  return (pCsr->rootpgno==0);
+}
+static int hctvalidColumn(
+  sqlite3_vtab_cursor *cur,   /* The cursor */
+  sqlite3_context *ctx,       /* First argument to sqlite3_result_...() */
+  int i                       /* Which column to return */
+){
+  hctvalid_cursor *pCsr = (hctvalid_cursor*)cur;
+  switch( i ){
+    case 0:
+      sqlite3_result_int64(ctx, (i64)pCsr->rootpgno);
+      break;
+    case 1:
+      sqlite3_result_text(ctx, pCsr->zFirst, -1, SQLITE_TRANSIENT);
+      break;
+    case 2:
+      sqlite3_result_text(ctx, pCsr->zLast, -1, SQLITE_TRANSIENT);
+      break;
+    case 3:
+      sqlite3_result_text(ctx, pCsr->zPglist, -1, SQLITE_TRANSIENT);
+      break;
+  }
+  return SQLITE_OK;
+}
+static int hctvalidRowid(sqlite3_vtab_cursor *cur, sqlite_int64 *pRowid){
+  hctvalid_cursor *pCsr = (hctvalid_cursor*)cur;
+  *pRowid = pCsr->iEntry;
+  return SQLITE_OK;
+}
+
+
 
 int sqlite3HctVtabInit(sqlite3 *db){
   static sqlite3_module hctdbModule = {
@@ -4590,11 +4752,41 @@ int sqlite3HctVtabInit(sqlite3 *db){
     /* xShadowName */ 0
   };
 
+  static sqlite3_module hctvalidModule = {
+    /* iVersion    */ 0,
+    /* xCreate     */ 0,
+    /* xConnect    */ hctvalidConnect,
+    /* xBestIndex  */ hctvalidBestIndex,
+    /* xDisconnect */ hctvalidDisconnect,
+    /* xDestroy    */ 0,
+    /* xOpen       */ hctvalidOpen,
+    /* xClose      */ hctvalidClose,
+    /* xFilter     */ hctvalidFilter,
+    /* xNext       */ hctvalidNext,
+    /* xEof        */ hctvalidEof,
+    /* xColumn     */ hctvalidColumn,
+    /* xRowid      */ hctvalidRowid,
+    /* xUpdate     */ 0,
+    /* xBegin      */ 0,
+    /* xSync       */ 0,
+    /* xCommit     */ 0,
+    /* xRollback   */ 0,
+    /* xFindMethod */ 0,
+    /* xRename     */ 0,
+    /* xSavepoint  */ 0,
+    /* xRelease    */ 0,
+    /* xRollbackTo */ 0,
+    /* xShadowName */ 0
+  };
+
   int rc;
 
   rc = sqlite3_create_module(db, "hctdb", &hctdbModule, 0);
   if( rc==SQLITE_OK ){
     rc = sqlite3_create_module(db, "hctentry", &hctentryModule, 0);
+  }
+  if( rc==SQLITE_OK ){
+    rc = sqlite3_create_module(db, "hctvalid", &hctvalidModule, 0);
   }
   if( rc==SQLITE_OK ){
     rc = sqlite3HctFileVtabInit(db);

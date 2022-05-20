@@ -363,7 +363,7 @@ static char *test_thread(int iTid, void *pArg){
   sqlite3_create_function(db,"updateblob",3,SQLITE_UTF8,0,updateBlobFunc,0 ,0);
 
   hst_sqlite3_exec(db, "PRAGMA journal_mode = wal");
-  hst_sqlite3_exec(db, "PRAGMA wal_autocheckpoint = 100000");
+  hst_sqlite3_exec(db, "PRAGMA wal_autocheckpoint = 10000");
   hst_sqlite3_exec(db, "PRAGMA mmap_size = 1000000000");
   hst_sqlite3_exec(db, "PRAGMA locking_mode = exclusive");
   hst_sqlite3_exec_printf(&err,

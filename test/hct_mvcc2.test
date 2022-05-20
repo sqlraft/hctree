@@ -110,6 +110,12 @@ breakpoint
     execsql COMMIT db2
   } {}
 
+if {$tn==2 && $i==0} {
+  puts "a: [lsort -integer [array names a]]"
+  puts "b: [lsort -integer [array names b]]"
+  puts "bConflict=$bConflict"
+  breakpoint
+}
   if {$bConflict} {
     do_catchsql_test $tn.1.$i.3a {
       COMMIT
