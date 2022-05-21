@@ -15,8 +15,6 @@
 
 #include "sqlite3.h"
 
-#include <valgrind/callgrind.h>
-
 
 typedef sqlite3_int64 i64;
 typedef unsigned int u32;
@@ -245,7 +243,8 @@ static sqlite3_int64 hst_current_time(){
 
 static void hst_join_threads(
   Error *pErr,                    /* IN/OUT: Error code */
-  Threadset *pThreads             /* Thread set */
+  Threadset *pThreads,            /* Thread set */
+  int *pnTrans
 ){
   Thread *p;
   Thread *pNext;
@@ -269,7 +268,7 @@ static void hst_join_threads(
     sqlite3_free(p->zRes);
     sqlite3_free(p);
   }
-  printf("Total transactions: %d\n", nTrans);
+  *pnTrans = nTrans;
   pThreads->pThread = 0;
 }
 
@@ -474,9 +473,6 @@ static void test_build_db(Error *pErr, Testcase *pTst, int iDb){
   sqlite3_stmt *pIns = 0;
   sqlite3 *db = 0;
   char *zFile = sqlite3_mprintf("%s%d", HST_DATABASE_NAME, iDb);
-  char *zRm = sqlite3_mprintf("rm -rf %s", zFile);
-
-  system(zRm);
 
   db = hst_sqlite3_open(zFile);
   hst_sqlite3_exec(db,
@@ -526,12 +522,19 @@ static void runtest(Testcase *pTst){
   sqlite3_stmt *pIC = 0;
   int ii;
   int iDb;
+  int nTrans;
 
   Error err;
   Threadset threadset;
 
   memset(&err, 0, sizeof(err));
   memset(&threadset, 0, sizeof(threadset));
+
+  for(ii=0; ii<32; ii++){
+    char *zRm = sqlite3_mprintf("rm -rf %s%d", HST_DATABASE_NAME, ii);
+    system(zRm);
+    sqlite3_free(zRm);
+  }
 
   for(iDb=0; iDb<pTst->nThread && (iDb==0 || pTst->bSeparate); iDb++){
     test_build_db(&err, pTst, iDb);
@@ -544,11 +547,16 @@ static void runtest(Testcase *pTst){
   for(ii=0; ii<pTst->nThread; ii++){
     hst_launch_thread(&err, &threadset, test_thread, (void*)pTst);
   }
-  hst_join_threads(&err, &threadset);
+  hst_join_threads(&err, &threadset, &nTrans);
+
+  printf("Total transactions: %d (%d/second) (%d/cpu-second)\n", nTrans,
+      nTrans / pTst->nSecond,
+      nTrans / (pTst->nSecond*pTst->nThread)
+  );
 
   if( pTst->bSeparate==0 ){
     char *zFile = sqlite3_mprintf("%s0", HST_DATABASE_NAME);
-    db = hst_sqlite3_open(HST_DATABASE_NAME);
+    db = hst_sqlite3_open(zFile);
     pIC = hst_sqlite3_prepare(&err, db, "PRAGMA integrity_check");
     if( pIC ){
       while( sqlite3_step(pIC)==SQLITE_ROW ){
