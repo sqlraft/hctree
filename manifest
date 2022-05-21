@@ -1,5 +1,5 @@
-C Change\sdefault\stmap\sstep\sfrom\s2\sto\s64.\sAdd\sextra\soutput\sto\shct_speed_test.
-D 2022-05-21T16:42:13.672
+C Add\smissing\sfile\shct_record.c.
+D 2022-05-21T16:44:48.099
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -527,6 +527,7 @@ F src/hctTMapInt.h 5d5407435259ccdb4d369c89ed45a335aa63beb57b391f631ef63e591a40f
 F src/hct_database.c eac80f2ee96b5f803d8dc844091d7717aabeafdf98d8c8ca9a2a6e65d3835aa3
 F src/hct_file.c 63061fcc8d6892efc13b023187585f29e6846f3af9aa8f4648a56ff1a9e8d7d1
 F src/hct_pman.c 15ff9ece5c09ff8b178f6b72a6d80286333e6cb5f72427ebe4fe234cd862c37a
+F src/hct_record.c 54b0d564be580ca29a54312f9a9abdba193b234ac56ec65a7e40109107041b25
 F src/hct_tmap.c 16cabc364051634c62643160ad8a5afe9f8463eb8541da153b0ae4e75b1efe75
 F src/hct_tree.c 5129553cafc33c3d37b9ea020dd0c0c2581874c76297f47f84b9f58f51d2f807
 F src/hctree.c 9b5e0e7bcac8af673ed8fe7568944c5eac1ec04becafa219d61ce1fc9deef545
@@ -1984,8 +1985,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P 582de98ca5b0c85fbc3d4781057ac236c23b9b2ff724e0270475cf284df1c28d
-R f255d664af6f2db0246b5bbe1ab2a7ac
+P 94a1b3c75ac5b7c35392d7a5d7e5b2cdd33727b06910f0c78bc49a80e7ccd8ba
+R e4f5f838bc5935c25bb3006df79a2219
 U dan
-Z 39a62e2375d4155ab57629025cef8ff0
+Z df644354ce76ef3cc00910f2422e4f94
 # Remove this line to create a well-formed Fossil manifest.
