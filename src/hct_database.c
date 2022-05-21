@@ -163,6 +163,7 @@ struct HctDbWriter {
 struct HctDatabase {
   HctFile *pFile;
   HctConfig *pConfig;
+  i64 nCasFail;                   /* Number cas-collisions so far */
   int pgsz;                       /* Page size in bytes */
   u8 *aTmp;                       /* Temp buffer pgsz bytes in size */
 
@@ -1735,6 +1736,9 @@ nCall++;
       }else{
         hctDbWriterCleanup(pDb, &wr, 1);
       }
+      if( rc==SQLITE_LOCKED ){
+        pDb->nCasFail++;
+      }
     }while( rc==SQLITE_LOCKED );
   }
 
@@ -1754,6 +1758,10 @@ void sqlite3HctDbRollbackMode(HctDatabase *pDb, int bRollback){
   assert( pDb->bRollback==0 || pDb->bRollback==1 );
   assert( pDb->bRollback==0 || bRollback==0 );
   pDb->bRollback = bRollback;
+}
+
+i64 sqlite3HctDbNCasFail(HctDatabase *pDb){
+  return pDb->nCasFail;
 }
 
 #if 0
@@ -1833,6 +1841,7 @@ int sqlite3HctDbInsertFlush(HctDatabase *pDb, int *pnRetry){
     if( rc==SQLITE_LOCKED ){
       *pnRetry = pDb->pa.nWriteKey;
       rc = SQLITE_OK;
+      pDb->nCasFail++;
     }else{
       *pnRetry = 0;
     }
@@ -3343,6 +3352,7 @@ int sqlite3HctDbInsert(
     rc = SQLITE_OK;
     *pnRetry = pDb->pa.nWriteKey;
     pDb->pa.nWriteKey = 0;
+    pDb->nCasFail++;
   }else{
     *pnRetry = 0;
   }

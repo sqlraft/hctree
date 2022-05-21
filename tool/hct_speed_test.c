@@ -124,6 +124,7 @@ static void hst_sqlite3_exec(sqlite3 *db, const char *zSql){
 
 #define SEL(e) ((e)->iLine = ((e)->rc ? (e)->iLine : __LINE__))
 
+
 static void hst_sqlite3_exec_printf(
   Error *pErr,
   sqlite3 *db, 
@@ -192,6 +193,23 @@ static void hst_sqlite3_reset(Error *pErr, sqlite3_stmt *pStmt){
   SEL(pErr),                             \
   hst_sqlite3_reset(pErr, pStmt)         \
 )
+
+static i64 hst_sqlite3_exec_i64(Error *pErr, sqlite3 *db, const char *zSql){
+  i64 iRet = 0;
+  sqlite3_stmt *p = hst_sqlite3_prepare(pErr, db, zSql);
+  if( p && SQLITE_ROW==sqlite3_step(p) ){
+    iRet = sqlite3_column_int64(p, 0);
+  }
+  hst_sqlite3_reset(pErr, p);
+  sqlite3_finalize(p);
+  return iRet;
+}
+#define hst_sqlite3_exec_i64(pErr, db, zSql) ( \
+  SEL(pErr),                                   \
+  hst_sqlite3_exec_i64(pErr, db, zSql)         \
+)
+
+
 
 static void system_error(Error *pErr, int iSys){
   pErr->rc = iSys;
@@ -354,6 +372,7 @@ static char *test_thread(int iTid, void *pArg, int *pnTrans){
   int nWrite = 0;                  /* Total number of writes */
   int nBusy = 0;                   /* Total number of SQLITE_BUSY errors */
   char *zRet = 0;
+  i64 nCasFail = 0;
 
   FastPrng prng = {0,0};
   Error err = {0,0,0};
@@ -448,9 +467,13 @@ static char *test_thread(int iTid, void *pArg, int *pnTrans){
     sqlite3_finalize(pSelect);
   }
 
+  /* Find the number of CAS collisions */
+  nCasFail = hst_sqlite3_exec_i64(&err, db, "PRAGMA hct_ncasfail");
+
   zRet = sqlite3_mprintf(
-      "%d transactions (%d busy) at %d/second (%d lost updates)", nWrite, 
-      nBusy, (int)(((i64)nWrite * 1000) / (iEndTime - iStartTime)), nError
+      "%d transactions (%d busy, %d cas-fail) at %d/second (%d lost updates)", 
+      nWrite, nBusy, (int)nCasFail,
+      (int)(((i64)nWrite * 1000) / (iEndTime - iStartTime)), nError
   );
   *pnTrans = nWrite;
 

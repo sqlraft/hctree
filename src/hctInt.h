@@ -167,6 +167,8 @@ void sqlite3HctDbRecoverTid(HctDatabase *db, u64 iTid);
 
 char *sqlite3HctDbLogFile(HctDatabase*);
 
+i64 sqlite3HctDbNCasFail(HctDatabase*);
+
 /*************************************************************************
 ** Interface to code in hct_file.c
 */

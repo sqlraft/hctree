@@ -1972,6 +1972,10 @@ int sqlite3BtreePragma(Btree *p, char **aFnctl){
     rc = SQLITE_OK;
     zRet = hctDbMPrintf(&rc, "%d", p->config.nTryBeforeUnevict);
   }
+  else if( 0==sqlite3_stricmp("hct_ncasfail", zLeft) ){
+    rc = SQLITE_OK;
+    zRet = hctDbMPrintf(&rc, "%lld", sqlite3HctDbNCasFail(p->pHctDb));
+  }
 
   aFnctl[0] = zRet;
   return rc;
