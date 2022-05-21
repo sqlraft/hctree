@@ -286,6 +286,7 @@ struct Testcase {
   int nThread;
   int nTryBeforeUnevict;
   int bSeparate;
+  int nSleep;
 };
 
 /*
@@ -540,6 +541,11 @@ static void runtest(Testcase *pTst){
     test_build_db(&err, pTst, iDb);
   }
 
+  if( pTst->nSleep ){
+    printf("sleeping for %d seconds\n", pTst->nSleep);
+    sleep(pTst->nSleep);
+  }
+
   /* Set the "time-to-stop" global */
   g.iTimeToStop = hst_current_time() + (i64)pTst->nSecond * 1000;
 
@@ -588,6 +594,7 @@ int main(int argc, char **argv){
   tst.nRow = 1000000;
   tst.nUpdate = 1;
   tst.nSecond = 10;
+  tst.nSleep = 1;
   tst.nTryBeforeUnevict = 100;
 
   for(iArg=1; iArg<argc; iArg++){
@@ -601,6 +608,9 @@ int main(int argc, char **argv){
       if( nArg>2 && nArg<=9 && memcmp("-separate", zArg, nArg)==0 ){
         pnVal = &tst.bSeparate;
       }else
+      if( nArg>3 && nArg<=7 && memcmp("-nsleep", zArg, nArg)==0 ){
+        pnVal = &tst.nSleep;
+      }else
       if( nArg>2 && nArg<=6 && memcmp("-nblob", zArg, nArg)==0 ){
         pnVal = &tst.nBlob;
       }else
@@ -610,7 +620,7 @@ int main(int argc, char **argv){
       if( nArg>2 && nArg<=5 && memcmp("-nrow", zArg, nArg)==0 ){
         pnVal = &tst.nRow;
       }else
-      if( nArg>2 && nArg<=8 && memcmp("-nsecond", zArg, nArg)==0 ){
+      if( nArg>3 && nArg<=8 && memcmp("-nsecond", zArg, nArg)==0 ){
         pnVal = &tst.nSecond;
       }else
       if( nArg>2 && nArg<=8 && memcmp("-ntrybeforeunevict", zArg, nArg)==0 ){

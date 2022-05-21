@@ -1,9 +1,9 @@
 B ebc706fb79b23a3e3f22c528c489dd97a7ea0a0c24becb18ae66ade63884c415
-C Further\supdates\sto\shct_speed_test\soutput.
-D 2022-05-21T17:48:33.255
-F tool/hct_speed_test.c ee347ecf5157b0a5adbe194a595b634f91debdc30ce2f7b797195342211d1bbc
-P ebc706fb79b23a3e3f22c528c489dd97a7ea0a0c24becb18ae66ade63884c415
-R 850975c65a796b272d9f0a3be9d35fc6
+C Add\s-nsleep\soption\sto\shct_speed_test.
+D 2022-05-21T19:09:51.078
+F tool/hct_speed_test.c 6acf6a2f3d1decf80978ad928165e4ef07d10be365da3e1c46d50a45e19695c6
+P b3956a79d6abde993c5e5ea8748d937ef2571a4d547ae173bfbd216cf4af854d
+R 9c013b61eefedf5602b3912006c42833
 U dan
-Z bac4763b902f2fe9b5dbd1f16b7adbb5
+Z 7fe3e0c2e239e3b09b859c93bd0f0d44
 # Remove this line to create a well-formed Fossil manifest.
