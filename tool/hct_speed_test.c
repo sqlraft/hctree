@@ -36,9 +36,10 @@ struct Error {
 struct Thread {
   int iTid;                       /* Thread number within test */
   void* pArg;                     /* Pointer argument passed by caller */
+  int nTrans;                     /* Number of transactions run by thread */
 
   pthread_t tid;                  /* Thread id */
-  char *(*xProc)(int, void*);     /* Thread main proc */
+  char *(*xProc)(int,void*,int*); /* Thread main proc */
   char *zRes;                     /* Value returned by xProc */
   Thread *pNext;                  /* Next in this list of threads */
 };
@@ -203,14 +204,14 @@ static void system_error(Error *pErr, int iSys){
 
 static void *launch_thread_main(void *pArg){
   Thread *p = (Thread *)pArg;
-  p->zRes = p->xProc(p->iTid, p->pArg);
+  p->zRes = p->xProc(p->iTid, p->pArg, &p->nTrans);
   return 0;
 }
 
 static void hst_launch_thread(
   Error *pErr,                    /* IN/OUT: Error code */
   Threadset *pThreads,            /* Thread set */
-  char *(*xProc)(int, void*),     /* Proc to run */
+  char *(*xProc)(int,void*,int*), /* Proc to run */
   void *pArg                      /* Argument passed to thread proc */
 ){
   if( pErr->rc==SQLITE_OK ){
@@ -248,6 +249,7 @@ static void hst_join_threads(
 ){
   Thread *p;
   Thread *pNext;
+  int nTrans = 0;
   for(p=pThreads->pThread; p; p=pNext){
     void *ret = 0;
     int rc = SQLITE_OK;
@@ -258,12 +260,16 @@ static void hst_join_threads(
     if( rc!=0 ){
       if( pErr->rc==SQLITE_OK ) system_error(pErr, rc);
     }else{
-      printf("Thread %d says: %s\n", p->iTid, (p->zRes==0 ? "..." : p->zRes));
+      printf("Thread %d says: [%d] %s\n", 
+          p->iTid, p->nTrans, (p->zRes==0 ? "..." : p->zRes)
+      );
       fflush(stdout);
+      nTrans += p->nTrans;
     }
     sqlite3_free(p->zRes);
     sqlite3_free(p);
   }
+  printf("Total transactions: %d\n", nTrans);
   pThreads->pThread = 0;
 }
 
@@ -330,7 +336,7 @@ static void updateBlobFunc(
   sqlite3_free(aCopy);
 }
 
-static char *test_thread(int iTid, void *pArg){
+static char *test_thread(int iTid, void *pArg, int *pnTrans){
   Testcase *pTst = (Testcase*)pArg;
   sqlite3 *db = 0;
   sqlite3_stmt *pBegin = 0;
@@ -441,6 +447,7 @@ static char *test_thread(int iTid, void *pArg){
       "%d transactions (%d busy) at %d/second (%d lost updates)", nWrite, 
       nBusy, (int)(((i64)nWrite * 1000) / (iEndTime - iStartTime)), nError
   );
+  *pnTrans = nWrite;
 
   sqlite3_free(aUpdate);
   sqlite3_free(aVal);
