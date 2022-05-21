@@ -1,5 +1,5 @@
-C Add\smissing\sfile\shct_record.c.
-D 2022-05-21T16:44:48.099
+C Add\sthe\s-separate\soption\sto\shct_speed_test.
+D 2022-05-21T17:27:45.508
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -1900,7 +1900,7 @@ F tool/fuzzershell.c e1d90a03ca790d7c331c2aae08ca46ff435f1ae1faa6cb9cc48f4687c18
 F tool/genfkey.README cf68fddd4643bbe3ff8e31b8b6d8b0a1b85e20f4
 F tool/genfkey.test b6afd7b825d797a1e1274f519ab5695373552ecad5cd373530c63533638a5a4f
 F tool/getlock.c f4c39b651370156cae979501a7b156bdba50e7ce
-F tool/hct_speed_test.c bdcc27103bf3961547b9af12bb81bcdd028aafd8467248c1fa45c9a989fad76f
+F tool/hct_speed_test.c 36b20dab55d19f710489f647cbae436081d04713069af8a4fe25cefc65618dac
 F tool/index_usage.c f62a0c701b2c7ff2f3e21d206f093c123f222dbf07136a10ffd1ca15a5c706c5
 F tool/kvtest-speed.sh 4761a9c4b3530907562314d7757995787f7aef8f
 F tool/lemon.c ea5c8589c7749e9bd32ba10432aeeed3c16e215de72a12ada2bc707884837149
@@ -1985,8 +1985,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P 94a1b3c75ac5b7c35392d7a5d7e5b2cdd33727b06910f0c78bc49a80e7ccd8ba
-R e4f5f838bc5935c25bb3006df79a2219
+P deb8a87cc1a8efb227ce0a8eefe4b67cf0bc09ac04178272bd701fbde9b6cefa
+R b69bb10037a8b7ddd78a4aad3e257f03
 U dan
-Z df644354ce76ef3cc00910f2422e4f94
+Z bada068ec379d045fd62aa7c7b9830f9
 # Remove this line to create a well-formed Fossil manifest.

@@ -286,6 +286,7 @@ struct Testcase {
   int nUpdate;
   int nThread;
   int nTryBeforeUnevict;
+  int bSeparate;
 };
 
 /*
@@ -360,12 +361,16 @@ static char *test_thread(int iTid, void *pArg, int *pnTrans){
 
   TestUpdate *aUpdate = 0;
   u32 *aVal = 0;
+  char *zFile = sqlite3_mprintf(
+      "%s%d", HST_DATABASE_NAME, pTst->bSeparate ? iTid-1 : 0
+  );
+
   aUpdate = sqlite3_malloc(sizeof(TestUpdate) * pTst->nUpdate);
   aVal = sqlite3_malloc(sizeof(u32) * (pTst->nRow+1));
   memset(aVal, 0, (pTst->nRow+1) * sizeof(u32));
 
   sqlite3_randomness(sizeof(FastPrng), (void*)&prng);
-  db = hst_sqlite3_open(HST_DATABASE_NAME);
+  db = hst_sqlite3_open(zFile);
   sqlite3_create_function(db,"updateblob",3,SQLITE_UTF8,0,updateBlobFunc,0 ,0);
 
   hst_sqlite3_exec(db, "PRAGMA journal_mode = wal");
@@ -464,21 +469,16 @@ static char *test_thread(int iTid, void *pArg, int *pnTrans){
   return zRet;
 }
 
-static void runtest(Testcase *pTst){
-  sqlite3 *db = 0;
-  sqlite3_stmt *pIns = 0;
-  sqlite3_stmt *pIC = 0;
+static void test_build_db(Error *pErr, Testcase *pTst, int iDb){
   int ii;
+  sqlite3_stmt *pIns = 0;
+  sqlite3 *db = 0;
+  char *zFile = sqlite3_mprintf("%s%d", HST_DATABASE_NAME, iDb);
+  char *zRm = sqlite3_mprintf("rm -rf %s", zFile);
 
-  Error err;
-  Threadset threadset;
+  system(zRm);
 
-  memset(&err, 0, sizeof(err));
-  memset(&threadset, 0, sizeof(threadset));
-
-  system("rm -rf " HST_DATABASE_NAME);
-
-  db = hst_sqlite3_open(HST_DATABASE_NAME);
+  db = hst_sqlite3_open(zFile);
   hst_sqlite3_exec(db,
       " CREATE TABLE tbl("
       "   a INTEGER PRIMARY KEY,"
@@ -486,21 +486,22 @@ static void runtest(Testcase *pTst){
       "   c CHAR(64)"
       ")"
   );
+
   if( pTst->nIdx==1 ){
-      hst_sqlite3_exec(db, "CREATE INDEX i1 ON tbl(c)");
+    hst_sqlite3_exec(db, "CREATE INDEX i1 ON tbl(c)");
   }else{
     for(ii=0; ii<pTst->nIdx; ii++){
       char *zSql = sqlite3_mprintf(
           "CREATE INDEX tbl_i%d ON tbl(substr(c, %d, 16));", ii, ii
-      );
+          );
       hst_sqlite3_exec(db, zSql);
       sqlite3_free(zSql);
     }
   }
 
-  printf("building initial database."); 
+  printf("building initial database %d.", iDb); 
   fflush(stdout);
-  pIns = hst_sqlite3_prepare(&err, db, 
+  pIns = hst_sqlite3_prepare(pErr, db, 
       "INSERT INTO tbl VALUES(NULL, zeroblob(?), hex(frandomblob(32)))"
   );
   sqlite3_bind_int(pIns, 1, pTst->nBlob);
@@ -512,13 +513,29 @@ static void runtest(Testcase *pTst){
     }
 
     sqlite3_step(pIns);
-    hst_sqlite3_reset(&err, pIns);
+    hst_sqlite3_reset(pErr, pIns);
   }
   hst_sqlite3_exec(db, "COMMIT");
   sqlite3_finalize(pIns);
   printf("\n");
-
   sqlite3_close(db);
+}
+
+static void runtest(Testcase *pTst){
+  sqlite3 *db = 0;
+  sqlite3_stmt *pIC = 0;
+  int ii;
+  int iDb;
+
+  Error err;
+  Threadset threadset;
+
+  memset(&err, 0, sizeof(err));
+  memset(&threadset, 0, sizeof(threadset));
+
+  for(iDb=0; iDb<pTst->nThread && (iDb==0 || pTst->bSeparate); iDb++){
+    test_build_db(&err, pTst, iDb);
+  }
 
   /* Set the "time-to-stop" global */
   g.iTimeToStop = hst_current_time() + (i64)pTst->nSecond * 1000;
@@ -529,13 +546,16 @@ static void runtest(Testcase *pTst){
   }
   hst_join_threads(&err, &threadset);
 
-  db = hst_sqlite3_open(HST_DATABASE_NAME);
-  pIC = hst_sqlite3_prepare(&err, db, "PRAGMA integrity_check");
-  if( pIC ){
-    while( sqlite3_step(pIC)==SQLITE_ROW ){
-      printf("Integrity check: %s\n", sqlite3_column_text(pIC, 0));
+  if( pTst->bSeparate==0 ){
+    char *zFile = sqlite3_mprintf("%s0", HST_DATABASE_NAME);
+    db = hst_sqlite3_open(HST_DATABASE_NAME);
+    pIC = hst_sqlite3_prepare(&err, db, "PRAGMA integrity_check");
+    if( pIC ){
+      while( sqlite3_step(pIC)==SQLITE_ROW ){
+        printf("Integrity check: %s\n", sqlite3_column_text(pIC, 0));
+      }
+      sqlite3_finalize(pIC);
     }
-    sqlite3_finalize(pIC);
   }
 
   hst_print_and_free_err(&err);
@@ -570,6 +590,9 @@ int main(int argc, char **argv){
     }else{
       int nArg = strlen(zArg);
       int *pnVal = 0;
+      if( nArg>2 && nArg<=9 && memcmp("-separate", zArg, nArg)==0 ){
+        pnVal = &tst.bSeparate;
+      }else
       if( nArg>2 && nArg<=6 && memcmp("-nblob", zArg, nArg)==0 ){
         pnVal = &tst.nBlob;
       }else
