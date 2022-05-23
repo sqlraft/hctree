@@ -162,6 +162,10 @@ foreach hdr {
    vxworks.h
    wal.h
    whereInt.h
+
+   hctInt.h
+   hctPManInt.h
+   hctTMapInt.h
 } {
   set available_hdr($hdr) 1
 }
@@ -367,7 +371,6 @@ foreach file {
    wal.c
 
    btmutex.c
-   btree.c
    backup.c
 
    vdbemem.c
@@ -440,6 +443,14 @@ foreach file {
    sqlite3session.c
    fts5.c
    stmt.c
+
+   hct_pman.c
+   hctree.c
+   hct_tree.c
+   hct_file.c
+   hct_database.c
+   hct_tmap.c
+   hct_record.c
 } {
   copy_file $srcdir/$file
 }

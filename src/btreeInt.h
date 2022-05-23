@@ -215,6 +215,8 @@
 */
 #include "sqliteInt.h"
 
+#ifndef SQLITE_ENABLE_HCT
+
 
 /* The following value is the maximum cell size assuming a maximum page
 ** size give above.
@@ -729,3 +731,5 @@ struct IntegrityCk {
 #else
 # define get2byteAligned(x)  ((x)[0]<<8 | (x)[1])
 #endif
+
+#endif /* ifndef SQLITE_ENABLE_HCT */

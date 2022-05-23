@@ -297,6 +297,7 @@ static void hst_join_threads(
 typedef struct Testcase Testcase;
 struct Testcase {
   int nSecond;
+  int nMinInsert;
   int nBlob;
   int nIdx;
   int nRow;
@@ -420,7 +421,7 @@ static char *test_thread(int iTid, void *pArg, int *pnTrans){
       iIntervalWrite = nWrite;
     }
 
-    if( iNow>=g.iTimeToStop ){
+    if( iNow>=g.iTimeToStop && nWrite>pTst->nMinInsert ){
       break;
     }else{
       int ii = 0;
@@ -578,10 +579,12 @@ static void runtest(Testcase *pTst){
   }
   hst_join_threads(&err, &threadset, &nTrans);
 
-  printf("Total transactions: %d (%d/second) (%d/cpu-second)\n", nTrans,
-      nTrans / pTst->nSecond,
-      nTrans / (pTst->nSecond*pTst->nThread)
-  );
+  if( pTst->nSecond ){
+    printf("Total transactions: %d (%d/second) (%d/cpu-second)\n", nTrans,
+        nTrans / pTst->nSecond,
+        nTrans / (pTst->nSecond*pTst->nThread)
+    );
+  }
 
   if( pTst->bSeparate==0 ){
     char *zFile = sqlite3_mprintf("%s0", HST_DATABASE_NAME);
@@ -628,6 +631,9 @@ int main(int argc, char **argv){
     }else{
       int nArg = strlen(zArg);
       int *pnVal = 0;
+      if( nArg>2 && nArg<=11 && memcmp("-nmininsert", zArg, nArg)==0 ){
+        pnVal = &tst.nMinInsert;
+      }else
       if( nArg>2 && nArg<=9 && memcmp("-separate", zArg, nArg)==0 ){
         pnVal = &tst.bSeparate;
       }else

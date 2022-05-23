@@ -50,6 +50,14 @@
 #  define SQLITE_TCLAPI
 #endif
 
+#define SQLITE_ENABLE_HCT 1
+#ifdef SQLITE_ENABLE_HCT
+# define SQLITE_OMIT_WAL 1
+# define SQLITE_OMIT_SHARED_CACHE 1
+# define SQLITE_OMIT_VACUUM 1
+# define SQLITE_DEFAULT_MEMSTATUS 0
+#endif
+
 /*
 ** Include the header file used to customize the compiler options for MSVC.
 ** This should be done first so that it can successfully prevent spurious

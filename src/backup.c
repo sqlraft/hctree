@@ -15,6 +15,8 @@
 #include "sqliteInt.h"
 #include "btreeInt.h"
 
+#ifndef SQLITE_ENABLE_HCT
+
 /*
 ** Structure allocated for each backup operation.
 */
@@ -768,3 +770,5 @@ copy_finished:
   return rc;
 }
 #endif /* SQLITE_OMIT_VACUUM */
+
+#endif /* SQLITE_ENABLE_HCTREE */

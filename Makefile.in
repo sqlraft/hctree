@@ -164,7 +164,7 @@ LTINSTALL = $(LIBTOOL) --mode=install $(INSTALL)
 # You should not have to change anything below this line
 ###############################################################################
 
-USE_AMALGAMATION = @USE_AMALGAMATION@
+USE_AMALGAMATION = 0
 AMALGAMATION_LINE_MACROS = @AMALGAMATION_LINE_MACROS@
 
 # Object files for the SQLite library (non-amalgamation).
@@ -194,6 +194,9 @@ LIBOBJS0 = alter.lo analyze.lo attach.lo auth.lo \
          vdbetrace.lo vdbevtab.lo \
          wal.lo walker.lo where.lo wherecode.lo whereexpr.lo \
          window.lo utf.lo vtab.lo
+
+LIBOBJS0 += hct_pman.lo hct_record.lo hctree.lo
+LIBOBJS0 += hct_tree.lo hct_file.lo hct_database.lo hct_tmap.lo 
 
 # Object files for the amalgamation.
 #
@@ -380,6 +383,18 @@ SRC += \
   config.h \
   shell.c \
   sqlite3.h
+
+SRC += \
+  $(TOP)/src/hctree.c \
+  $(TOP)/src/hct_tree.c \
+  $(TOP)/src/hct_file.c \
+  $(TOP)/src/hct_database.c \
+  $(TOP)/src/hct_tmap.c \
+  $(TOP)/src/hct_record.c \
+  $(TOP)/src/hct_pman.c  \
+  $(TOP)/src/hctInt.h      \
+  $(TOP)/src/hctPManInt.h  \
+  $(TOP)/src/hctTMapInt.h
 
 # Source code to the test files.
 #
@@ -654,6 +669,9 @@ libtclsqlite3.la:	tclsqlite.lo libsqlite3.la
 		-rpath "$(TCLLIBDIR)" \
 		-version-info "8:6:8" \
 		-avoid-version
+
+hct_speed_test$(TEXE):	$(TOP)/tool/hct_speed_test.c sqlite3.lo sqlite3.h
+	$(LTLINK) -o $@ $(TOP)/tool/hct_speed_test.c sqlite3.lo $(TLIBS)
 
 sqlite3$(TEXE):	shell.c sqlite3.c
 	$(LTLINK) $(READLINE_FLAGS) $(SHELL_OPT) -o $@ \
@@ -1041,6 +1059,27 @@ whereexpr.lo:	$(TOP)/src/whereexpr.c $(HDR)
 
 window.lo:	$(TOP)/src/window.c $(HDR)
 	$(LTCOMPILE) $(TEMP_STORE) -c $(TOP)/src/window.c
+
+hct_tree.lo:	$(TOP)/src/hct_tree.c $(HDR)
+	$(LTCOMPILE) $(TEMP_STORE) -c $(TOP)/src/hct_tree.c
+
+hct_file.lo:	$(TOP)/src/hct_file.c $(HDR)
+	$(LTCOMPILE) $(TEMP_STORE) -c $(TOP)/src/hct_file.c
+
+hct_database.lo:	$(TOP)/src/hct_database.c $(HDR)
+	$(LTCOMPILE) $(TEMP_STORE) -c $(TOP)/src/hct_database.c
+
+hct_tmap.lo:	$(TOP)/src/hct_tmap.c $(HDR)
+	$(LTCOMPILE) $(TEMP_STORE) -c $(TOP)/src/hct_tmap.c
+
+hct_pman.lo:	$(TOP)/src/hct_pman.c $(HDR)
+	$(LTCOMPILE) $(TEMP_STORE) -c $(TOP)/src/hct_pman.c
+
+hct_record.lo:	$(TOP)/src/hct_record.c $(HDR)
+	$(LTCOMPILE) $(TEMP_STORE) -c $(TOP)/src/hct_record.c
+
+hctree.lo:	$(TOP)/src/hctree.c $(HDR)
+	$(LTCOMPILE) $(TEMP_STORE) -c $(TOP)/src/hctree.c
 
 tclsqlite.lo:	$(TOP)/src/tclsqlite.c $(HDR)
 	$(LTCOMPILE) -DUSE_TCL_STUBS=1 -c $(TOP)/src/tclsqlite.c

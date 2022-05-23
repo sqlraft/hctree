@@ -94,7 +94,6 @@ SRC = \
   $(TOP)/src/bitvec.c \
   $(TOP)/src/btmutex.c \
   $(TOP)/src/btree.c \
-  $(TOP)/src/hctree.c \
   $(TOP)/src/btree.h \
   $(TOP)/src/btreeInt.h \
   $(TOP)/src/build.c \
@@ -191,6 +190,18 @@ SRC = \
   $(TOP)/src/whereexpr.c \
   $(TOP)/src/whereInt.h \
   $(TOP)/src/window.c
+
+SRC += \
+  $(TOP)/src/hctree.c \
+  $(TOP)/src/hct_tree.c \
+  $(TOP)/src/hct_file.c \
+  $(TOP)/src/hct_database.c \
+  $(TOP)/src/hct_tmap.c \
+  $(TOP)/src/hct_record.c \
+  $(TOP)/src/hct_pman.c  \
+  $(TOP)/src/hctInt.h      \
+  $(TOP)/src/hctPManInt.h  \
+  $(TOP)/src/hctTMapInt.h
 
 # Source code for extensions
 #

@@ -17,6 +17,11 @@
 #include "sqliteInt.h"
 #include "vdbeInt.h"
 
+#ifdef SQLITE_ENABLE_HCT
+void sqlite3Vacuum(Parse *pParse, Token *pNm, Expr *pInto){
+}
+#endif
+
 #if !defined(SQLITE_OMIT_VACUUM) && !defined(SQLITE_OMIT_ATTACH)
 
 /*
