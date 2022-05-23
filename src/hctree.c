@@ -564,14 +564,15 @@ static int btreeFlushOneToDisk(void *pCtx, u32 iRoot, KeyInfo *pKeyInfo){
       if( pRec ) sqlite3VdbeRecordUnpack(pKeyInfo, nData, aData, pRec);
       rc = sqlite3HctDbInsert(pDb, iRoot, pRec, iKey, bDel,nData,aData,&nRetry);
       if( rc ) break;
+      assert( nRetry>=0 && nRetry!=1 );
 
-      assert( nRetry>=0 );
       if( nRetry==0 ){
         sqlite3HctTreeCsrNext(pCsr);
         if( sqlite3HctTreeCsrEof(pCsr) ){
           rc = sqlite3HctDbInsertFlush(pDb, &nRetry);
           if( nRetry ){
             sqlite3HctTreeCsrLast(pCsr);
+            assert( sqlite3HctTreeCsrEof(pCsr)==0 );
           }else{
             /* Done - the table has been successfully flushed to disk */
             break;
@@ -581,6 +582,7 @@ static int btreeFlushOneToDisk(void *pCtx, u32 iRoot, KeyInfo *pKeyInfo){
       for(ii=1; ii<nRetry; ii++){
         assert( sqlite3HctTreeCsrEof(pCsr)==0 );
         sqlite3HctTreeCsrPrev(pCsr);
+        assert( sqlite3HctTreeCsrEof(pCsr)==0 );
       }
     }
 

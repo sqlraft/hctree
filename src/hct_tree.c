@@ -1052,8 +1052,6 @@ int sqlite3HctTreeCsrPrev(HctTreeCsr *pCsr){
 ** Return false if cursor points to a valid entry, or true otherwise.
 */
 int sqlite3HctTreeCsrEof(HctTreeCsr *pCsr){
-  /* todo - fix OOM handling here */
-  // (void)hctRestoreCursor(pCsr, 0);
   return (pCsr->iNode<0);
 }
 

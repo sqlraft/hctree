@@ -2047,6 +2047,7 @@ static int SQLITE_TCLAPI DbObjCmd(
   ** FILENAME database.
   */
   case DB_BACKUP: {
+#ifndef SQLITE_ENABLE_HCT
     const char *zDestFile;
     const char *zSrcDb;
     sqlite3 *pDest;
@@ -2087,6 +2088,7 @@ static int SQLITE_TCLAPI DbObjCmd(
       rc = TCL_ERROR;
     }
     sqlite3_close(pDest);
+#endif
     break;
   }
 
@@ -3145,6 +3147,7 @@ deserialize_error:
   ** of FILENAME into the local database DATABASE (default: "main").
   */
   case DB_RESTORE: {
+#ifndef SQLITE_ENABLE_HCT
     const char *zSrcFile;
     const char *zDestDb;
     sqlite3 *pSrc;
@@ -3196,6 +3199,7 @@ deserialize_error:
       rc = TCL_ERROR;
     }
     sqlite3_close(pSrc);
+#endif
     break;
   }
 

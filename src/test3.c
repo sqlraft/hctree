@@ -23,6 +23,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifndef SQLITE_ENABLE_HCT
+
 extern const char *sqlite3ErrName(int);
 
 /*
@@ -688,3 +690,6 @@ int Sqlitetest3_Init(Tcl_Interp *interp){
 
   return TCL_OK;
 }
+#else
+int Sqlitetest3_Init(Tcl_Interp *interp){ return TCL_OK; }
+#endif /* SQLITE_ENABLE_HCT */

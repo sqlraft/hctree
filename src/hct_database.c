@@ -480,7 +480,7 @@ static int hctDbTidIsVisible(HctDatabase *pDb, u64 iTid){
 ** a write/write conflict and the transaction should be rolled back, or
 ** false if the write should proceed.
 */
-static int hctDbTidIsWriteWriteConflict(HctDatabase *pDb, u64 iTid){
+static int hctDbTidIsConflict(HctDatabase *pDb, u64 iTid){
   u64 eState = 0;
   u64 iCid = hctDbTMapLookup(pDb, iTid, &eState);
   if( eState==HCT_TMAP_WRITING || eState==HCT_TMAP_VALIDATING ) return 1;
@@ -1494,6 +1494,7 @@ static void hctDbWriterCleanup(HctDatabase *pDb, HctDbWriter *p, int bRevert){
 
   hctDbCsrReset(&p->writecsr);
   p->nWritePg = 0;
+  p->nWriteKey = 0;
   p->nDiscard = 0;
   sqlite3_free(p->aWriteFpKey);
   p->aWriteFpKey = 0;
@@ -3186,7 +3187,7 @@ nCall++;
         }
       }else{
         /* Check for a write conflict */
-        if( hctDbTidIsWriteWriteConflict(pDb, iClobberTid) ){
+        if( hctDbTidIsConflict(pDb, iClobberTid) ){
           rc = SQLITE_BUSY;
         }
       }
@@ -3704,7 +3705,9 @@ static int hctDbValidateEntry(HctDatabase *pDb, HctDbCsr *pCsr){
   int iOff = hctDbCellOffset(pCsr->pg.aOld, pCsr->iCell, &flags);
   if( flags & HCTDB_HAS_TID ){
     u64 iTid = hctGetU64(&pCsr->pg.aOld[iOff]);
-    if( iTid!=pDb->iTid && hctDbTidIsVisible(pCsr->pDb, iTid)==0 ){
+    if( iTid!=pDb->iTid
+      && hctDbTidIsConflict(pDb, iTid)
+    ){
       return SQLITE_BUSY;
     }
   }

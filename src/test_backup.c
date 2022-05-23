@@ -24,6 +24,9 @@
 #include "sqlite3.h"
 #include <assert.h>
 
+#include "sqliteInt.h"
+#ifndef SQLITE_ENABLE_HCT
+
 /* These functions are implemented in main.c. */
 extern const char *sqlite3ErrName(int);
 
@@ -155,3 +158,6 @@ int Sqlitetestbackup_Init(Tcl_Interp *interp){
   Tcl_CreateObjCommand(interp, "sqlite3_backup", backupTestInit, 0, 0);
   return TCL_OK;
 }
+#else
+int Sqlitetestbackup_Init(Tcl_Interp *interp){ return TCL_OK; }
+#endif /* SQLITE_ENABLE_HCT */
