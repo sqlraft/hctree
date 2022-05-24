@@ -564,7 +564,6 @@ static int btreeFlushOneToDisk(void *pCtx, u32 iRoot, KeyInfo *pKeyInfo){
       if( pRec ) sqlite3VdbeRecordUnpack(pKeyInfo, nData, aData, pRec);
       rc = sqlite3HctDbInsert(pDb, iRoot, pRec, iKey, bDel,nData,aData,&nRetry);
       if( rc ) break;
-      assert( nRetry>=0 && nRetry!=1 );
 
       if( nRetry==0 ){
         sqlite3HctTreeCsrNext(pCsr);
