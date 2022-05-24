@@ -62,6 +62,15 @@ struct HctCsrIndexOp {
   u32 aPg[1];
 };
 
+struct CsrIntkey {
+  HctCsrIntkeyOp *pOpList;
+  HctCsrIntkeyOp *pCurrentOp;
+};
+struct CsrIndex {
+  HctCsrIndexOp *pOpList;
+  HctCsrIndexOp *pCurrentOp;
+};
+
 /*
 ** iRoot:
 **   Logical root page of tree structure that this cursor is open on.
@@ -93,8 +102,8 @@ struct HctDbCsr {
   int nRecord;                    /* Size of aRecord[] in bytes */
   HctBuffer rec;
 
-  HctCsrIntkeyOp *pIntkeyOps;
-  HctCsrIndexOp *pIndexOps;
+  struct CsrIntkey intkey;
+  struct CsrIndex index;
   HctDbCsr *pNextScanner;
 
   int iCell;                      /* Current cell within page */
@@ -480,7 +489,7 @@ static int hctDbTidIsVisible(HctDatabase *pDb, u64 iTid){
 ** a write/write conflict and the transaction should be rolled back, or
 ** false if the write should proceed.
 */
-static int hctDbTidIsWriteWriteConflict(HctDatabase *pDb, u64 iTid){
+static int hctDbTidIsConflict(HctDatabase *pDb, u64 iTid){
   u64 eState = 0;
   u64 iCid = hctDbTMapLookup(pDb, iTid, &eState);
   if( eState==HCT_TMAP_WRITING || eState==HCT_TMAP_VALIDATING ) return 1;
@@ -1177,9 +1186,9 @@ static int hctDbCsrScanStart(HctDbCsr *pCsr, UnpackedRecord *pRec, i64 iKey){
       if( pOp==0 ){
         rc = SQLITE_NOMEM_BKPT;
       }else{
+        assert( pCsr->intkey.pCurrentOp==0 );
         pOp->iFirst = pOp->iLast = iKey;
-        pOp->pNextOp = pCsr->pIntkeyOps;
-        pCsr->pIntkeyOps = pOp;
+        pCsr->intkey.pCurrentOp = pOp;
       }
     }else{
       HctCsrIndexOp *pOp = 0;
@@ -1192,8 +1201,8 @@ static int hctDbCsrScanStart(HctDbCsr *pCsr, UnpackedRecord *pRec, i64 iKey){
           pOp->pLast = pOp->pFirst;
           pOp->nLast = pOp->nFirst;
         }
-        pOp->pNextOp = pCsr->pIndexOps;
-        pCsr->pIndexOps = pOp;
+        assert( pCsr->index.pCurrentOp==0 );
+        pCsr->index.pCurrentOp = pOp;
       }
     }
   }
@@ -1207,10 +1216,14 @@ static int hctDbCsrScanVisit(HctDbCsr *pCsr, u32 iLogical, u32 iPhysical){
 
 static int hctDbCsrScanFinish(HctDbCsr *pCsr){
   int rc = SQLITE_OK;
-  if( pCsr->eDir!=BTREE_DIR_NONE ){
-    if( pCsr->pKeyInfo==0 ){
-      HctCsrIntkeyOp *pOp = pCsr->pIntkeyOps;
-      if( pOp ){
+
+  if( pCsr->pKeyInfo==0 ){
+    HctCsrIntkeyOp *pOp = pCsr->intkey.pCurrentOp;
+    pCsr->intkey.pCurrentOp = 0;
+    if( pOp ){
+      HctCsrIntkeyOp *pPrev = pCsr->intkey.pOpList;
+
+      if( pCsr->eDir!=BTREE_DIR_NONE ){
         i64 iVal = 0; 
         if( sqlite3HctDbCsrEof(pCsr) ){
           if( pCsr->eDir==BTREE_DIR_FORWARD ){
@@ -1229,9 +1242,19 @@ static int hctDbCsrScanFinish(HctDbCsr *pCsr){
           pOp->iFirst = iVal;
         }
       }
-    }else{
-      HctCsrIndexOp *pOp = pCsr->pIndexOps;
-      if( pOp ){
+
+      if( pPrev && pOp->iLast<=pPrev->iLast && pOp->iFirst>=pPrev->iFirst ){
+        sqlite3_free(pOp);
+      }else{
+        pOp->pNextOp = pPrev;
+        pCsr->intkey.pOpList = pOp;
+      }
+    }
+  }else{
+    HctCsrIndexOp *pOp = pCsr->index.pCurrentOp;
+    pCsr->index.pCurrentOp = 0;
+    if( pOp ){
+      if( pCsr->eDir!=BTREE_DIR_NONE ){
         int nKey = 0;
         u8 *aCopy = 0;
         if( !sqlite3HctDbCsrEof(pCsr) ){
@@ -1255,6 +1278,9 @@ static int hctDbCsrScanFinish(HctDbCsr *pCsr){
           pOp->nFirst = nKey;
         }
       }
+
+      pOp->pNextOp = pCsr->index.pOpList;
+      pCsr->index.pOpList = pOp;
     }
   }
 
@@ -1757,6 +1783,7 @@ void sqlite3HctDbRollbackMode(HctDatabase *pDb, int bRollback){
   assert( bRollback==0 || bRollback==1 );
   assert( pDb->bRollback==0 || pDb->bRollback==1 );
   assert( pDb->bRollback==0 || bRollback==0 );
+  pDb->pa.nWriteKey = 0;
   pDb->bRollback = bRollback;
 }
 
@@ -3186,7 +3213,7 @@ nCall++;
         }
       }else{
         /* Check for a write conflict */
-        if( hctDbTidIsWriteWriteConflict(pDb, iClobberTid) ){
+        if( hctDbTidIsConflict(pDb, iClobberTid) ){
           rc = SQLITE_BUSY;
         }
       }
@@ -3408,14 +3435,14 @@ int sqlite3HctDbEndWrite(HctDatabase *p, u64 iCid){
 }
 
 static void hctDbFreeCsr(HctDbCsr *pCsr){
-  while( pCsr->pIntkeyOps ){
-    HctCsrIntkeyOp *pOp = pCsr->pIntkeyOps;
-    pCsr->pIntkeyOps = pOp->pNextOp;
+  while( pCsr->intkey.pOpList ){
+    HctCsrIntkeyOp *pOp = pCsr->intkey.pOpList;
+    pCsr->intkey.pOpList = pOp->pNextOp;
     sqlite3_free(pOp);
   }
-  while( pCsr->pIndexOps ){
-    HctCsrIndexOp *pOp = pCsr->pIndexOps;
-    pCsr->pIndexOps = pOp->pNextOp;
+  while( pCsr->index.pOpList ){
+    HctCsrIndexOp *pOp = pCsr->index.pOpList;
+    pCsr->index.pOpList = pOp->pNextOp;
     if( pOp->pLast!=pOp->pFirst ){
       sqlite3_free(pOp->pLast);
     }
@@ -3484,6 +3511,17 @@ int sqlite3HctDbCsrOpen(
   int rc = SQLITE_OK;
   HctDbCsr *p;
 
+  /* Search for an existing cursor that can be reused. */
+  HctDbCsr **pp;
+  for(pp=&pDb->pScannerList; *pp; pp=&(*pp)->pNextScanner){
+    if( (*pp)->iRoot==iRoot ){
+      *ppCsr = *pp;
+      *pp = (*pp)->pNextScanner;
+      return SQLITE_OK;
+    }
+  }
+
+  /* If no existing cursor was found, allocate a new one */
   p = (HctDbCsr*)sqlite3MallocZero(sizeof(HctDbCsr));
   if( p==0 ){
     rc = SQLITE_NOMEM_BKPT;
@@ -3704,7 +3742,7 @@ static int hctDbValidateEntry(HctDatabase *pDb, HctDbCsr *pCsr){
   int iOff = hctDbCellOffset(pCsr->pg.aOld, pCsr->iCell, &flags);
   if( flags & HCTDB_HAS_TID ){
     u64 iTid = hctGetU64(&pCsr->pg.aOld[iOff]);
-    if( iTid!=pDb->iTid && hctDbTidIsVisible(pCsr->pDb, iTid)==0 ){
+    if( iTid!=pDb->iTid && hctDbTidIsConflict(pCsr->pDb, iTid) ){
       return SQLITE_BUSY;
     }
   }
@@ -3713,9 +3751,11 @@ static int hctDbValidateEntry(HctDatabase *pDb, HctDbCsr *pCsr){
 
 static int hctDbValidateIntkey(HctDatabase *pDb, HctDbCsr *pCsr){
   int rc = SQLITE_OK;
-  HctCsrIntkeyOp *pOpList = pCsr->pIntkeyOps;
+  HctCsrIntkeyOp *pOpList = pCsr->intkey.pOpList;
   HctCsrIntkeyOp *pOp;
-  pCsr->pIntkeyOps = 0;
+
+  pCsr->intkey.pOpList = 0;
+  assert( pCsr->intkey.pCurrentOp==0 );
   for(pOp=pOpList; pOp && rc==SQLITE_OK; pOp=pOp->pNextOp){
     assert( pOp->iFirst<=pOp->iLast );
     if( pOp->iFirst==SMALLEST_INT64 ){
@@ -3742,18 +3782,19 @@ static int hctDbValidateIntkey(HctDatabase *pDb, HctDbCsr *pCsr){
     }
     hctDbCsrReset(pCsr);
   }
-  assert( pCsr->pIntkeyOps==0 );
-  pCsr->pIntkeyOps = pOpList;
+  assert( pCsr->intkey.pOpList==0 && pCsr->intkey.pCurrentOp==0 );
+  pCsr->intkey.pOpList = pOpList;
 
   return rc;
 }
 
 static int hctDbValidateIndex(HctDatabase *pDb, HctDbCsr *pCsr){
   int rc = SQLITE_OK;
-  HctCsrIndexOp *pOpList = pCsr->pIndexOps;
+  HctCsrIndexOp *pOpList = pCsr->index.pOpList;
   HctCsrIndexOp *pOp;
-  pCsr->pIndexOps = 0;
 
+  pCsr->index.pOpList = 0;
+  assert( pCsr->index.pCurrentOp==0 );
   rc = hctDbAllocateUnpacked(pCsr);
   for(pOp=pOpList; pOp && rc==SQLITE_OK; pOp=pOp->pNextOp){
     UnpackedRecord *pRec = pCsr->pRec;
@@ -3798,8 +3839,8 @@ static int hctDbValidateIndex(HctDatabase *pDb, HctDbCsr *pCsr){
     }
   }
 
-  assert( pCsr->pIndexOps==0 );
-  pCsr->pIndexOps = pOpList;
+  assert( pCsr->index.pOpList==0 && pCsr->index.pCurrentOp==0 );
+  pCsr->index.pOpList = pOpList;
   return rc;
 }
 
@@ -4631,16 +4672,16 @@ static int hctvalidNext(sqlite3_vtab_cursor *cur){
   pCsr->rootpgno = 0;
   pCsr->iEntry++;
   pDbCsr = pCsr->pDb->pScannerList;
-  pIntkeyOp = pDbCsr->pIntkeyOps;
-  pIndexOp = pDbCsr->pIndexOps;
+  pIntkeyOp = pDbCsr->intkey.pOpList;
+  pIndexOp = pDbCsr->index.pOpList;
   for(ii=0; pDbCsr && ii<pCsr->iEntry; ii++){
     if( pIntkeyOp ) pIntkeyOp = pIntkeyOp->pNextOp;
     if( pIndexOp ) pIndexOp = pIndexOp->pNextOp;
     if( pIntkeyOp==0 && pIndexOp==0 ){
       pDbCsr = pDbCsr->pNextScanner;
       if( pDbCsr ){
-        pIntkeyOp = pDbCsr->pIntkeyOps;
-        pIndexOp = pDbCsr->pIndexOps;
+        pIntkeyOp = pDbCsr->intkey.pOpList;
+        pIndexOp = pDbCsr->index.pOpList;
       }
     }
   }
