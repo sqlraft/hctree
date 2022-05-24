@@ -1,5 +1,5 @@
-C Enhance\shct_speed_test\sto\sadd\squeries\sto\stransactions.
-D 2022-05-24T17:35:49.626
+C Avoid\sa\sfull\srebalance\soperation\swhen\sa\ssingle\spage\scould\sbe\srebuilt\sinstead.
+D 2022-05-24T21:35:18.448
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -524,8 +524,8 @@ F src/hash.h 3340ab6e1d13e725571d7cee6d3e3135f0779a7d8e76a9ce0a85971fa3953c51
 F src/hctInt.h 128dd960339f3d378c16889441a232c14913aedd677a4ca2d7d8617a2d58ff58
 F src/hctPManInt.h b2fad3181b093c3796a35f78df2efb506309a06af77e2e2adb043e85ecb740af
 F src/hctTMapInt.h 5d5407435259ccdb4d369c89ed45a335aa63beb57b391f631ef63e591a40fcd9
-F src/hct_database.c fe52ce5c2d08e613680d83777c97f0b86080835806916bc14543b8d4b6c1647c
-F src/hct_file.c 63061fcc8d6892efc13b023187585f29e6846f3af9aa8f4648a56ff1a9e8d7d1
+F src/hct_database.c f825ecab25bd490b6aeb1f3b5a6ff9f1f281dee821ddbb5e7f2398da5f9101a8
+F src/hct_file.c fc69915b56f26698d4c063edaefed42c7977c52b753f6d45a518a48f30333951
 F src/hct_pman.c 15ff9ece5c09ff8b178f6b72a6d80286333e6cb5f72427ebe4fe234cd862c37a
 F src/hct_record.c 54b0d564be580ca29a54312f9a9abdba193b234ac56ec65a7e40109107041b25
 F src/hct_tmap.c 16cabc364051634c62643160ad8a5afe9f8463eb8541da153b0ae4e75b1efe75
@@ -1985,8 +1985,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P 712a21bd46a915b25869be5b3f99a93dba34837960c9e3747b9a865c55ae27ec
-R f46c1d6d6bf3e237f4d484508ab0c292
+P 75dadbc85f40f2b67edb6ad30a72754513706d7fa1bb3a439c28e2a2413051dc
+R 2e3b4625b294b92f421ba0d410a15703
 U dan
-Z 0941e2ac7d4588aa2c02473434c562ed
+Z d519c45249d2eeface0706d0fb74c1bc
 # Remove this line to create a well-formed Fossil manifest.

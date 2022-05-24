@@ -2452,7 +2452,9 @@ struct HctDbCellSz {
 ** (bClobber)                  ->   clobber
 ** (bClobber==0)               ->   insert of new key
 */
-static void hctDbBalanceGetCellSz(
+static void 
+__attribute__ ((noinline)) 
+hctDbBalanceGetCellSz(
   HctDatabase *pDb,
   int iPg,
   int iInsert,
@@ -2525,9 +2527,12 @@ static void hctDbBalanceGetCellSz(
 ** index leaves and index nodes.
 ** 
 */
-static int hctDbBalance(
+static int 
+__attribute__ ((noinline)) 
+hctDbBalance(
   HctDatabase *pDb,
   HctDbWriter *p,
+  int bSingle,
   int *piPg,                      /* IN/OUT: Page for new cell */
   int *piInsert,                  /* IN/OUT: Position in page for new cell */
   int bClobber,
@@ -2559,9 +2564,11 @@ static int hctDbBalance(
 
   /* If the HctDbWriter.aWritePg[] array still contains a single page, load
   ** some peer pages into it. */
-  rc = hctDbLoadPeers(pDb, p, &iPg);
-  if( rc!=SQLITE_OK ){
-    return rc;
+  if( !bSingle ){
+    rc = hctDbLoadPeers(pDb, p, &iPg);
+    if( rc!=SQLITE_OK ){
+      return rc;
+    }
   }
 
   /* Determine the subset of HctDbWriter.aWritePg[] pages that will be 
@@ -2609,20 +2616,24 @@ static int hctDbBalance(
 
   /* Figure out how many output pages will be required. This loop calculates
   ** a mapping heavily biased to the left. */
-  assert( sizeof(HctDbIntkeyLeaf)==sizeof(HctDbIndexLeaf) );
   aPgFirst[0] = 0;
-  nRem = pDb->pgsz - sizeof(HctDbIntkeyLeaf);
-  for(iSz=0; iSz<nSz; iSz++){
-    if( aSz[iSz].nByte>nRem ){
-      aPgRem[nOut-1] = nRem;
-      aPgFirst[nOut] = iSz;
-      nOut++;
-      nRem = pDb->pgsz - sizeof(HctDbIntkeyLeaf);
-      assert( nOut<=ArraySize(aPgRem) );
+  if( bSingle ){
+    nOut = 1;
+  }else{
+    assert( sizeof(HctDbIntkeyLeaf)==sizeof(HctDbIndexLeaf) );
+    nRem = pDb->pgsz - sizeof(HctDbIntkeyLeaf);
+    for(iSz=0; iSz<nSz; iSz++){
+      if( aSz[iSz].nByte>nRem ){
+        aPgRem[nOut-1] = nRem;
+        aPgFirst[nOut] = iSz;
+        nOut++;
+        nRem = pDb->pgsz - sizeof(HctDbIntkeyLeaf);
+        assert( nOut<=ArraySize(aPgRem) );
+      }
+      nRem -= aSz[iSz].nByte;
     }
-    nRem -= aSz[iSz].nByte;
+    aPgRem[nOut-1] = nRem;
   }
-  aPgRem[nOut-1] = nRem;
   aPgFirst[nOut] = nSz;
 
   /* Adjust the packing calculated by the previous loop. */
@@ -2684,6 +2695,32 @@ assert( rc==SQLITE_OK );
 
   sqlite3_free(pFree);
   return rc;
+}
+
+/*
+** Return true if page aPg[] can be rebuilt so that the free-gap is 
+** at least nReq bytes in size. Or false otherwise.
+*/
+static int hctDbTestPageCapacity(HctDatabase *pDb, u8 *aPg, int nReq){
+  u64 iSafeTid = sqlite3HctFileSafeTID(pDb->pFile);
+  HctDbIndexNode *p = (HctDbIndexNode*)aPg;
+  int szEntry = 0;
+  int nFree = p->hdr.nFreeBytes;
+  int ii;
+
+  hctDbEntryArrayDim(aPg, &szEntry);
+  for(ii=1; ii<p->pg.nEntry && nFree<nReq; ii++){
+    int flags = 0;
+    int iOff = hctDbEntryInfo((void*)aPg, ii, 0, &flags);
+    if( flags & HCTDB_IS_DELETE ){
+      u64 iTid = hctGetU64(&aPg[iOff]);
+      if( iTid<=iSafeTid ){
+        nFree += szEntry + hctDbPageRecordSize(aPg, pDb->pgsz, ii);
+      }
+    }
+  }
+
+  return nFree>=nReq;
 }
 
 static int hctDbBalanceIntkeyNode(
@@ -3047,6 +3084,7 @@ static int hctDbInsert(
   int nEntry = 0;                 /* Size of aEntry[] */
   int nEntrySize = 0;             /* Value for page header nSize field */
   int bBalance = 0;               /* True if requires a rebalance operation */
+  int bSingle = 0;               /* True if requires a rebalance operation */
 
 static int nCall = 0;
 nCall++;
@@ -3299,17 +3337,19 @@ nCall++;
     }
     bIsOnly = hctIsLeftmost(aTarget) && ((HctDbPageHdr*)aTarget)->iPeerPg==0;
 
-    bBalance = (
-        hctDbFreegap(aTarget)<nReq 
-     || ((bIsOnly==0 && iInsert==0 && bFullDel) || (nFree>(2*pDb->pgsz/3)))
-    );
+    if( (bIsOnly==0 && iInsert==0 && bFullDel) || (nFree>(2*pDb->pgsz/3)) ){
+      bBalance = 1;
+    }else if( hctDbFreegap(aTarget)<nReq ){
+      bBalance = 1;
+      if( p->nWritePg==1 ) bSingle = hctDbTestPageCapacity(pDb, aTarget, nReq);
+    }
   }
 
   if( bBalance ){
     assert( bFullDel==0 || aEntry==0 );
     assert( bFullDel==0 || nEntry==0 );
     assert_page_is_ok(aTarget, pDb->pgsz);
-    rc = hctDbBalance(pDb, p, &iPg, &iInsert, bClobber, nEntry);
+    rc = hctDbBalance(pDb, p, bSingle, &iPg, &iInsert, bClobber, nEntry);
     assert_page_is_ok(aTarget, pDb->pgsz);
     aTarget = p->aWritePg[iPg].aNew;
   }else{
@@ -3844,7 +3884,10 @@ static int hctDbValidateIndex(HctDatabase *pDb, HctDbCsr *pCsr){
   return rc;
 }
 
-int sqlite3HctDbValidate(HctDatabase *pDb, u64 *piCid){
+
+int 
+__attribute__ ((noinline)) 
+sqlite3HctDbValidate(HctDatabase *pDb, u64 *piCid){
   HctDbCsr *pCsr = 0;
   u64 *pEntry = hctDbFindTMapEntry(pDb->pTmap, pDb->iTid);
   u64 iCid = 0;

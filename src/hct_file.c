@@ -264,6 +264,13 @@ static u64 hctFilePagemapGet(HctMapping *p, u32 iSlot){
   return HctAtomicLoad( hctPagemapPtr(p, iSlot) );
 }
 
+static u64 hctFilePagemapGetSafe(HctMapping *p, u32 iSlot){
+  if( ((iSlot-1)>>p->mapShift)>=p->nChunk ){
+    return 0;
+  }
+  return hctFilePagemapGet(p, iSlot);
+}
+
 /*
 ** Increment the value in slot iSlot by nIncr. Return the new value.
 */
@@ -630,7 +637,7 @@ static int hctFileServerInit(HctFileServer *p, const char *zFile){
 
       nPg = MAX((nPg1 & 0xFFFFFFFF), (nPg2 & 0xFFFFFFFF));
       for(iPg=1; iPg<=nPg; iPg++){
-        u64 iVal = hctFilePagemapGet(pMapping, iPg);
+        u64 iVal = hctFilePagemapGetSafe(pMapping, iPg);
         if( (iVal & HCT_PMF_PHYSICAL_IN_USE)==0 && (iPg<=nPg1) ){
           sqlite3HctPManServerInit(&rc, p->pPManServer, iPg, 0);
         }
