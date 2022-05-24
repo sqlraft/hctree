@@ -209,6 +209,23 @@ static i64 hst_sqlite3_exec_i64(Error *pErr, sqlite3 *db, const char *zSql){
   hst_sqlite3_exec_i64(pErr, db, zSql)         \
 )
 
+static void hst_sqlite3_exec_debug(Error *pErr, sqlite3 *db, const char *zSql){
+  sqlite3_stmt *p = hst_sqlite3_prepare(pErr, db, zSql);
+  while( p && SQLITE_ROW==sqlite3_step(p) ){
+    int nCol = sqlite3_data_count(p);
+    int iCol;
+    for(iCol=0; iCol<nCol; iCol++){
+      const char *z = (const char*)sqlite3_column_text(p, iCol);
+      printf("%s%s", z ? z : "(null)", iCol==nCol-1 ? "\n" : "|");
+    }
+  }
+  hst_sqlite3_reset(pErr, p);
+  sqlite3_finalize(p);
+}
+#define hst_sqlite3_exec_debug(pErr, db, zSql) ( \
+  SEL(pErr),                                     \
+  hst_sqlite3_exec_debug(pErr, db, zSql)         \
+)
 
 
 static void system_error(Error *pErr, int iSys){
@@ -306,6 +323,8 @@ struct Testcase {
   int nTryBeforeUnevict;
   int bSeparate;
   int nSleep;
+  int nScan;
+  int szScan;
 };
 
 /*
@@ -364,6 +383,7 @@ static char *test_thread(int iTid, void *pArg, int *pnTrans){
   sqlite3_stmt *pRollback = 0;
   sqlite3_stmt *pWrite = 0;
   sqlite3_stmt *pSelect = 0;
+  sqlite3_stmt *pScan = 0;
 
   const i64 nInterval = 2000;
   i64 iStartTime = 0;              /* Start of first loop */
@@ -406,6 +426,11 @@ static char *test_thread(int iTid, void *pArg, int *pnTrans){
   pWrite = hst_sqlite3_prepare(&err, db, 
     "UPDATE tbl SET b=updateblob(b, ?, ?), c=hex(frandomblob(32)) WHERE a = ?"
   );
+  pScan = hst_sqlite3_prepare(&err, db, 
+      "SELECT * FROM tbl WHERE substr(c, 0, 16)>=hex(frandomblob(8))"
+      " ORDER BY substr(c, 0, 16)"
+  );
+
   if( err.rc ) goto test_out;
   sqlite3_bind_int(pWrite, 1, iTid);
 
@@ -429,6 +454,14 @@ static char *test_thread(int iTid, void *pArg, int *pnTrans){
       hst_sqlite3_reset(&err, pBegin);
       hstFastRandomness(&prng, sizeof(TestUpdate)*pTst->nUpdate, aUpdate);
 
+      for(ii=0; ii<pTst->nScan; ii++){
+        int nn = 0;
+        while( sqlite3_step(pScan)==SQLITE_ROW ){
+          if( ++nn>=pTst->szScan ) break;
+        }
+        hst_sqlite3_reset(&err, pScan);
+      }
+
       for(ii=0; ii<pTst->nUpdate; ii++){
         aUpdate[ii].iRow = 1+((aUpdate[ii].iRow & 0x7FFFFFFF) % pTst->nRow);
         sqlite3_bind_int64(pWrite, 2, aUpdate[ii].iVal);
@@ -436,6 +469,12 @@ static char *test_thread(int iTid, void *pArg, int *pnTrans){
         sqlite3_step(pWrite);
         hst_sqlite3_reset(&err, pWrite);
       }
+
+#if 0
+      if( nWrite==4 ){
+        hst_sqlite3_exec_debug(&err, db, "SELECT * FROM hctvalid");
+      };
+#endif
 
       sqlite3_step(pCommit);
       hst_sqlite3_reset(&err, pCommit);
@@ -485,6 +524,7 @@ static char *test_thread(int iTid, void *pArg, int *pnTrans){
   sqlite3_finalize(pCommit);
   sqlite3_finalize(pRollback);
   sqlite3_finalize(pWrite);
+  sqlite3_finalize(pScan);
 
   sqlite3_close(db);
 
@@ -508,16 +548,12 @@ static void test_build_db(Error *pErr, Testcase *pTst, int iDb){
       ")"
   );
 
-  if( pTst->nIdx==1 ){
-    hst_sqlite3_exec(db, "CREATE INDEX i1 ON tbl(c)");
-  }else{
-    for(ii=0; ii<pTst->nIdx; ii++){
-      char *zSql = sqlite3_mprintf(
-          "CREATE INDEX tbl_i%d ON tbl(substr(c, %d, 16));", ii, ii
-          );
-      hst_sqlite3_exec(db, zSql);
-      sqlite3_free(zSql);
-    }
+  for(ii=0; ii<pTst->nIdx; ii++){
+    char *zSql = sqlite3_mprintf(
+        "CREATE INDEX tbl_i%d ON tbl(substr(c, %d, 16));", ii, ii
+    );
+    hst_sqlite3_exec(db, zSql);
+    sqlite3_free(zSql);
   }
 
   printf("building initial database %d.", iDb); 
@@ -596,6 +632,7 @@ static void runtest(Testcase *pTst){
       }
       sqlite3_finalize(pIC);
     }
+    hst_sqlite3_exec_debug(&err, db, "");   /* to avoid a compiler warning */
   }
 
   hst_print_and_free_err(&err);
@@ -623,6 +660,9 @@ int main(int argc, char **argv){
   tst.nSleep = 1;
   tst.nTryBeforeUnevict = 100;
 
+  tst.nScan = 0;
+  tst.szScan = 10;
+
   for(iArg=1; iArg<argc; iArg++){
     const char *zArg = argv[iArg];
     if( zArg[0]=='+' ){
@@ -631,6 +671,12 @@ int main(int argc, char **argv){
     }else{
       int nArg = strlen(zArg);
       int *pnVal = 0;
+      if( nArg>3 && nArg<=6 && memcmp("-nscan", zArg, nArg)==0 ){
+        pnVal = &tst.nScan;
+      }else
+      if( nArg>2 && nArg<=7 && memcmp("-szscan", zArg, nArg)==0 ){
+        pnVal = &tst.szScan;
+      }else
       if( nArg>2 && nArg<=11 && memcmp("-nmininsert", zArg, nArg)==0 ){
         pnVal = &tst.nMinInsert;
       }else

@@ -1,5 +1,5 @@
-C Fix\ssome\stransaction\svalidation\sissues.
-D 2022-05-24T16:25:08.554
+C Enhance\shct_speed_test\sto\sadd\squeries\sto\stransactions.
+D 2022-05-24T17:35:49.626
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -1900,7 +1900,7 @@ F tool/fuzzershell.c e1d90a03ca790d7c331c2aae08ca46ff435f1ae1faa6cb9cc48f4687c18
 F tool/genfkey.README cf68fddd4643bbe3ff8e31b8b6d8b0a1b85e20f4
 F tool/genfkey.test b6afd7b825d797a1e1274f519ab5695373552ecad5cd373530c63533638a5a4f
 F tool/getlock.c f4c39b651370156cae979501a7b156bdba50e7ce
-F tool/hct_speed_test.c c86a85a09f3cc676fbb00e6288108c4fa31cdf94cf86fb2f686cb34f2f6c5197
+F tool/hct_speed_test.c c99de5792eb81230a7e370540da361b1de5c182eadc0ec7391683a9351d36b96
 F tool/index_usage.c f62a0c701b2c7ff2f3e21d206f093c123f222dbf07136a10ffd1ca15a5c706c5
 F tool/kvtest-speed.sh 4761a9c4b3530907562314d7757995787f7aef8f
 F tool/lemon.c ea5c8589c7749e9bd32ba10432aeeed3c16e215de72a12ada2bc707884837149
@@ -1985,8 +1985,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P a29ae35b07d2f3de9e8e1bd9f467ba4e4918ac9a0be15d81d5efdc22e8d7d61e 4bb2bbdf2b6c9bfe95cf586887ad59fac4c2d7779dcc291f81440096de43bfba
-R 717136f8bde28647b5dfd8b83670a0f6
+P 712a21bd46a915b25869be5b3f99a93dba34837960c9e3747b9a865c55ae27ec
+R f46c1d6d6bf3e237f4d484508ab0c292
 U dan
-Z 4ae96fc07b5fd861de0a069d533af99b
+Z 0941e2ac7d4588aa2c02473434c562ed
 # Remove this line to create a well-formed Fossil manifest.
