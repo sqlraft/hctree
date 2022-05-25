@@ -48,8 +48,9 @@ struct HctCsrIntkeyOp {
   HctCsrIntkeyOp *pNextOp;
   i64 iFirst;
   i64 iLast;
-  int nPg;
-  u32 aPg[1];
+
+  u32 iLogical;
+  u32 iPhysical;
 };
 
 struct HctCsrIndexOp {
@@ -58,8 +59,9 @@ struct HctCsrIndexOp {
   int nFirst;
   u8 *pLast;
   int nLast;
-  int nPg;
-  u32 aPg[1];
+
+  u32 iLogical;
+  u32 iPhysical;
 };
 
 struct CsrIntkey {
@@ -473,12 +475,18 @@ static int hctDbTidIsVisible(HctDatabase *pDb, u64 iTid){
   while( 1 ){
     u64 eState = 0;
     u64 iCid = hctDbTMapLookup(pDb, iTid, &eState);
-    if( eState==HCT_TMAP_WRITING || eState==HCT_TMAP_ROLLBACK ) return 0;
+    if( eState==HCT_TMAP_WRITING || eState==HCT_TMAP_ROLLBACK ){
+      return 0;
+    }
     if( eState==HCT_TMAP_COMMITTED ){
-      return (iCid <= pDb->iSnapshotId);
+      if( iCid>pDb->iSnapshotId ){
+        return 0;
+      }
+      return 1;
     }
   }
 
+  assert( 0 );
   return 0;
 }
 
@@ -492,6 +500,10 @@ static int hctDbTidIsVisible(HctDatabase *pDb, u64 iTid){
 static int hctDbTidIsConflict(HctDatabase *pDb, u64 iTid){
   u64 eState = 0;
   u64 iCid = hctDbTMapLookup(pDb, iTid, &eState);
+
+  /* This should only be called while writing or validating. */
+  assert( pDb->iTid );
+
   if( eState==HCT_TMAP_WRITING || eState==HCT_TMAP_VALIDATING ) return 1;
 
   /* It's tempting to return 0 here - how can a key that has been rolled
@@ -1132,6 +1144,16 @@ static int hctDbCsrFindVersion(int *pRc, HctDbCsr *pCsr){
       return ((flags & HCTDB_IS_DELETE) ? 0 : 1);
     }
 
+    if( pCsr->pKeyInfo==0 ){
+      assert( pCsr->intkey.pCurrentOp );
+      pCsr->intkey.pCurrentOp->iLogical = 0;
+      pCsr->intkey.pCurrentOp->iPhysical = 0;
+    }else{
+      assert( pCsr->index.pCurrentOp );
+      pCsr->index.pCurrentOp->iLogical = 0;
+      pCsr->index.pCurrentOp->iPhysical = 0;
+    }
+
     /* Current entry is not visible to the client. Check if it has an 
     ** old-page pointer. If so, code below will search that page for a visible
     ** version of the key. Otherwise, return 0 to indicate that no visible
@@ -1189,6 +1211,8 @@ static int hctDbCsrScanStart(HctDbCsr *pCsr, UnpackedRecord *pRec, i64 iKey){
         assert( pCsr->intkey.pCurrentOp==0 );
         pOp->iFirst = pOp->iLast = iKey;
         pCsr->intkey.pCurrentOp = pOp;
+        pOp->iLogical = pCsr->pg.iPg;
+        pOp->iPhysical = pCsr->pg.iOldPg;
       }
     }else{
       HctCsrIndexOp *pOp = 0;
@@ -1200,6 +1224,8 @@ static int hctDbCsrScanStart(HctDbCsr *pCsr, UnpackedRecord *pRec, i64 iKey){
           rc = sqlite3HctSerializeRecord(pRec, &pOp->pFirst, &pOp->nFirst);
           pOp->pLast = pOp->pFirst;
           pOp->nLast = pOp->nFirst;
+          pOp->iLogical = pCsr->pg.iPg;
+          pOp->iPhysical = pCsr->pg.iOldPg;
         }
         assert( pCsr->index.pCurrentOp==0 );
         pCsr->index.pCurrentOp = pOp;
@@ -1231,8 +1257,12 @@ static int hctDbCsrScanFinish(HctDbCsr *pCsr){
           }else{
             iVal = SMALLEST_INT64;
           }
+          pOp->iLogical = pOp->iPhysical = 0;
         }else{
           sqlite3HctDbCsrKey(pCsr, &iVal);
+          if( pCsr->pg.iPg!=pOp->iLogical ){
+            pOp->iLogical = pOp->iPhysical = 0;
+          }
         }
 
         if( iVal>=pOp->iFirst ){
@@ -1244,6 +1274,7 @@ static int hctDbCsrScanFinish(HctDbCsr *pCsr){
       }
 
       if( pPrev && pOp->iLast<=pPrev->iLast && pOp->iFirst>=pPrev->iFirst ){
+        pPrev->iLogical = pPrev->iPhysical = 0;
         sqlite3_free(pOp);
       }else{
         pOp->pNextOp = pPrev;
@@ -1268,6 +1299,11 @@ static int hctDbCsrScanFinish(HctDbCsr *pCsr){
               memcpy(aCopy, aKey, nKey);
             }
           }
+          if( pCsr->pg.iPg!=pOp->iLogical ){
+            pOp->iLogical = pOp->iPhysical = 0;
+          }
+        }else{
+          pOp->iLogical = pOp->iPhysical = 0;
         }
 
         if( pCsr->eDir==BTREE_DIR_FORWARD ){
@@ -1359,13 +1395,13 @@ int sqlite3HctDbCsrSeek(
   int bExact;
 
   rc = hctDbCsrScanFinish(pCsr);
-  if( rc==SQLITE_OK ){
-    hctDbCsrReset(pCsr);
-    rc = hctDbCsrScanStart(pCsr, pRec, iKey);
-  }
+  hctDbCsrReset(pCsr);
 
   if( rc==SQLITE_OK ){
     rc = hctDbCsrSeek(pCsr, 0, pRec, iKey, &bExact);
+  }
+  if( rc==SQLITE_OK ){
+    rc = hctDbCsrScanStart(pCsr, pRec, iKey);
   }
 
   /* The main cursor now points to the largest entry less than or equal 
@@ -3798,6 +3834,13 @@ static int hctDbValidateIntkey(HctDatabase *pDb, HctDbCsr *pCsr){
   assert( pCsr->intkey.pCurrentOp==0 );
   for(pOp=pOpList; pOp && rc==SQLITE_OK; pOp=pOp->pNextOp){
     assert( pOp->iFirst<=pOp->iLast );
+
+    if( pOp->iLogical
+     && pOp->iPhysical==sqlite3HctFilePageMapping(pDb->pFile, pOp->iLogical)
+    ){
+      continue;
+    }
+
     if( pOp->iFirst==SMALLEST_INT64 ){
       pCsr->eDir = BTREE_DIR_FORWARD;
       rc = hctDbCsrFirst(pCsr);
@@ -3838,6 +3881,13 @@ static int hctDbValidateIndex(HctDatabase *pDb, HctDbCsr *pCsr){
   rc = hctDbAllocateUnpacked(pCsr);
   for(pOp=pOpList; pOp && rc==SQLITE_OK; pOp=pOp->pNextOp){
     UnpackedRecord *pRec = pCsr->pRec;
+
+    if( pOp->iLogical
+     && pOp->iPhysical==sqlite3HctFilePageMapping(pDb->pFile, pOp->iLogical)
+    ){
+      continue;
+    }
+
     hctDbCsrReset(pCsr);
     pCsr->eDir = (pOp->pFirst==pOp->pLast) ? BTREE_DIR_NONE : BTREE_DIR_FORWARD;
     if( pOp->pFirst==0 ){
@@ -3906,8 +3956,8 @@ sqlite3HctDbValidate(HctDatabase *pDb, u64 *piCid){
       rc = hctDbValidateIndex(pDb, pCsr);
     }
   }
-
   pDb->bValidate = 0;
+
   *piCid = iCid;
   return rc;
 }

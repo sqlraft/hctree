@@ -295,6 +295,8 @@ const char *sqlite3HctFileName(HctFile *pFile);
 
 int sqlite3HctFileFindLogs(HctFile*, void*, int(*)(void*, const char*));
 
+u32 sqlite3HctFilePageMapping(HctFile *pFile, u32 iLogical);
+
 
 #include <hctPManInt.h>
 HctPManClient *sqlite3HctFilePManClient(HctFile*);

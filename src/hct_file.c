@@ -977,6 +977,10 @@ int sqlite3HctFilePageGet(HctFile *pFile, u32 iPg, HctFilePage *pPg){
   return rc;
 }
 
+u32 sqlite3HctFilePageMapping(HctFile *pFile, u32 iLogical){
+  return (u32)(hctFilePagemapGet(pFile->pMapping, iLogical) & 0xFFFFFFFF);
+}
+
 /*
 ** Obtain a reference to physical page iPg.
 */
