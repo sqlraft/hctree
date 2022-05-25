@@ -417,6 +417,7 @@ static char *test_thread(int iTid, void *pArg, int *pnTrans){
   hst_sqlite3_exec(db, "PRAGMA wal_autocheckpoint = 10000");
   hst_sqlite3_exec(db, "PRAGMA mmap_size = 1000000000");
   hst_sqlite3_exec(db, "PRAGMA locking_mode = exclusive");
+  hst_sqlite3_exec(db, "PRAGMA synchronous = off");
   hst_sqlite3_exec_printf(&err,
       db, "PRAGMA hct_try_before_unevict = %d", pTst->nTryBeforeUnevict
   );

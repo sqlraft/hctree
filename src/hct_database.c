@@ -827,9 +827,16 @@ static int hctDbLoadRecord(
   return rc;
 }
 
+/* static RecordCompare find_record_compare((UnpackedRecord*, RecordCompare); */
+#define find_record_compare(pRec, xCompare) (                 \
+    (xCompare) ? (xCompare) : sqlite3VdbeFindCompare(pRec)    \
+)
+
+
 static int hctDbIndexSearch(
   HctDatabase *pDb,
   u8 *aPg, 
+  RecordCompare xCompare,
   UnpackedRecord *pRec,
   int *piPos,
   int *pbExact
@@ -839,6 +846,7 @@ static int hctDbIndexSearch(
   int i1 = 0;
   int i2 = ((HctDbPageHdr*)aPg)->nEntry;
 
+  if( pRec ) xCompare = find_record_compare(pRec, xCompare);
   memset(&buf, 0, sizeof(buf));
 
   while( i2>i1 ){
@@ -852,7 +860,7 @@ static int hctDbIndexSearch(
     if( nRec==0 ){
       res = -1;
     }else{
-      res = sqlite3VdbeRecordCompare(nRec, aRec, pRec);
+      res = xCompare(nRec, aRec, pRec);
     }
 
     if( res==0 ){
@@ -944,6 +952,7 @@ static int hctDbCompareFPKey(
 int hctDbCsrSeek(
   HctDbCsr *pCsr,                 /* Cursor to seek */
   int iHeight,                    /* Height to seek at (0==leaf, 1==parent) */
+  RecordCompare xCompare,
   UnpackedRecord *pRec,           /* Key for index/without rowid tables */
   i64 iKey,                       /* Key for intkey tables */
   int *pbExact
@@ -952,6 +961,7 @@ int hctDbCsrSeek(
   u32 iPg = pCsr->iRoot;
   int rc = SQLITE_OK;
 
+  if( pRec ) xCompare = find_record_compare(pRec, xCompare);
   while( rc==SQLITE_OK ){
     if( iPg ) rc = sqlite3HctFilePageGet(pFile, iPg, &pCsr->pg);
     if( rc==SQLITE_OK ){
@@ -960,14 +970,18 @@ int hctDbCsrSeek(
       int bExact;
       if( pHdr->nHeight==0 ){
         if( pRec ){
-          rc = hctDbIndexSearch(pCsr->pDb, pCsr->pg.aOld, pRec, &i2, &bExact);
+          rc = hctDbIndexSearch(
+              pCsr->pDb, pCsr->pg.aOld, xCompare, pRec, &i2, &bExact
+          );
         }else{
           i2 = hctDbIntkeyLeafSearch(pCsr->pg.aOld, iKey, &bExact);
         }
         if( bExact==0 ) i2--;
       }else if( pRec ){
         HctDbIndexNode *pNode = (HctDbIndexNode*)pCsr->pg.aOld;
-        rc = hctDbIndexSearch(pCsr->pDb, pCsr->pg.aOld, pRec, &i2, &bExact);
+        rc = hctDbIndexSearch(
+            pCsr->pDb, pCsr->pg.aOld, xCompare, pRec, &i2, &bExact
+        );
         i2 -= !bExact;
         iPg = pNode->aEntry[i2].iChildPg;
         assert( iPg );
@@ -1093,7 +1107,9 @@ static int hctDbFindKeyInOldPage(HctDbCsr *pCsr){
     rc = hctDbAllocateUnpacked(pCsr);
     if( rc==SQLITE_OK ){
       sqlite3VdbeRecordUnpack(pCsr->pKeyInfo, p->nSize, aCell, pCsr->pRec);
-      rc = hctDbIndexSearch(pCsr->pDb, pCsr->oldpg.aOld, pCsr->pRec, &iCell, &bExact);
+      rc = hctDbIndexSearch(
+          pCsr->pDb, pCsr->oldpg.aOld, 0, pCsr->pRec, &iCell, &bExact
+      );
     }
     if( rc ) return rc;
     if( bExact==0 ) iCell = -1;
@@ -1398,7 +1414,7 @@ int sqlite3HctDbCsrSeek(
   hctDbCsrReset(pCsr);
 
   if( rc==SQLITE_OK ){
-    rc = hctDbCsrSeek(pCsr, 0, pRec, iKey, &bExact);
+    rc = hctDbCsrSeek(pCsr, 0, 0, pRec, iKey, &bExact);
   }
   if( rc==SQLITE_OK ){
     rc = hctDbCsrScanStart(pCsr, pRec, iKey);
@@ -1874,7 +1890,7 @@ static int hctDbFindRollbackData(
     int b = 0;
     int iCell = 0;
     if( pRec ){
-      rc = hctDbIndexSearch(pDb, aPg, pRec, &iCell, &b);
+      rc = hctDbIndexSearch(pDb, aPg, 0, pRec, &iCell, &b);
     }else{
       iCell = hctDbIntkeyLeafSearch(aPg, iKey, &b);
     }
@@ -1923,6 +1939,7 @@ int sqlite3HctDbInsertFlush(HctDatabase *pDb, int *pnRetry){
 */
 static int hctDbTestWriteFpKey(
   HctDbWriter *p, 
+  RecordCompare xCompare,
   UnpackedRecord *pRec, 
   i64 iKey
 ){
@@ -1931,7 +1948,7 @@ static int hctDbTestWriteFpKey(
     if( p->aWriteFpKey==0 ){
       r = 1;
     }else{
-      r = sqlite3VdbeRecordCompare(p->iWriteFpKey, p->aWriteFpKey, pRec);
+      r = xCompare(p->iWriteFpKey, p->aWriteFpKey, pRec);
     }
     return (r <= 0);
   }
@@ -2278,7 +2295,7 @@ static int hctDbFindLhsPeer(
   if( hctPagetype(aLeft)==HCT_PAGETYPE_INTKEY ){
     i64 iKey = hctDbIntkeyFPKey(aLeft);
     assert( iKey!=SMALLEST_INT64 );
-    rc = hctDbCsrSeek(&csr, p->iHeight, 0, iKey-1, 0);
+    rc = hctDbCsrSeek(&csr, p->iHeight, 0, 0, iKey-1, 0);
   }else{
     UnpackedRecord *pRec = 0;
     HctBuffer buf;
@@ -2294,7 +2311,7 @@ static int hctDbFindLhsPeer(
       sqlite3VdbeRecordUnpack(p->writecsr.pKeyInfo, nData, aData, pRec);
       hctDbRecordTrim(pRec);
       pRec->default_rc = 1;
-      rc = hctDbCsrSeek(&csr, p->iHeight, pRec, 0, 0);
+      rc = hctDbCsrSeek(&csr, p->iHeight, 0, pRec, 0, 0);
       pRec->default_rc = 0;
 
       assert( csr.pg.iPg!=pPg->iPg );
@@ -2489,7 +2506,6 @@ struct HctDbCellSz {
 ** (bClobber==0)               ->   insert of new key
 */
 static void 
-__attribute__ ((noinline)) 
 hctDbBalanceGetCellSz(
   HctDatabase *pDb,
   int iPg,
@@ -2563,9 +2579,7 @@ hctDbBalanceGetCellSz(
 ** index leaves and index nodes.
 ** 
 */
-static int 
-__attribute__ ((noinline)) 
-hctDbBalance(
+static int hctDbBalance(
   HctDatabase *pDb,
   HctDbWriter *p,
   int bSingle,
@@ -3106,6 +3120,7 @@ static int hctDbInsert(
   int bDel,                       /* True for a delete operation */
   int nData, const u8 *aData      /* Record/key to insert */
 ){
+  const RecordCompare xCompare = pRec ? sqlite3VdbeFindCompare(pRec) : 0;
   int rc = SQLITE_OK;
   int iInsert;
   int iPg = 0;                    /* Page in HctDbWriter.aWritePg[] to write */
@@ -3122,16 +3137,15 @@ static int hctDbInsert(
   int bBalance = 0;               /* True if requires a rebalance operation */
   int bSingle = 0;               /* True if requires a rebalance operation */
 
-static int nCall = 0;
-nCall++;
-
   p->nWriteKey++;
 
   /* Check if any existing dirty pages need to be flushed to disk before 
   ** this key can be inserted. If they do, flush them. */
   assert( p->nWritePg==0 || iRoot==p->writecsr.iRoot );
   if( p->nWritePg ){
-    if( p->nWritePg>HCTDB_MAX_DIRTY || hctDbTestWriteFpKey(p, pRec, iKey) ){
+    if( p->nWritePg>HCTDB_MAX_DIRTY 
+     || hctDbTestWriteFpKey(p, xCompare, pRec, iKey) 
+    ){
       rc = hctDbInsertFlushWrite(pDb, p);
       if( rc ) return rc;
       p->nWriteKey = 1;
@@ -3143,7 +3157,7 @@ nCall++;
   if( p->nWritePg==0 ){
     hctDbCsrInit(pDb, iRoot, &p->writecsr);
     if( pRec ) p->writecsr.pKeyInfo = pRec->pKeyInfo;
-    rc = hctDbCsrSeek(&p->writecsr, p->iHeight, pRec, iKey, 0);
+    rc = hctDbCsrSeek(&p->writecsr, p->iHeight, xCompare, pRec, iKey, 0);
     if( rc ) return rc;
 
     p->aWritePg[0] = p->writecsr.pg;
@@ -3180,11 +3194,11 @@ nCall++;
         hctBufferFree(&buf);
         return rc;
       }
-      if( sqlite3VdbeRecordCompare(nK, aK, pRec)>0 ) break;
+      if( xCompare(nK, aK, pRec)>0 ) break;
     }
     hctBufferFree(&buf);
     rc = hctDbIndexSearch(pDb,
-        p->aWritePg[iPg].aNew, pRec, &iInsert, &bClobber
+        p->aWritePg[iPg].aNew, xCompare, pRec, &iInsert, &bClobber
     );
     if( rc!=SQLITE_OK ) return rc;
   }else{
@@ -3784,14 +3798,14 @@ int sqlite3HctDbCsrPrev(HctDbCsr *pCsr){
           HctFilePage pg = pCsr->pg;
           memset(&pCsr->pg, 0, sizeof(HctFilePage));
           pRec->default_rc = 1;
-          hctDbCsrSeek(pCsr, 0, pRec, 0, &bDummy);
+          hctDbCsrSeek(pCsr, 0, 0, pRec, 0, &bDummy);
           pRec->default_rc = 0;
           sqlite3HctFilePageRelease(&pg);
         }
       }else if( hctIsLeftmost(pCsr->pg.aOld)==0 ){
         i64 iKey = hctDbIntkeyFPKey(pCsr->pg.aOld);
         sqlite3HctFilePageRelease(&pCsr->pg);
-        rc = hctDbCsrSeek(pCsr, 0, 0, iKey-1, 0);
+        rc = hctDbCsrSeek(pCsr, 0, 0, 0, iKey-1, 0);
       }
     }
   }while( rc==SQLITE_OK && hctDbCsrFindVersion(&rc, pCsr)==0 );
@@ -3851,7 +3865,7 @@ static int hctDbValidateIntkey(HctDatabase *pDb, HctDbCsr *pCsr){
       }else{
         pCsr->eDir = BTREE_DIR_FORWARD;
       }
-      rc = hctDbCsrSeek(pCsr, 0, 0, pOp->iFirst, &bDummy);
+      rc = hctDbCsrSeek(pCsr, 0, 0, 0, pOp->iFirst, &bDummy);
     }
 
     while( rc==SQLITE_OK && !sqlite3HctDbCsrEof(pCsr) ){
@@ -3895,7 +3909,7 @@ static int hctDbValidateIndex(HctDatabase *pDb, HctDbCsr *pCsr){
     }else{
       int bExact = 0;
       sqlite3VdbeRecordUnpack(pCsr->pKeyInfo, pOp->nFirst, pOp->pFirst, pRec);
-      rc = hctDbCsrSeek(pCsr, 0, pRec, 0, &bExact);
+      rc = hctDbCsrSeek(pCsr, 0, 0, pRec, 0, &bExact);
       if( rc==SQLITE_OK && bExact==0 ){
         rc = hctDbCsrNext(pCsr);
       }
@@ -3947,16 +3961,22 @@ sqlite3HctDbValidate(HctDatabase *pDb, u64 *piCid){
   HctAtomicStore(pEntry, HCT_TMAP_VALIDATING);
   iCid = sqlite3HctFileAllocateCID(pDb->pFile);
 
-  assert( pDb->bValidate==0 );
-  pDb->bValidate = 1;
-  for(pCsr=pDb->pScannerList; pCsr && rc==SQLITE_OK; pCsr=pCsr->pNextScanner){
-    if( pCsr->pKeyInfo==0 ){
-      rc = hctDbValidateIntkey(pDb, pCsr);
-    }else{
-      rc = hctDbValidateIndex(pDb, pCsr);
+  /* If iCid is one more than pDb->iSnapshotId, then this transaction is
+  ** being applied against the snapshot that it was run against. In this
+  ** case we can skip validation entirely. */
+  if( iCid!=pDb->iSnapshotId+1 ){
+
+    assert( pDb->bValidate==0 );
+    pDb->bValidate = 1;
+    for(pCsr=pDb->pScannerList; pCsr && rc==SQLITE_OK; pCsr=pCsr->pNextScanner){
+      if( pCsr->pKeyInfo==0 ){
+        rc = hctDbValidateIntkey(pDb, pCsr);
+      }else{
+        rc = hctDbValidateIndex(pDb, pCsr);
+      }
     }
+    pDb->bValidate = 0;
   }
-  pDb->bValidate = 0;
 
   *piCid = iCid;
   return rc;
