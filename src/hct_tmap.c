@@ -454,7 +454,8 @@ static HctTMapFull *hctTMapNewObject(
     assert( (pPrev->m.iMinTid+1)>=pPrev->m.iFirstTid );
     for(iMinTid=pPrev->m.iMinTid; iMinTid<(iEof-1); iMinTid++){
       u64 iVal = HctAtomicLoad( hctTMapFind(pPrev, iMinTid+1) );
-      if( (iVal & HCT_TMAP_STATE_MASK)!=HCT_TMAP_COMMITTED
+      u64 eState = (iVal & HCT_TMAP_STATE_MASK);
+      if( (eState!=HCT_TMAP_COMMITTED && eState!=HCT_TMAP_ROLLBACK)
        || (iVal & HCT_TMAP_CID_MASK)>iCid
       ){
         break;

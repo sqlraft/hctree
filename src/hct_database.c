@@ -3468,7 +3468,7 @@ int sqlite3HctDbEndWrite(HctDatabase *p, u64 iCid){
   assert( p->pa.nWritePg==0 );
   assert( p->pa.aWriteFpKey==0 );
 
-  HctAtomicStore(pEntry, iCid | HCT_TMAP_COMMITTED);
+  HctAtomicStore(pEntry, iCid | (iCid?HCT_TMAP_COMMITTED:HCT_TMAP_ROLLBACK));
 
   p->iTid = 0;
   return rc;

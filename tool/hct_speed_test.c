@@ -643,6 +643,11 @@ static void usage(const char *zPrg){
   exit(-1);
 }
 
+static void log_callback(void *pArg, int iErrCode, const char *zMsg){
+  printf("(%d) %s\n", iErrCode, zMsg);
+  fflush(stdout);
+}
+
 int main(int argc, char **argv){
   int iArg;
   Testcase tst;
@@ -662,6 +667,8 @@ int main(int argc, char **argv){
 
   tst.nScan = 0;
   tst.szScan = 10;
+
+  sqlite3_config(SQLITE_CONFIG_LOG, log_callback, 0);
 
   for(iArg=1; iArg<argc; iArg++){
     const char *zArg = argv[iArg];
