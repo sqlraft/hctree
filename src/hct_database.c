@@ -4787,7 +4787,9 @@ static int hctvalidNext(sqlite3_vtab_cursor *cur){
   pDbCsr = pCsr->pDb->pScannerList;
   pIntkeyOp = pDbCsr->intkey.pOpList;
   pIndexOp = pDbCsr->index.pOpList;
-  for(ii=0; pDbCsr && ii<pCsr->iEntry; ii++){
+  ii = 0;
+  if( pIntkeyOp==0 && pIndexOp==0 ) ii--;
+  for(/*noop*/; pDbCsr && ii<pCsr->iEntry; ii++){
     if( pIntkeyOp ) pIntkeyOp = pIntkeyOp->pNextOp;
     if( pIndexOp ) pIndexOp = pIndexOp->pNextOp;
     if( pIntkeyOp==0 && pIndexOp==0 ){
@@ -4795,6 +4797,7 @@ static int hctvalidNext(sqlite3_vtab_cursor *cur){
       if( pDbCsr ){
         pIntkeyOp = pDbCsr->intkey.pOpList;
         pIndexOp = pDbCsr->index.pOpList;
+        if( pIntkeyOp==0 && pIndexOp==0 ) ii--;
       }
     }
   }
@@ -4808,6 +4811,11 @@ static int hctvalidNext(sqlite3_vtab_cursor *cur){
       if( pIntkeyOp->iFirst!=LARGEST_INT64 ){
         pCsr->zLast = sqlite3_mprintf("%lld", pIntkeyOp->iLast);
       }
+      if( pIntkeyOp->iLogical ){
+        pCsr->zPglist = sqlite3_mprintf(
+            "%lld/%lld", pIntkeyOp->iLogical, pIntkeyOp->iPhysical
+        );
+      }
     }else{
       if( pIndexOp->pFirst ){
         pCsr->zFirst = hctDbRecordToText(
@@ -4817,6 +4825,11 @@ static int hctvalidNext(sqlite3_vtab_cursor *cur){
       if( pIndexOp->pLast ){
         pCsr->zLast = hctDbRecordToText(
             pTab->db, pIndexOp->pLast, pIndexOp->nLast
+        );
+      }
+      if( pIndexOp->iLogical ){
+        pCsr->zPglist = sqlite3_mprintf(
+            "%lld/%lld", pIndexOp->iLogical, pIndexOp->iPhysical
         );
       }
     }

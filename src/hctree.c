@@ -1782,6 +1782,26 @@ int sqlite3BtreeDelete(BtCursor *pCur, u8 flags){
   return rc;
 }
 
+int sqlite3BtreeIdxDelete(BtCursor *pCur, UnpackedRecord *pKey){
+  int rc = SQLITE_OK;
+  if( pCur->pHctDbCsr ){
+    u8 *aRec = 0;
+    int nRec = 0;
+    rc = sqlite3HctSerializeRecord(pKey, &aRec, &nRec);
+    if( rc==SQLITE_OK ){
+      rc = sqlite3HctTreeDeleteKey(pCur->pHctTreeCsr, pKey, 0, nRec, aRec);
+      sqlite3_free(aRec);
+    }
+  }else{
+    int res = 0;
+    rc = sqlite3HctTreeCsrSeek(pCur->pHctTreeCsr, pKey, 0, &res);
+    if( res==0 ){
+      rc = sqlite3HctTreeDelete(pCur->pHctTreeCsr);
+    }
+  }
+  return rc;
+}
+
 static int hctreeAddNewRoot(Btree *p, u32 iRoot, int bIndex){
   BtNewRoot *aNewRoot;
 

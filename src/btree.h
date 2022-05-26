@@ -420,5 +420,6 @@ int sqlite3HctVtabInit(sqlite3*);
 #endif
 
 int sqlite3BtreePragma(Btree *pBtree, char **aFnctl);
+int sqlite3BtreeIdxDelete(BtCursor*, UnpackedRecord*);
 
 #endif /* SQLITE_BTREE_H */

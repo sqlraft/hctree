@@ -6212,6 +6212,10 @@ case OP_IdxDelete: {
   r.nField = (u16)pOp->p3;
   r.default_rc = 0;
   r.aMem = &aMem[pOp->p2];
+#ifdef SQLITE_ENABLE_HCT
+  rc = sqlite3BtreeIdxDelete(pCrsr, &r);
+  if( rc ) goto abort_due_to_error;
+#else
   rc = sqlite3BtreeIndexMoveto(pCrsr, &r, &res);
   if( rc ) goto abort_due_to_error;
   if( res==0 ){
@@ -6221,6 +6225,7 @@ case OP_IdxDelete: {
     rc = sqlite3ReportError(SQLITE_CORRUPT_INDEX, __LINE__, "index corruption");
     goto abort_due_to_error;
   }
+#endif
   assert( pC->deferredMoveto==0 );
   pC->cacheStatus = CACHE_STALE;
   pC->seekResult = 0;

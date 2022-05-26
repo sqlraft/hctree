@@ -428,8 +428,8 @@ static char *test_thread(int iTid, void *pArg, int *pnTrans){
     "UPDATE tbl SET b=updateblob(b, ?, ?), c=hex(frandomblob(32)) WHERE a = ?"
   );
   pScan = hst_sqlite3_prepare(&err, db, 
-      "SELECT * FROM tbl WHERE substr(c, 0, 16)>=hex(frandomblob(8))"
-      " ORDER BY substr(c, 0, 16)"
+      "SELECT * FROM tbl WHERE substr(c, 1, 16)>=hex(frandomblob(8))"
+      " ORDER BY substr(c, 1, 16)"
   );
 
   if( err.rc ) goto test_out;
@@ -551,7 +551,7 @@ static void test_build_db(Error *pErr, Testcase *pTst, int iDb){
 
   for(ii=0; ii<pTst->nIdx; ii++){
     char *zSql = sqlite3_mprintf(
-        "CREATE INDEX tbl_i%d ON tbl(substr(c, %d, 16));", ii, ii
+        "CREATE INDEX tbl_i%d ON tbl(substr(c, %d, 16));", ii+1, ii+1
     );
     hst_sqlite3_exec(db, zSql);
     sqlite3_free(zSql);
