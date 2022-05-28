@@ -3153,12 +3153,27 @@ static int hctDbInsert(
   }
 
   /* If the page array is empty, seek the write cursor to find the leaf
-  ** page on which to insert this new entry or delete key. */
+  ** page on which to insert this new entry or delete key.
+  **
+  ** Otherwise, figure out which page in the HctDbWriter.aWritePg[] array the
+  ** new entry belongs on. TODO: This can be optimized by remembering which
+  ** page the previous key was stored on.  This block sets stack variables:
+  **
+  **   iPg:      Index of page in HctDbWriter.aWritePg[] to write to.
+  **   iInsert:  The index of the new (or overwritten) entry within the page.
+  **   bClobber: True if this write overwrites an existing key.
+  */
   if( p->nWritePg==0 ){
-    hctDbCsrInit(pDb, iRoot, &p->writecsr);
+    if( p->writecsr.iRoot!=iRoot ){
+      hctDbCsrInit(pDb, iRoot, &p->writecsr);
+    }else{
+      hctDbCsrReset(&p->writecsr);
+    }
     if( pRec ) p->writecsr.pKeyInfo = pRec->pKeyInfo;
-    rc = hctDbCsrSeek(&p->writecsr, p->iHeight, xCompare, pRec, iKey, 0);
+    rc = hctDbCsrSeek(&p->writecsr, p->iHeight, xCompare, pRec, iKey, &bClobber);
     if( rc ) return rc;
+    iInsert = p->writecsr.iCell;
+    if( bClobber==0 ) iInsert++;
 
     p->aWritePg[0] = p->writecsr.pg;
     memset(&p->writecsr.pg, 0, sizeof(HctFilePage));
@@ -3172,19 +3187,7 @@ static int hctDbInsert(
     /* TODO: Do not like this. HctFilePage.iOldPg should not be accessed
     ** outside of hct_file.c. */
     p->iOldPgno = p->aWritePg[0].iOldPg;
-  }
-  assert( p->nWritePg>0 && p->aWritePg[0].aNew );
-
-  /* Figure out which page in the HctDbWriter.aWritePg[] array the new entry
-  ** belongs on. TODO: This can be optimized by remembering which page the
-  ** previous key was stored on.  This block sets stack variables:
-  **
-  **   iPg:      Index of page in HctDbWriter.aWritePg[] to write to.
-  **   iInsert:  The index of the new (or overwritten) entry within the page.
-  **   bClobber: True if this write overwrites an existing key.
-  **   aTarget:  Pointer to aNew[] buffer of page iPg.
-  */
-  if( pRec ){
+  }else if( pRec ){
     HctBuffer buf = {0,0,0};
     for(iPg=0; iPg<p->nWritePg-1; iPg++){
       const u8 *aK;
@@ -3212,6 +3215,7 @@ static int hctDbInsert(
     }
   }
   aTarget = p->aWritePg[iPg].aNew;
+  assert( aTarget );
 
   /* At this point, once the page that will be modified has been loaded
   ** and marked as writable, if the operation is on an internal list:
