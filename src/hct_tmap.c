@@ -110,6 +110,7 @@ struct HctTMapClient {
 struct HctTMapServer {
   sqlite3_mutex *pMutex;          /* Mutex to protect this object */
   int nTidStep;
+  int nClient;                    /* Number of connected clients */
   u64 iMinMinTid;                 /* Smallest iMinTid value in pList */
   HctTMapFull *pList;             /* List of tmaps. Newest first */
 };
@@ -121,6 +122,9 @@ struct HctTMapFull {
   HctTMapRef *pRefList;
   HctTMapFull *pNext;             /* Next entry in HctTMapServer.pList */
 };
+
+#define ENTER_TMAP_MUTEX(pClient) sqlite3_mutex_enter(pClient->pServer->pMutex)
+#define LEAVE_TMAP_MUTEX(pClient) sqlite3_mutex_leave(pClient->pServer->pMutex)
 
 /*
 ** Atomic version of:
@@ -234,6 +238,9 @@ int sqlite3HctTMapClientNew(HctTMapServer *p, HctTMapClient **ppClient){
     rc = SQLITE_NOMEM_BKPT;
   }else{
     pNew->pServer = p;
+    ENTER_TMAP_MUTEX(pNew);
+    pNew->pServer->nClient++;
+    LEAVE_TMAP_MUTEX(pNew);
   }
   *ppClient = pNew;
   return rc;
@@ -336,9 +343,9 @@ int sqlite3HctTMapBegin(HctTMapClient *pClient, HctTMap **ppMap){
       break;
     }else{
       assert( HctAtomicLoad(&pRef->refMask)==0 );
-      sqlite3_mutex_enter(pClient->pServer->pMutex);
+      ENTER_TMAP_MUTEX(pClient);
       hctTMapGetRef(pClient->pServer, pRef);
-      sqlite3_mutex_leave(pClient->pServer->pMutex);
+      LEAVE_TMAP_MUTEX(pClient);
     }
   }
 
@@ -370,9 +377,9 @@ static void hctTMapUpdateSafe(HctTMapClient *pClient){
 */
 int sqlite3HctTMapUpdate(HctTMapClient *pClient, HctTMap **ppMap){
   assert( pClient->eState==HCT_CLIENT_OPEN || pClient->eState==HCT_CLIENT_UP );
-  sqlite3_mutex_enter(pClient->pServer->pMutex);
+  ENTER_TMAP_MUTEX(pClient);
   hctTMapUpdateSafe(pClient);
-  sqlite3_mutex_leave(pClient->pServer->pMutex);
+  LEAVE_TMAP_MUTEX(pClient);
   *ppMap = &pClient->aRef[pClient->iRef].pMap->m;
   return SQLITE_OK;
 }
@@ -394,9 +401,9 @@ int sqlite3HctTMapEnd(HctTMapClient *pClient, u64 iCID){
   if( pClient->eState==HCT_CLIENT_UP ){
     pRef = &pClient->aRef[!pClient->iRef];
     assert( HctAtomicLoad(&pRef->refMask) & HCT_TMAPREF_CLIENT );
-    sqlite3_mutex_enter(pClient->pServer->pMutex);
+    ENTER_TMAP_MUTEX(pClient);
     hctTMapDropRef(pClient->pServer, pRef);
-    sqlite3_mutex_leave(pClient->pServer->pMutex);
+    LEAVE_TMAP_MUTEX(pClient);
   }
 
   /* Check if the current reference also needs to be dropped. It needs to
@@ -410,9 +417,9 @@ int sqlite3HctTMapEnd(HctTMapClient *pClient, u64 iCID){
   if( iCID>=pClient->iDerefCID
    || 0==hctTMapBoolCAS32(&pRef->refMask, HCT_TMAPREF_BOTH, HCT_TMAPREF_SERVER)
   ){
-    sqlite3_mutex_enter(pClient->pServer->pMutex);
+    ENTER_TMAP_MUTEX(pClient);
     hctTMapDropRef(pClient->pServer, pRef);
-    sqlite3_mutex_leave(pClient->pServer->pMutex);
+    LEAVE_TMAP_MUTEX(pClient);
     pClient->iDerefCID = 0;
   }
 
@@ -420,14 +427,15 @@ int sqlite3HctTMapEnd(HctTMapClient *pClient, u64 iCID){
   return SQLITE_OK;
 }
 
-void sqlite3HctTMapClientFree(HctTMapClient *p){
-  if( p ){
-    assert( p->eState==HCT_CLIENT_NONE );
-    sqlite3_mutex_enter(p->pServer->pMutex);
-    hctTMapDropRef(p->pServer, &p->aRef[0]);
-    hctTMapDropRef(p->pServer, &p->aRef[1]);
-    sqlite3_mutex_leave(p->pServer->pMutex);
-    sqlite3_free(p);
+void sqlite3HctTMapClientFree(HctTMapClient *pClient){
+  if( pClient ){
+    assert( pClient->eState==HCT_CLIENT_NONE );
+    ENTER_TMAP_MUTEX(pClient);
+    hctTMapDropRef(pClient->pServer, &pClient->aRef[0]);
+    hctTMapDropRef(pClient->pServer, &pClient->aRef[1]);
+    pClient->pServer->nClient--;
+    LEAVE_TMAP_MUTEX(pClient);
+    sqlite3_free(pClient);
   }
 }
 
@@ -497,6 +505,9 @@ static HctTMapFull *hctTMapNewObject(
 ** Return the largest TID for which it is safe to reuse freed pages.
 */
 u64 sqlite3HctTMapSafeTID(HctTMapClient *p){
+  if( HctAtomicLoad(&p->pServer->nClient)==1 ){
+    return ((u64)1<<56) - 1;
+  }
   return HctAtomicLoad(&p->pServer->iMinMinTid);
 }
 
@@ -528,7 +539,7 @@ int sqlite3HctTMapNewTID(
   assert( (p->aRef[p->iRef].refMask & HCT_TMAPREF_CLIENT) );
 
   if( (iTid % nTidStep)==0 || nMapReq>pMap->m.nMap ){
-    sqlite3_mutex_enter(p->pServer->pMutex);
+    ENTER_TMAP_MUTEX(p);
     pMap = p->pServer->pList;
     if( (iTid % nTidStep)==0 || nMapReq>pMap->m.nMap ){
       /* Create a new HctTMapFull object! */
@@ -544,7 +555,7 @@ int sqlite3HctTMapNewTID(
       }
     }
     hctTMapUpdateSafe(p);
-    sqlite3_mutex_leave(p->pServer->pMutex);
+    LEAVE_TMAP_MUTEX(p);
   }
 
   *ppMap = &p->aRef[p->iRef].pMap->m;
