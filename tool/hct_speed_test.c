@@ -34,10 +34,9 @@ struct Error {
 struct Thread {
   int iTid;                       /* Thread number within test */
   void* pArg;                     /* Pointer argument passed by caller */
-  int nTrans;                     /* Number of transactions run by thread */
 
   pthread_t tid;                  /* Thread id */
-  char *(*xProc)(int,void*,int*); /* Thread main proc */
+  char *(*xProc)(int,void*);      /* Thread main proc */
   char *zRes;                     /* Value returned by xProc */
   Thread *pNext;                  /* Next in this list of threads */
 };
@@ -237,14 +236,14 @@ static void system_error(Error *pErr, int iSys){
 
 static void *launch_thread_main(void *pArg){
   Thread *p = (Thread *)pArg;
-  p->zRes = p->xProc(p->iTid, p->pArg, &p->nTrans);
+  p->zRes = p->xProc(p->iTid, p->pArg);
   return 0;
 }
 
 static void hst_launch_thread(
   Error *pErr,                    /* IN/OUT: Error code */
   Threadset *pThreads,            /* Thread set */
-  char *(*xProc)(int,void*,int*), /* Proc to run */
+  char *(*xProc)(int,void*),      /* Proc to run */
   void *pArg                      /* Argument passed to thread proc */
 ){
   if( pErr->rc==SQLITE_OK ){
@@ -278,12 +277,10 @@ static sqlite3_int64 hst_current_time(){
 
 static void hst_join_threads(
   Error *pErr,                    /* IN/OUT: Error code */
-  Threadset *pThreads,            /* Thread set */
-  int *pnTrans
+  Threadset *pThreads             /* Thread set */
 ){
   Thread *p;
   Thread *pNext;
-  int nTrans = 0;
   for(p=pThreads->pThread; p; p=pNext){
     void *ret = 0;
     int rc = SQLITE_OK;
@@ -294,16 +291,14 @@ static void hst_join_threads(
     if( rc!=0 ){
       if( pErr->rc==SQLITE_OK ) system_error(pErr, rc);
     }else{
-      printf("Thread %d says: [%d] %s\n", 
-          p->iTid, p->nTrans, (p->zRes==0 ? "..." : p->zRes)
+      printf("Thread %d says: %s\n", 
+          p->iTid, (p->zRes==0 ? "..." : p->zRes)
       );
       fflush(stdout);
-      nTrans += p->nTrans;
     }
     sqlite3_free(p->zRes);
     sqlite3_free(p);
   }
-  *pnTrans = nTrans;
   pThreads->pThread = 0;
 }
 
@@ -325,6 +320,13 @@ struct Testcase {
   int nSleep;
   int nScan;
   int szScan;
+};
+
+typedef struct TestCtx TestCtx;
+struct TestCtx {
+  Testcase *pTst;
+  int nTotalTrans;                /* Total number of transactions attempted */
+  int nBusyTrans;                 /* Number of SQLITE_BUSY errors */
 };
 
 /*
@@ -375,8 +377,9 @@ static void updateBlobFunc(
   sqlite3_free(aCopy);
 }
 
-static char *test_thread(int iTid, void *pArg, int *pnTrans){
-  Testcase *pTst = (Testcase*)pArg;
+static char *test_thread(int iTid, void *pArg){
+  TestCtx *pCtx = (TestCtx*)pArg;
+  Testcase *pTst = pCtx->pTst;
   sqlite3 *db = 0;
   sqlite3_stmt *pBegin = 0;
   sqlite3_stmt *pCommit = 0;
@@ -516,7 +519,8 @@ static char *test_thread(int iTid, void *pArg, int *pnTrans){
       nWrite, nBusy, (int)nCasFail,
       (int)(((i64)nWrite * 1000) / (iEndTime - iStartTime)), nError
   );
-  *pnTrans = nWrite;
+  pCtx->nTotalTrans = nWrite;
+  pCtx->nBusyTrans = nBusy;
 
   sqlite3_free(aUpdate);
   sqlite3_free(aVal);
@@ -584,10 +588,13 @@ static void runtest(Testcase *pTst){
   sqlite3_stmt *pIC = 0;
   int ii;
   int iDb;
+
   int nTrans;
+  int nBusy;
 
   Error err;
   Threadset threadset;
+  TestCtx *aCtx = 0;
 
   memset(&err, 0, sizeof(err));
   memset(&threadset, 0, sizeof(threadset));
@@ -602,6 +609,12 @@ static void runtest(Testcase *pTst){
     test_build_db(&err, pTst, iDb);
   }
 
+  aCtx = sqlite3_malloc(sizeof(TestCtx)*(pTst->nThread+1));
+  memset(aCtx, 0, sizeof(TestCtx)*pTst->nThread);
+  for(iDb=0; iDb<pTst->nThread; iDb++){
+    aCtx[iDb].pTst = pTst;
+  }
+
   if( pTst->nSleep ){
     printf("sleeping for %d seconds\n", pTst->nSleep);
     sleep(pTst->nSleep);
@@ -612,16 +625,30 @@ static void runtest(Testcase *pTst){
 
   printf("launching %d threads\n", pTst->nThread);
   for(ii=0; ii<pTst->nThread; ii++){
-    hst_launch_thread(&err, &threadset, test_thread, (void*)pTst);
+    hst_launch_thread(&err, &threadset, test_thread, (void*)&aCtx[ii]);
   }
-  hst_join_threads(&err, &threadset, &nTrans);
+  hst_join_threads(&err, &threadset);
+
+  nTrans = 0;
+  nBusy = 0;
+  for(ii=0; ii<pTst->nThread; ii++){
+    nTrans += aCtx[ii].nTotalTrans;
+    nBusy += aCtx[ii].nBusyTrans;
+  }
 
   if( pTst->nSecond ){
     printf("Total transactions: %d (%d/second) (%d/cpu-second)\n", nTrans,
         nTrans / pTst->nSecond,
         nTrans / (pTst->nSecond*pTst->nThread)
     );
+
+    printf("INSERT INTO tests(name, nthread, nsecond, ntrans, nbusy) VALUES(");
+    printf("'-nup %d -nscan %d', %d, %d, %d, %d);\n",
+        pTst->nUpdate, pTst->nScan, pTst->nThread, pTst->nSecond,
+        nTrans, nBusy
+    );
   }
+
 
   if( pTst->bSeparate==0 ){
     char *zFile = sqlite3_mprintf("%s0", HST_DATABASE_NAME);
