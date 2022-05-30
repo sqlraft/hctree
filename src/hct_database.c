@@ -608,6 +608,7 @@ static int hctDbIntkeyLeafSearch(
   int i1 = 0;
   int i2 = pLeaf->pg.nEntry;
 
+  assert( hctPagetype(aPg)==HCT_PAGETYPE_INTKEY );
   assert( pLeaf->pg.nHeight==0 );
   while( i2>i1 ){
     int iTest = (i1+i2)/2;
@@ -3851,25 +3852,37 @@ static int hctDbValidateIntkey(HctDatabase *pDb, HctDbCsr *pCsr){
   pCsr->intkey.pOpList = 0;
   assert( pCsr->intkey.pCurrentOp==0 );
   for(pOp=pOpList; pOp && rc==SQLITE_OK; pOp=pOp->pNextOp){
+    int bDum = 0;
     assert( pOp->iFirst<=pOp->iLast );
 
-    if( pOp->iLogical
-     && pOp->iPhysical==sqlite3HctFilePageMapping(pDb->pFile, pOp->iLogical)
-    ){
-      continue;
+    if( pOp->iLogical ){
+      int bEvict = 0;
+      u32 iPhys = sqlite3HctFilePageMapping(pDb->pFile, pOp->iLogical, &bEvict);
+      if( pOp->iPhysical==iPhys ) continue;
+      if( bEvict==0 && pOp->iLogical!=pCsr->iRoot ){
+        rc = sqlite3HctFilePageGetPhysical(pDb->pFile, iPhys, &pCsr->pg);
+        if( rc==SQLITE_OK ){
+          pCsr->eDir = BTREE_DIR_FORWARD;
+          pCsr->iCell = hctDbIntkeyLeafSearch(pCsr->pg.aOld, pOp->iFirst,&bDum);
+          if( pCsr->iCell>=((HctDbIntkeyLeaf*)pCsr->pg.aOld)->pg.nEntry ){
+            hctDbCsrReset(pCsr);
+          }
+        }
+      }
     }
 
-    if( pOp->iFirst==SMALLEST_INT64 ){
-      pCsr->eDir = BTREE_DIR_FORWARD;
-      rc = hctDbCsrFirst(pCsr);
-    }else{
-      int bDummy = 0;
-      if( pOp->iFirst==pOp->iLast ){
-        pCsr->eDir = BTREE_DIR_NONE;
-      }else{
+    if( pCsr->pg.aOld==0 ){
+      if( pOp->iFirst==SMALLEST_INT64 ){
         pCsr->eDir = BTREE_DIR_FORWARD;
+        rc = hctDbCsrFirst(pCsr);
+      }else{
+        if( pOp->iFirst==pOp->iLast ){
+          pCsr->eDir = BTREE_DIR_NONE;
+        }else{
+          pCsr->eDir = BTREE_DIR_FORWARD;
+        }
+        rc = hctDbCsrSeek(pCsr, 0, 0, 0, pOp->iFirst, &bDum);
       }
-      rc = hctDbCsrSeek(pCsr, 0, 0, 0, pOp->iFirst, &bDummy);
     }
 
     while( rc==SQLITE_OK && !sqlite3HctDbCsrEof(pCsr) ){
@@ -3899,9 +3912,10 @@ static int hctDbValidateIndex(HctDatabase *pDb, HctDbCsr *pCsr){
   rc = hctDbAllocateUnpacked(pCsr);
   for(pOp=pOpList; pOp && rc==SQLITE_OK; pOp=pOp->pNextOp){
     UnpackedRecord *pRec = pCsr->pRec;
+    int bDummy = 0;
 
     if( pOp->iLogical
-     && pOp->iPhysical==sqlite3HctFilePageMapping(pDb->pFile, pOp->iLogical)
+     && pOp->iPhysical==sqlite3HctFilePageMapping(pDb->pFile, pOp->iLogical, &bDummy)
     ){
       continue;
     }

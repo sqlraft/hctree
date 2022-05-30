@@ -977,8 +977,10 @@ int sqlite3HctFilePageGet(HctFile *pFile, u32 iPg, HctFilePage *pPg){
   return rc;
 }
 
-u32 sqlite3HctFilePageMapping(HctFile *pFile, u32 iLogical){
-  return (u32)(hctFilePagemapGet(pFile->pMapping, iLogical) & 0xFFFFFFFF);
+u32 sqlite3HctFilePageMapping(HctFile *pFile, u32 iLogical, int *pbEvicted){
+  u64 val = hctFilePagemapGet(pFile->pMapping, iLogical);
+  *pbEvicted = (val & HCT_PMF_LOGICAL_EVICTED) ? 1 : 0;
+  return (u32)(val & 0xFFFFFFFF);
 }
 
 /*

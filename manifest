@@ -1,5 +1,5 @@
-C Add\sTcl\sscript\sto\sbuild\shtml\stable\sfrom\shct_speed_test\soutput.
-D 2022-05-28T20:23:01.442
+C Speed\sup\sintkey\svalidation\sa\slittle\sbit\sby\sjumping\sstraight\sto\sthe\sleaf\spage\sinstead\sof\sseeking\sthrough\sthe\supper\slists.
+D 2022-05-30T20:40:41.227
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -521,11 +521,11 @@ F src/func.c a3407a6fbb0d4088d8d502e46f0ace63e0aeae7467ae23a9ca9815bbf9239761
 F src/global.c e83ee571b79ee3adc32e380cf554cf1254bc43763d23786c71721fbcdfbbb965
 F src/hash.c 8d7dda241d0ebdafb6ffdeda3149a412d7df75102cecfc1021c98d6219823b19
 F src/hash.h 3340ab6e1d13e725571d7cee6d3e3135f0779a7d8e76a9ce0a85971fa3953c51
-F src/hctInt.h e5c18b02ec72fdcd21a666f16ed0563428cb81a236d19e3680b009af088ed4a2
+F src/hctInt.h 1d04689b5deb3d659a5445adff850133abbd6fd6f1dfd5842627b260baddd72b
 F src/hctPManInt.h b2fad3181b093c3796a35f78df2efb506309a06af77e2e2adb043e85ecb740af
 F src/hctTMapInt.h 5d5407435259ccdb4d369c89ed45a335aa63beb57b391f631ef63e591a40fcd9
-F src/hct_database.c edf72b2778b70193dd7b598f6e5e2ddb353c24feb4e344b5733e7f7d6d85dc53
-F src/hct_file.c ddc3c56047f938724039eca206e8ec2490ef7b0673a0cca90e0c730889c02404
+F src/hct_database.c 2d875230787e9f1b21ba110d08995750296a4dcb558f0f72dc425e758a685079
+F src/hct_file.c 6ac903ab52cca9acf34156046bcb5896a6380fe9e08f9e7c0e18a52747f1c851
 F src/hct_pman.c 15ff9ece5c09ff8b178f6b72a6d80286333e6cb5f72427ebe4fe234cd862c37a
 F src/hct_record.c 54b0d564be580ca29a54312f9a9abdba193b234ac56ec65a7e40109107041b25
 F src/hct_tmap.c ce571b66fe80a12f57d4bfef16e2d61a064d2926f0a27ae65fc96a18667f96ac
@@ -1986,8 +1986,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P 3721d3a9f758244778d899170d905de17301a58c1a09091f1fa486d4f95c37f0
-R 18898bcdce7fa442fe573a6d310e501b
+P bf483143d327418d3f82a68a4453ad4b4c07ee90d3231b85d9c5c36ba6cbfd83
+R 2f203e1ae96e939d73a8f0f1f52f2d7f
 U dan
-Z 3fbf969cb5e7560daf92477aeede8389
+Z 66261b89798efa568e6c626bc6b64854
 # Remove this line to create a well-formed Fossil manifest.
