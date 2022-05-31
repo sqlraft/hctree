@@ -29,7 +29,7 @@ modifies exactly one row as follows:
 Each scan is:
 
 <pre>
-      SELECT * FROM tbl WHERE substr(c, 1, 16)>=hex(frandomblob(8)) ORDER BY substr(c, 1, 16);
+      SELECT * FROM tbl WHERE substr(c, 1, 16)>=hex(frandomblob(8)) ORDER BY substr(c, 1, 16) LIMIT 10;
 </pre>
 
 Each test consists of either between 1 and 8 threads running transctions
