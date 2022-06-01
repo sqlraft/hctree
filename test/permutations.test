@@ -198,11 +198,11 @@ hct_pman1.test
 hct_reopen1.test
 hct_simple_rollback.test
 
-  update.test
   select2.test select4.test select5.test
   select6.test select7.test select8.test select9.test
   selectA.test
 }
+# update.test
 
 # select3.test
 # delete2.test delete3.test

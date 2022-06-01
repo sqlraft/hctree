@@ -16,8 +16,12 @@ foreach f $argv {
   }
 }
 
-set lThread [db eval {SELECT DISTINCT nthread FROM tests}]
-set lTest [db eval {SELECT DISTINCT name FROM tests}]
+set lThread [db eval {
+  SELECT DISTINCT nthread FROM tests ORDER BY typeof(nthread) DESC, nthread
+}]
+set lTest [db eval {
+  SELECT DISTINCT name FROM tests ORDER BY name NOT LIKE '%sep%'
+}]
 
 puts -nonewline "<table border=1 cellpadding=10>"
 puts -nonewline "<tr><th>Test"
@@ -31,10 +35,10 @@ foreach test $lTest {
   foreach t $lThread {
     puts -nonewline <td>
     db eval {
-      SELECT (ntrans/nsecond) || ' (' || (nbusy/nsecond) || ')' || ' ' 
-        || cast((100 * ntrans/nsecond) / (
+      SELECT (ntrans/nsecond) || ' (' || round((100.0*nbusy)/ntrans,1) || '%)' || ' <b>' 
+        || cast((100 * ntrans/(nsecond*(CASE WHEN typeof(nthread)=='integer' THEN nthread ELSE 1 END) )) / (
           SELECT avg(ntrans/nsecond) FROM tests WHERE name=$test AND nthread=1
-        ) AS int) || '%' 
+        ) AS int) || '%</b>' 
         AS line
       FROM tests WHERE name=$test AND nthread=$t
     } {

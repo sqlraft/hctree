@@ -92,6 +92,7 @@ struct HctTMapClient {
   int eState;
   u64 iDerefCID;                  /* Drop all references at/after this CID */
   int iRef;                       /* Current entry in aRef[2], or -1 for none */
+  u64 iThisTid;                   /* TID of current/last transaction */
   HctTMapRef aRef[2];             /* Pair of tmap references */
 };
 
@@ -506,7 +507,7 @@ static HctTMapFull *hctTMapNewObject(
 */
 u64 sqlite3HctTMapSafeTID(HctTMapClient *p){
   if( HctAtomicLoad(&p->pServer->nClient)==1 ){
-    return ((u64)1<<56) - 1;
+    return p->iThisTid-1;
   }
   return HctAtomicLoad(&p->pServer->iMinMinTid);
 }
@@ -538,6 +539,7 @@ int sqlite3HctTMapNewTID(
   assert( p->eState!=HCT_CLIENT_NONE );
   assert( (p->aRef[p->iRef].refMask & HCT_TMAPREF_CLIENT) );
 
+  p->iThisTid = iTid;
   if( (iTid % nTidStep)==0 || nMapReq>pMap->m.nMap ){
     ENTER_TMAP_MUTEX(p);
     pMap = p->pServer->pList;

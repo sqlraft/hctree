@@ -193,7 +193,11 @@ static void hst_sqlite3_reset(Error *pErr, sqlite3_stmt *pStmt){
   hst_sqlite3_reset(pErr, pStmt)         \
 )
 
-static i64 hst_sqlite3_exec_i64(Error *pErr, sqlite3 *db, const char *zSql){
+static i64 hst_sqlite3_exec_i64(
+  Error *pErr, 
+  sqlite3 *db, 
+  const char *zSql
+){
   i64 iRet = 0;
   sqlite3_stmt *p = hst_sqlite3_prepare(pErr, db, zSql);
   if( p && SQLITE_ROW==sqlite3_step(p) ){
@@ -446,6 +450,7 @@ static char *test_thread(int iTid, void *pArg){
       printf("t%d: %d transactions at %d/second\n", iTid, (int)nIntervalWrite, 
           (int)((nIntervalWrite * 1000) / (iNow - iIntervalTime))
       );
+      fflush(stdout);
       iIntervalTime = iNow;
       iIntervalWrite = nWrite;
     }
@@ -543,6 +548,7 @@ static void test_build_db(Error *pErr, Testcase *pTst, int iDb){
   sqlite3_stmt *pIns = 0;
   sqlite3 *db = 0;
   char *zFile = sqlite3_mprintf("%s%d", HST_DATABASE_NAME, iDb);
+  const int nInsertPerTrans = 10000;
 
   db = hst_sqlite3_open(zFile);
   hst_sqlite3_exec(db,
@@ -576,6 +582,11 @@ static void test_build_db(Error *pErr, Testcase *pTst, int iDb){
 
     sqlite3_step(pIns);
     hst_sqlite3_reset(pErr, pIns);
+
+    if( (ii % nInsertPerTrans)==(nInsertPerTrans-1) && ii!=pTst->nRow ){
+      hst_sqlite3_exec(db, "COMMIT");
+      hst_sqlite3_exec(db, "bEGIN");
+    }
   }
   hst_sqlite3_exec(db, "COMMIT");
   sqlite3_finalize(pIns);
@@ -584,6 +595,7 @@ static void test_build_db(Error *pErr, Testcase *pTst, int iDb){
 }
 
 static void runtest(Testcase *pTst){
+  char *zFile = 0;
   sqlite3 *db = 0;
   sqlite3_stmt *pIC = 0;
   int ii;
@@ -636,23 +648,37 @@ static void runtest(Testcase *pTst){
     nBusy += aCtx[ii].nBusyTrans;
   }
 
+  zFile = sqlite3_mprintf("%s0", HST_DATABASE_NAME);
+  db = hst_sqlite3_open(zFile);
+
   if( pTst->nSecond ){
+    char *zThread = 0;
+    sqlite3_stmt *p = hst_sqlite3_prepare(&err, db, "PRAGMA hct_ncasfail");
+    if( SQLITE_ROW==sqlite3_step(p) || pTst->nThread>1 ){
+      zThread = sqlite3_mprintf("%d", pTst->nThread);
+    }else{
+      zThread = sqlite3_mprintf("'stock'");
+    }
+    hst_sqlite3_reset(&err, p);
+    sqlite3_finalize(p);
+
     printf("Total transactions: %d (%d/second) (%d/cpu-second)\n", nTrans,
         nTrans / pTst->nSecond,
         nTrans / (pTst->nSecond*pTst->nThread)
     );
 
     printf("INSERT INTO tests(name, nthread, nsecond, ntrans, nbusy) VALUES(");
-    printf("'-nup %d -nscan %d', %d, %d, %d, %d);\n",
-        pTst->nUpdate, pTst->nScan, pTst->nThread, pTst->nSecond,
+    printf("'-nup %d -nscan %d%s', %s, %d, %d, %d);\n",
+        pTst->nUpdate, pTst->nScan, 
+        pTst->bSeparate ? " -sep 1" : "",
+        zThread, pTst->nSecond,
         nTrans, nBusy
     );
+    sqlite3_free(zThread);
   }
 
 
   if( pTst->bSeparate==0 ){
-    char *zFile = sqlite3_mprintf("%s0", HST_DATABASE_NAME);
-    db = hst_sqlite3_open(zFile);
     pIC = hst_sqlite3_prepare(&err, db, "PRAGMA integrity_check");
     if( pIC ){
       while( sqlite3_step(pIC)==SQLITE_ROW ){
@@ -663,6 +689,7 @@ static void runtest(Testcase *pTst){
     hst_sqlite3_exec_debug(&err, db, "");   /* to avoid a compiler warning */
   }
 
+  sqlite3_close(db);
   hst_print_and_free_err(&err);
 }
 
@@ -697,6 +724,7 @@ int main(int argc, char **argv){
   tst.szScan = 10;
 
   sqlite3_config(SQLITE_CONFIG_LOG, log_callback, 0);
+  sqlite3_config(SQLITE_CONFIG_MEMSTATUS, (int)0);
 
   for(iArg=1; iArg<argc; iArg++){
     const char *zArg = argv[iArg];

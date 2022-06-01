@@ -63,12 +63,17 @@ struct HctTreeNode {
   HctTreeNode *pClobber;          /* If non-NULL, entry this one clobbered */
 };
 
+/*
+** pCsrCache:
+**   List of unused cursor objects for this table/index.
+*/
 struct HctTreeRoot {
   u32 iRoot;                      /* Name of this tree structure */
   KeyInfo *pKeyInfo;
   HctTreeNode *pNode;             /* Root node of tree (or NULL) */
   HctTreeRoot *pHashNext;         /* Next entry in hash-chain */
   HctTreeCsr *pCsrList;           /* Cursors open on this tree */
+  HctTreeCsr *pCsrCache;          /* Cache of unused cursor objects */
 };
 
 /*
@@ -84,14 +89,20 @@ static void *hctMallocZero(int nByte){
 
 int sqlite3HctTreeNew(HctTree **ppTree){
   HctTree *pNew;
+  int rc = SQLITE_OK;
 
   pNew = (HctTree*)hctMallocZero(sizeof(HctTree));
-  if( pNew==0 ) {
-    return SQLITE_NOMEM;
+  if( pNew ){
+    pNew->apRootHash = (HctTreeRoot**)hctMallocZero(sizeof(HctTreeRoot*)*16);
+    pNew->nRootHash = 16;
+  }
+  if( pNew==0 || pNew->apRootHash==0 ){
+    sqlite3_free(pNew);
+    rc = SQLITE_NOMEM_BKPT;
   }
 
   *ppTree = pNew;
-  return SQLITE_OK;
+  return rc;
 }
 
 static void treeNodeUnref(HctTreeNode *pNode){
@@ -119,8 +130,14 @@ void sqlite3HctTreeFree(HctTree *pTree){
     for(i=0; i<pTree->nRootHash; i++){
       while( pTree->apRootHash[i] ){
         HctTreeRoot *p = pTree->apRootHash[i];
+        HctTreeCsr *pCsr = p->pCsrCache;
         sqlite3KeyInfoUnref(p->pKeyInfo);
         pTree->apRootHash[i] = p->pHashNext;
+        while( pCsr ){
+          HctTreeCsr *pNext = pCsr->pCsrNext;
+          sqlite3_free(pCsr);
+          pCsr = pNext;
+        }
         hctTreeFreeNode(p->pNode);
         sqlite3_free(p);
       }
@@ -208,14 +225,12 @@ static HctTreeRoot *hctTreeFindRoot(HctTree *pTree, u32 iRoot){
 
   /* Search the hash table for an existing root. Return immediately if 
   ** one is found.  */
-  if( pTree->nRootHash ){
-    HctTreeRoot *pRoot;
-    for(pRoot = pTree->apRootHash[iRoot % pTree->nRootHash];
-        pRoot;
-        pRoot=pRoot->pHashNext
-    ){
-      if( pRoot->iRoot==iRoot ) return pRoot;
-    }
+  HctTreeRoot *pRoot;
+  for(pRoot = pTree->apRootHash[iRoot % pTree->nRootHash];
+      pRoot;
+      pRoot=pRoot->pHashNext
+  ){
+    if( pRoot->iRoot==iRoot ) return pRoot;
   }
 
   /* If the hash table needs to grow, do that now */
@@ -868,24 +883,16 @@ int sqlite3HctTreeRollbackTo(HctTree *pTree, int iStmt){
 */
 void sqlite3HctTreeClear(HctTree *pTree){
   int i;
-  for(i=0; i<pTree->nRootHash; i++){
-    HctTreeRoot **pp = &pTree->apRootHash[i];
-    while( *pp ){
-      HctTreeRoot *p = *pp;
+  HctTreeRoot **pp;
+  HctTreeRoot **pEnd = &pTree->apRootHash[pTree->nRootHash];
+  for(pp=pTree->apRootHash; pp<pEnd; pp++){
+    HctTreeRoot *p;
+    for(p=*pp; p; p=p->pHashNext){
       hctSaveCursors(p, 0);
       hctTreeFreeNode(p->pNode);
       p->pNode = 0;
       sqlite3KeyInfoUnref(p->pKeyInfo);
       p->pKeyInfo = 0;
-      if( p->pCsrList==0 ){
-        /* If the cursor-list is empty, also delete the HctTreeRoot 
-        ** structure itself. */
-        *pp = p->pHashNext;
-        sqlite3_free(p);
-        pTree->nRootEntry--;
-      }else{
-        pp = &p->pHashNext;
-      }
     }
   }
 }
@@ -921,16 +928,25 @@ int sqlite3HctTreeCsrOpen(HctTree *pTree, u32 iRoot, HctTreeCsr **ppCsr){
   if( pRoot==0 ){
     rc = SQLITE_NOMEM;
   }else{
-    pNew = (HctTreeCsr*)hctMallocZero(sizeof(HctTreeCsr));
-    if( pNew==0 ){
-      rc = SQLITE_NOMEM;
+    if( pRoot->pCsrCache ){
+      pNew = pRoot->pCsrCache;
+      pRoot->pCsrCache = pNew->pCsrNext;
+      pNew->pCsrNext = 0;
+      assert( pNew->pTree==pTree );
+      assert( pNew->pRoot==pRoot );
+      assert( pNew->iNode==-1 );
     }else{
-      pNew->pTree = pTree;
-      pNew->pRoot = pRoot;
-      pNew->iNode = -1;
-      pNew->pCsrNext = pRoot->pCsrList;
-      pRoot->pCsrList = pNew;
+      pNew = (HctTreeCsr*)hctMallocZero(sizeof(HctTreeCsr));
+      if( pNew==0 ){
+        rc = SQLITE_NOMEM;
+      }else{
+        pNew->pTree = pTree;
+        pNew->pRoot = pRoot;
+        pNew->iNode = -1;
+      }
     }
+    pNew->pCsrNext = pRoot->pCsrList;
+    pRoot->pCsrList = pNew;
   }
   *ppCsr = pNew;
   return rc;
@@ -941,8 +957,15 @@ int sqlite3HctTreeCsrClose(HctTreeCsr *pCsr){
     HctTreeCsr **pp;
     for(pp=&pCsr->pRoot->pCsrList; *pp!=pCsr; pp=&(*pp)->pCsrNext);
     *pp = pCsr->pCsrNext;
-    if( pCsr->pReseek ) treeNodeUnref(pCsr->pReseek);
-    sqlite3_free(pCsr);
+    if( pCsr->pReseek ){
+      treeNodeUnref(pCsr->pReseek);
+      pCsr->pReseek = 0;
+    }
+    pCsr->pCsrNext = pCsr->pRoot->pCsrCache;
+    pCsr->pRoot->pCsrCache = pCsr;
+    pCsr->iSkip = 0;
+    pCsr->bPin = 0;
+    pCsr->iNode = -1;
   }
   return SQLITE_OK;
 }
