@@ -1,13 +1,13 @@
 B 65ee971274e68a0e043c5130588d5a4c8dab78943fe035c1c88ccf0bdfa94ba3
-C Test\sprogram\senhancements.
-D 2022-06-01T20:35:36.122
+C Add\scallgrind\smacros\sto\shct_speed_test.c.
+D 2022-06-03T15:15:48.916
 F src/hct_tmap.c a2227389df2d8b9d4b3cd8ea8273df439fada9ceee788931faccd17ff38ada98
 F src/hct_tree.c 2e230496533dd845dfb16332c76a492174cd85e90bc631e20aca403d03874445
 F test/permutations.test 109c97669dda843011f7fd4650686df13c62db1f16728cbadadf55e2155d2101
 F tool/hct_mkspeedtable.tcl fc45e2047cd7f55ab1df1895b19d54ed07faff0d3c375b5b55eec35c440587e1
-F tool/hct_speed_test.c bf19cc678e3ed19ec3738c1cdd5686c329895a0ac08b2bb5b30895effc46d195
-P 65ee971274e68a0e043c5130588d5a4c8dab78943fe035c1c88ccf0bdfa94ba3
-R abeafc4f1400a8bb773d5e8497202536
+F tool/hct_speed_test.c a5b7e92566ed9f54446f42865d9576ec5ed6845674d19c11b3cd1ff9c9cee173
+P 8c6d2122d8a35f3a29f13bea6c2387a45d7e7b0eaa89f34055428836e35655ba
+R 018518e8dc7b0c152bc9745847bb74b2
 U dan
-Z de5d0dbef1b147ad7489e58d5862d2a1
+Z f9b2698b8b46a46d34959fbd6256310d
 # Remove this line to create a well-formed Fossil manifest.

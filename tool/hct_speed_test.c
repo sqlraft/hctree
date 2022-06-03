@@ -15,6 +15,8 @@
 
 #include "sqlite3.h"
 
+#include <valgrind/callgrind.h>
+
 
 typedef sqlite3_int64 i64;
 typedef unsigned int u32;
@@ -442,6 +444,8 @@ static char *test_thread(int iTid, void *pArg){
   if( err.rc ) goto test_out;
   sqlite3_bind_int(pWrite, 1, iTid);
 
+  CALLGRIND_START_INSTRUMENTATION;
+
   iStartTime = iIntervalTime = hst_current_time();
   while( err.rc==SQLITE_OK ){
     i64 iNow = hst_current_time();
@@ -500,6 +504,8 @@ static char *test_thread(int iTid, void *pArg){
       nWrite++;
     }
   }
+
+  CALLGRIND_STOP_INSTRUMENTATION;
 
   iEndTime = hst_current_time();
   if( iEndTime<=iStartTime ) iEndTime = iStartTime + 1;
