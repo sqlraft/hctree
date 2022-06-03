@@ -1,3 +1,4 @@
+package require sqlite3
 
 sqlite3 db ""
 db eval {

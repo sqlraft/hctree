@@ -333,6 +333,7 @@ struct TestCtx {
   Testcase *pTst;
   int nTotalTrans;                /* Total number of transactions attempted */
   int nBusyTrans;                 /* Number of SQLITE_BUSY errors */
+  u32 *aVal;
 };
 
 /*
@@ -409,14 +410,11 @@ static char *test_thread(int iTid, void *pArg){
   int nError = 0;
 
   TestUpdate *aUpdate = 0;
-  u32 *aVal = 0;
   char *zFile = sqlite3_mprintf(
       "%s%d", HST_DATABASE_NAME, pTst->bSeparate ? iTid-1 : 0
   );
 
   aUpdate = sqlite3_malloc(sizeof(TestUpdate) * pTst->nUpdate);
-  aVal = sqlite3_malloc(sizeof(u32) * (pTst->nRow+1));
-  memset(aVal, 0, (pTst->nRow+1) * sizeof(u32));
 
   sqlite3_randomness(sizeof(FastPrng), (void*)&prng);
   db = hst_sqlite3_open(zFile);
@@ -498,7 +496,7 @@ static char *test_thread(int iTid, void *pArg){
         hst_sqlite3_reset(&err, pRollback);
       }else{
         for(ii=0; ii<pTst->nUpdate; ii++){
-          aVal[ aUpdate[ii].iRow ] = aUpdate[ii].iVal;
+          pCtx->aVal[ aUpdate[ii].iRow ] = aUpdate[ii].iVal;
         }
       }
       nWrite++;
@@ -517,7 +515,7 @@ static char *test_thread(int iTid, void *pArg){
     while( SQLITE_ROW==sqlite3_step(pSelect) ){
       int iRow = sqlite3_column_int(pSelect, 0);
       u32 *aBlob = (u32*)sqlite3_column_blob(pSelect, 1);
-      if( aBlob[iTid]!=aVal[iRow] ) nError++;
+      if( aBlob[iTid]!=pCtx->aVal[iRow] ) nError++;
     }
     sqlite3_finalize(pSelect);
   }
@@ -534,7 +532,6 @@ static char *test_thread(int iTid, void *pArg){
   pCtx->nBusyTrans = nBusy;
 
   sqlite3_free(aUpdate);
-  sqlite3_free(aVal);
 
   sqlite3_finalize(pBegin);
   sqlite3_finalize(pCommit);
@@ -549,12 +546,46 @@ static char *test_thread(int iTid, void *pArg){
   return zRet;
 }
 
-static void test_build_db(Error *pErr, Testcase *pTst, int iDb){
+static void test_build_db(Error *pErr, Testcase *pTst, int iDb, TestCtx *aCtx){
   int ii;
   sqlite3_stmt *pIns = 0;
   sqlite3 *db = 0;
   char *zFile = sqlite3_mprintf("%s%d", HST_DATABASE_NAME, iDb);
   const int nInsertPerTrans = 10000;
+  char *zRm = 0;
+
+  i64 nObj;
+
+  /* Check if the database is already populated */
+  db = hst_sqlite3_open(zFile);
+  nObj = hst_sqlite3_exec_i64(pErr, db, "SELECT count(*) FROM sqlite_schema");
+  if( nObj==pTst->nIdx+1 ){
+    i64 nRow = hst_sqlite3_exec_i64(pErr, db, "SELECT count(*) FROM tbl");
+    if( nRow==pTst->nRow ){
+      printf("reusing database %d.\n", iDb); 
+      /* The database already exists. Populate the aCtx[x].aVal arrays. */
+      sqlite3_stmt *p = hst_sqlite3_prepare(pErr, db, "SELECT a, b FROM tbl");
+      while( sqlite3_step(p)==SQLITE_ROW ){
+        int a = sqlite3_column_int(p, 0);
+        const u32 *b = (u32*)sqlite3_column_blob(p, 1);
+        aCtx[iDb].aVal[a] = b[iDb+1];
+      }
+      hst_sqlite3_reset(pErr, p);
+      sqlite3_finalize(p);
+      sqlite3_close(db);
+      return;
+    }
+  }
+  sqlite3_close(db);
+
+  zRm = sqlite3_mprintf(
+      "rm -rf %s%d; rm -rf %s%d-data; rm -rf %s%d-pagemap", 
+      HST_DATABASE_NAME, iDb,
+      HST_DATABASE_NAME, iDb,
+      HST_DATABASE_NAME, iDb
+  );
+  system(zRm);
+  sqlite3_free(zRm);
 
   db = hst_sqlite3_open(zFile);
   hst_sqlite3_exec(db,
@@ -591,7 +622,7 @@ static void test_build_db(Error *pErr, Testcase *pTst, int iDb){
 
     if( (ii % nInsertPerTrans)==(nInsertPerTrans-1) && ii!=pTst->nRow ){
       hst_sqlite3_exec(db, "COMMIT");
-      hst_sqlite3_exec(db, "bEGIN");
+      hst_sqlite3_exec(db, "BEGIN");
     }
   }
   hst_sqlite3_exec(db, "COMMIT");
@@ -617,20 +648,17 @@ static void runtest(Testcase *pTst){
   memset(&err, 0, sizeof(err));
   memset(&threadset, 0, sizeof(threadset));
 
-  for(ii=0; ii<32; ii++){
-    char *zRm = sqlite3_mprintf("rm -rf %s%d", HST_DATABASE_NAME, ii);
-    system(zRm);
-    sqlite3_free(zRm);
-  }
-
-  for(iDb=0; iDb<pTst->nThread && (iDb==0 || pTst->bSeparate); iDb++){
-    test_build_db(&err, pTst, iDb);
-  }
-
   aCtx = sqlite3_malloc(sizeof(TestCtx)*(pTst->nThread+1));
   memset(aCtx, 0, sizeof(TestCtx)*pTst->nThread);
   for(iDb=0; iDb<pTst->nThread; iDb++){
+    int nByte = sizeof(u32) * (pTst->nRow+1);
     aCtx[iDb].pTst = pTst;
+    aCtx[iDb].aVal = (u32*)sqlite3_malloc(nByte);
+    memset(aCtx[iDb].aVal, 0, nByte);
+  }
+
+  for(iDb=0; iDb<pTst->nThread && (iDb==0 || pTst->bSeparate); iDb++){
+    test_build_db(&err, pTst, iDb, aCtx);
   }
 
   if( pTst->nSleep ){
@@ -646,6 +674,11 @@ static void runtest(Testcase *pTst){
     hst_launch_thread(&err, &threadset, test_thread, (void*)&aCtx[ii]);
   }
   hst_join_threads(&err, &threadset);
+
+  for(iDb=0; iDb<pTst->nThread; iDb++){
+    sqlite3_free(aCtx[iDb].aVal);
+    aCtx[iDb].aVal = 0;
+  }
 
   nTrans = 0;
   nBusy = 0;
