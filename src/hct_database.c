@@ -2155,6 +2155,22 @@ static void assert_page_is_ok(const u8 *aData, int nData){
 # define assert_page_is_ok(x,y)
 #endif
 
+#ifdef SQLITE_DEBUG
+static void assert_all_pages_ok(HctDatabase *pDb, HctDbWriter *p){
+  int ii;
+  return;
+  for(ii=0; ii<p->nWritePg; ii++){
+    u8 *aPg = p->aWritePg[ii].aNew;
+    assert( aPg[0]!=0x00 );
+    assert( hctIsVarRecords(aPg) );
+    assert_page_is_ok(aPg, pDb->pgsz);
+  }
+}
+#else
+# define assert_all_pages_ok(x,y)
+#endif
+
+
 /*
 ** HOW INSERT/DELETE OPERATIONS WORK:
 **
@@ -2533,6 +2549,7 @@ hctDbBalanceGetCellSz(
     HctDbPageHdr *pPg = (HctDbPageHdr*)aPgCopy[ii];
     HctDbCellSz *pSz = &aSz[iSz];
 
+    assert( pPg->nEntry<pDb->pgsz );
     if( ii==iPg && iCell==iIns ){
       assert( nNewCell>0 || bClobber );
       if( nNewCell ){
@@ -2560,6 +2577,7 @@ hctDbBalanceGetCellSz(
         pSz->nByte = szEntry + hctDbPageRecordSize(pPg, pDb->pgsz, iCell);
         pSz->iPg = ii;
         pSz->iEntry = iCell;
+        assert( pSz->nByte>0 );
       }else{
         iSz--;
       }
@@ -2615,11 +2633,13 @@ static int hctDbBalance(
 
   /* If the HctDbWriter.aWritePg[] array still contains a single page, load
   ** some peer pages into it. */
+  assert( p->nDiscard>=0 );
   if( !bSingle ){
     rc = hctDbLoadPeers(pDb, p, &iPg);
     if( rc!=SQLITE_OK ){
       return rc;
     }
+    assert_all_pages_ok(pDb, p);
   }
 
   /* Determine the subset of HctDbWriter.aWritePg[] pages that will be 
@@ -2655,6 +2675,8 @@ static int hctDbBalance(
   for(ii=0; ii<nIn; ii++){
     aPgCopy[ii] = &pFree[pDb->pgsz * ii];
     memcpy(aPgCopy[ii], p->aWritePg[iLeftPg+ii].aNew, pDb->pgsz);
+    assert( hctIsVarRecords(aPgCopy[ii]) );
+    assert_page_is_ok(aPgCopy[ii], pDb->pgsz);
   }
 
   /* Populate the aSz[] array with the sizes and locations of each cell */
@@ -3145,6 +3167,7 @@ static int hctDbInsert(
   assert( p->nWritePg==0 || iRoot==p->writecsr.iRoot );
   if( p->nWritePg ){
     if( p->nWritePg>HCTDB_MAX_DIRTY 
+     || p->nDiscard>=HCTDB_MAX_DIRTY 
      || hctDbTestWriteFpKey(p, xCompare, pRec, iKey) 
     ){
       rc = hctDbInsertFlushWrite(pDb, p);
@@ -3403,9 +3426,9 @@ static int hctDbInsert(
   if( bBalance ){
     assert( bFullDel==0 || aEntry==0 );
     assert( bFullDel==0 || nEntry==0 );
-    assert_page_is_ok(aTarget, pDb->pgsz);
+    assert_all_pages_ok(pDb, p);
     rc = hctDbBalance(pDb, p, bSingle, &iPg, &iInsert, bClobber, nEntry);
-    assert_page_is_ok(aTarget, pDb->pgsz);
+    assert_all_pages_ok(pDb, p);
     aTarget = p->aWritePg[iPg].aNew;
   }else{
     if( bClobber ){
@@ -3448,7 +3471,7 @@ static int hctDbInsert(
   if( rc!=SQLITE_OK ){
     hctDbWriterCleanup(pDb, p, 1);
   }
-  assert_page_is_ok(aTarget, pDb->pgsz);
+  assert_all_pages_ok(pDb, p);
   return rc;
 }
 
