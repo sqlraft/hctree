@@ -2158,7 +2158,6 @@ static void assert_page_is_ok(const u8 *aData, int nData){
 #ifdef SQLITE_DEBUG
 static void assert_all_pages_ok(HctDatabase *pDb, HctDbWriter *p){
   int ii;
-  return;
   for(ii=0; ii<p->nWritePg; ii++){
     u8 *aPg = p->aWritePg[ii].aNew;
     assert( aPg[0]!=0x00 );
@@ -3428,7 +3427,7 @@ static int hctDbInsert(
     assert( bFullDel==0 || nEntry==0 );
     assert_all_pages_ok(pDb, p);
     rc = hctDbBalance(pDb, p, bSingle, &iPg, &iInsert, bClobber, nEntry);
-    assert_all_pages_ok(pDb, p);
+    if( rc==SQLITE_OK ) assert_all_pages_ok(pDb, p);
     aTarget = p->aWritePg[iPg].aNew;
   }else{
     if( bClobber ){
@@ -3471,7 +3470,7 @@ static int hctDbInsert(
   if( rc!=SQLITE_OK ){
     hctDbWriterCleanup(pDb, p, 1);
   }
-  assert_all_pages_ok(pDb, p);
+  if( rc==SQLITE_OK ) assert_all_pages_ok(pDb, p);
   return rc;
 }
 
