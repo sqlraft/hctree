@@ -563,12 +563,18 @@ static void test_build_db(Error *pErr, Testcase *pTst, int iDb, TestCtx *aCtx){
     i64 nRow = hst_sqlite3_exec_i64(pErr, db, "SELECT count(*) FROM tbl");
     if( nRow==pTst->nRow ){
       printf("reusing database %d.\n", iDb); 
+      fflush(stdout);
       /* The database already exists. Populate the aCtx[x].aVal arrays. */
       sqlite3_stmt *p = hst_sqlite3_prepare(pErr, db, "SELECT a, b FROM tbl");
       while( sqlite3_step(p)==SQLITE_ROW ){
         int a = sqlite3_column_int(p, 0);
         const u32 *b = (u32*)sqlite3_column_blob(p, 1);
-        aCtx[iDb].aVal[a] = b[iDb+1];
+	int iTid;
+	for(iTid=1; iTid<=pTst->nThread; iTid++){
+	  if( pTst->bSeparate==0 || iDb==(iTid-1) ){
+	    aCtx[iTid-1].aVal[a] = b[iTid];
+	  }
+	}
       }
       hst_sqlite3_reset(pErr, p);
       sqlite3_finalize(p);
@@ -663,6 +669,7 @@ static void runtest(Testcase *pTst){
 
   if( pTst->nSleep ){
     printf("sleeping for %d seconds\n", pTst->nSleep);
+    fflush(stdout);
     sleep(pTst->nSleep);
   }
 
@@ -670,6 +677,7 @@ static void runtest(Testcase *pTst){
   g.iTimeToStop = hst_current_time() + (i64)pTst->nSecond * 1000;
 
   printf("launching %d threads\n", pTst->nThread);
+  fflush(stdout);
   for(ii=0; ii<pTst->nThread; ii++){
     hst_launch_thread(&err, &threadset, test_thread, (void*)&aCtx[ii]);
   }
