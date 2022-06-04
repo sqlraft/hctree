@@ -109,3 +109,5 @@ u64 sqlite3HctTMapSafeTID(HctTMapClient*);
 
 int sqlite3HctTMapNewTID(HctTMapClient *p, u64 iCid, u64 iTid, HctTMap **ppMap);
 
+int sqlite3HctTMapClientPragmaTidStep(HctTMapClient *p, int iVal);
+

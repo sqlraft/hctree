@@ -71,6 +71,46 @@ typedef struct HctTMapRef HctTMapRef;
 ** The following object type represents a reference to an HctTMapFull
 ** object. The reference is taken and released under the cover of the
 ** associated HctTMapServer.mutex mutex.
+**
+** pRefNext/pRefPrev:
+**   These are used to link this object into the linked list at 
+**   HctTMapFull.pRefList. They may only be accessed under the cover
+**   of the associated HctTMapServer.mutex mutex.
+**
+** pMap:
+**   Pointer to the HctTMapFull object, if any, that this reference
+**   currently points to.
+**
+** refMask:
+**   This may be set to one of four values. It is always modified using
+**   CAS instructions.
+**
+**      Zero:
+**        HctTMapRef.pMap is not valid (always NULL).
+**
+**      HCT_TMAPREF_SERVER:
+**        When the reference is first taken, under cover of the server mutex,
+**        refMask is set to this value.
+**         
+**      HCT_TMAPREF_SERVER|HCT_TMAPREF_CLIENT:
+**        When a client actually wishes to use the tmap indicated by this
+**        reference, it uses a CAS instruction to set refMask to this value.
+**        It may then use the tmap object. This does not require the mutex.
+**
+**        If the client finds that refMask is not HCT_TMAPREF_SERVER, but
+**        has been set to 0, then the reference has been revoked. In this
+**        case it is not safe for the client to touch pMap. It must
+**        reinitialize the HctTmapRef object (under cover of the server
+**        mutex).
+**
+**        When the read transaction is over, and the client does not need
+**        need the tmap object, it uses a CAS instruction to set refMask
+**        back to HCT_TMAPREF_SERVER. If, when doing so, it finds that the
+**        HCT_TMAPREF_SERVER bit has already been cleared, then it must
+**        release the reference immediately (under cover of the server
+**        mutex).
+**
+**      HCT_TMAPREF_CLIENT:
 */
 struct HctTMapRef {
   u32 refMask;
@@ -512,6 +552,37 @@ u64 sqlite3HctTMapSafeTID(HctTMapClient *p){
   return HctAtomicLoad(&p->pServer->iMinMinTid);
 }
 
+static void hctTMapUnrefOldClients(HctTMapServer *pServer, u64 iTid){
+  const int nTidMul = 25;
+
+  assert( sqlite3_mutex_held(pServer->pMutex) );
+  if( (pServer->iMinMinTid + (nTidMul * pServer->nTidStep) < iTid) ){
+    HctTMapFull *pMap = pServer->pList->pNext->pNext;
+    HctTMapFull *pNext;
+    while( pMap ){
+      HctTMapFull *pNext = pMap->pNext;
+      HctTMapRef *pRef;
+      HctTMapRef *pNextRef = 0;
+      for(pRef=pMap->pRefList; pRef; pRef=pNextRef){
+        pNextRef = pRef->pRefNext;
+        u32 v1, v2; 
+
+        do {
+          v1 = AtomicLoad(&pRef->refMask);
+          v2 = v1 & ~HCT_TMAPREF_SERVER;
+          assert( v1 & HCT_TMAPREF_SERVER );
+        }while( 0==hctTMapBoolCAS32(&pRef->refMask, v1, v2) );
+
+        if( v2==0 ){
+          hctTMapDropRef(pServer, pRef);
+        }
+      }
+
+      pMap = pNext;
+    }
+  }
+}
+
 /*
 ** This is called by write transactions immediately after obtaining
 ** the transactions TID value (at the start of the commit process).
@@ -554,6 +625,7 @@ int sqlite3HctTMapNewTID(
         if( pOld->pRefList==0 ){
           hctTMapDropMap(p->pServer, pOld);
         }
+        hctTMapUnrefOldClients(p->pServer, iTid);
       }
     }
     hctTMapUpdateSafe(p);
@@ -564,6 +636,16 @@ int sqlite3HctTMapNewTID(
   return rc;
 }
 
+int sqlite3HctTMapClientPragmaTidStep(HctTMapClient *p, int iVal){
+  int iRet;
+  ENTER_TMAP_MUTEX(p);
+  if( iVal>1 && p->pServer->nClient==1 ){
+    p->pServer->nTidStep = iVal;
+  }
+  iRet = p->pServer->nTidStep;
+  LEAVE_TMAP_MUTEX(p);
+  return iRet;
+}
 
 
 

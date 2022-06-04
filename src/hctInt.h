@@ -297,6 +297,7 @@ int sqlite3HctFileFindLogs(HctFile*, void*, int(*)(void*, const char*));
 
 u32 sqlite3HctFilePageMapping(HctFile *pFile, u32 iLogical, int *pbEvicted);
 
+int sqlite3HctFilePragmaTidStep(HctFile *pFile, int iVal);
 
 #include <hctPManInt.h>
 HctPManClient *sqlite3HctFilePManClient(HctFile*);

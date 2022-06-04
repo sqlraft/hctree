@@ -1370,6 +1370,9 @@ int sqlite3HctFileFindLogs(
   return hctFileFindLogs(pFile->pServer, pCtx, xLog);
 }
 
+int sqlite3HctFilePragmaTidStep(HctFile *pFile, int iVal){
+  return sqlite3HctTMapClientPragmaTidStep(pFile->pTMapClient, iVal);
+}
 
 /*************************************************************************
 ** Beginning of vtab implemetation.

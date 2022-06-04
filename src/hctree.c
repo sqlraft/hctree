@@ -1997,6 +1997,14 @@ int sqlite3BtreePragma(Btree *p, char **aFnctl){
     rc = SQLITE_OK;
     zRet = hctDbMPrintf(&rc, "%lld", sqlite3HctDbNCasFail(p->pHctDb));
   }
+  else if( p->pHctDb && 0==sqlite3_stricmp("hct_ntidstep", zLeft) ){
+    int iVal = 0;
+    if( zRight ){
+      iVal = sqlite3Atoi(zRight);
+    }
+    iVal = sqlite3HctFilePragmaTidStep(sqlite3HctDbFile(p->pHctDb), iVal);
+    zRet = hctDbMPrintf(&rc, "%d", iVal);
+  }
 
   aFnctl[0] = zRet;
   return rc;
