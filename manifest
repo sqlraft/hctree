@@ -1,9 +1,9 @@
-C Allow\swriters\sto\srevoke\sold\stmap\sreferences\sbelonging\sto\sother\sclients.
-D 2022-06-04T19:26:43.483
+C Rename\shct_speed_test\sto\shct_thread_test.
+D 2022-06-06T07:26:15.796
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
-F Makefile.in 198183620a378dea016ee5c1e8610597b9382e96d90ea0c680be7ea8a19b6584
+F Makefile.in ff2df97417544ff5dd07efe80bb4dbe5b239dd3de12ca59b4890d280e49e059c
 F Makefile.linux-gcc f609543700659711fbd230eced1f01353117621dccae7b9fb70daa64236c5241
 F Makefile.msc b28a8a7a977e7312f6859f560348e1eb110c21bd6cf9fab0d16537c0a514eef3
 F README.md 2dd87a5c1d108b224921f3dd47dea567973f706e1f6959386282a626f459a70c
@@ -485,7 +485,7 @@ F ext/userauth/userauth.c 7f00cded7dcaa5d47f54539b290a43d2e59f4b1eb5f447545fa865
 F install-sh 9d4de14ab9fb0facae2f48780b874848cbf2f895 x
 F ltmain.sh 3ff0879076df340d2e23ae905484d8c15d5fdea8
 F magic.txt 8273bf49ba3b0c8559cb2774495390c31fd61c60
-F main.mk b7786672d4a020f4d95142cddfb5d2e7101dba8ed6fabc5fb2f64c544464161e
+F main.mk 1320e7cdd84e3b9bc5f6ab5510bc4ae77f6c2b8fcc37fce3379a3f0fcb3882e3
 F mkso.sh fd21c06b063bb16a5d25deea1752c2da6ac3ed83
 F mptest/config01.test 3c6adcbc50b991866855f1977ff172eb6d901271
 F mptest/config02.test 4415dfe36c48785f751e16e32c20b077c28ae504
@@ -1903,7 +1903,7 @@ F tool/genfkey.README cf68fddd4643bbe3ff8e31b8b6d8b0a1b85e20f4
 F tool/genfkey.test b6afd7b825d797a1e1274f519ab5695373552ecad5cd373530c63533638a5a4f
 F tool/getlock.c f4c39b651370156cae979501a7b156bdba50e7ce
 F tool/hct_mkspeedtable.tcl 2abb41df5314963be04307c0d52df5afa91cc1ad6868b20624df3dca963edcac
-F tool/hct_speed_test.c 27a6fb72c11c6f1f6b8d667f4f1755b3331bd03a580c85f98b2fa7a4f5c13a48
+F tool/hct_thread_test.c 6c3cbb39f89ad30a921a1e721f0233e286f006ed19841cdf1b6270d4547d7f97 w tool/hct_speed_test.c
 F tool/index_usage.c f62a0c701b2c7ff2f3e21d206f093c123f222dbf07136a10ffd1ca15a5c706c5
 F tool/kvtest-speed.sh 4761a9c4b3530907562314d7757995787f7aef8f
 F tool/lemon.c ea5c8589c7749e9bd32ba10432aeeed3c16e215de72a12ada2bc707884837149
@@ -1988,8 +1988,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P 1cd64cd288e14228d88cc8796b2185828f60a050d775c211d9d552eb6fece574
-R cf22b7b5e190546cacbc6f2b0fd1dcd2
+P 56ccf3f0240b7b4ee302534a22836f8dacd58bc4e2ca6f10ed963bed7f66e0d6
+R feb8a7845d85512661489445efa22f55
 U dan
-Z ad0ba5334fad8fcce948c4ca9b2ec17d
+Z c63c249aca8985b91f81318b2760ab78
 # Remove this line to create a well-formed Fossil manifest.

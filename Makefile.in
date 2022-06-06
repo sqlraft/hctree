@@ -670,8 +670,8 @@ libtclsqlite3.la:	tclsqlite.lo libsqlite3.la
 		-version-info "8:6:8" \
 		-avoid-version
 
-hct_speed_test$(TEXE):	$(TOP)/tool/hct_speed_test.c sqlite3.lo sqlite3.h
-	$(LTLINK) -o $@ $(TOP)/tool/hct_speed_test.c sqlite3.lo $(TLIBS)
+hct_thread_test$(TEXE):	$(TOP)/tool/hct_thread_test.c sqlite3.lo sqlite3.h
+	$(LTLINK) -o $@ $(TOP)/tool/hct_thread_test.c sqlite3.lo $(TLIBS)
 
 sqlite3$(TEXE):	shell.c sqlite3.c
 	$(LTLINK) $(READLINE_FLAGS) $(SHELL_OPT) -o $@ \
