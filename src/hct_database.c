@@ -328,10 +328,11 @@ static u64 hctDbTMapLookup(HctDatabase *pDb, u64 iTid, u64 *peState){
     if( iMap>=pTmap->nMap ){
       HctTMapClient *pTMapClient = sqlite3HctFileTMapClient(pDb->pFile);
       sqlite3HctTMapUpdate(pTMapClient, &pDb->pTmap);
-      pTmap = pDb->pTmap;
-      assert( iMap<pTmap->nMap );
+      assert( iTid<(pDb->pTmap->nMap*HCT_TMAP_PAGESIZE)+pDb->pTmap->iFirstTid );
+      return hctDbTMapLookup(pDb, iTid, peState);
     }
-    if( iMap<pTmap->nMap ){
+
+    {
       int iOff = (iTid - pTmap->iFirstTid) % HCT_TMAP_PAGESIZE;
       iVal = AtomicLoad(&pTmap->aaMap[iMap][iOff]);
     }

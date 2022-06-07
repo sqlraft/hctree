@@ -570,7 +570,11 @@ static void hctTMapUnrefOldClients(HctTMapServer *pServer, u64 iTid){
         do {
           v1 = AtomicLoad(&pRef->refMask);
           v2 = v1 & ~HCT_TMAPREF_SERVER;
-          assert( v1 & HCT_TMAPREF_SERVER );
+          if( (v1 & HCT_TMAPREF_SERVER)==0 ){
+            /* Server reference has already been revoked */
+            v2 = 1;
+            break;
+          }
         }while( 0==hctTMapBoolCAS32(&pRef->refMask, v1, v2) );
 
         if( v2==0 ){
