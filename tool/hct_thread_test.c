@@ -353,7 +353,7 @@ struct TestUpdate {
 /*
 ** Implementation of SQL function:
 **
-**   updateblob(BLOB, IDX, IVAL)
+**   updateblob(BLOB, IDX, IVAL, OLDVAL)
 **
 ** This function treats the input blob as an array of 32-bit unsigned 
 ** integers. In machine byte order. It returns a copy of BLOB with entry
@@ -369,12 +369,24 @@ static void updateBlobFunc(
   u32 *aCopy= 0;
   int iIdx = 0;
   u32 iVal = 0;
+  u32 iOldVal = 0;
 
   nBlob = sqlite3_value_bytes(apArg[0]);
   aBlob = (u32*)sqlite3_value_blob(apArg[0]);
 
   iIdx = sqlite3_value_int(apArg[1]);
   iVal = (u32)(sqlite3_value_int64(apArg[2]) & 0xFFFFFFFF);
+  iOldVal = (u32)(sqlite3_value_int64(apArg[3]) & 0xFFFFFFFF);
+
+  if( aBlob[iIdx]!=iOldVal ){
+    char *zErr = sqlite3_mprintf(
+        "updateblob mismatch - iIdx=%d iVal=%lld iOldVal=%lld", 
+        iIdx, (i64)iVal, (i64)iOldVal
+    );
+    sqlite3_result_error(pCtx, zErr, -1);
+    sqlite3_free(zErr);
+    return;
+  }
 
   aCopy = sqlite3_malloc(nBlob);
   memcpy(aCopy, aBlob, nBlob);
@@ -418,7 +430,7 @@ static char *test_thread(int iTid, void *pArg){
 
   sqlite3_randomness(sizeof(FastPrng), (void*)&prng);
   db = htt_sqlite3_open(zFile);
-  sqlite3_create_function(db,"updateblob",3,SQLITE_UTF8,0,updateBlobFunc,0 ,0);
+  sqlite3_create_function(db,"updateblob",4,SQLITE_UTF8,0,updateBlobFunc,0 ,0);
 
   htt_sqlite3_exec(db, "PRAGMA journal_mode = wal");
   htt_sqlite3_exec(db, "PRAGMA wal_autocheckpoint = 10000");
@@ -432,7 +444,7 @@ static char *test_thread(int iTid, void *pArg){
   pCommit = htt_sqlite3_prepare(&err, db, "COMMIT");
   pRollback = htt_sqlite3_prepare(&err, db, "ROLLBACK");
   pWrite = htt_sqlite3_prepare(&err, db, 
-    "UPDATE tbl SET b=updateblob(b, ?, ?), c=hex(frandomblob(32)) WHERE a = ?"
+    "UPDATE tbl SET b=updateblob(b,?,?,?), c=hex(frandomblob(32)) WHERE a = ?"
   );
   pScan = htt_sqlite3_prepare(&err, db, 
       "SELECT * FROM tbl WHERE substr(c, 1, 16)>=hex(frandomblob(8))"
@@ -475,8 +487,10 @@ static char *test_thread(int iTid, void *pArg){
 
       for(ii=0; ii<pTst->nUpdate; ii++){
         aUpdate[ii].iRow = 1+((aUpdate[ii].iRow & 0x7FFFFFFF) % pTst->nRow);
+        aUpdate[ii].iVal = pCtx->aVal[ aUpdate[ii].iRow ]+1;
         sqlite3_bind_int64(pWrite, 2, aUpdate[ii].iVal);
-        sqlite3_bind_int(pWrite, 3, aUpdate[ii].iRow);
+        sqlite3_bind_int64(pWrite, 3, pCtx->aVal[ aUpdate[ii].iRow ]);
+        sqlite3_bind_int(pWrite, 4, aUpdate[ii].iRow);
         sqlite3_step(pWrite);
         htt_sqlite3_reset(&err, pWrite);
       }

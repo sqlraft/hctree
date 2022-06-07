@@ -487,6 +487,7 @@ static u64 *hctTMapFind(HctTMapFull *pMap, u64 iTid){
 }
 
 static HctTMapFull *hctTMapNewObject(
+  HctTMapServer *pServer,
   HctTMapFull *pPrev, 
   u64 iCid,
   int nMapReq
@@ -514,7 +515,7 @@ static HctTMapFull *hctTMapNewObject(
     pNew->m.iMinCid = MAX(pPrev->m.iMinCid, iCid);
     pNew->m.iMinTid = iMinTid;
 
-    nSkip = (pNew->m.iMinTid - pNew->m.iFirstTid) / HCT_TMAP_PAGESIZE;
+    nSkip = (pServer->iMinMinTid - pNew->m.iFirstTid) / HCT_TMAP_PAGESIZE;
     if( nSkip<0 ) nSkip = 0;
     pNew->m.iFirstTid += (nSkip * HCT_TMAP_PAGESIZE);
 
@@ -620,7 +621,7 @@ int sqlite3HctTMapNewTID(
     pMap = p->pServer->pList;
     if( (iTid % nTidStep)==0 || nMapReq>pMap->m.nMap ){
       /* Create a new HctTMapFull object! */
-      HctTMapFull *pNew = hctTMapNewObject(pMap, iCid, nMapReq);
+      HctTMapFull *pNew = hctTMapNewObject(p->pServer, pMap, iCid, nMapReq);
       if( pNew==0 ){
         rc = SQLITE_NOMEM_BKPT;
       }else{
