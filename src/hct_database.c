@@ -1728,9 +1728,6 @@ static int hctDbInsertFlushWrite(HctDatabase *pDb, HctDbWriter *p){
   HctFilePage root;
   int bUnevict = 0;
 
-static int nCall = 0;
-nCall++;
-
   memset(&root, 0, sizeof(root));
 
 #ifdef SQLITE_DEBUG

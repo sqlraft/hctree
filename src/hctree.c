@@ -710,9 +710,6 @@ static int btreeFlushToDisk(Btree *p){
   u64 iTid = 0;
   u64 iCid = 0;
 
-static int nCall = 0;
-nCall++;
-
   /* Write a log file for this transaction. The TID field is still set
   ** to zero at this point.  */
   rc = btreeWriteLog(p);

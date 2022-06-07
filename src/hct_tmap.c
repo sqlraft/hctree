@@ -280,7 +280,7 @@ int sqlite3HctTMapClientNew(HctTMapServer *p, HctTMapClient **ppClient){
   }else{
     pNew->pServer = p;
     ENTER_TMAP_MUTEX(pNew);
-    pNew->pServer->nClient++;
+    HctAtomicStore(&p->nClient, p->nClient+1);
     LEAVE_TMAP_MUTEX(pNew);
   }
   *ppClient = pNew;
@@ -474,7 +474,7 @@ void sqlite3HctTMapClientFree(HctTMapClient *pClient){
     ENTER_TMAP_MUTEX(pClient);
     hctTMapDropRef(pClient->pServer, &pClient->aRef[0]);
     hctTMapDropRef(pClient->pServer, &pClient->aRef[1]);
-    pClient->pServer->nClient--;
+    HctAtomicStore(&pClient->pServer->nClient, pClient->pServer->nClient-1);
     LEAVE_TMAP_MUTEX(pClient);
     sqlite3_free(pClient);
   }
