@@ -737,9 +737,9 @@ static void runtest(Testcase *pTst){
     );
 
     printf("INSERT INTO tests(name, nthread, nsecond, ntrans, nbusy) VALUES(");
-    printf("'-nup %d -nscan %d%s', %s, %d, %d, %d);\n",
+    printf("'nUpdate=%d nScan=%d%s', %s, %d, %d, %d);\n",
         pTst->nUpdate, pTst->nScan, 
-        pTst->bSeparate ? " -sep 1" : "",
+        pTst->bSeparate ? " (sep)" : "",
         zThread, pTst->nSecond,
         nTrans, nBusy
     );
