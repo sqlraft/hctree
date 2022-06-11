@@ -378,6 +378,8 @@ static void updateBlobFunc(
   iVal = (u32)(sqlite3_value_int64(apArg[2]) & 0xFFFFFFFF);
   iOldVal = (u32)(sqlite3_value_int64(apArg[3]) & 0xFFFFFFFF);
 
+#if 0
+  /* This fails if the same row is updated twice by the transaction... */
   if( aBlob[iIdx]!=iOldVal ){
     char *zErr = sqlite3_mprintf(
         "updateblob mismatch - iIdx=%d iVal=%lld iOldVal=%lld", 
@@ -387,6 +389,7 @@ static void updateBlobFunc(
     sqlite3_free(zErr);
     return;
   }
+#endif
 
   aCopy = sqlite3_malloc(nBlob);
   memcpy(aCopy, aBlob, nBlob);

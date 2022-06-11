@@ -81,31 +81,53 @@ each test run, three values are reported:
      case, as a percentage (in bold).
 
 For example, the first run of the 8 thread test with nUpdate=1 and nScan=0
-is reported as "240288 (0.0%) <b>82%</b>". This means that, considering all
-8 threads, throughput was 240288 transactions per second. This is 30036 per
-second for each CPU, or roughly 82% of the average speed of the single
-threaded tests - 36249 transactions per second. None (or perhaps almost none)
+is reported as "243832 (0.0%) <b>85%</b>". This means that, considering all
+8 threads, throughput was 243832 transactions per second. This is 30479 per
+second for each CPU, or roughly 85% of the average speed of the single
+threaded tests - 35897 transactions per second. None (or perhaps almost none)
 of these failed to COMMIT, hence the "(0.0%)".
 
-
-
-<table border=1 cellpadding=10><tr><th>Test<th>stock<th>1<th>2<th>4<th>6<th>8
-<tr><td>-nup 1 -nscan 0 -sep 1
-<td><td>36409&nbsp;(0.0%)&nbsp;<b>100%</b><br>36307&nbsp;(0.0%)&nbsp;<b>99%</b><br><td>73974&nbsp;(0.0%)&nbsp;<b>101%</b><br>72889&nbsp;(0.0%)&nbsp;<b>100%</b><br><td>131326&nbsp;(0.0%)&nbsp;<b>90%</b><br>131405&nbsp;(0.0%)&nbsp;<b>90%</b><br><td>180676&nbsp;(0.0%)&nbsp;<b>82%</b><br>180083&nbsp;(0.0%)&nbsp;<b>82%</b><br><td>222419&nbsp;(0.0%)&nbsp;<b>76%</b><br>220940&nbsp;(0.0%)&nbsp;<b>75%</b><br>
-<tr><td>-nup 5 -nscan 0 -sep 1
-<td><td>7805&nbsp;(0.0%)&nbsp;<b>97%</b><br>8158&nbsp;(0.0%)&nbsp;<b>102%</b><br><td>16517&nbsp;(0.0%)&nbsp;<b>103%</b><br>16433&nbsp;(0.0%)&nbsp;<b>102%</b><br><td>28798&nbsp;(0.0%)&nbsp;<b>90%</b><br>28633&nbsp;(0.0%)&nbsp;<b>89%</b><br><td>38798&nbsp;(0.0%)&nbsp;<b>81%</b><br>38791&nbsp;(0.0%)&nbsp;<b>81%</b><br><td>47397&nbsp;(0.0%)&nbsp;<b>74%</b><br>47370&nbsp;(0.0%)&nbsp;<b>74%</b><br>
-<tr><td>-nup 25 -nscan 0 -sep 1
-<td><td>1674&nbsp;(0.0%)&nbsp;<b>100%</b><br>1655&nbsp;(0.0%)&nbsp;<b>99%</b><br><td>3402&nbsp;(0.0%)&nbsp;<b>102%</b><br>3412&nbsp;(0.0%)&nbsp;<b>102%</b><br><td>5970&nbsp;(0.0%)&nbsp;<b>89%</b><br>5854&nbsp;(0.0%)&nbsp;<b>87%</b><br><td>7939&nbsp;(0.0%)&nbsp;<b>79%</b><br>7978&nbsp;(0.0%)&nbsp;<b>79%</b><br><td>9686&nbsp;(0.0%)&nbsp;<b>72%</b><br>9624&nbsp;(0.0%)&nbsp;<b>72%</b><br>
-<tr><td>-nup 1 -nscan 0
-<td>30903&nbsp;(0.0%)&nbsp;<b>85%</b><br>31169&nbsp;(0.0%)&nbsp;<b>85%</b><br><td>36355&nbsp;(0.0%)&nbsp;<b>100%</b><br>36144&nbsp;(0.0%)&nbsp;<b>99%</b><br><td>72476&nbsp;(0.0%)&nbsp;<b>99%</b><br>71953&nbsp;(0.0%)&nbsp;<b>99%</b><br><td>134744&nbsp;(0.0%)&nbsp;<b>92%</b><br>133601&nbsp;(0.0%)&nbsp;<b>92%</b><br><td>188879&nbsp;(0.0%)&nbsp;<b>86%</b><br>187915&nbsp;(0.0%)&nbsp;<b>86%</b><br><td>240288&nbsp;(0.0%)&nbsp;<b>82%</b><br>238308&nbsp;(0.0%)&nbsp;<b>82%</b><br>
-<tr><td>-nup 5 -nscan 0
-<td>6362&nbsp;(0.0%)&nbsp;<b>78%</b><br>6387&nbsp;(0.0%)&nbsp;<b>78%</b><br><td>8162&nbsp;(0.0%)&nbsp;<b>100%</b><br>8093&nbsp;(0.0%)&nbsp;<b>99%</b><br><td>16285&nbsp;(0.0%)&nbsp;<b>100%</b><br>16035&nbsp;(0.0%)&nbsp;<b>98%</b><br><td>30269&nbsp;(0.0%)&nbsp;<b>93%</b><br>30272&nbsp;(0.0%)&nbsp;<b>93%</b><br><td>42315&nbsp;(0.1%)&nbsp;<b>86%</b><br>42078&nbsp;(0.1%)&nbsp;<b>86%</b><br><td>52482&nbsp;(0.1%)&nbsp;<b>80%</b><br>52214&nbsp;(0.0%)&nbsp;<b>80%</b><br>
-<tr><td>-nup 25 -nscan 0
-<td>1301&nbsp;(0.0%)&nbsp;<b>78%</b><br>1297&nbsp;(0.0%)&nbsp;<b>77%</b><br><td>1680&nbsp;(0.0%)&nbsp;<b>100%</b><br>1655&nbsp;(0.0%)&nbsp;<b>99%</b><br><td>3390&nbsp;(1.7%)&nbsp;<b>101%</b><br>3380&nbsp;(0.1%)&nbsp;<b>101%</b><br><td>6191&nbsp;(0.2%)&nbsp;<b>92%</b><br>6192&nbsp;(1.0%)&nbsp;<b>92%</b><br><td>8630&nbsp;(2.0%)&nbsp;<b>86%</b><br>8734&nbsp;(2.0%)&nbsp;<b>87%</b><br><td>10935&nbsp;(3.0%)&nbsp;<b>81%</b><br>11011&nbsp;(3.1%)&nbsp;<b>82%</b><br>
-<tr><td>-nup 1 -nscan 5
-<td>10082&nbsp;(0.0%)&nbsp;<b>95%</b><br>9885&nbsp;(0.0%)&nbsp;<b>93%</b><br><td>10693&nbsp;(0.0%)&nbsp;<b>100%</b><br>10488&nbsp;(0.0%)&nbsp;<b>99%</b><br><td>22584&nbsp;(0.1%)&nbsp;<b>106%</b><br>21871&nbsp;(0.1%)&nbsp;<b>103%</b><br><td>43689&nbsp;(0.1%)&nbsp;<b>103%</b><br>43831&nbsp;(0.1%)&nbsp;<b>103%</b><br><td>63426&nbsp;(0.2%)&nbsp;<b>99%</b><br>63612&nbsp;(0.2%)&nbsp;<b>100%</b><br><td>82865&nbsp;(0.3%)&nbsp;<b>97%</b><br>82235&nbsp;(0.2%)&nbsp;<b>97%</b><br>
-<tr><td>-nup 5 -nscan 10
-<td>3395&nbsp;(0.0%)&nbsp;<b>89%</b><br>3303&nbsp;(0.0%)&nbsp;<b>87%</b><br><td>3896&nbsp;(0.0%)&nbsp;<b>102%</b><br>3691&nbsp;(0.0%)&nbsp;<b>97%</b><br><td>8050&nbsp;(0.6%)&nbsp;<b>106%</b><br>8002&nbsp;(0.8%)&nbsp;<b>105%</b><br><td>15427&nbsp;(1.8%)&nbsp;<b>101%</b><br>15293&nbsp;(1.4%)&nbsp;<b>100%</b><br><td>22027&nbsp;(1.8%)&nbsp;<b>96%</b><br>21938&nbsp;(2.1%)&nbsp;<b>96%</b><br><td>27746&nbsp;(2.0%)&nbsp;<b>91%</b><br>27842&nbsp;(2.3%)&nbsp;<b>91%</b><br>
+<table border=1 cellpadding=10><tr><th>Test<th>Stock SQLite<th>HCT 1 thread<th>HCT 2 threads<th>HCT 4 threads<th>HCT 6 threads<th>HCT 8 threads
+<tr><td>nUpdate=0 nScan=1
+<td>82004(0.0%)&nbsp<b>103%</b><br>72870(0.0%)&nbsp<b>92%</b><br><td>80079(0.0%)&nbsp<b>101%</b><br>79062(0.0%)&nbsp<b>99%</b><br><td>171610(0.0%)&nbsp<b>108%</b><br>169548(0.0%)&nbsp<b>107%</b><br><td>342761(0.0%)&nbsp<b>108%</b><br>339859(0.0%)&nbsp<b>107%</b><br><td>505376(0.0%)&nbsp<b>106%</b><br>505464(0.0%)&nbsp<b>106%</b><br><td>639161(0.0%)&nbsp<b>100%</b><br>665236(0.0%)&nbsp<b>105%</b><br>
+<tr><td>nUpdate=0 nScan=5
+<td>17536(0.0%)&nbsp<b>110%</b><br>16876(0.0%)&nbsp<b>106%</b><br><td>15495(0.0%)&nbsp<b>98%</b><br>16269(0.0%)&nbsp<b>102%</b><br><td>35380(0.0%)&nbsp<b>111%</b><br>34304(0.0%)&nbsp<b>108%</b><br><td>69239(0.0%)&nbsp<b>109%</b><br>69072(0.0%)&nbsp<b>109%</b><br><td>103414(0.0%)&nbsp<b>109%</b><br>102711(0.0%)&nbsp<b>108%</b><br><td>135803(0.0%)&nbsp<b>107%</b><br>135101(0.0%)&nbsp<b>106%</b><br>
+<tr><td>nUpdate=0 nScan=10
+<td>8865(0.0%)&nbsp<b>112%</b><br>8665(0.0%)&nbsp<b>109%</b><br><td>7794(0.0%)&nbsp<b>98%</b><br>8064(0.0%)&nbsp<b>102%</b><br><td>17385(0.0%)&nbsp<b>110%</b><br>17599(0.0%)&nbsp<b>111%</b><br><td>34687(0.0%)&nbsp<b>109%</b><br>34645(0.0%)&nbsp<b>109%</b><br><td>51502(0.0%)&nbsp<b>108%</b><br>51544(0.0%)&nbsp<b>108%</b><br><td>67946(0.0%)&nbsp<b>107%</b><br>67585(0.0%)&nbsp<b>107%</b><br>
+<tr><td>nUpdate=0 nScan=25
+<td>3622(0.0%)&nbsp<b>111%</b><br>3497(0.0%)&nbsp<b>108%</b><br><td>3256(0.0%)&nbsp<b>100%</b><br>3244(0.0%)&nbsp<b>100%</b><br><td>7053(0.0%)&nbsp<b>109%</b><br>6965(0.0%)&nbsp<b>107%</b><br><td>13837(0.0%)&nbsp<b>106%</b><br>13879(0.0%)&nbsp<b>107%</b><br><td>20663(0.0%)&nbsp<b>106%</b><br>20449(0.0%)&nbsp<b>105%</b><br><td>27174(0.0%)&nbsp<b>105%</b><br>26951(0.0%)&nbsp<b>104%</b><br>
+<tr><td>nUpdate=1 nScan=0
+<td>28615(0.0%)&nbsp<b>80%</b><br>30457(0.0%)&nbsp<b>85%</b><br><td>35261(0.0%)&nbsp<b>98%</b><br>36533(0.0%)&nbsp<b>102%</b><br><td>71853(0.0%)&nbsp<b>100%</b><br>73132(0.0%)&nbsp<b>102%</b><br><td>135924(0.0%)&nbsp<b>95%</b><br>137546(0.0%)&nbsp<b>96%</b><br><td>191311(0.0%)&nbsp<b>89%</b><br>193415(0.0%)&nbsp<b>90%</b><br><td>243832(0.0%)&nbsp<b>85%</b><br>244235(0.0%)&nbsp<b>85%</b><br>
+<tr><td>nUpdate=1 nScan=1
+<td>21165(0.0%)&nbsp<b>91%</b><br>20946(0.0%)&nbsp<b>91%</b><br><td>22944(0.0%)&nbsp<b>99%</b><br>23329(0.0%)&nbsp<b>101%</b><br><td>48754(0.0%)&nbsp<b>105%</b><br>48548(0.0%)&nbsp<b>105%</b><br><td>92544(0.0%)&nbsp<b>100%</b><br>92709(0.0%)&nbsp<b>100%</b><br><td>131705(0.0%)&nbsp<b>95%</b><br>132066(0.0%)&nbsp<b>95%</b><br><td>167619(0.0%)&nbsp<b>91%</b><br>167153(0.0%)&nbsp<b>90%</b><br>
+<tr><td>nUpdate=1 nScan=5
+<td>9982(0.0%)&nbsp<b>93%</b><br>9801(0.0%)&nbsp<b>92%</b><br><td>10808(0.0%)&nbsp<b>101%</b><br>10545(0.0%)&nbsp<b>99%</b><br><td>22129(0.0%)&nbsp<b>104%</b><br>22157(0.0%)&nbsp<b>104%</b><br><td>43371(0.1%)&nbsp<b>102%</b><br>43353(0.1%)&nbsp<b>102%</b><br><td>63466(0.1%)&nbsp<b>99%</b><br>63314(0.1%)&nbsp<b>99%</b><br><td>81691(0.2%)&nbsp<b>96%</b><br>81585(0.1%)&nbsp<b>96%</b><br>
+<tr><td>nUpdate=1 nScan=10
+<td>6119(0.0%)&nbsp<b>98%</b><br>6031(0.0%)&nbsp<b>96%</b><br><td>6401(0.0%)&nbsp<b>102%</b><br>6140(0.0%)&nbsp<b>98%</b><br><td>13391(0.0%)&nbsp<b>107%</b><br>13272(0.0%)&nbsp<b>106%</b><br><td>26424(0.1%)&nbsp<b>105%</b><br>26407(0.1%)&nbsp<b>105%</b><br><td>38758(0.2%)&nbsp<b>103%</b><br>38575(0.2%)&nbsp<b>103%</b><br><td>50137(0.3%)&nbsp<b>100%</b><br>50229(0.3%)&nbsp<b>100%</b><br>
+<tr><td>nUpdate=1 nScan=25
+<td>2845(0.0%)&nbsp<b>99%</b><br>2814(0.0%)&nbsp<b>98%</b><br><td>2890(0.0%)&nbsp<b>100%</b><br>2878(0.0%)&nbsp<b>100%</b><br><td>6149(0.1%)&nbsp<b>107%</b><br>6020(0.1%)&nbsp<b>104%</b><br><td>12049(0.4%)&nbsp<b>104%</b><br>12060(0.3%)&nbsp<b>105%</b><br><td>17887(0.6%)&nbsp<b>103%</b><br>17763(0.5%)&nbsp<b>103%</b><br><td>23238(0.7%)&nbsp<b>101%</b><br>23255(0.7%)&nbsp<b>101%</b><br>
+<tr><td>nUpdate=5 nScan=0
+<td>6272(0.0%)&nbsp<b>79%</b><br>5356(0.0%)&nbsp<b>67%</b><br><td>7933(0.0%)&nbsp<b>100%</b><br>7952(0.0%)&nbsp<b>100%</b><br><td>16296(0.1%)&nbsp<b>103%</b><br>16119(0.0%)&nbsp<b>101%</b><br><td>29610(0.0%)&nbsp<b>93%</b><br>29951(0.0%)&nbsp<b>94%</b><br><td>41564(0.0%)&nbsp<b>87%</b><br>41336(0.0%)&nbsp<b>87%</b><br><td>52039(0.1%)&nbsp<b>82%</b><br>51911(0.1%)&nbsp<b>82%</b><br>
+<tr><td>nUpdate=5 nScan=1
+<td>5636(0.0%)&nbsp<b>81%</b><br>5574(0.0%)&nbsp<b>80%</b><br><td>7094(0.0%)&nbsp<b>102%</b><br>6863(0.0%)&nbsp<b>98%</b><br><td>14141(0.0%)&nbsp<b>101%</b><br>14169(0.0%)&nbsp<b>102%</b><br><td>26547(0.1%)&nbsp<b>95%</b><br>26486(0.1%)&nbsp<b>95%</b><br><td>37345(0.2%)&nbsp<b>89%</b><br>37120(0.2%)&nbsp<b>89%</b><br><td>46619(0.3%)&nbsp<b>84%</b><br>46813(0.3%)&nbsp<b>84%</b><br>
+<tr><td>nUpdate=5 nScan=5
+<td>4219(0.0%)&nbsp<b>83%</b><br>4206(0.0%)&nbsp<b>83%</b><br><td>5082(0.0%)&nbsp<b>100%</b><br>5071(0.0%)&nbsp<b>100%</b><br><td>10341(0.1%)&nbsp<b>102%</b><br>10413(0.1%)&nbsp<b>103%</b><br><td>19793(0.4%)&nbsp<b>97%</b><br>19897(0.5%)&nbsp<b>98%</b><br><td>28063(0.7%)&nbsp<b>92%</b><br>27953(0.7%)&nbsp<b>92%</b><br><td>35196(1.0%)&nbsp<b>87%</b><br>35100(0.9%)&nbsp<b>86%</b><br>
+<tr><td>nUpdate=5 nScan=10
+<td>3284(0.0%)&nbsp<b>86%</b><br>3320(0.0%)&nbsp<b>87%</b><br><td>3822(0.0%)&nbsp<b>100%</b><br>3792(0.0%)&nbsp<b>100%</b><br><td>7999(0.2%)&nbsp<b>105%</b><br>8010(0.2%)&nbsp<b>105%</b><br><td>15204(0.6%)&nbsp<b>100%</b><br>15116(0.6%)&nbsp<b>99%</b><br><td>21713(1.2%)&nbsp<b>95%</b><br>21711(1.3%)&nbsp<b>95%</b><br><td>27515(1.7%)&nbsp<b>90%</b><br>27414(1.6%)&nbsp<b>90%</b><br>
+<tr><td>nUpdate=5 nScan=25
+<td>2025(0.0%)&nbsp<b>92%</b><br>2016(0.0%)&nbsp<b>91%</b><br><td>2203(0.0%)&nbsp<b>100%</b><br>2204(0.0%)&nbsp<b>100%</b><br><td>4552(0.5%)&nbsp<b>103%</b><br>4627(0.5%)&nbsp<b>105%</b><br><td>8993(1.6%)&nbsp<b>102%</b><br>8960(1.5%)&nbsp<b>102%</b><br><td>13070(2.5%)&nbsp<b>99%</b><br>13093(2.5%)&nbsp<b>99%</b><br><td>16776(3.5%)&nbsp<b>95%</b><br>16742(3.7%)&nbsp<b>95%</b><br>
+<tr><td>nUpdate=10 nScan=0
+<td>2992(0.0%)&nbsp<b>74%</b><br>2926(0.0%)&nbsp<b>73%</b><br><td>4075(0.0%)&nbsp<b>101%</b><br>3992(0.0%)&nbsp<b>99%</b><br><td>8211(0.0%)&nbsp<b>102%</b><br>8261(0.0%)&nbsp<b>102%</b><br><td>15120(0.3%)&nbsp<b>94%</b><br>15184(0.0%)&nbsp<b>94%</b><br><td>21217(0.4%)&nbsp<b>88%</b><br>21104(0.4%)&nbsp<b>87%</b><br><td>26436(0.2%)&nbsp<b>82%</b><br>26336(0.2%)&nbsp<b>82%</b><br>
+<tr><td>nUpdate=10 nScan=1
+<td>2942(0.0%)&nbsp<b>78%</b><br>2914(0.0%)&nbsp<b>77%</b><br><td>3732(0.0%)&nbsp<b>99%</b><br>3799(0.0%)&nbsp<b>101%</b><br><td>7787(0.1%)&nbsp<b>103%</b><br>7619(0.3%)&nbsp<b>101%</b><br><td>14243(0.2%)&nbsp<b>95%</b><br>14191(0.2%)&nbsp<b>94%</b><br><td>19894(0.6%)&nbsp<b>88%</b><br>19848(0.5%)&nbsp<b>88%</b><br><td>24810(0.6%)&nbsp<b>82%</b><br>24813(0.7%)&nbsp<b>82%</b><br>
+<tr><td>nUpdate=10 nScan=5
+<td>2534(0.0%)&nbsp<b>82%</b><br>2529(0.0%)&nbsp<b>81%</b><br><td>3111(0.0%)&nbsp<b>100%</b><br>3099(0.0%)&nbsp<b>100%</b><br><td>6328(0.3%)&nbsp<b>102%</b><br>6302(0.3%)&nbsp<b>101%</b><br><td>11899(0.9%)&nbsp<b>96%</b><br>11952(1.3%)&nbsp<b>96%</b><br><td>16661(1.3%)&nbsp<b>89%</b><br>16703(1.4%)&nbsp<b>90%</b><br><td>20922(2.4%)&nbsp<b>84%</b><br>20865(2.0%)&nbsp<b>84%</b><br>
+<tr><td>nUpdate=10 nScan=10
+<td>2179(0.0%)&nbsp<b>85%</b><br>2074(0.0%)&nbsp<b>81%</b><br><td>2595(0.0%)&nbsp<b>101%</b><br>2538(0.0%)&nbsp<b>99%</b><br><td>5231(0.7%)&nbsp<b>102%</b><br>5229(0.4%)&nbsp<b>102%</b><br><td>10048(1.6%)&nbsp<b>98%</b><br>10022(1.5%)&nbsp<b>98%</b><br><td>14075(2.6%)&nbsp<b>91%</b><br>14073(2.5%)&nbsp<b>91%</b><br><td>17637(3.9%)&nbsp<b>86%</b><br>17612(3.3%)&nbsp<b>86%</b><br>
+<tr><td>nUpdate=10 nScan=25
+<td>1521(0.0%)&nbsp<b>89%</b><br>1473(0.0%)&nbsp<b>86%</b><br><td>1712(0.0%)&nbsp<b>101%</b><br>1694(0.0%)&nbsp<b>99%</b><br><td>3555(1.0%)&nbsp<b>104%</b><br>3584(1.0%)&nbsp<b>105%</b><br><td>6846(3.3%)&nbsp<b>100%</b><br>6826(3.5%)&nbsp<b>100%</b><br><td>9745(5.7%)&nbsp<b>95%</b><br>9718(5.5%)&nbsp<b>95%</b><br><td>12342(7.6%)&nbsp<b>91%</b><br>12285(7.8%)&nbsp<b>90%</b><br>
+<tr><td>nUpdate=25 nScan=0
+<td>1271(0.0%)&nbsp<b>78%</b><br>1184(0.0%)&nbsp<b>73%</b><br><td>1664(0.0%)&nbsp<b>102%</b><br>1594(0.0%)&nbsp<b>98%</b><br><td>3278(0.1%)&nbsp<b>101%</b><br>3332(0.1%)&nbsp<b>102%</b><br><td>6180(1.1%)&nbsp<b>95%</b><br>6169(1.1%)&nbsp<b>95%</b><br><td>8670(2.6%)&nbsp<b>89%</b><br>8523(0.9%)&nbsp<b>87%</b><br><td>10688(2.2%)&nbsp<b>82%</b><br>10773(3.1%)&nbsp<b>83%</b><br>
 </table>
 
 
