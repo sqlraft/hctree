@@ -1,11 +1,12 @@
 B 066761cd4bdfbd496ff87fdc43fb57248be123e32f223b748ad7de487aa15e64
-C Updates\sto\sthreadtest.wiki.
-D 2022-06-11T17:19:09.868
-F doc/hctree/threadtest.wiki 4ffb33aa8aec0679f010ccb388ec40382f286ce4bede238db09c55a2c3d7b9af
-F tool/hct_mkspeedtable.tcl 9b50dc9362324261c702caedab1e345331bcca9e8492c758c93283e17495179c
+C Further\supdates\sto\sthreadtest.wiki.
+D 2022-06-13T19:19:08.380
+F doc/hctree/index.wiki 509e107aca5e34d77c3ed0b1c0a83686ecae52834aa3135479744e6c44f0faca
+F doc/hctree/threadtest.wiki 6b9349abd6cf39a188ee0468a361f139ee898445f53587fb15e95c6b8fbeae12
+F tool/hct_mkspeedtable.tcl 30ae66edc2497bb6effdfe533a378519ab5e8749b7c23de79e3a95ec8aabae88
 F tool/hct_thread_test.c 6d97ba3894699efb17d3069456e0898c0caac152bd2d71c7a76e86a876d329cd
-P 066761cd4bdfbd496ff87fdc43fb57248be123e32f223b748ad7de487aa15e64
-R 0bdb8d27263ce51ad067f58520d8f77e
+P 0d9fb8eff1da1a4ba0041e9ab2785417d87ba4a39d36dff1003d6fb3d4b4a4d6
+R ff080bc7e6b2ebf9d61a39690f6febae
 U dan
-Z b723cfa5cf56242493d170e0b7465162
+Z 8da63a9bc50c854e91d18ef8c157ee4e
 # Remove this line to create a well-formed Fossil manifest.

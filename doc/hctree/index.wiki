@@ -12,7 +12,7 @@
 A high-concurrency, optimistic row-level-locking backend for SQLite that
 more or less plugs in to the btree.h interface. Goals are:
 
-  *  To run significantly faster than stock SQLite in all important cases, and
+  *  To run as fast or faster than stock SQLite in all important cases, and
   *  To allow an order of magnitude more write concurrency than stock SQLite.
 
 All clients must be within a single process. Databases are robust in the face
@@ -25,7 +25,8 @@ Suitable for use in a server system such as BedrockDB.
 There is also a document describing the concurrent [./blink.wiki|b-link tree]
 used to store data persistently in the file-system, and a
 [./fileformat.wiki|file-format document] describing the structure of the 
-various types of files.
+various types of files. And a page with the 
+[./threadtest.wiki|project status and some experimental results].
 
 <h1 id=system_overview>1. System Overview</h1>
 

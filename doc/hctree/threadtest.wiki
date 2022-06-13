@@ -23,6 +23,13 @@ That is the goal of the tests on this page - to verify the extent that
 the database allows multiple clients in separate application threads to
 run concurrent read/write transactions.
 
+Performance is also compared against a single client using the standard
+SQLite b-tree backend. This is not to show that hctree is faster than stock
+SQLite in single-threaded deployments (in many cases it is slower), but merely
+to show that it is similar enough in the cases tested. There would be no point
+in running 8 threads concurrently if each of them were an order of magnitude
+slower than with the regular database backend.
+
 <h1>Test Overview</h1>
 
 All tests use the same database. The schema is:
@@ -80,54 +87,63 @@ each test run, three values are reported:
   *  the per-cpu speed that this represents, relative to the single threaded
      case, as a percentage (in bold).
 
-For example, the first run of the 8 thread test with nUpdate=1 and nScan=0
-is reported as "243832 (0.0%) <b>85%</b>". This means that, considering all
-8 threads, throughput was 243832 transactions per second. This is 30479 per
+For example, the first run of the 8 thread test with nUpdate=5 and nScan=10
+is reported as "27841 (1.8%) <b>85%</b>" (the cell with the <span
+    style=background-color:lightgrey>grey background</span> below). This means that, considering all
+8 threads, throughput was 27841 transactions per second. This is 3480 per
 second for each CPU, or roughly 85% of the average speed of the single
-threaded tests - 35897 transactions per second. None (or perhaps almost none)
-of these failed to COMMIT, hence the "(0.0%)".
+threaded tests - 4094 transactions per second. Roughly 1.8% of attempted
+transactions failed to COMMIT due to conflicts between threads.
+
+These tests were run on an "AMD Ryzen 7 2700" (8 cores) with copious memory
+available. Advanced BIOS CPU frequency management features like "Core Boost",
+"AMD Cool & Quiet" and "Simultaneous Multi-Threading" were all disabled.
+
 
 <table border=1 cellpadding=10><tr><th>Test<th>Stock SQLite<th>HCT 1 thread<th>HCT 2 threads<th>HCT 4 threads<th>HCT 6 threads<th>HCT 8 threads
 <tr><td>nUpdate=0 nScan=1
-<td>82004(0.0%)&nbsp<b>103%</b><br>72870(0.0%)&nbsp<b>92%</b><br><td>80079(0.0%)&nbsp<b>101%</b><br>79062(0.0%)&nbsp<b>99%</b><br><td>171610(0.0%)&nbsp<b>108%</b><br>169548(0.0%)&nbsp<b>107%</b><br><td>342761(0.0%)&nbsp<b>108%</b><br>339859(0.0%)&nbsp<b>107%</b><br><td>505376(0.0%)&nbsp<b>106%</b><br>505464(0.0%)&nbsp<b>106%</b><br><td>639161(0.0%)&nbsp<b>100%</b><br>665236(0.0%)&nbsp<b>105%</b><br>
+<td nowrap>87295(0.0%) <b>100%</b><br>77734(0.0%) <b>89%</b><br><td nowrap>89912(0.0%) <b>103%</b><br>85079(0.0%) <b>97%</b><br><td nowrap>176540(0.0%) <b>101%</b><br>180467(0.0%) <b>103%</b><br><td nowrap>356519(0.0%) <b>102%</b><br>355716(0.0%) <b>102%</b><br><td nowrap>532009(0.0%) <b>101%</b><br>532813(0.0%) <b>101%</b><br><td nowrap>702755(0.0%) <b>100%</b><br>701430(0.0%) <b>100%</b><br>
 <tr><td>nUpdate=0 nScan=5
-<td>17536(0.0%)&nbsp<b>110%</b><br>16876(0.0%)&nbsp<b>106%</b><br><td>15495(0.0%)&nbsp<b>98%</b><br>16269(0.0%)&nbsp<b>102%</b><br><td>35380(0.0%)&nbsp<b>111%</b><br>34304(0.0%)&nbsp<b>108%</b><br><td>69239(0.0%)&nbsp<b>109%</b><br>69072(0.0%)&nbsp<b>109%</b><br><td>103414(0.0%)&nbsp<b>109%</b><br>102711(0.0%)&nbsp<b>108%</b><br><td>135803(0.0%)&nbsp<b>107%</b><br>135101(0.0%)&nbsp<b>106%</b><br>
+<td nowrap>18749(0.0%) <b>105%</b><br>18355(0.0%) <b>103%</b><br><td nowrap>17448(0.0%) <b>98%</b><br>18250(0.0%) <b>102%</b><br><td nowrap>36592(0.0%) <b>103%</b><br>36213(0.0%) <b>101%</b><br><td nowrap>72416(0.0%) <b>101%</b><br>72577(0.0%) <b>102%</b><br><td nowrap>108364(0.0%) <b>101%</b><br>108100(0.0%) <b>101%</b><br><td nowrap>142495(0.0%) <b>100%</b><br>142700(0.0%) <b>100%</b><br>
 <tr><td>nUpdate=0 nScan=10
-<td>8865(0.0%)&nbsp<b>112%</b><br>8665(0.0%)&nbsp<b>109%</b><br><td>7794(0.0%)&nbsp<b>98%</b><br>8064(0.0%)&nbsp<b>102%</b><br><td>17385(0.0%)&nbsp<b>110%</b><br>17599(0.0%)&nbsp<b>111%</b><br><td>34687(0.0%)&nbsp<b>109%</b><br>34645(0.0%)&nbsp<b>109%</b><br><td>51502(0.0%)&nbsp<b>108%</b><br>51544(0.0%)&nbsp<b>108%</b><br><td>67946(0.0%)&nbsp<b>107%</b><br>67585(0.0%)&nbsp<b>107%</b><br>
+<td nowrap>9567(0.0%) <b>107%</b><br>9403(0.0%) <b>105%</b><br><td nowrap>8761(0.0%) <b>98%</b><br>9196(0.0%) <b>102%</b><br><td nowrap>18189(0.0%) <b>101%</b><br>18251(0.0%) <b>102%</b><br><td nowrap>36353(0.0%) <b>101%</b><br>36348(0.0%) <b>101%</b><br><td nowrap>54195(0.0%) <b>101%</b><br>53911(0.0%) <b>100%</b><br><td nowrap>71413(0.0%) <b>99%</b><br>71390(0.0%) <b>99%</b><br>
 <tr><td>nUpdate=0 nScan=25
-<td>3622(0.0%)&nbsp<b>111%</b><br>3497(0.0%)&nbsp<b>108%</b><br><td>3256(0.0%)&nbsp<b>100%</b><br>3244(0.0%)&nbsp<b>100%</b><br><td>7053(0.0%)&nbsp<b>109%</b><br>6965(0.0%)&nbsp<b>107%</b><br><td>13837(0.0%)&nbsp<b>106%</b><br>13879(0.0%)&nbsp<b>107%</b><br><td>20663(0.0%)&nbsp<b>106%</b><br>20449(0.0%)&nbsp<b>105%</b><br><td>27174(0.0%)&nbsp<b>105%</b><br>26951(0.0%)&nbsp<b>104%</b><br>
+<td nowrap>3898(0.0%) <b>106%</b><br>3793(0.0%) <b>103%</b><br><td nowrap>3723(0.0%) <b>101%</b><br>3652(0.0%) <b>99%</b><br><td nowrap>7369(0.0%) <b>100%</b><br>7364(0.0%) <b>100%</b><br><td nowrap>14471(0.0%) <b>98%</b><br>14474(0.0%) <b>98%</b><br><td nowrap>21711(0.0%) <b>98%</b><br>21639(0.0%) <b>98%</b><br><td nowrap>28563(0.0%) <b>97%</b><br>28571(0.0%) <b>97%</b><br>
 <tr><td>nUpdate=1 nScan=0
-<td>28615(0.0%)&nbsp<b>80%</b><br>30457(0.0%)&nbsp<b>85%</b><br><td>35261(0.0%)&nbsp<b>98%</b><br>36533(0.0%)&nbsp<b>102%</b><br><td>71853(0.0%)&nbsp<b>100%</b><br>73132(0.0%)&nbsp<b>102%</b><br><td>135924(0.0%)&nbsp<b>95%</b><br>137546(0.0%)&nbsp<b>96%</b><br><td>191311(0.0%)&nbsp<b>89%</b><br>193415(0.0%)&nbsp<b>90%</b><br><td>243832(0.0%)&nbsp<b>85%</b><br>244235(0.0%)&nbsp<b>85%</b><br>
+<td nowrap>32106(0.0%) <b>86%</b><br>29690(0.0%) <b>79%</b><br><td nowrap>37029(0.0%) <b>99%</b><br>37905(0.0%) <b>101%</b><br><td nowrap>73234(0.0%) <b>98%</b><br>72268(0.0%) <b>96%</b><br><td nowrap>137192(0.0%) <b>92%</b><br>135848(0.0%) <b>91%</b><br><td nowrap>193005(0.0%) <b>86%</b><br>194181(0.0%) <b>86%</b><br><td nowrap>242250(0.0%) <b>81%</b><br>242728(0.0%) <b>81%</b><br>
 <tr><td>nUpdate=1 nScan=1
-<td>21165(0.0%)&nbsp<b>91%</b><br>20946(0.0%)&nbsp<b>91%</b><br><td>22944(0.0%)&nbsp<b>99%</b><br>23329(0.0%)&nbsp<b>101%</b><br><td>48754(0.0%)&nbsp<b>105%</b><br>48548(0.0%)&nbsp<b>105%</b><br><td>92544(0.0%)&nbsp<b>100%</b><br>92709(0.0%)&nbsp<b>100%</b><br><td>131705(0.0%)&nbsp<b>95%</b><br>132066(0.0%)&nbsp<b>95%</b><br><td>167619(0.0%)&nbsp<b>91%</b><br>167153(0.0%)&nbsp<b>90%</b><br>
+<td nowrap>22347(0.0%) <b>89%</b><br>22043(0.0%) <b>88%</b><br><td nowrap>25536(0.0%) <b>102%</b><br>24762(0.0%) <b>98%</b><br><td nowrap>48577(0.0%) <b>97%</b><br>48647(0.0%) <b>97%</b><br><td nowrap>92570(0.0%) <b>92%</b><br>92906(0.0%) <b>92%</b><br><td nowrap>133393(0.0%) <b>88%</b><br>131944(0.0%) <b>87%</b><br><td nowrap>168731(0.0%) <b>84%</b><br>167434(0.0%) <b>83%</b><br>
 <tr><td>nUpdate=1 nScan=5
-<td>9982(0.0%)&nbsp<b>93%</b><br>9801(0.0%)&nbsp<b>92%</b><br><td>10808(0.0%)&nbsp<b>101%</b><br>10545(0.0%)&nbsp<b>99%</b><br><td>22129(0.0%)&nbsp<b>104%</b><br>22157(0.0%)&nbsp<b>104%</b><br><td>43371(0.1%)&nbsp<b>102%</b><br>43353(0.1%)&nbsp<b>102%</b><br><td>63466(0.1%)&nbsp<b>99%</b><br>63314(0.1%)&nbsp<b>99%</b><br><td>81691(0.2%)&nbsp<b>96%</b><br>81585(0.1%)&nbsp<b>96%</b><br>
+<td nowrap>10567(0.0%) <b>92%</b><br>10669(0.0%) <b>93%</b><br><td nowrap>11613(0.0%) <b>101%</b><br>11375(0.0%) <b>99%</b><br><td nowrap>22195(0.0%) <b>97%</b><br>22595(0.0%) <b>98%</b><br><td nowrap>44006(0.1%) <b>96%</b><br>43465(0.1%) <b>95%</b><br><td nowrap>63952(0.1%) <b>93%</b><br>63695(0.1%) <b>92%</b><br><td nowrap>82701(0.1%) <b>90%</b><br>82594(0.1%) <b>90%</b><br>
 <tr><td>nUpdate=1 nScan=10
-<td>6119(0.0%)&nbsp<b>98%</b><br>6031(0.0%)&nbsp<b>96%</b><br><td>6401(0.0%)&nbsp<b>102%</b><br>6140(0.0%)&nbsp<b>98%</b><br><td>13391(0.0%)&nbsp<b>107%</b><br>13272(0.0%)&nbsp<b>106%</b><br><td>26424(0.1%)&nbsp<b>105%</b><br>26407(0.1%)&nbsp<b>105%</b><br><td>38758(0.2%)&nbsp<b>103%</b><br>38575(0.2%)&nbsp<b>103%</b><br><td>50137(0.3%)&nbsp<b>100%</b><br>50229(0.3%)&nbsp<b>100%</b><br>
+<td nowrap>6492(0.0%) <b>93%</b><br>6510(0.0%) <b>93%</b><br><td nowrap>7005(0.0%) <b>101%</b><br>6934(0.0%) <b>99%</b><br><td nowrap>13462(0.0%) <b>97%</b><br>13256(0.0%) <b>95%</b><br><td nowrap>26773(0.1%) <b>96%</b><br>26541(0.1%) <b>95%</b><br><td nowrap>39182(0.2%) <b>94%</b><br>38972(0.2%) <b>93%</b><br><td nowrap>50974(0.3%) <b>91%</b><br>50594(0.3%) <b>91%</b><br>
 <tr><td>nUpdate=1 nScan=25
-<td>2845(0.0%)&nbsp<b>99%</b><br>2814(0.0%)&nbsp<b>98%</b><br><td>2890(0.0%)&nbsp<b>100%</b><br>2878(0.0%)&nbsp<b>100%</b><br><td>6149(0.1%)&nbsp<b>107%</b><br>6020(0.1%)&nbsp<b>104%</b><br><td>12049(0.4%)&nbsp<b>104%</b><br>12060(0.3%)&nbsp<b>105%</b><br><td>17887(0.6%)&nbsp<b>103%</b><br>17763(0.5%)&nbsp<b>103%</b><br><td>23238(0.7%)&nbsp<b>101%</b><br>23255(0.7%)&nbsp<b>101%</b><br>
+<td nowrap>3017(0.0%) <b>97%</b><br>3020(0.0%) <b>97%</b><br><td nowrap>3141(0.0%) <b>101%</b><br>3087(0.0%) <b>99%</b><br><td nowrap>6128(0.1%) <b>98%</b><br>6176(0.1%) <b>99%</b><br><td nowrap>12304(0.3%) <b>99%</b><br>12265(0.3%) <b>98%</b><br><td nowrap>18167(0.5%) <b>97%</b><br>18088(0.4%) <b>97%</b><br><td nowrap>23784(0.6%) <b>95%</b><br>23673(0.7%) <b>95%</b><br>
 <tr><td>nUpdate=5 nScan=0
-<td>6272(0.0%)&nbsp<b>79%</b><br>5356(0.0%)&nbsp<b>67%</b><br><td>7933(0.0%)&nbsp<b>100%</b><br>7952(0.0%)&nbsp<b>100%</b><br><td>16296(0.1%)&nbsp<b>103%</b><br>16119(0.0%)&nbsp<b>101%</b><br><td>29610(0.0%)&nbsp<b>93%</b><br>29951(0.0%)&nbsp<b>94%</b><br><td>41564(0.0%)&nbsp<b>87%</b><br>41336(0.0%)&nbsp<b>87%</b><br><td>52039(0.1%)&nbsp<b>82%</b><br>51911(0.1%)&nbsp<b>82%</b><br>
+<td nowrap>6602(0.0%) <b>79%</b><br>6485(0.0%) <b>78%</b><br><td nowrap>8385(0.0%) <b>100%</b><br>8350(0.0%) <b>100%</b><br><td nowrap>16138(0.1%) <b>96%</b><br>15879(0.0%) <b>95%</b><br><td nowrap>30031(0.0%) <b>90%</b><br>29841(0.1%) <b>89%</b><br><td nowrap>41955(0.1%) <b>84%</b><br>41631(0.1%) <b>83%</b><br><td nowrap>52484(0.1%) <b>78%</b><br>52529(0.1%) <b>78%</b><br>
 <tr><td>nUpdate=5 nScan=1
-<td>5636(0.0%)&nbsp<b>81%</b><br>5574(0.0%)&nbsp<b>80%</b><br><td>7094(0.0%)&nbsp<b>102%</b><br>6863(0.0%)&nbsp<b>98%</b><br><td>14141(0.0%)&nbsp<b>101%</b><br>14169(0.0%)&nbsp<b>102%</b><br><td>26547(0.1%)&nbsp<b>95%</b><br>26486(0.1%)&nbsp<b>95%</b><br><td>37345(0.2%)&nbsp<b>89%</b><br>37120(0.2%)&nbsp<b>89%</b><br><td>46619(0.3%)&nbsp<b>84%</b><br>46813(0.3%)&nbsp<b>84%</b><br>
+<td nowrap>5760(0.0%) <b>78%</b><br>5866(0.0%) <b>79%</b><br><td nowrap>7409(0.0%) <b>100%</b><br>7409(0.0%) <b>100%</b><br><td nowrap>14146(0.0%) <b>95%</b><br>14187(0.1%) <b>96%</b><br><td nowrap>26808(0.1%) <b>90%</b><br>26653(0.1%) <b>90%</b><br><td nowrap>37407(0.2%) <b>84%</b><br>37363(0.2%) <b>84%</b><br><td nowrap>47049(0.3%) <b>79%</b><br>46832(0.4%) <b>79%</b><br>
 <tr><td>nUpdate=5 nScan=5
-<td>4219(0.0%)&nbsp<b>83%</b><br>4206(0.0%)&nbsp<b>83%</b><br><td>5082(0.0%)&nbsp<b>100%</b><br>5071(0.0%)&nbsp<b>100%</b><br><td>10341(0.1%)&nbsp<b>102%</b><br>10413(0.1%)&nbsp<b>103%</b><br><td>19793(0.4%)&nbsp<b>97%</b><br>19897(0.5%)&nbsp<b>98%</b><br><td>28063(0.7%)&nbsp<b>92%</b><br>27953(0.7%)&nbsp<b>92%</b><br><td>35196(1.0%)&nbsp<b>87%</b><br>35100(0.9%)&nbsp<b>86%</b><br>
+<td nowrap>4543(0.0%) <b>84%</b><br>4564(0.0%) <b>84%</b><br><td nowrap>5411(0.0%) <b>100%</b><br>5394(0.0%) <b>100%</b><br><td nowrap>10480(0.2%) <b>97%</b><br>10407(0.1%) <b>96%</b><br><td nowrap>19904(0.4%) <b>92%</b><br>19825(0.4%) <b>92%</b><br><td nowrap>28300(0.7%) <b>87%</b><br>28134(0.7%) <b>87%</b><br><td nowrap>35531(0.9%) <b>82%</b><br>35476(0.9%) <b>82%</b><br>
 <tr><td>nUpdate=5 nScan=10
-<td>3284(0.0%)&nbsp<b>86%</b><br>3320(0.0%)&nbsp<b>87%</b><br><td>3822(0.0%)&nbsp<b>100%</b><br>3792(0.0%)&nbsp<b>100%</b><br><td>7999(0.2%)&nbsp<b>105%</b><br>8010(0.2%)&nbsp<b>105%</b><br><td>15204(0.6%)&nbsp<b>100%</b><br>15116(0.6%)&nbsp<b>99%</b><br><td>21713(1.2%)&nbsp<b>95%</b><br>21711(1.3%)&nbsp<b>95%</b><br><td>27515(1.7%)&nbsp<b>90%</b><br>27414(1.6%)&nbsp<b>90%</b><br>
+<td nowrap>3536(0.0%) <b>86%</b><br>3557(0.0%) <b>87%</b><br><td
+nowrap>4128(0.0%) <b>101%</b><br>4060(0.0%) <b>99%</b><br><td nowrap>7992(0.2%)
+  <b>98%</b><br>7876(0.2%) <b>96%</b><br><td nowrap>15317(0.7%)
+  <b>94%</b><br>15321(0.7%) <b>94%</b><br><td nowrap>21994(1.3%)
+  <b>90%</b><br>21932(1.1%) <b>89%</b><br><td style=background-color:lightgrey>27841(1.8%) <b>85%</b><br>27763(1.7%) <b>85%</b><br>
 <tr><td>nUpdate=5 nScan=25
-<td>2025(0.0%)&nbsp<b>92%</b><br>2016(0.0%)&nbsp<b>91%</b><br><td>2203(0.0%)&nbsp<b>100%</b><br>2204(0.0%)&nbsp<b>100%</b><br><td>4552(0.5%)&nbsp<b>103%</b><br>4627(0.5%)&nbsp<b>105%</b><br><td>8993(1.6%)&nbsp<b>102%</b><br>8960(1.5%)&nbsp<b>102%</b><br><td>13070(2.5%)&nbsp<b>99%</b><br>13093(2.5%)&nbsp<b>99%</b><br><td>16776(3.5%)&nbsp<b>95%</b><br>16742(3.7%)&nbsp<b>95%</b><br>
+<td nowrap>2158(0.0%) <b>91%</b><br>2161(0.0%) <b>91%</b><br><td nowrap>2354(0.0%) <b>99%</b><br>2381(0.0%) <b>101%</b><br><td nowrap>4663(0.5%) <b>98%</b><br>4677(0.5%) <b>99%</b><br><td nowrap>9104(1.4%) <b>96%</b><br>9092(1.7%) <b>96%</b><br><td nowrap>13273(2.6%) <b>93%</b><br>13248(2.7%) <b>93%</b><br><td nowrap>16971(3.7%) <b>90%</b><br>16978(3.5%) <b>90%</b><br>
 <tr><td>nUpdate=10 nScan=0
-<td>2992(0.0%)&nbsp<b>74%</b><br>2926(0.0%)&nbsp<b>73%</b><br><td>4075(0.0%)&nbsp<b>101%</b><br>3992(0.0%)&nbsp<b>99%</b><br><td>8211(0.0%)&nbsp<b>102%</b><br>8261(0.0%)&nbsp<b>102%</b><br><td>15120(0.3%)&nbsp<b>94%</b><br>15184(0.0%)&nbsp<b>94%</b><br><td>21217(0.4%)&nbsp<b>88%</b><br>21104(0.4%)&nbsp<b>87%</b><br><td>26436(0.2%)&nbsp<b>82%</b><br>26336(0.2%)&nbsp<b>82%</b><br>
+<td nowrap>3311(0.0%) <b>78%</b><br>3296(0.0%) <b>78%</b><br><td nowrap>4181(0.0%) <b>99%</b><br>4296(0.0%) <b>101%</b><br><td nowrap>8172(0.0%) <b>96%</b><br>8304(0.0%) <b>98%</b><br><td nowrap>15225(0.2%) <b>90%</b><br>15319(0.5%) <b>90%</b><br><td nowrap>21167(0.1%) <b>83%</b><br>21432(0.4%) <b>84%</b><br><td nowrap>26642(0.4%) <b>79%</b><br>26639(0.3%) <b>79%</b><br>
 <tr><td>nUpdate=10 nScan=1
-<td>2942(0.0%)&nbsp<b>78%</b><br>2914(0.0%)&nbsp<b>77%</b><br><td>3732(0.0%)&nbsp<b>99%</b><br>3799(0.0%)&nbsp<b>101%</b><br><td>7787(0.1%)&nbsp<b>103%</b><br>7619(0.3%)&nbsp<b>101%</b><br><td>14243(0.2%)&nbsp<b>95%</b><br>14191(0.2%)&nbsp<b>94%</b><br><td>19894(0.6%)&nbsp<b>88%</b><br>19848(0.5%)&nbsp<b>88%</b><br><td>24810(0.6%)&nbsp<b>82%</b><br>24813(0.7%)&nbsp<b>82%</b><br>
+<td nowrap>3069(0.0%) <b>77%</b><br>3006(0.0%) <b>76%</b><br><td nowrap>3974(0.0%) <b>100%</b><br>3954(0.0%) <b>100%</b><br><td nowrap>7562(0.1%) <b>95%</b><br>7634(0.1%) <b>96%</b><br><td nowrap>14349(0.4%) <b>90%</b><br>14280(0.4%) <b>90%</b><br><td nowrap>20075(0.6%) <b>84%</b><br>20037(0.6%) <b>84%</b><br><td nowrap>25071(0.6%) <b>79%</b><br>25082(0.8%) <b>79%</b><br>
 <tr><td>nUpdate=10 nScan=5
-<td>2534(0.0%)&nbsp<b>82%</b><br>2529(0.0%)&nbsp<b>81%</b><br><td>3111(0.0%)&nbsp<b>100%</b><br>3099(0.0%)&nbsp<b>100%</b><br><td>6328(0.3%)&nbsp<b>102%</b><br>6302(0.3%)&nbsp<b>101%</b><br><td>11899(0.9%)&nbsp<b>96%</b><br>11952(1.3%)&nbsp<b>96%</b><br><td>16661(1.3%)&nbsp<b>89%</b><br>16703(1.4%)&nbsp<b>90%</b><br><td>20922(2.4%)&nbsp<b>84%</b><br>20865(2.0%)&nbsp<b>84%</b><br>
+<td nowrap>2649(0.0%) <b>81%</b><br>2660(0.0%) <b>81%</b><br><td nowrap>3267(0.0%) <b>99%</b><br>3304(0.0%) <b>101%</b><br><td nowrap>6345(0.3%) <b>97%</b><br>6312(0.3%) <b>96%</b><br><td nowrap>11906(1.0%) <b>91%</b><br>11910(0.8%) <b>91%</b><br><td nowrap>16729(1.5%) <b>85%</b><br>16762(1.5%) <b>85%</b><br><td nowrap>21042(1.9%) <b>80%</b><br>21060(2.2%) <b>80%</b><br>
 <tr><td>nUpdate=10 nScan=10
-<td>2179(0.0%)&nbsp<b>85%</b><br>2074(0.0%)&nbsp<b>81%</b><br><td>2595(0.0%)&nbsp<b>101%</b><br>2538(0.0%)&nbsp<b>99%</b><br><td>5231(0.7%)&nbsp<b>102%</b><br>5229(0.4%)&nbsp<b>102%</b><br><td>10048(1.6%)&nbsp<b>98%</b><br>10022(1.5%)&nbsp<b>98%</b><br><td>14075(2.6%)&nbsp<b>91%</b><br>14073(2.5%)&nbsp<b>91%</b><br><td>17637(3.9%)&nbsp<b>86%</b><br>17612(3.3%)&nbsp<b>86%</b><br>
+<td nowrap>2310(0.0%) <b>85%</b><br>2206(0.0%) <b>81%</b><br><td nowrap>2707(0.0%) <b>99%</b><br>2746(0.0%) <b>101%</b><br><td nowrap>5255(0.5%) <b>96%</b><br>5274(0.5%) <b>97%</b><br><td nowrap>10056(1.6%) <b>92%</b><br>10052(1.5%) <b>92%</b><br><td nowrap>14235(2.6%) <b>87%</b><br>14176(2.1%) <b>87%</b><br><td nowrap>17853(3.8%) <b>82%</b><br>17862(3.9%) <b>82%</b><br>
 <tr><td>nUpdate=10 nScan=25
-<td>1521(0.0%)&nbsp<b>89%</b><br>1473(0.0%)&nbsp<b>86%</b><br><td>1712(0.0%)&nbsp<b>101%</b><br>1694(0.0%)&nbsp<b>99%</b><br><td>3555(1.0%)&nbsp<b>104%</b><br>3584(1.0%)&nbsp<b>105%</b><br><td>6846(3.3%)&nbsp<b>100%</b><br>6826(3.5%)&nbsp<b>100%</b><br><td>9745(5.7%)&nbsp<b>95%</b><br>9718(5.5%)&nbsp<b>95%</b><br><td>12342(7.6%)&nbsp<b>91%</b><br>12285(7.8%)&nbsp<b>90%</b><br>
+<td nowrap>1607(0.0%) <b>87%</b><br>1600(0.0%) <b>87%</b><br><td nowrap>1850(0.0%) <b>101%</b><br>1824(0.0%) <b>99%</b><br><td nowrap>3527(1.0%) <b>96%</b><br>3558(1.2%) <b>97%</b><br><td nowrap>6884(3.1%) <b>94%</b><br>6875(3.5%) <b>94%</b><br><td nowrap>9879(5.7%) <b>90%</b><br>9862(5.4%) <b>89%</b><br><td nowrap>12454(7.7%) <b>85%</b><br>12430(7.9%) <b>85%</b><br>
 <tr><td>nUpdate=25 nScan=0
-<td>1271(0.0%)&nbsp<b>78%</b><br>1184(0.0%)&nbsp<b>73%</b><br><td>1664(0.0%)&nbsp<b>102%</b><br>1594(0.0%)&nbsp<b>98%</b><br><td>3278(0.1%)&nbsp<b>101%</b><br>3332(0.1%)&nbsp<b>102%</b><br><td>6180(1.1%)&nbsp<b>95%</b><br>6169(1.1%)&nbsp<b>95%</b><br><td>8670(2.6%)&nbsp<b>89%</b><br>8523(0.9%)&nbsp<b>87%</b><br><td>10688(2.2%)&nbsp<b>82%</b><br>10773(3.1%)&nbsp<b>83%</b><br>
+<td nowrap>1135(0.0%) <b>67%</b><br>1236(0.0%) <b>73%</b><br><td nowrap>1722(0.0%) <b>101%</b><br>1684(0.0%) <b>99%</b><br><td nowrap>3317(1.9%) <b>97%</b><br>3280(0.1%) <b>96%</b><br><td nowrap>6147(0.2%) <b>90%</b><br>6119(0.2%) <b>90%</b><br><td nowrap>8566(0.9%) <b>84%</b><br>8569(0.9%) <b>84%</b><br><td nowrap>10730(1.3%) <b>79%</b><br>10828(2.2%) <b>79%</b><br>
 </table>
-
 

@@ -81,7 +81,7 @@ foreach test $lTest {
   foreach t $lThread {
     set tcount $t
     if {$tcount=="stock"} {set tcount 1}
-    puts -nonewline <td>
+    puts -nonewline "<td nowrap>"
     db eval {
       WITH res(ntotal, npersecond, npersecondcpu, percentbusy) AS (
         SELECT ntrans, 
@@ -100,7 +100,7 @@ foreach test $lTest {
           || '<b>' || CAST((100 * npersecond / (navg*$tcount))+0.5 AS integer) || '%</b>'  AS line
       FROM res, baserate;
     } {
-      puts -nonewline [string map [list " " &nbsp;] $line]
+      puts -nonewline $line
       puts -nonewline <br>
     }
   }
