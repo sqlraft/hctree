@@ -498,12 +498,6 @@ static char *test_thread(int iTid, void *pArg){
         htt_sqlite3_reset(&err, pWrite);
       }
 
-#if 0
-      if( nWrite==4 ){
-        htt_sqlite3_exec_debug(&err, db, "SELECT * FROM hctvalid");
-      };
-#endif
-
       sqlite3_step(pCommit);
       htt_sqlite3_reset(&err, pCommit);
       if( err.rc==SQLITE_BUSY ){
@@ -642,11 +636,6 @@ static void test_build_db(Error *pErr, Testcase *pTst, int iDb, TestCtx *aCtx){
 
     sqlite3_step(pIns);
     htt_sqlite3_reset(pErr, pIns);
-
-    if( (ii % nInsertPerTrans)==(nInsertPerTrans-1) && ii!=pTst->nRow ){
-      htt_sqlite3_exec(db, "COMMIT");
-      htt_sqlite3_exec(db, "BEGIN");
-    }
   }
   htt_sqlite3_exec(db, "COMMIT");
   sqlite3_finalize(pIns);
