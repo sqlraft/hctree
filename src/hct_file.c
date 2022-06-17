@@ -757,18 +757,20 @@ static int hctFileServerFind(HctFile *pFile, const char *zFile){
 
   if( pServer==0 ){
     int fd = hctFileOpen(&rc, zFile, "");
-    hctFileLock(&rc, fd);
-
-    pServer = (HctFileServer*)sqlite3HctMalloc(&rc, sizeof(*pServer));
-    if( pServer==0 ){
-      close(fd);
-    }else{
-      pServer->st_dev = (i64)sStat.st_dev;
-      pServer->st_ino = (i64)sStat.st_ino;
-      pServer->pServerNext = g.pServerList;
-      pServer->fdHdr = fd;
-      pServer->pMutex = sqlite3_mutex_alloc(SQLITE_MUTEX_RECURSIVE);
-      g.pServerList = pServer;
+    if( rc==SQLITE_OK ){
+      hctFileLock(&rc, fd);
+      pServer = (HctFileServer*)sqlite3HctMalloc(&rc, sizeof(*pServer));
+      if( pServer==0 ){
+        if( fd ) close(fd);
+      }else{
+        fstat(fd, &sStat);
+        pServer->st_dev = (i64)sStat.st_dev;
+        pServer->st_ino = (i64)sStat.st_ino;
+        pServer->pServerNext = g.pServerList;
+        pServer->fdHdr = fd;
+        pServer->pMutex = sqlite3_mutex_alloc(SQLITE_MUTEX_RECURSIVE);
+        g.pServerList = pServer;
+      }
     }
   }
 
