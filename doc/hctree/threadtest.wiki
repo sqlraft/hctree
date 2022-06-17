@@ -25,10 +25,12 @@ run concurrent read/write transactions.
 
 Performance is also compared against a single client using the standard
 SQLite b-tree backend. This is not to show that hctree is faster than stock
-SQLite in single-threaded deployments (in many cases it is slower), but merely
-to show that it is similar enough in the cases tested. There would be no point
-in running 8 threads concurrently if each of them were an order of magnitude
-slower than with the regular database backend.
+SQLite in single-threaded deployments. Although it does test faster in
+some write-heavy cases below, this is largely because it currently creates
+slightly larger database files. The point is to show that it runs at a
+similar speed for the cases tested. There would be no point in running 8
+threads concurrently if each of them were an order of magnitude slower than
+other database backends.
 
 <h1>Test Overview</h1>
 

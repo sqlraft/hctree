@@ -32,6 +32,9 @@
 
 #define HCT_HEADER_PAGESIZE      4096
 
+#define HCT_LOCK_OFFSET (1024*1024)
+#define HCT_LOCK_SIZE   1
+
 
 /*
 ** Pagemap slots used for special purposes.
@@ -405,6 +408,24 @@ static int hctFileOpen(int *pRc, const char *zFile, const char *zPost){
 }
 
 /*
+** Take an exclusive POSIX lock on the file-descriptor passed as the 
+** second argument.
+*/
+static void hctFileLock(int *pRc, int fd){
+  if( *pRc==SQLITE_OK ){
+    int res;
+    struct flock l;
+    memset(&l, 0, sizeof(l));
+    l.l_type = F_WRLCK;
+    l.l_whence = SEEK_SET;
+    l.l_start = HCT_LOCK_OFFSET;
+    l.l_len = HCT_LOCK_SIZE;
+    res = fcntl(fd, F_SETLK, &l);
+    if( res!=0 ) *pRc = SQLITE_BUSY;
+  }
+}
+
+/*
 ** Argument fd is an open file-handle. Return the size of the file in bytes.
 **
 ** This function is a no-op (returns 0) if *pRc is other than SQLITE_OK 
@@ -736,21 +757,18 @@ static int hctFileServerFind(HctFile *pFile, const char *zFile){
 
   if( pServer==0 ){
     int fd = hctFileOpen(&rc, zFile, "");
-    if( rc==SQLITE_OK ){
-      fstat(fd, &sStat);
-      pServer = (HctFileServer*)sqlite3_malloc(sizeof(*pServer));
-      if( pServer==0 ){
-        close(fd);
-        rc = SQLITE_NOMEM_BKPT;
-      }else{
-        memset(pServer, 0, sizeof(*pServer));
-        pServer->st_dev = (i64)sStat.st_dev;
-        pServer->st_ino = (i64)sStat.st_ino;
-        pServer->pServerNext = g.pServerList;
-        pServer->fdHdr = fd;
-        pServer->pMutex = sqlite3_mutex_alloc(SQLITE_MUTEX_RECURSIVE);
-        g.pServerList = pServer;
-      }
+    hctFileLock(&rc, fd);
+
+    pServer = (HctFileServer*)sqlite3HctMalloc(&rc, sizeof(*pServer));
+    if( pServer==0 ){
+      close(fd);
+    }else{
+      pServer->st_dev = (i64)sStat.st_dev;
+      pServer->st_ino = (i64)sStat.st_ino;
+      pServer->pServerNext = g.pServerList;
+      pServer->fdHdr = fd;
+      pServer->pMutex = sqlite3_mutex_alloc(SQLITE_MUTEX_RECURSIVE);
+      g.pServerList = pServer;
     }
   }
 
