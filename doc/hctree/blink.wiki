@@ -652,24 +652,80 @@ being left in the database following an application failure.
 
 <h2 id=recovery2> Recovery From Power/OS Failure </h2>
 
-In order to support recovery from power failure, each database has three
-separate page-map files - A, B and C. We refer to "files" in this section, but
-these could just as easily be three different parts of a single file, or three
-different parts of the database file itself.
+Robustness in the face of power failures is achieved using database checkpoints
+and checksummed log files. A checkpoint is a version of the database that
+can be recovered following a power failure. A checkpoint is a version
+of the database that:
 
-A database also has two header pages. Each header page is located on a
+    *  contains all data for all transactions with transaction ids less 
+       than or equal to some value T, and no data for any transaction with a
+       transaction id greater than T. 
+
+    *  contains all data for all transactions with commit ids less 
+       than or equal to some value C, and no data for any transaction with a
+       commit id greater than C. 
+
+A database has two header pages. Each header page is located on a
 different disk sector, so it can be synced to disk separately. These are
 called header pages, but are in fact stored in a separate file to other
 database content. This is also to allow them to be synced separately.
 
-Robustness in the face of power failures is achieved using database checkpoints
-and checksummed log files. A checkpoint is a version of the page-map and a set
-of pages within the database file that have been successfully synced to disk. A
-checkpoint contains all data for all transactions with transaction ids less
-than or equal to some value T, and no data for any transaction with a
-transaction greater than T. To recover the database following a power failure,
-as many transactions as possible are recovered from the checksummed log files
-and added to the checkpointed version of the database.
+In order to create a checkpoint, the database client must:
+
+    *  Block any new writers from beginning to commit (i.e. from obtaining
+       new transaction ids),
+    *  Wait until all existing writers have committed,
+    *  Record the current snapshot id, then unblock new writers,
+    *  Sync the db file,
+    *  Write the checkpoint id to a database header page,
+    *  Sync the header pages.
+
+To recover the database following a power failure, as many transactions as
+possible are recovered from the checksummed log files and added to the
+checkpointed version of the database.
+
+There are two ideas here for implementing recovery of a checkpoint following
+power or OS failure here. Idea #1 is reasonably simple, but requires the
+entire database file (possibly many TB of data) to be scanned twice in 
+order to reconstruct the page-map. Idea 2 is more complicated, and adds some
+overhead to all clients, but allows for fast recovery.
+
+Idea #1 seems the more plausible of the two.
+
+<b>Idea #1</b>
+
+This scheme adds three fields to each page written to the database file:
+
+  *  The logical page number, and
+
+  *  The TID of the transaction that wrote the page, and
+
+  *  The version number of the logical page. This is incremented each time
+     a new version of the logical page is written to disk.
+
+As in idea #1, a checkpoint requires all currently outstanding transactions
+to be committed before any new commits are started. The database file is
+synced to disk and the largest TID of any transaction committed before the
+checkpoint is recorded in a header page as part of the checkpoint.
+
+To recover from a power failure, the client must reconstruct the page-map
+by scanning the entire database file from beginning to end. This creates
+a preliminary page-map by mapping each logical page to the version with
+with the largest version number that also has a TID less than or equal
+to the checkpoint TID. 
+
+This page-map is not quite complete though, as it includes logical pages
+that are free. To identify these, the client then scans each tree structure
+within the database file, identifying all logical and physical pages that are
+linked in to the database. All other logical and physical pages are marked as
+free in the reconstructed page-map.
+
+
+<b>Idea #2</b>
+
+Each database has three separate page-map files - A, B and C. We refer to
+"files" in this section, but these could just as easily be three different
+parts of a single file, or three different parts of the database file itself.
 
 Writers begin by writing transactions into the database and into page-map 
 file A. Each writer also writes its transactions into a log file (one log 

@@ -1,5 +1,5 @@
-C Fix\sbug\sin\sprevious\scommit.
-D 2022-06-17T15:50:38.276
+C Update\sdocs\sregarding\srecovery\sfrom\spower\sfailure.
+D 2022-06-18T17:00:29.177
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -38,7 +38,7 @@ F configure bd48a40b811cdcf12ec1bf2562cfa8a588b2d90c099f513d552b7e31fc1103b6 x
 F configure.ac 3ef6eeff4387585bfcab76b0c3f6e15a0618587bb90245dd5d44e4378141bb35
 F contrib/sqlitecon.tcl 210a913ad63f9f991070821e599d600bd913e0ad
 F doc/F2FS.txt c1d4a0ae9711cfe0e1d8b019d154f1c29e0d3abfe820787ba1e9ed7691160fcd
-F doc/hctree/blink.wiki 2adc7831284cdea33801f88222b8a4d9b9d8376c8bda936efb54144a0281efb9
+F doc/hctree/blink.wiki 7e9b7dc054ae0446bf5d6e012c800b87954c014bd7a4323fd9b6038c49a71c07
 F doc/hctree/btree_merge1.png 850d83122906431143a3ec302d12ab219a172283fe9cf3e90c820c8767faee8d
 F doc/hctree/btree_redistribute1.png 1666cf0e3a24d3f792a09081665307f79d469f4d10a9f2e08526544c75644a2c
 F doc/hctree/btree_split1.png c90032107fbcb0333f8770d94f5c6102155aa3abb6a2f769f55529969f67ab6d
@@ -1988,8 +1988,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P 5d5fd8aff7fd4b79b42f197803a0a1f7212bbbb1a31c95a1402eda8ec1b11c7b
-R 66f2bc91f335ffa3b6c2221b89f40c8d
+P e40ff01d6fc1714068cc4cfcf9bad7f8f46a19217fc591676ab3d4fa15d173bb
+R d0ac0d5e59d4ec19fbe49b1c69684c9d
 U dan
-Z fce5ddfdb890d354025f678cb7e0cd0d
+Z 7577b96a5d1d48efe5db55a580177589
 # Remove this line to create a well-formed Fossil manifest.
