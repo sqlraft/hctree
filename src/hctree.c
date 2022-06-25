@@ -2002,6 +2002,17 @@ int sqlite3BtreePragma(Btree *p, char **aFnctl){
     iVal = sqlite3HctFilePragmaTidStep(sqlite3HctDbFile(p->pHctDb), iVal);
     zRet = hctDbMPrintf(&rc, "%d", iVal);
   }
+  else if( 0==sqlite3_stricmp("hct_quiescent_integrity_check", zLeft) ){
+    int iVal = 0;
+    if( zRight ){
+      iVal = sqlite3Atoi(zRight);
+    }
+    if( iVal>0 ){
+      p->config.bQuiescentIntegrityCheck = (iVal==0 ? 0 : 1);
+    }
+    rc = SQLITE_OK;
+    zRet = hctDbMPrintf(&rc, "%d", p->config.bQuiescentIntegrityCheck);
+  }
 
   aFnctl[0] = zRet;
   return rc;
@@ -2068,8 +2079,13 @@ char *sqlite3BtreeIntegrityCheck(
   int mxErr,    /* Stop reporting errors after this many */
   int *pnErr    /* Write number of errors seen to this variable */
 ){
+  char *zRet = 0;                 /* Return value */
   *pnErr = 0;
-  return 0;
+  if( p->config.bQuiescentIntegrityCheck && nRoot>0 && aRoot[0]!=0 ){
+    zRet = sqlite3HctDbIntegrityCheck(p->pHctDb, aRoot, nRoot, pnErr);
+    assert( zRet==0 || (*pnErr)>0 );
+  }
+  return zRet;
 }
 #endif /* SQLITE_OMIT_INTEGRITY_CHECK */
 

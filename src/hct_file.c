@@ -1394,6 +1394,57 @@ int sqlite3HctFilePragmaTidStep(HctFile *pFile, int iVal){
   return sqlite3HctTMapClientPragmaTidStep(pFile->pTMapClient, iVal);
 }
 
+void sqlite3HctFileICArrays(
+  HctFile *pFile, 
+  u8 **paLogic, u32 *pnLogic, 
+  u8 **paPhys, u32 *pnPhys
+){
+  int rc = SQLITE_OK;
+  u32 nLogic = 0;
+  u32 nPhys = 0;
+  u8 *aLogic = 0;
+  u8 *aPhys = 0;
+  u32 ii;
+
+  rc = hctFilePagemapGetGrow32(pFile, HCT_PAGEMAP_LOGICAL_EOF, &nLogic);
+  if( rc==SQLITE_OK ){
+    rc = hctFilePagemapGetGrow32(pFile, HCT_PAGEMAP_PHYSICAL_EOF, &nPhys);
+  }
+
+  if( rc==SQLITE_OK ){
+    aLogic = (u8*)sqlite3HctMalloc(&rc, (nLogic + nPhys) * sizeof(u8));
+    if( aLogic ){
+      aPhys = &aLogic[nLogic];
+    }
+  }
+
+  for(ii=1; ii<=nLogic && rc==SQLITE_OK; ii++){
+    u64 val;
+    rc = hctFilePagemapGetGrow(pFile, ii, &val);
+    if( rc==SQLITE_OK && (val & HCT_PMF_LOGICAL_IN_USE)==0 ){
+      aLogic[ii-1] = 1;
+    }
+  }
+  for(ii=1; ii<=nPhys && rc==SQLITE_OK; ii++){
+    u64 val;
+    rc = hctFilePagemapGetGrow(pFile, ii, &val);
+    if( rc==SQLITE_OK && (val & HCT_PMF_PHYSICAL_IN_USE)==0 ){
+      aPhys[ii-1] = 1;
+    }
+  }
+
+  if( rc!=SQLITE_OK ){
+    sqlite3_free(aLogic);
+    aLogic = aPhys = 0;
+    nLogic = nPhys = 0;
+  }
+
+  *paLogic = aLogic;
+  *paPhys = aPhys;
+  *pnLogic = nLogic;
+  *pnPhys = nPhys;
+}
+
 /*************************************************************************
 ** Beginning of vtab implemetation.
 *************************************************************************/

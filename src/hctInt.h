@@ -18,6 +18,7 @@ typedef struct HctConfig HctConfig;
 struct HctConfig {
   int nPageSet;                   /* Used by hct_pman.c */
   int nTryBeforeUnevict;
+  int bQuiescentIntegrityCheck;   /* PRAGMA hct_quiescent_integrity_check */
 };
 
 #define HCT_TID_MASK  ((((u64)0x00FFFFFF) << 32)|0xFFFFFFFF)
@@ -169,6 +170,8 @@ char *sqlite3HctDbLogFile(HctDatabase*);
 
 i64 sqlite3HctDbNCasFail(HctDatabase*);
 
+char *sqlite3HctDbIntegrityCheck(HctDatabase*, u32 *aRoot, int nRoot, int*);
+
 /*************************************************************************
 ** Interface to code in hct_file.c
 */
@@ -200,7 +203,7 @@ struct HctFilePage {
   u8 *aOld;                       /* Current buffer, or NULL */
   u8 *aNew;                       /* New buffer (to be populated) */
 
-  /* Used internally by hct_file.c */
+  /* Used internally by hct_file.c. Mostly... */
   u32 iPg;                        /* logical page number */
   u32 iNewPg;                     /* New physical page number */
   u32 iOldPg;                     /* Original physical page number */
@@ -298,6 +301,8 @@ int sqlite3HctFileFindLogs(HctFile*, void*, int(*)(void*, const char*));
 u32 sqlite3HctFilePageMapping(HctFile *pFile, u32 iLogical, int *pbEvicted);
 
 int sqlite3HctFilePragmaTidStep(HctFile *pFile, int iVal);
+
+void sqlite3HctFileICArrays(HctFile*, u8**, u32*, u8**, u32*);
 
 #include <hctPManInt.h>
 HctPManClient *sqlite3HctFilePManClient(HctFile*);

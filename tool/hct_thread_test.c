@@ -740,6 +740,7 @@ static void runtest(Testcase *pTst){
 
 
   if( pTst->bSeparate==0 ){
+    htt_sqlite3_exec(db, "PRAGMA hct_quiescent_integrity_check=1");
     pIC = htt_sqlite3_prepare(&err, db, "PRAGMA integrity_check");
     if( pIC ){
       while( sqlite3_step(pIC)==SQLITE_ROW ){

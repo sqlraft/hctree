@@ -4093,7 +4093,111 @@ sqlite3HctDbValidate(HctDatabase *pDb, u64 *piCid){
   return rc;
 }
 
+/*************************************************************************
+**************************************************************************
+** Start of integrity-check implementation.
+**
+** The code here assumes that the database is quiescent. If it is invoked
+** concurrently with database writers, false-positive errors may be reported.
+*/
 
+char *sqlite3HctDbIntegrityCheck(
+  HctDatabase *pDb, 
+  u32 *aRoot, 
+  int nRoot, 
+  int *pnErr
+){
+  HctFile *pFile = pDb->pFile;
+  char *zRet = 0;
+  int nLogic = 0;                 /* Number of logical pages in db */
+  int nPhys = 0;                  /* Number of physical pages in db */
+  u8 *aLogic = 0;
+  u8 *aPhys = 0;
+  int nErr = *pnErr;
+  int rc = SQLITE_OK;
+
+  sqlite3HctFileICArrays(pFile, &aLogic, &nLogic, &aPhys, &nPhys);
+  if( !aLogic ){
+    nErr++;
+  }else{
+    int ii;
+
+    for(ii=-1; nErr==0 && ii<nRoot; ii++){
+      HctFilePage pg;
+      u32 pgno = ii<0 ? 2 : aRoot[ii];
+
+      do {
+        u32 child = 0;
+        rc = sqlite3HctFilePageGet(pFile, pgno, &pg);
+        if( rc!=SQLITE_OK ){
+          nErr++;
+        }else if( hctPageheight(pg.aOld)>0 ){
+          int eType = hctPagetype(pg.aOld);
+          if( eType==HCT_PAGETYPE_INTKEY ){
+            child = ((HctDbIntkeyNode*)pg.aOld)->aEntry[0].iChildPg;
+          }else if( eType==HCT_PAGETYPE_INDEX ){
+            child = ((HctDbIndexNode*)pg.aOld)->aEntry[0].iChildPg;
+          }else{
+            nErr++;
+            zRet = sqlite3_mprintf("unknown page type: %d\n", eType);
+          }
+        }
+
+        while( nErr==0 && pg.aOld ){
+          u32 iPeerPg = ((HctDbPageHdr*)pg.aOld)->iPeerPg;
+          u32 iLogic = pg.iPg;
+          u32 iPhys = pg.iOldPg;
+
+          assert( iLogic && iPhys && iLogic<=nLogic && iPhys<=nPhys );
+          if( aLogic[iLogic-1] ){
+            zRet = sqlite3_mprintf(
+                "multiple refs to logical page %d", (int)iLogic
+            );
+            nErr++;
+          }else if( aPhys[iPhys-1] ){
+            zRet = sqlite3_mprintf(
+                "multiple refs to physical page %d", (int)iPhys
+            );
+            nErr++;
+          }else{
+            aLogic[iLogic-1] = 1;
+            aPhys[iPhys-1] = 1;
+          }
+
+          sqlite3HctFilePageRelease(&pg);
+          if( iPeerPg ){
+            rc = sqlite3HctFilePageGet(pFile, iPeerPg, &pg);
+            if( rc!=SQLITE_OK ){
+              nErr++;
+            }
+          }
+        }
+
+        pgno = child;
+      }while( nErr==0 && pgno!=0 );
+    }
+
+    /* Check for leaks */
+    for(ii=1; nErr==0 && ii<=nLogic; ii++){
+      assert( aLogic[ii-1]==0 || aLogic[ii-1]==1 );
+      if( aLogic[ii-1]!=1 ){
+        zRet = sqlite3_mprintf("logical page %d has been leaked", ii);
+        nErr++;
+      }
+    }
+    for(ii=1; nErr==0 && ii<=nPhys; ii++){
+      assert( aPhys[ii-1]==0 || aPhys[ii-1]==1 );
+      if( aPhys[ii-1]!=1 ){
+        zRet = sqlite3_mprintf("physical page %d has been leaked", ii);
+        nErr++;
+      }
+    }
+  }
+
+  *pnErr = nErr;
+  sqlite3_free(aLogic);
+  return zRet;
+}
 
 /*************************************************************************
 **************************************************************************
