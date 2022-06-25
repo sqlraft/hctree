@@ -1119,6 +1119,10 @@ static int hctDbCellOffset(const u8 *aPage, int iCell, u8 *pFlags){
     HctDbIntkeyEntry *pEntry = &((HctDbIntkeyLeaf*)pHdr)->aEntry[iCell];
     *pFlags = pEntry->flags;
     iRet = pEntry->iOff;
+  }else if( hctPageheight(pHdr)>0 ){
+    HctDbIndexNodeEntry *pEntry = &((HctDbIndexNode*)pHdr)->aEntry[iCell];
+    *pFlags = pEntry->flags;
+    iRet = pEntry->iOff;
   }else{
     HctDbIndexEntry *pEntry = &((HctDbIndexLeaf*)pHdr)->aEntry[iCell];
     *pFlags = pEntry->flags;
@@ -4127,19 +4131,25 @@ char *sqlite3HctDbIntegrityCheck(
       u32 pgno = ii<0 ? 2 : aRoot[ii];
 
       do {
+        int nHeight = 0;
+        int eType = 0;
         u32 child = 0;
         rc = sqlite3HctFilePageGet(pFile, pgno, &pg);
         if( rc!=SQLITE_OK ){
           nErr++;
-        }else if( hctPageheight(pg.aOld)>0 ){
-          int eType = hctPagetype(pg.aOld);
-          if( eType==HCT_PAGETYPE_INTKEY ){
-            child = ((HctDbIntkeyNode*)pg.aOld)->aEntry[0].iChildPg;
-          }else if( eType==HCT_PAGETYPE_INDEX ){
-            child = ((HctDbIndexNode*)pg.aOld)->aEntry[0].iChildPg;
-          }else{
+        }else{
+          nHeight = hctPageheight(pg.aOld);
+          eType = hctPagetype(pg.aOld);
+          if( eType!=HCT_PAGETYPE_INTKEY && eType!=HCT_PAGETYPE_INDEX ){
             nErr++;
             zRet = sqlite3_mprintf("unknown page type: %d\n", eType);
+          }
+          else if( nHeight>0 ){
+            if( eType==HCT_PAGETYPE_INTKEY ){
+              child = ((HctDbIntkeyNode*)pg.aOld)->aEntry[0].iChildPg;
+            }else{
+              child = ((HctDbIndexNode*)pg.aOld)->aEntry[0].iChildPg;
+            }
           }
         }
 
@@ -4162,6 +4172,33 @@ char *sqlite3HctDbIntegrityCheck(
           }else{
             aLogic[iLogic-1] = 1;
             aPhys[iPhys-1] = 1;
+          }
+
+          if( nHeight==0 || eType==HCT_PAGETYPE_INDEX ){
+            int iCell = 0;
+            int nEntry = ((HctDbPageHdr*)pg.aOld)->nEntry;
+            for(iCell=0; nErr==0 && iCell<nEntry; iCell++){
+              u8 flags = 0;
+              int iOff = hctDbCellOffset(pg.aOld, iCell, &flags);
+              if( flags & HCTDB_HAS_OVFL ){
+                u32 ovfl = 0;
+                if( (flags & HCTDB_HAS_TID)!=0 ) iOff += 8;
+                if( (flags & HCTDB_HAS_OLD)!=0 ) iOff += 4;
+                ovfl = hctGetU32(&pg.aOld[iOff]);
+                while( ovfl!=0 ){
+                  HctFilePage ov;
+                  aPhys[ovfl-1] = 1;
+                  rc = sqlite3HctFilePageGetPhysical(pFile, ovfl, &ov);
+                  if( rc!=SQLITE_OK ){
+                    nErr++;
+                    ovfl = 0;
+                  }else{
+                    ovfl = ((HctDbPageHdr*)ov.aOld)->iPeerPg;
+                    sqlite3HctFilePageRelease(&ov);
+                  }
+                }
+              }
+            }
           }
 
           sqlite3HctFilePageRelease(&pg);

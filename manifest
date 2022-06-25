@@ -1,5 +1,5 @@
-C Add\scode\sfor\schecking\sfor\sleaked\spages.
-D 2022-06-25T20:14:39.519
+C Consider\soverflow\spages\swhen\ssearching\sfor\sleaks.
+D 2022-06-25T21:31:34.089
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -525,7 +525,7 @@ F src/hash.h 3340ab6e1d13e725571d7cee6d3e3135f0779a7d8e76a9ce0a85971fa3953c51
 F src/hctInt.h 8a38db1703eb914f5d7ff857213982b592e0a773d9e07f90bcf327b5be7566c7
 F src/hctPManInt.h b2fad3181b093c3796a35f78df2efb506309a06af77e2e2adb043e85ecb740af
 F src/hctTMapInt.h 0a404ce775f3dcb2d6a4d43ea14c03a88eb57efd27f2fb9dcdf5d9791ac34be3
-F src/hct_database.c ab8217f29f3f7e4eee9168200e958752512cedc4e7f4e18c4808e7106de85d87
+F src/hct_database.c 9bf336d45fbe66a6c3eb2f2558e76073f948faf87c5b3914a07f709e9acdbf20
 F src/hct_file.c 9b596f204a2a8be8b0f9a27164ecaa25570122cb1427daed132f2325206ddfb8
 F src/hct_pman.c 15ff9ece5c09ff8b178f6b72a6d80286333e6cb5f72427ebe4fe234cd862c37a
 F src/hct_record.c 54b0d564be580ca29a54312f9a9abdba193b234ac56ec65a7e40109107041b25
@@ -1988,8 +1988,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P bdc461f3f2ec94934b4717d6151b30c81ea92f07359cf82526cd67cb91b2f540
-R 445c6c1d1a53b7a57b82678a025e7785
+P 24a31b7869e15b23b172b6d6e77eac1924ced42fc8e51a02f5901147f1406c13
+R 54aab15739977e8b8469ce480ba07c06
 U dan
-Z 9486c21d77e424f51a253013e44da91b
+Z dbcffe540d7d7354add6479c8bda7202
 # Remove this line to create a well-formed Fossil manifest.
