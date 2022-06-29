@@ -285,6 +285,7 @@ u64 sqlite3HctFileSafeTID(HctFile*);
 u32 sqlite3HctFilePageRangeAlloc(HctFile*, int bLogical, int nPg);
 
 int sqlite3HctFileClearInUse(HctFilePage *pPg, int bReuseNow);
+int sqlite3HctFileClearPhysInUse(HctFile *pFile, u32 pgno, int bReuseNow);
 
 void sqlite3HctFileDebugPrint(HctFile *pFile, const char *zFmt, ...);
 

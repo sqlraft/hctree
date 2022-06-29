@@ -903,6 +903,8 @@ void sqlite3HctFileClose(HctFile *pFile){
       if( pDel->fdHdr ) close(pDel->fdHdr);
       if( pDel->fdMap ) close(pDel->fdMap);
       if( pDel->fdDb ) close(pDel->fdDb);
+      sqlite3_free(pDel->zDir);
+      sqlite3_free(pDel->zPath);
       sqlite3_mutex_free(pDel->pMutex);
       sqlite3_free(pDel);
     }
@@ -1335,6 +1337,15 @@ int sqlite3HctFileClearInUse(HctFilePage *pPg, int bReuseNow){
     sqlite3HctPManFreePg(&rc, pPg->pFile->pPManClient, iTid, iPhysPg, 0);
   }
 
+  return rc;
+}
+
+int sqlite3HctFileClearPhysInUse(HctFile *pFile, u32 pgno, int bReuseNow){
+  u64 iTid = pFile->iCurrentTid;
+  int rc = SQLITE_OK;
+  
+  hctFileClearFlag(pFile, pgno, HCT_PMF_PHYSICAL_IN_USE);
+  sqlite3HctPManFreePg(&rc, pFile->pPManClient, iTid, pgno, 0);
   return rc;
 }
 

@@ -55,7 +55,6 @@
 # define SQLITE_OMIT_WAL 1
 # define SQLITE_OMIT_SHARED_CACHE 1
 # define SQLITE_OMIT_VACUUM 1
-# define SQLITE_DEFAULT_MEMSTATUS 0
 #endif
 
 /*
