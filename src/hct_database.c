@@ -193,6 +193,7 @@ struct HctDbWriter {
   u32 iEvictLockedPgno;
 
   HctDbOverflowArray delOvfl;     /* Overflow chains to free on write */
+  HctDbOverflowArray insOvfl;     /* Overflow chains to free on don't-write */
 
   int nOverflow;
 };
@@ -1621,6 +1622,28 @@ static int hctDbMinCellsPerIntkeyNode(int pgsz){
 
 static void hctDbIrrevocablyEvictPage(HctDatabase *pDb, HctDbWriter *p);
 
+static int hctDbOverflowArrayFree(HctDatabase *pDb, HctDbOverflowArray *p){
+  int ii = 0;
+  int rc = SQLITE_OK;
+
+  for(ii=0; rc==SQLITE_OK && ii<p->nEntry; ii++){
+    u32 pgno = p->aOvfl[ii].pgno;
+    int nRem = p->aOvfl[ii].nOvfl;
+    while( 1 ){
+      HctFilePage pg;
+      sqlite3HctFileClearPhysInUse(pDb->pFile, pgno, 0);
+      nRem--;
+      if( nRem==0 ) break;
+      rc = sqlite3HctFilePageGetPhysical(pDb->pFile, pgno, &pg);
+      assert( rc==SQLITE_OK );
+      pgno = ((HctDbPageHdr*)pg.aOld)->iPeerPg;
+      sqlite3HctFilePageRelease(&pg);
+    }
+  }
+
+  return rc;
+}
+
 /*
 ** Cleanup the writer object passed as the first argument.
 */
@@ -1633,24 +1656,14 @@ static void hctDbWriterCleanup(HctDatabase *pDb, HctDbWriter *p, int bRevert){
 
   /* If not reverting, mark the overflow chains in p->delOvfl as free */
   if( bRevert==0 ){
-    for(ii=0; ii<p->delOvfl.nEntry; ii++){
-      u32 pgno = p->delOvfl.aOvfl[ii].pgno;
-      int nRem = p->delOvfl.aOvfl[ii].nOvfl;
-      while( 1 ){
-        int rc;
-        HctFilePage pg;
-        sqlite3HctFileClearPhysInUse(pDb->pFile, pgno, 0);
-        nRem--;
-        if( nRem==0 ) break;
-        rc = sqlite3HctFilePageGetPhysical(pDb->pFile, pgno, &pg);
-        assert( rc==SQLITE_OK );
-        pgno = ((HctDbPageHdr*)pg.aOld)->iPeerPg;
-        sqlite3HctFilePageRelease(&pg);
-      }
-    }
+    hctDbOverflowArrayFree(pDb, &p->delOvfl);
+  }else{
+    hctDbOverflowArrayFree(pDb, &p->insOvfl);
   }
   sqlite3_free(p->delOvfl.aOvfl);
+  sqlite3_free(p->insOvfl.aOvfl);
   memset(&p->delOvfl, 0, sizeof(p->delOvfl));
+  memset(&p->insOvfl, 0, sizeof(p->insOvfl));
 
   for(ii=0; ii<p->writepg.nPg; ii++){
     HctFilePage *pPg = &p->writepg.aPg[ii];
@@ -3085,8 +3098,33 @@ static int hctDbFreebytes(void *aPg){
   return ((HctDbIndexNode*)aPg)->hdr.nFreeBytes;
 }
 
+static int hctDbOverflowArrayAppend(HctDbOverflowArray *p, u32 ovfl, int nOvfl){
+  assert( p->nAlloc>=p->nEntry );
+  assert( ovfl>0 && nOvfl>0 );
+
+  if( p->nAlloc==p->nEntry ){
+    int nNew = p->nAlloc ? p->nAlloc*2 : 16;
+    int nByte = nNew*sizeof(HctDbOverflow);
+    HctDbOverflow *aNew = (HctDbOverflow*)sqlite3_realloc(p->aOvfl, nByte);
+
+    if( aNew==0 ){
+      return SQLITE_NOMEM_BKPT;
+    }
+    p->aOvfl = aNew;
+    p->nAlloc = nNew;
+  }
+
+  p->aOvfl[p->nEntry].pgno = ovfl;
+  p->aOvfl[p->nEntry].nOvfl = nOvfl;
+  p->nEntry++;
+
+  return SQLITE_OK;
+}
+
+
 static int hctDbInsertOverflow(
   HctDatabase *pDb, 
+  HctDbWriter *pWriter,
   u8 *aTarget, 
   int nData, 
   const u8 *aData, 
@@ -3104,12 +3142,14 @@ static int hctDbInsertOverflow(
     int nRem;
     int nCopy;
     u32 iPg = 0;
+    int nOvfl = 0;
 
     nRem = nData;
     nCopy = (nRem-nLocal) % sz;
     if( nCopy==0 ) nCopy = sz;
     while( rc==SQLITE_OK && nRem>nLocal ){
       HctFilePage pg;
+      nOvfl++;
       rc = sqlite3HctFilePageNewPhysical(pDb->pFile, &pg);
       if( rc==SQLITE_OK ){
         HctDbPageHdr *pPg = (HctDbPageHdr*)pg.aNew;
@@ -3126,6 +3166,10 @@ static int hctDbInsertOverflow(
 
     *ppgOvfl = iPg;
     *pnWrite = nLocal;
+
+    if( rc==SQLITE_OK ){
+      rc = hctDbOverflowArrayAppend(&pWriter->insOvfl, iPg, nOvfl);
+    }
   }
 
   return rc;
@@ -3140,6 +3184,7 @@ static int hctDbCopyOverflow(
   int rc = SQLITE_OK;
   u32 pgno = ovfl;
   HctFilePage prevnew;
+  int nOvfl = 0;
 
   memset(&prevnew, 0, sizeof(prevnew));
   while( pgno ){
@@ -3161,35 +3206,19 @@ static int hctDbCopyOverflow(
     sqlite3HctFilePageRelease(&prevnew);
     sqlite3HctFilePageRelease(&pg);
     prevnew = pgnew;
+    nOvfl++;
   }
   sqlite3HctFilePageRelease(&prevnew);
 
+  if( rc==SQLITE_OK ){
+    rc = hctDbOverflowArrayAppend(&pWriter->insOvfl, *pOvflOut, nOvfl);
+  }
   return rc;
+
 }
 
 static int hctDbFreeOverflowChain(HctDbWriter *pWriter, u32 ovfl, int nOvfl){
-  HctDbOverflowArray *p = &pWriter->delOvfl;
-
-  assert( p->nAlloc>=p->nEntry );
-  assert( ovfl>0 && nOvfl>0 );
-
-  if( p->nAlloc==p->nEntry ){
-    int nNew = p->nAlloc ? p->nAlloc*2 : 16;
-    int nByte = nNew*sizeof(HctDbOverflow);
-    HctDbOverflow *aNew = (HctDbOverflow*)sqlite3_realloc(p->aOvfl, nByte);
-
-    if( aNew==0 ){
-      return SQLITE_NOMEM_BKPT;
-    }
-    p->aOvfl = aNew;
-    p->nAlloc = nNew;
-  }
-
-  p->aOvfl[p->nEntry].pgno = ovfl;
-  p->aOvfl[p->nEntry].nOvfl = nOvfl;
-  p->nEntry++;
-
-  return SQLITE_OK;
+  return hctDbOverflowArrayAppend(&pWriter->delOvfl, ovfl, nOvfl);
 }
 
 static void hctDbRemoveCell(
@@ -3605,7 +3634,7 @@ static int hctDbInsert(
         if( bClobber ) iOld = p->iOldPgno;
       }
 
-      rc = hctDbInsertOverflow(pDb, aTarget, nData, aData, &nWrite, &pgOvfl);
+      rc = hctDbInsertOverflow(pDb, p, aTarget, nData, aData, &nWrite, &pgOvfl);
 
       aEntry = pDb->aTmp;
       nEntry = hctDbCellPut(aEntry, iTid, iOld, pgOvfl, aData, nWrite);

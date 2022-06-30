@@ -197,6 +197,7 @@ hct_mvcc2.test
 hct_pman1.test
 hct_reopen1.test
 hct_simple_rollback.test
+hct_overflow1.test
 
   update.test
   delete3.test
