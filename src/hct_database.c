@@ -3171,6 +3171,8 @@ static int hctDbFreeOverflowChain(HctDbWriter *pWriter, u32 ovfl, int nOvfl){
   HctDbOverflowArray *p = &pWriter->delOvfl;
 
   assert( p->nAlloc>=p->nEntry );
+  assert( ovfl>0 && nOvfl>0 );
+
   if( p->nAlloc==p->nEntry ){
     int nNew = p->nAlloc ? p->nAlloc*2 : 16;
     int nByte = nNew*sizeof(HctDbOverflow);
@@ -3353,7 +3355,7 @@ static int hctDbFindEntry(u8 *aTarget, int iEntry, u8 *pFlags, int *pnSize){
   }else{
     iRet = ((HctDbIndexNode*)aTarget)->aEntry[iEntry].iOff;
     *pFlags = ((HctDbIndexNode*)aTarget)->aEntry[iEntry].flags;
-    *pnSize = ((HctDbIntkeyLeaf*)aTarget)->aEntry[iEntry].nSize;
+    *pnSize = ((HctDbIndexNode*)aTarget)->aEntry[iEntry].nSize;
   }
   return iRet;
 }
