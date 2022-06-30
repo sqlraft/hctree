@@ -1333,10 +1333,6 @@ static int hctDbCsrScanStart(HctDbCsr *pCsr, UnpackedRecord *pRec, i64 iKey){
   return rc;
 }
 
-static int hctDbCsrScanVisit(HctDbCsr *pCsr, u32 iLogical, u32 iPhysical){
-  return SQLITE_OK;
-}
-
 static int hctDbCsrScanFinish(HctDbCsr *pCsr){
   int rc = SQLITE_OK;
 
@@ -2610,6 +2606,83 @@ static int hctDbLoadPeers(HctDatabase *pDb, HctDbWriter *p, int *piPg){
   return rc;
 }
 
+
+static int hctDbOverflowArrayAppend(HctDbOverflowArray *p, u32 ovfl, int nOvfl){
+  assert( p->nAlloc>=p->nEntry );
+  assert( ovfl>0 && nOvfl>0 );
+
+  if( p->nAlloc==p->nEntry ){
+    int nNew = p->nAlloc ? p->nAlloc*2 : 16;
+    int nByte = nNew*sizeof(HctDbOverflow);
+    HctDbOverflow *aNew = (HctDbOverflow*)sqlite3_realloc(p->aOvfl, nByte);
+
+    if( aNew==0 ){
+      return SQLITE_NOMEM_BKPT;
+    }
+    p->aOvfl = aNew;
+    p->nAlloc = nNew;
+  }
+
+  p->aOvfl[p->nEntry].pgno = ovfl;
+  p->aOvfl[p->nEntry].nOvfl = nOvfl;
+  p->nEntry++;
+
+  return SQLITE_OK;
+}
+
+
+/*
+** Buffer aTarget[] must contain a page with variable sized records - an
+** index leaf or node, or an intkey leaf. This function returns the offset
+** of the record for entry iEntry, and populates output variable *pFlags
+** with the entry flags.
+*/
+static int hctDbFindEntry(u8 *aTarget, int iEntry, u8 *pFlags, int *pnSize){
+  int iRet;
+  if( hctPagetype(aTarget)==HCT_PAGETYPE_INTKEY ){
+    iRet = ((HctDbIntkeyLeaf*)aTarget)->aEntry[iEntry].iOff;
+    *pFlags = ((HctDbIntkeyLeaf*)aTarget)->aEntry[iEntry].flags;
+    *pnSize = ((HctDbIntkeyLeaf*)aTarget)->aEntry[iEntry].nSize;
+  }else if( hctPageheight(aTarget)==0 ){
+    iRet = ((HctDbIndexLeaf*)aTarget)->aEntry[iEntry].iOff;
+    *pFlags = ((HctDbIndexLeaf*)aTarget)->aEntry[iEntry].flags;
+    *pnSize = ((HctDbIndexLeaf*)aTarget)->aEntry[iEntry].nSize;
+  }else{
+    iRet = ((HctDbIndexNode*)aTarget)->aEntry[iEntry].iOff;
+    *pFlags = ((HctDbIndexNode*)aTarget)->aEntry[iEntry].flags;
+    *pnSize = ((HctDbIndexNode*)aTarget)->aEntry[iEntry].nSize;
+  }
+  return iRet;
+}
+
+static int hctDbRemoveOverflow(
+  HctDatabase *pDb,
+  HctDbWriter *p,
+  u8 *aPage,
+  int iCell
+){
+  int rc = SQLITE_OK;
+
+  int nSize = 0;
+  u8 flags = 0;
+  int iOff = hctDbFindEntry(aPage, iCell, &flags, &nSize);
+  if( flags & HCTDB_HAS_OVFL ){
+    u32 ovfl = 0;
+    int nOvfl = 0;
+    const int nBytePerOvfl = pDb->pgsz - sizeof(HctDbPageHdr);
+    int nLocal = hctDbLocalsize(aPage, pDb->pgsz, nSize);
+
+    if( flags & HCTDB_HAS_TID ) iOff += 8;
+    if( flags & HCTDB_HAS_OLD ) iOff += 4;
+    ovfl = hctGetU32(&aPage[iOff]);
+    nOvfl = ((nSize - nLocal) + nBytePerOvfl - 1) / nBytePerOvfl;
+    
+    rc = hctDbOverflowArrayAppend(&p->delOvfl, ovfl, nOvfl);
+  }
+
+  return rc;
+}
+
 /*
 ** This is used by the rebalance operation implemented by hctDbBalance().
 ** The first step of that operation is to assemble an array of these
@@ -2648,9 +2721,9 @@ struct HctDbCellSz {
 ** (bClobber)                  ->   clobber
 ** (bClobber==0)               ->   insert of new key
 */
-static void 
-hctDbBalanceGetCellSz(
+static void hctDbBalanceGetCellSz(
   HctDatabase *pDb,
+  HctDbWriter *pWriter,
   int iPg,
   int iInsert,
   int bClobber,
@@ -2690,8 +2763,8 @@ hctDbBalanceGetCellSz(
       iIns = -1;
     }else{
       int bSkip = 0;
+      int flags = 0;
       if( iSz>0 ){
-        int flags = 0;
         int iOff = hctDbEntryInfo((void*)pPg, iCell, 0, &flags);
         if( flags & HCTDB_IS_DELETE ){
           u64 iTid = hctGetU64(&((u8*)pPg)[iOff]);
@@ -2705,6 +2778,9 @@ hctDbBalanceGetCellSz(
         pSz->iEntry = iCell;
         assert( pSz->nByte>0 );
       }else{
+        if( flags & HCTDB_HAS_OVFL ){
+          hctDbRemoveOverflow(pDb, pWriter, (u8*)pPg, iCell);
+        }
         iSz--;
       }
       iCell++;
@@ -2807,7 +2883,7 @@ static int hctDbBalance(
 
   /* Populate the aSz[] array with the sizes and locations of each cell */
   hctDbBalanceGetCellSz(
-      pDb, iPg-iLeftPg, iIns, bClobber, nNewCell, aPgCopy, nIn, aSz, &nSz
+      pDb, p, iPg-iLeftPg, iIns, bClobber, nNewCell, aPgCopy, nIn, aSz, &nSz
   );
   for(ii=1; ii<nSz; ii++){
     assert( aSz[ii].nByte>0 );
@@ -3098,30 +3174,6 @@ static int hctDbFreebytes(void *aPg){
   return ((HctDbIndexNode*)aPg)->hdr.nFreeBytes;
 }
 
-static int hctDbOverflowArrayAppend(HctDbOverflowArray *p, u32 ovfl, int nOvfl){
-  assert( p->nAlloc>=p->nEntry );
-  assert( ovfl>0 && nOvfl>0 );
-
-  if( p->nAlloc==p->nEntry ){
-    int nNew = p->nAlloc ? p->nAlloc*2 : 16;
-    int nByte = nNew*sizeof(HctDbOverflow);
-    HctDbOverflow *aNew = (HctDbOverflow*)sqlite3_realloc(p->aOvfl, nByte);
-
-    if( aNew==0 ){
-      return SQLITE_NOMEM_BKPT;
-    }
-    p->aOvfl = aNew;
-    p->nAlloc = nNew;
-  }
-
-  p->aOvfl[p->nEntry].pgno = ovfl;
-  p->aOvfl[p->nEntry].nOvfl = nOvfl;
-  p->nEntry++;
-
-  return SQLITE_OK;
-}
-
-
 static int hctDbInsertOverflow(
   HctDatabase *pDb, 
   HctDbWriter *pWriter,
@@ -3236,8 +3288,6 @@ static void hctDbRemoveCell(
   int iArrayOff = 0;              /* Offset of aEntry array in aTarget */
   int iData = 0;                  /* Offset of cell in aTarget[] */
   int nData = 0;                  /* Local size of cell to remove */
-  int flags = 0;
-  int nSize = 0;
 
   /* Populate stack variables szEntry, iArrayOff, iData and nData. */
   assert( eType==HCT_PAGETYPE_INTKEY || eType==HCT_PAGETYPE_INDEX );
@@ -3248,43 +3298,19 @@ static void hctDbRemoveCell(
     nData = hctDbIntkeyEntrySize(pEntry, pgsz);
     szEntry = sizeof(*pEntry);
     iArrayOff = sizeof(HctDbIntkeyLeaf);
-    flags = pEntry->flags;
-    nSize = pEntry->nSize;
   }else if( nHeight==0 ){
     HctDbIndexEntry *pEntry = &((HctDbIndexLeaf*)aTarget)->aEntry[iRem]; 
     iData = pEntry->iOff;
     nData = hctDbIndexEntrySize(pEntry, pgsz);
     szEntry = sizeof(*pEntry);
     iArrayOff = sizeof(HctDbIndexLeaf);
-    flags = pEntry->flags;
-    nSize = pEntry->nSize;
   }else{
     HctDbIndexNodeEntry *pEntry = &((HctDbIndexNode*)aTarget)->aEntry[iRem]; 
     iData = pEntry->iOff;
     nData = hctDbIndexNodeEntrySize(pEntry, pgsz);
     szEntry = sizeof(*pEntry);
     iArrayOff = sizeof(HctDbIndexNode);
-    flags = pEntry->flags;
-    nSize = pEntry->nSize;
   }
-
-  /* Free any overflow pages */
-  #if 0
-  if( flags & HCTDB_HAS_OVFL ){
-    int nBytePerOvfl = pDb->pgsz - sizeof(HctDbPageHdr);
-    int nOvfl = 0;                /* Number of overflow pages */
-    u32 ovfl = 0;                 /* First overflow page number */
-    int nOff = 4;
-
-    if( flags & HCTDB_HAS_TID ) nOff += 8;
-    if( flags & HCTDB_HAS_OLD ) nOff += 4;
-
-    ovfl = hctGetU32(&aTarget[iData - nOff]);
-    nOvfl = (nSize - (nData - nOff)) + (nBytePerOvfl-1) / nBytePerOvfl;
-
-    hctDbFreeOverflowChain(p, ovfl, nOvfl);
-  }
-  #endif
 
   /* Remove the aEntry[] array entry */
   if( iRem<p->pg.nEntry-1 ){
@@ -3363,30 +3389,6 @@ u32 hctDbGetChildPage(u8 *aTarget, int iInsert){
     iChildPg = ((HctDbIndexNode*)aTarget)->aEntry[iInsert].iChildPg;
   }
   return iChildPg;
-}
-
-/*
-** Buffer aTarget[] must contain a page with variable sized records - an
-** index leaf or node, or an intkey leaf. This function returns the offset
-** of the record for entry iEntry, and populates output variable *pFlags
-** with the entry flags.
-*/
-static int hctDbFindEntry(u8 *aTarget, int iEntry, u8 *pFlags, int *pnSize){
-  int iRet;
-  if( hctPagetype(aTarget)==HCT_PAGETYPE_INTKEY ){
-    iRet = ((HctDbIntkeyLeaf*)aTarget)->aEntry[iEntry].iOff;
-    *pFlags = ((HctDbIntkeyLeaf*)aTarget)->aEntry[iEntry].flags;
-    *pnSize = ((HctDbIntkeyLeaf*)aTarget)->aEntry[iEntry].nSize;
-  }else if( hctPageheight(aTarget)==0 ){
-    iRet = ((HctDbIndexLeaf*)aTarget)->aEntry[iEntry].iOff;
-    *pFlags = ((HctDbIndexLeaf*)aTarget)->aEntry[iEntry].flags;
-    *pnSize = ((HctDbIntkeyLeaf*)aTarget)->aEntry[iEntry].nSize;
-  }else{
-    iRet = ((HctDbIndexNode*)aTarget)->aEntry[iEntry].iOff;
-    *pFlags = ((HctDbIndexNode*)aTarget)->aEntry[iEntry].flags;
-    *pnSize = ((HctDbIndexNode*)aTarget)->aEntry[iEntry].nSize;
-  }
-  return iRet;
 }
 
 static int hctDbInsert(
@@ -3696,26 +3698,9 @@ static int hctDbInsert(
   }
 
   /* If this is a clobber operation and the entry being clobbered has an 
-  ** overflow chain, add an entry to HctDbWriter.delOvfl.
-  */
+  ** overflow chain, add an entry to HctDbWriter.delOvfl.  */
   if( bClobber ){
-    int nSize = 0;
-    u8 flags = 0;
-    int iOff = hctDbFindEntry(aTarget, iInsert, &flags, &nSize);
-    if( flags & HCTDB_HAS_OVFL ){
-      u32 ovfl = 0;
-      int nOvfl = 0;
-      const int nBytePerOvfl = pDb->pgsz - sizeof(HctDbPageHdr);
-      int nLocal = hctDbLocalsize(aTarget, pDb->pgsz, nSize);
-
-      if( flags & HCTDB_HAS_TID ) iOff += 8;
-      if( flags & HCTDB_HAS_OLD ) iOff += 4;
-      ovfl = hctGetU32(&aTarget[iOff]);
-      nOvfl = ((nSize - nLocal) + nBytePerOvfl - 1) / nBytePerOvfl;
-
-      rc = hctDbFreeOverflowChain(p, ovfl, nOvfl);
-      assert( rc==SQLITE_OK );  /* todo */
-    }
+    hctDbRemoveOverflow(pDb, p, aTarget, iInsert);
   }
 
   if( bBalance ){
@@ -4336,8 +4321,8 @@ char *sqlite3HctDbIntegrityCheck(
 ){
   HctFile *pFile = pDb->pFile;
   char *zRet = 0;
-  int nLogic = 0;                 /* Number of logical pages in db */
-  int nPhys = 0;                  /* Number of physical pages in db */
+  u32 nLogic = 0;                 /* Number of logical pages in db */
+  u32 nPhys = 0;                  /* Number of physical pages in db */
   u8 *aLogic = 0;
   u8 *aPhys = 0;
   int nErr = *pnErr;

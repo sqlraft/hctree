@@ -21,7 +21,7 @@
 typedef sqlite3_int64 i64;
 typedef unsigned int u32;
 
-#define HST_DATABASE_NAME "hct_speed.db"
+#define HST_DATABASE_NAME "hct_thread.db"
 
 typedef struct Error Error;
 typedef struct Thread Thread;
@@ -326,6 +326,7 @@ struct Testcase {
   int nSleep;
   int nScan;
   int szScan;
+  int bOverflow;     
 };
 
 typedef struct TestCtx TestCtx;
@@ -446,11 +447,18 @@ static char *test_thread(int iTid, void *pArg){
   pBegin = htt_sqlite3_prepare(&err, db, "BEGIN");
   pCommit = htt_sqlite3_prepare(&err, db, "COMMIT");
   pRollback = htt_sqlite3_prepare(&err, db, "ROLLBACK");
-  pWrite = htt_sqlite3_prepare(&err, db, 
-    "UPDATE tbl SET b=updateblob(b,?,?,?), c=hex(frandomblob(32)) WHERE a = ?"
-  );
+  if( pTst->bOverflow==0 ){
+    pWrite = htt_sqlite3_prepare(&err, db, "UPDATE "
+        "tbl SET b=updateblob(b,?,?,?), c=hex(frandomblob(32)) WHERE a = ?"
+    );
+  }else{
+    pWrite = htt_sqlite3_prepare(&err, db, "UPDATE "
+        "tbl SET padding=frandomblob(9000), "
+                "b=updateblob(b,?,?,?), c=hex(frandomblob(32)) WHERE a = ?"
+    );
+  }
   pScan = htt_sqlite3_prepare(&err, db, 
-      "SELECT * FROM tbl WHERE substr(c, 1, 16)>=hex(frandomblob(8))"
+      "SELECT a,b,c FROM tbl WHERE substr(c, 1, 16)>=hex(frandomblob(8))"
       " ORDER BY substr(c, 1, 16)"
   );
 
@@ -606,25 +614,36 @@ static void test_build_db(Error *pErr, Testcase *pTst, int iDb, TestCtx *aCtx){
 
   db = htt_sqlite3_open(zFile);
   htt_sqlite3_exec(db,
+      pTst->bOverflow==0 ?
       " CREATE TABLE tbl("
       "   a INTEGER PRIMARY KEY,"
       "   b BLOB,"
       "   c CHAR(64)"
       ")"
+      :
+      " CREATE TABLE tbl("
+      "   a INTEGER PRIMARY KEY,"
+      "   padding BLOB DEFAULT (frandomblob(9000)),"
+      "   b BLOB,"
+      "   c CHAR(64)"
+      ");"
   );
-
-  for(ii=0; ii<pTst->nIdx; ii++){
-    char *zSql = sqlite3_mprintf(
-        "CREATE INDEX tbl_i%d ON tbl(substr(c, %d, 16));", ii+1, ii+1
-    );
-    htt_sqlite3_exec(db, zSql);
-    sqlite3_free(zSql);
+  if( pTst->bOverflow && pTst->nIdx==1 ){
+    htt_sqlite3_exec(db, "CREATE INDEX i1 ON tbl(padding, c)");
+  }else{
+    for(ii=0; ii<pTst->nIdx; ii++){
+      char *zSql = sqlite3_mprintf(
+          "CREATE INDEX tbl_i%d ON tbl(substr(c, %d, 16));", ii+1, ii+1
+          );
+      htt_sqlite3_exec(db, zSql);
+      sqlite3_free(zSql);
+    }
   }
 
   printf("building initial database %d.", iDb); 
   fflush(stdout);
   pIns = htt_sqlite3_prepare(pErr, db, 
-      "INSERT INTO tbl VALUES(NULL, zeroblob(?), hex(frandomblob(32)))"
+      "INSERT INTO tbl(a,b,c) VALUES(NULL, zeroblob(?), hex(frandomblob(32)))"
   );
   sqlite3_bind_int(pIns, 1, pTst->nBlob);
   htt_sqlite3_exec(db, "BEGIN");
@@ -662,6 +681,12 @@ static void runtest(Testcase *pTst){
     return;
   }else if( pTst->nIdx==0 && pTst->nScan>0 ){
     printf("ERROR: nIdx==0 && nScan>0. Skipping test...\n");
+    return;
+  }else if( pTst->bOverflow && pTst->nScan>0 ){
+    printf("ERROR: bOverflow==1 && nScan>0. Skipping test...\n");
+    return;
+  }else if( pTst->bOverflow && pTst->nIdx>1 ){
+    printf("ERROR: bOverflow==1 && nIdx>1. Skipping test...\n");
     return;
   }
 
@@ -828,6 +853,9 @@ int main(int argc, char **argv){
       }else
       if( nArg>2 && nArg<=8 && memcmp("-nupdate", zArg, nArg)==0 ){
         pnVal = &tst.nUpdate;
+      }else
+      if( nArg>1 && nArg<=9 && memcmp("-overflow", zArg, nArg)==0 ){
+        pnVal = &tst.bOverflow;
       }else{
         usage(argv[0]);
       }
