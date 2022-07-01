@@ -32,6 +32,14 @@ typedef struct BtNewRoot BtNewRoot;
 **   aNewRoot[x].iSavepoint contains the open savepoint count when the table
 **   with root page aNewRoot[x].pgnoRoot was created. The value 
 **   Btree.db->nSavepoint.
+**
+** eTrans:
+**   Set to SQLITE_TXN_NONE, READ or WRITE to indicate the type of 
+**   transaction that is open. This is set by the following functions:
+**
+**     sqlite3BtreeBeginTrans()
+**     sqlite3BtreeCommitPhaseTwo()
+**     sqlite3BtreeRollback()
 */
 struct Btree {
   sqlite3 *db;
@@ -481,6 +489,7 @@ int sqlite3BtreeBeginTrans(Btree *p, int wrflag, int *pSchemaVersion){
   int rc = SQLITE_OK;
   int req = wrflag ? SQLITE_TXN_WRITE : SQLITE_TXN_READ;
 
+  assert( wrflag==0 || p->pHctDb==0 || pSchemaVersion );
   if( pSchemaVersion ){
     sqlite3BtreeGetMeta(p, 1, (u32*)pSchemaVersion);
   }
@@ -1943,6 +1952,7 @@ void sqlite3BtreeGetMeta(Btree *p, int idx, u32 *pMeta){
   assert( idx>=0 && idx<SQLITE_N_BTREE_META );
   if( p->pHctDb && p->eMetaState==HCT_METASTATE_NONE ){
     sqlite3HctDbGetMeta(p->pHctDb, (u8*)p->aMeta, SQLITE_N_BTREE_META*4);
+    p->eMetaState = HCT_METASTATE_READ;
   }
   *pMeta = p->aMeta[idx];
 }

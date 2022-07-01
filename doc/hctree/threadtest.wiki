@@ -6,11 +6,7 @@
 This project contains no usable code. The database backend works well enough to
 run some test cases, but (for example):
 
-  *  modifying or deleting large records (> 1KiB for index records, or >4KiB
-     for table records) leaks pages.
-  *  DROP TABLE and DROP INDEX both leak database pages.
-  *  very large transactions result in a database file that contains many
-     unused pages.
+  *  DROP TABLE and DROP INDEX both leak lots of database pages.
   *  the "EDKS" feature, which prevents excess delete keys from accumlating
      as a result of an unfortunate sequence of writes and deletes, is not
      implemented.

@@ -646,6 +646,24 @@ int sqlite3HctDbGetMeta(HctDatabase *pDb, u8 *aBuf, int nBuf){
   return rc;
 }
 
+static int hctDbValidateMeta(HctDatabase *pDb){
+  int rc = SQLITE_OK;
+  HctFilePage pg;
+
+  assert( pDb->iSnapshotId>0 );
+  rc = sqlite3HctFilePageGet(pDb->pFile, 2, &pg);
+  if( rc==SQLITE_OK ){
+    HctDbIntkeyEntry *p = &((HctDbIntkeyLeaf*)pg.aOld)->aEntry[0];
+    if( p->flags & HCTDB_HAS_TID ){
+      u64 iTid = hctGetU64(&pg.aOld[p->iOff]);
+      if( hctDbTidIsConflict(pDb, iTid) ) rc = SQLITE_BUSY;
+    }
+    sqlite3HctFilePageRelease(&pg);
+  }
+
+  return rc;
+}
+
 int sqlite3HctDbRootInit(HctDatabase *p, int bIndex, u32 iRoot){
   HctFilePage pg;
   int rc;
@@ -4288,16 +4306,22 @@ sqlite3HctDbValidate(HctDatabase *pDb, u64 *piCid){
   ** being applied against the snapshot that it was run against. In this
   ** case we can skip validation entirely. */
   if( iCid!=pDb->iSnapshotId+1 ){
-
     assert( pDb->bValidate==0 );
     pDb->bValidate = 1;
-    for(pCsr=pDb->pScannerList; pCsr && rc==SQLITE_OK; pCsr=pCsr->pNextScanner){
-      if( pCsr->pKeyInfo==0 ){
-        rc = hctDbValidateIntkey(pDb, pCsr);
-      }else{
-        rc = hctDbValidateIndex(pDb, pCsr);
+
+    if( hctDbValidateMeta(pDb) ){
+      rc = SQLITE_BUSY;
+    }else{
+      for(pCsr=pDb->pScannerList; pCsr; pCsr=pCsr->pNextScanner){
+        if( pCsr->pKeyInfo==0 ){
+          rc = hctDbValidateIntkey(pDb, pCsr);
+        }else{
+          rc = hctDbValidateIndex(pDb, pCsr);
+        }
+        if( rc ) break;
       }
     }
+
     pDb->bValidate = 0;
   }
 
