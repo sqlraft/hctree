@@ -191,12 +191,6 @@ void sqlite3HctFileClose(HctFile *pFile);
 
 u32 sqlite3HctFileMaxpage(HctFile *pFile);
 
-/*
-** Allocate logical root page numbers. And free the same (required if the
-** transaction is rolled back).
-*/
-int sqlite3HctFileRootNew(HctFile *pFile, u32 *piRoot);
-int sqlite3HctFileRootFree(HctFile *pFile, u32 iRoot);
 
 typedef struct HctFilePage HctFilePage;
 struct HctFilePage {
@@ -211,8 +205,16 @@ struct HctFilePage {
   HctFile *pFile;
 };
 
+/*
+** Allocate logical root page numbers. And free the same (required if the
+** transaction is rolled back).
+*/
+int sqlite3HctFileRootPgno(HctFile *pFile, u32 *piRoot);
+int sqlite3HctFileRootFree(HctFile *pFile, u32 iRoot);
+int sqlite3HctFileRootNew(HctFile *pFile, u32 iRoot, HctFilePage*);
 
-int sqlite3HctFilePageNew(HctFile *pFile, u32 iPg, HctFilePage *pPg);
+
+int sqlite3HctFilePageNew(HctFile *pFile, HctFilePage *pPg);
 
 /*
 ** Obtain a read-only reference to logical page iPg.
@@ -257,6 +259,7 @@ int sqlite3HctFilePageEvict(HctFilePage *pPg, int bIrrevocable);
 void sqlite3HctFilePageUnevict(HctFilePage *pPg);
 
 int sqlite3HctFilePageIsEvicted(HctFile *pFile, u32 iPgno);
+int sqlite3HctFilePageIsFree(HctFile *pFile, u32 iPgno, int bLogical);
 
 /*
 ** Release a page reference obtained via an earlier call to 
@@ -304,9 +307,19 @@ u32 sqlite3HctFilePageMapping(HctFile *pFile, u32 iLogical, int *pbEvicted);
 int sqlite3HctFilePragmaTidStep(HctFile *pFile, int iVal);
 
 void sqlite3HctFileICArrays(HctFile*, u8**, u32*, u8**, u32*);
+int sqlite3HctFileTreeFree(HctFile *, u32, int);
+int sqlite3HctFilePageClearIsRoot(HctFile*, u32);
+int sqlite3HctFilePageClearInUse(HctFile *pFile, u32 iPg, int bLogic);
 
 #include <hctPManInt.h>
 HctPManClient *sqlite3HctFilePManClient(HctFile*);
+
+int sqlite3HctDbWalkTree(
+  HctFile *pFile,                 /* File tree resides in */
+  u32 iRoot,                      /* Root page of tree */
+  int (*x)(void*, u32, u32),      /* Callback function */
+  void *pCtx                      /* First argument to pass to x() */
+);
 
 /*************************************************************************
 ** Interface to code in hct_record.c

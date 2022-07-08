@@ -24,6 +24,7 @@
 ** discovers by scanning the page-map.
 */
 typedef struct HctPManServer HctPManServer;
+typedef struct HctFile HctFile;
 
 HctPManServer *sqlite3HctPManServerNew(
   int *pRc,                       /* IN/OUT: Error code */
@@ -58,6 +59,7 @@ void sqlite3HctPManClientFree(HctPManClient*);
 u32 sqlite3HctPManAllocPg(
   int *pRc,                       /* IN/OUT: Error code */
   HctPManClient *p,               /* page-manager client handle */
+  HctFile *pFile,
   int bLogical
 );
 
@@ -82,4 +84,12 @@ void sqlite3HctPManFreePg(
 
 int sqlite3HctPManVtabInit(sqlite3 *db);
 
+/*
+** Mark an entire tree of logical and physical pages as free. The iTid
+** parameter works just as it does for sqlite3HctPManFreePg().
+**
+** SQLITE_OK is returned if successful, or an error code (e.g. SQLITE_NOMEM)
+** otherwise.
+*/
+int sqlite3HctPManFreeTree(HctPManClient *p, HctFile*, u32 iRoot, u64 iTid);
 

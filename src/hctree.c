@@ -23,14 +23,14 @@
 
 #ifdef SQLITE_ENABLE_HCT
 
-typedef struct BtNewRoot BtNewRoot;
+typedef struct BtSchemaOp BtSchemaOp;
 
 /*
-** aNewRoot[]:
-**   Array of nNewRoot BtNewRoot structures. Each such structure represents
+** aSchemaOp[]:
+**   Array of nSchemaOp BtSchemaOp structures. Each such structure represents
 **   a new table or index created by the current transaction. 
-**   aNewRoot[x].iSavepoint contains the open savepoint count when the table
-**   with root page aNewRoot[x].pgnoRoot was created. The value 
+**   aSchemaOp[x].iSavepoint contains the open savepoint count when the table
+**   with root page aSchemaOp[x].pgnoRoot was created. The value 
 **   Btree.db->nSavepoint.
 **
 ** eTrans:
@@ -51,8 +51,8 @@ struct Btree {
   int eTrans;                     /* SQLITE_TXN_NONE, READ or WRITE */
   BtCursor *pCsrList;             /* List of all open cursors */
 
-  int nNewRoot;
-  BtNewRoot *aNewRoot;
+  int nSchemaOp;
+  BtSchemaOp *aSchemaOp;
 
   int openFlags;
   int fdLog;                      /* File descriptor for log file */
@@ -70,11 +70,22 @@ struct Btree {
 #define HCT_METASTATE_READ  1
 #define HCT_METASTATE_DIRTY 2
 
-struct BtNewRoot {
+/*
+** A schema op.
+*/ 
+struct BtSchemaOp {
   int iSavepoint;
-  int bIndex;
+  int eSchemaOp;
   u32 pgnoRoot;
 };
+
+/*
+** Candidate values for BtSchemaOp.eSchemaOp
+*/
+#define HCT_SCHEMAOP_DROP          1
+#define HCT_SCHEMAOP_CREATE_INTKEY 2
+#define HCT_SCHEMAOP_CREATE_INDEX  3
+
 
 struct BtCursor {
   Btree *pBtree;
@@ -265,7 +276,7 @@ int sqlite3BtreeClose(Btree *p){
     sqlite3_free(p->pSchema);
     sqlite3HctTreeFree(p->pHctTree);
     sqlite3HctDbClose(p->pHctDb);
-    sqlite3_free(p->aNewRoot);
+    sqlite3_free(p->aSchemaOp);
     sqlite3_free(p);
   }
   return SQLITE_OK;
@@ -728,12 +739,33 @@ static int btreeFlushToDisk(Btree *p){
     rc = btreeWriteTid(p, iTid);
   }
 
-  /* Initialize any root pages created by this transaction. Then flush
-  ** the data to disk.  */
-  for(i=0; rc==SQLITE_OK && i<p->nNewRoot; i++){
-    BtNewRoot *pRoot = &p->aNewRoot[i];
-    rc = sqlite3HctDbRootInit(p->pHctDb, pRoot->bIndex, pRoot->pgnoRoot);
+  /* Initialize the root pages of any new tables or indexes created by this 
+  ** transaction. At this point the logical root page numbers have been
+  ** assigned by the page-manager, but there is no mapped physical page,
+  ** and the LOGICAL_IN_USE and LOGICAL_IS_ROOT flags are not yet set
+  ** for the page. This allocates and populates the physical root page,
+  ** and sets the two flags on the logical page slot.  
+  **
+  ** If the current transaction does not commit (i.e. failed validiation),
+  ** then the new tree is returned to the page-manage to be recycled 
+  ** immediately. Or, if a crash occurs, then recovery will see the
+  ** LOGICAL_IS_ROOT flag on a root page that is not in the sqlite_schema
+  ** table and free the pages then.  */
+  for(i=0; rc==SQLITE_OK && i<p->nSchemaOp; i++){
+    BtSchemaOp *pOp = &p->aSchemaOp[i];
+    assert(
+        pOp->eSchemaOp==HCT_SCHEMAOP_DROP
+     || pOp->eSchemaOp==HCT_SCHEMAOP_CREATE_INTKEY
+     || pOp->eSchemaOp==HCT_SCHEMAOP_CREATE_INDEX
+    );
+    if( pOp->eSchemaOp!=HCT_SCHEMAOP_DROP ){
+      int bIndex = (pOp->eSchemaOp==HCT_SCHEMAOP_CREATE_INDEX);
+      rc = sqlite3HctDbRootInit(p->pHctDb, bIndex, pOp->pgnoRoot);
+    }
   }
+
+  /* Write all the new database entries to the database. Any write/write
+  ** conflicts are detected here - SQLITE_BUSY is returned in that case.  */
   if( rc==SQLITE_OK ){
     rc = btreeFlushData(p, 0);
   }
@@ -749,6 +781,16 @@ static int btreeFlushToDisk(Btree *p){
     rcok = SQLITE_BUSY;
     rc = btreeFlushData(p, 1);
     if( rc==SQLITE_DONE ) rc = SQLITE_OK;
+  }
+
+  for(i=0; rc==SQLITE_OK && i<p->nSchemaOp; i++){
+    BtSchemaOp *pOp = &p->aSchemaOp[i];
+    if( (rcok==SQLITE_OK && pOp->eSchemaOp==HCT_SCHEMAOP_DROP)
+     || (rcok!=SQLITE_OK && pOp->eSchemaOp!=HCT_SCHEMAOP_DROP)
+    ){
+      HctFile *pFile = sqlite3HctDbFile(p->pHctDb);
+      rc = sqlite3HctFileTreeFree(pFile, pOp->pgnoRoot, rcok!=SQLITE_OK);
+    }
   }
 
   /* Zero the log file and set the entry in the transaction-map to 
@@ -799,7 +841,7 @@ int sqlite3BtreeCommitPhaseTwo(Btree *p, int bCleanup){
     if( p->pHctDb ){
       rc = btreeFlushToDisk(p);
       sqlite3HctTreeClear(p->pHctTree);
-      p->nNewRoot = 0;
+      p->nSchemaOp = 0;
     }
     p->eTrans = SQLITE_TXN_READ;
     p->eMetaState = HCT_METASTATE_READ;
@@ -887,7 +929,7 @@ int sqlite3BtreeRollback(Btree *p, int tripCode, int writeOnly){
       sqlite3HctTreeClear(p->pHctTree);
     }
     p->eTrans = SQLITE_TXN_READ;
-    p->nNewRoot = 0;
+    p->nSchemaOp = 0;
   }
   return SQLITE_OK;
 }
@@ -919,11 +961,11 @@ int sqlite3BtreeBeginStmt(Btree *p, int iStatement){
 static int btreeRollbackRoot(Btree *p, int iSavepoint){
   int i;
   int rc = SQLITE_OK;
-  for(i=p->nNewRoot-1; rc==SQLITE_OK && i>=0; i--){
-    if( p->aNewRoot[i].iSavepoint<=iSavepoint ) break;
-    rc = sqlite3HctDbRootFree(p->pHctDb, p->aNewRoot[i].pgnoRoot);
+  for(i=p->nSchemaOp-1; rc==SQLITE_OK && i>=0; i--){
+    if( p->aSchemaOp[i].iSavepoint<=iSavepoint ) break;
+    rc = sqlite3HctDbRootFree(p->pHctDb, p->aSchemaOp[i].pgnoRoot);
   }
-  p->nNewRoot = i+1;
+  p->nSchemaOp = i+1;
   return rc;
 }
 
@@ -945,9 +987,9 @@ int sqlite3BtreeSavepoint(Btree *p, int op, int iSavepoint){
     int i;
     assert( op==SAVEPOINT_ROLLBACK || op==SAVEPOINT_RELEASE );
     if( op==SAVEPOINT_RELEASE ){
-      for(i=0; i<p->nNewRoot; i++){
-        if( p->aNewRoot[i].iSavepoint>iSavepoint ){
-          p->aNewRoot[i].iSavepoint = iSavepoint;
+      for(i=0; i<p->nSchemaOp; i++){
+        if( p->aSchemaOp[i].iSavepoint>iSavepoint ){
+          p->aSchemaOp[i].iSavepoint = iSavepoint;
         }
       }
       sqlite3HctTreeRelease(p->pHctTree, iSavepoint+1);
@@ -1097,8 +1139,8 @@ int sqlite3BtreeCursor(
   rc = sqlite3HctTreeCsrOpen(p->pHctTree, iTable, &pCur->pHctTreeCsr);
   if( rc==SQLITE_OK && p->pHctDb ){
     int ii;
-    for(ii=0; ii<p->nNewRoot && p->aNewRoot[ii].pgnoRoot!=iTable; ii++);
-    if( ii==p->nNewRoot ){
+    for(ii=0; ii<p->nSchemaOp && p->aSchemaOp[ii].pgnoRoot!=iTable; ii++);
+    if( ii==p->nSchemaOp ){
       rc = sqlite3HctDbCsrOpen(p->pHctDb, pKeyInfo, iTable, &pCur->pHctDbCsr);
     }
   }
@@ -1808,23 +1850,28 @@ int sqlite3BtreeIdxDelete(BtCursor *pCur, UnpackedRecord *pKey){
   return rc;
 }
 
-static int hctreeAddNewRoot(Btree *p, u32 iRoot, int bIndex){
-  BtNewRoot *aNewRoot;
+static int hctreeAddNewSchemaOp(Btree *p, u32 iRoot, int eOp){
+  BtSchemaOp *aSchemaOp;
 
-  /* Grow the Btree.aNewRoot array */
+  /* Grow the Btree.aSchemaOp array */
   assert( p->pHctDb );
-  aNewRoot = (BtNewRoot*)sqlite3_realloc(
-      p->aNewRoot, sizeof(BtNewRoot)*(p->nNewRoot+1)
+  aSchemaOp = (BtSchemaOp*)sqlite3_realloc(
+      p->aSchemaOp, sizeof(BtSchemaOp)*(p->nSchemaOp+1)
   );
-  if( aNewRoot==0 ) return SQLITE_NOMEM_BKPT;
+  if( aSchemaOp==0 ) return SQLITE_NOMEM_BKPT;
 
-  p->aNewRoot = aNewRoot;
-  p->aNewRoot[p->nNewRoot].pgnoRoot = iRoot;
-  p->aNewRoot[p->nNewRoot].iSavepoint = p->db->nSavepoint;
-  p->aNewRoot[p->nNewRoot].bIndex = bIndex;
-  p->nNewRoot++;
+  p->aSchemaOp = aSchemaOp;
+  p->aSchemaOp[p->nSchemaOp].pgnoRoot = iRoot;
+  p->aSchemaOp[p->nSchemaOp].iSavepoint = p->db->nSavepoint;
+  p->aSchemaOp[p->nSchemaOp].eSchemaOp = eOp;
+  p->nSchemaOp++;
 
   return SQLITE_OK;
+}
+
+static int hctreeAddNewRoot(Btree *p, u32 iRoot, int bIndex){
+  int eOp = bIndex ? HCT_SCHEMAOP_CREATE_INDEX : HCT_SCHEMAOP_CREATE_INTKEY;
+  return hctreeAddNewSchemaOp(p, iRoot, eOp);
 }
 
 /*
@@ -1844,10 +1891,7 @@ int sqlite3BtreeCreateTable(Btree *p, Pgno *piTable, int flags){
   if( p->pHctDb ){
     rc = sqlite3HctDbRootNew(p->pHctDb, &iNew);
     if( rc==SQLITE_OK ){
-      rc = hctreeAddNewRoot(p, 0, (flags & BTREE_INTKEY)==0);
-    }
-    if( rc==SQLITE_OK ){
-      p->aNewRoot[p->nNewRoot-1].pgnoRoot = iNew;
+      rc = hctreeAddNewRoot(p, iNew, (flags & BTREE_INTKEY)==0);
     }
   }else{
     iNew = p->iNextRoot++;
@@ -1874,9 +1918,9 @@ int sqlite3BtreeClearTable(Btree *p, int iTable, i64 *pnChange){
   if( rc==SQLITE_OK && p->pHctDb ){
     int ii;
     int bIndex = -1;
-    for(ii=0; ii<p->nNewRoot; ii++){
-      if( p->aNewRoot[ii].pgnoRoot==iTable ){
-        bIndex = p->aNewRoot[ii].bIndex;
+    for(ii=0; ii<p->nSchemaOp; ii++){
+      if( p->aSchemaOp[ii].pgnoRoot==iTable ){
+        bIndex = (p->aSchemaOp[ii].eSchemaOp==HCT_SCHEMAOP_CREATE_INDEX);
         break;
       }
     }
@@ -1902,29 +1946,12 @@ int sqlite3BtreeClearTableOfCursor(BtCursor *pCur){
 }
 
 /*
-** Erase all information in a table and add the root of the table to
-** the freelist.  Except, the root of the principle table (the one on
-** page 1) is never added to the freelist.
-**
-** This routine will fail with SQLITE_LOCKED if there are any open
-** cursors on the table.
-**
-** If AUTOVACUUM is enabled and the page at iTable is not the last
-** root page in the database file, then the last root page 
-** in the database file is moved into the slot formerly occupied by
-** iTable and that last slot formerly occupied by the last root page
-** is added to the freelist instead of iTable.  In this say, all
-** root pages are kept at the beginning of the database file, which
-** is necessary for AUTOVACUUM to work right.  *piMoved is set to the 
-** page number that used to be the last root page in the file before
-** the move.  If no page gets moved, *piMoved is set to 0.
-** The last root page is recorded in meta[3] and the value of
-** meta[3] is updated by this procedure.
+** Drop the table with root page iTable. Set (*piMoved) to 0 before
+** returning.
 */
 int sqlite3BtreeDropTable(Btree *p, int iTable, int *piMoved){
-  int rc = SQLITE_OK;
-  /* HCT - fix this */
-  return rc;
+  *piMoved = 0;
+  return hctreeAddNewSchemaOp(p, iTable, HCT_SCHEMAOP_DROP);
 }
 
 

@@ -458,7 +458,7 @@ HctFile *sqlite3HctDbFile(HctDatabase *pDb){
 }
 
 int sqlite3HctDbRootNew(HctDatabase *p, u32 *piRoot){
-  return sqlite3HctFileRootNew(p->pFile, piRoot);
+  return sqlite3HctFileRootPgno(p->pFile, piRoot);
 }
 
 int sqlite3HctDbRootFree(HctDatabase *p, u32 iRoot){
@@ -666,9 +666,9 @@ static int hctDbValidateMeta(HctDatabase *pDb){
 
 int sqlite3HctDbRootInit(HctDatabase *p, int bIndex, u32 iRoot){
   HctFilePage pg;
-  int rc;
+  int rc = SQLITE_OK;
 
-  rc = sqlite3HctFilePageNew(p->pFile, iRoot, &pg);
+  rc = sqlite3HctFileRootNew(p->pFile, iRoot, &pg);
   if( rc==SQLITE_OK ){
     sqlite3HctDbRootPageInit(bIndex, pg.aNew, p->pgsz);
     rc = sqlite3HctFilePageRelease(&pg);
@@ -1868,7 +1868,7 @@ static int hctDbInsertFlushWrite(HctDatabase *pDb, HctDbWriter *p){
     HctFilePage *pPg0 = &p->writepg.aPg[0];
     memcpy(&root, pPg0, sizeof(HctFilePage));
     memset(pPg0, 0, sizeof(HctFilePage));
-    rc = sqlite3HctFilePageNew(pDb->pFile, 0, pPg0);
+    rc = sqlite3HctFilePageNew(pDb->pFile, pPg0);
     if( rc==SQLITE_OK ){
       memcpy(pPg0->aNew, root.aNew, pDb->pgsz);
       hctDbRootPageInit(eType==HCT_PAGETYPE_INDEX,
@@ -2375,7 +2375,7 @@ static int hctDbExtendWriteArray(
     }
     p->writepg.nPg++;
     memset(&p->writepg.aPg[ii], 0, sizeof(HctFilePage));
-    rc = sqlite3HctFilePageNew(pDb->pFile, 0, &p->writepg.aPg[ii]);
+    rc = sqlite3HctFilePageNew(pDb->pFile, &p->writepg.aPg[ii]);
     if( rc==SQLITE_OK ){
       HctDbPageHdr *pNew = (HctDbPageHdr*)p->writepg.aPg[ii].aNew;
       HctDbPageHdr *pPrev = (HctDbPageHdr*)p->writepg.aPg[ii-1].aNew;
@@ -4337,6 +4337,162 @@ sqlite3HctDbValidate(HctDatabase *pDb, u64 *piCid){
 ** concurrently with database writers, false-positive errors may be reported.
 */
 
+/*
+** Walk the tree structure with logical root page iRoot, visiting every
+** page and overflow page currently linked in.
+**
+** For each page in the tree, the supplied callback is invoked. The first
+** argument passed to the callback is a copy of the fourth argument to
+** this function. The second and third arguments are the logical and
+** physical page number, respectively. If there is no logical page number,
+** as for overflow pages, the second parameter is passed zero.
+**
+** It (presumably) makes little sense to call this function without 
+** somehow guaranteeing that the tree is not being currently written to.
+*/
+int sqlite3HctDbWalkTree(
+  HctFile *pFile,                 /* File tree resides in */
+  u32 iRoot,                      /* Root page of tree */
+  int (*x)(void*, u32, u32),      /* Callback function */
+  void *pCtx                      /* First argument to pass to x() */
+){
+  int rc = SQLITE_OK;
+  u32 pgno = iRoot;
+
+  u32 iPhys = 0;
+  int dummy = 0;
+
+  /* Special case - the root page is not mapped to any physical page. */
+  iPhys = sqlite3HctFilePageMapping(pFile, iRoot, &dummy);
+  if( iPhys==0 ){
+    return x(pCtx, iRoot, 0);
+  }
+
+  /* This outer loop runs once for each list in the tree structure - once
+  ** for the list of leaves, once for the list of parent, and so on.
+  ** Starting from the root page and descending towards the leaves. */
+  do {
+    HctFilePage pg;
+    int nHeight = 0;
+    int eType = 0;
+    u32 pgnoChild = 0;
+
+    /* Load up page pgno - the leftmost of its list. Then, unless this
+    ** is the list of leaves, set pgnoChild to the leftmost child of
+    ** the page. Or, if this is a list of leaves, leave pgnoChild set
+    ** to zero.  */
+    rc = sqlite3HctFilePageGet(pFile, pgno, &pg);
+    if( rc!=SQLITE_OK ){
+      break;
+    }else{
+      nHeight = hctPageheight(pg.aOld);
+      eType = hctPagetype(pg.aOld);
+      if( eType!=HCT_PAGETYPE_INTKEY && eType!=HCT_PAGETYPE_INDEX ){
+        rc = SQLITE_CORRUPT_BKPT;
+        break;
+      }
+      else if( nHeight>0 ){
+        if( eType==HCT_PAGETYPE_INTKEY ){
+          pgnoChild = ((HctDbIntkeyNode*)pg.aOld)->aEntry[0].iChildPg;
+        }else{
+          pgnoChild = ((HctDbIndexNode*)pg.aOld)->aEntry[0].iChildPg;
+        }
+      }
+    }
+
+    while( pg.aOld ){
+      u32 iPeerPg = ((HctDbPageHdr*)pg.aOld)->iPeerPg;
+      u32 iLogic = pg.iPg;
+      u32 iPhys = pg.iOldPg;
+
+      rc = x(pCtx, iLogic, iPhys);
+      if( rc!=SQLITE_OK ) break;
+
+      if( nHeight==0 || eType==HCT_PAGETYPE_INDEX ){
+        int iCell = 0;
+        int nEntry = ((HctDbPageHdr*)pg.aOld)->nEntry;
+        for(iCell=0; iCell<nEntry; iCell++){
+          u8 flags = 0;
+          int iOff = hctDbCellOffset(pg.aOld, iCell, &flags);
+          if( flags & HCTDB_HAS_OVFL ){
+            u32 ovfl = 0;
+            if( (flags & HCTDB_HAS_TID)!=0 ) iOff += 8;
+            if( (flags & HCTDB_HAS_OLD)!=0 ) iOff += 4;
+            ovfl = hctGetU32(&pg.aOld[iOff]);
+            while( ovfl!=0 ){
+              HctFilePage ov;
+              rc = x(pCtx, 0, ovfl);
+              if( rc!=SQLITE_OK ) break;
+              rc = sqlite3HctFilePageGetPhysical(pFile, ovfl, &ov);
+              if( rc!=SQLITE_OK ) break;
+              ovfl = ((HctDbPageHdr*)ov.aOld)->iPeerPg;
+              sqlite3HctFilePageRelease(&ov);
+            }
+          }
+        }
+      }
+
+      sqlite3HctFilePageRelease(&pg);
+      if( iPeerPg ){
+        rc = sqlite3HctFilePageGet(pFile, iPeerPg, &pg);
+        if( rc!=SQLITE_OK ) break;
+      }
+    }
+
+    pgno = pgnoChild;
+  }while( rc==SQLITE_OK && pgno!=0 );
+  
+  return rc;
+}
+
+typedef struct IntCheckCtx IntCheckCtx;
+struct IntCheckCtx {
+  u32 nLogic;                     /* Number of logical pages in db */
+  u32 nPhys;                      /* Number of physical pages in db */
+  u8 *aLogic;                     
+  u8 *aPhys;
+  int nErr;
+  int nMaxErr;
+  char *zErr;
+};
+
+static void hctDbICError(
+  IntCheckCtx *p,
+  char *zFmt,
+  ...
+){
+  va_list ap;
+  char *zErr;
+  va_start(ap, zFmt);
+  zErr = sqlite3_vmprintf(zFmt, ap);
+  p->zErr = sqlite3_mprintf("%z%s%z", p->zErr, (p->zErr ? "\n" : ""), zErr);
+  p->nErr++;
+  va_end(ap);
+}
+
+static int hctDbIntegrityCheckCb(
+  void *pCtx,
+  u32 iLogic,
+  u32 iPhys
+){
+  IntCheckCtx *p = (IntCheckCtx*)pCtx;
+  if( iLogic ){
+    if( p->aLogic[iLogic-1] ){
+      hctDbICError(p, "multiple refs to logical page %d", (int)iLogic);
+    }
+    p->aLogic[iLogic-1] = 1;
+  }
+  if( iPhys ){
+    if( p->aPhys[iPhys-1] ){
+      hctDbICError(p, "multiple refs to physical page %d", (int)iPhys);
+    }
+    p->aPhys[iPhys-1] = 1;
+  }
+
+  return (p->nErr>=p->nMaxErr) ? -1 : 0;
+}
+
+
 char *sqlite3HctDbIntegrityCheck(
   HctDatabase *pDb, 
   u32 *aRoot, 
@@ -4344,135 +4500,46 @@ char *sqlite3HctDbIntegrityCheck(
   int *pnErr
 ){
   HctFile *pFile = pDb->pFile;
-  char *zRet = 0;
-  u32 nLogic = 0;                 /* Number of logical pages in db */
-  u32 nPhys = 0;                  /* Number of physical pages in db */
-  u8 *aLogic = 0;
-  u8 *aPhys = 0;
-  int nErr = *pnErr;
-  int rc = SQLITE_OK;
+  IntCheckCtx c;
+  u32 *aFileRoot = 0;
+  int nFileRoot = 0;
 
-  sqlite3HctFileICArrays(pFile, &aLogic, &nLogic, &aPhys, &nPhys);
-  if( !aLogic ){
-    nErr++;
+  int rc = sqlite3HctFileRootArray(pFile, &aFileRoot, &nFileRoot);
+  memset(&c, 0, sizeof(c));
+  if( rc==SQLITE_OK ){
+    c.nErr = *pnErr;
+    c.nMaxErr = 100;
+    sqlite3HctFileICArrays(pFile, &c.aLogic, &c.nLogic, &c.aPhys, &c.nPhys);
+  }
+  if( !c.aLogic ){
+    c.nErr++;
   }else{
     int ii;
 
-    for(ii=-1; nErr==0 && ii<nRoot; ii++){
-      HctFilePage pg;
-      u32 pgno = ii<0 ? 2 : aRoot[ii];
-
-      do {
-        int nHeight = 0;
-        int eType = 0;
-        u32 child = 0;
-        rc = sqlite3HctFilePageGet(pFile, pgno, &pg);
-        if( rc!=SQLITE_OK ){
-          nErr++;
-        }else{
-          nHeight = hctPageheight(pg.aOld);
-          eType = hctPagetype(pg.aOld);
-          if( eType!=HCT_PAGETYPE_INTKEY && eType!=HCT_PAGETYPE_INDEX ){
-            nErr++;
-            zRet = sqlite3_mprintf("unknown page type: %d\n", eType);
-          }
-          else if( nHeight>0 ){
-            if( eType==HCT_PAGETYPE_INTKEY ){
-              child = ((HctDbIntkeyNode*)pg.aOld)->aEntry[0].iChildPg;
-            }else{
-              child = ((HctDbIndexNode*)pg.aOld)->aEntry[0].iChildPg;
-            }
-          }
-        }
-
-        while( nErr==0 && pg.aOld ){
-          u32 iPeerPg = ((HctDbPageHdr*)pg.aOld)->iPeerPg;
-          u32 iLogic = pg.iPg;
-          u32 iPhys = pg.iOldPg;
-
-          assert( iLogic && iPhys && iLogic<=nLogic && iPhys<=nPhys );
-          if( aLogic[iLogic-1] ){
-            zRet = sqlite3_mprintf(
-                "multiple refs to logical page %d", (int)iLogic
-            );
-            nErr++;
-          }else if( aPhys[iPhys-1] ){
-            zRet = sqlite3_mprintf(
-                "multiple refs to physical page %d", (int)iPhys
-            );
-            nErr++;
-          }else{
-            aLogic[iLogic-1] = 1;
-            aPhys[iPhys-1] = 1;
-          }
-
-          if( nHeight==0 || eType==HCT_PAGETYPE_INDEX ){
-            int iCell = 0;
-            int nEntry = ((HctDbPageHdr*)pg.aOld)->nEntry;
-            for(iCell=0; nErr==0 && iCell<nEntry; iCell++){
-              u8 flags = 0;
-              int iOff = hctDbCellOffset(pg.aOld, iCell, &flags);
-              if( flags & HCTDB_HAS_OVFL ){
-                u32 ovfl = 0;
-                if( (flags & HCTDB_HAS_TID)!=0 ) iOff += 8;
-                if( (flags & HCTDB_HAS_OLD)!=0 ) iOff += 4;
-                ovfl = hctGetU32(&pg.aOld[iOff]);
-                while( ovfl!=0 ){
-                  if( aPhys[ovfl-1] ){
-                    zRet = sqlite3_mprintf(
-                        "multiple refs to physical page %d", (int)ovfl
-                    );
-                    nErr++;
-                    break;
-                  }
-                  HctFilePage ov;
-                  aPhys[ovfl-1] = 1;
-                  rc = sqlite3HctFilePageGetPhysical(pFile, ovfl, &ov);
-                  if( rc!=SQLITE_OK ){
-                    nErr++;
-                    ovfl = 0;
-                  }else{
-                    ovfl = ((HctDbPageHdr*)ov.aOld)->iPeerPg;
-                    sqlite3HctFilePageRelease(&ov);
-                  }
-                }
-              }
-            }
-          }
-
-          sqlite3HctFilePageRelease(&pg);
-          if( iPeerPg ){
-            rc = sqlite3HctFilePageGet(pFile, iPeerPg, &pg);
-            if( rc!=SQLITE_OK ){
-              nErr++;
-            }
-          }
-        }
-
-        pgno = child;
-      }while( nErr==0 && pgno!=0 );
+    for(ii=0; c.nErr==0 && ii<nFileRoot; ii++){
+      u32 r = aFileRoot[ii];
+      sqlite3HctDbWalkTree(pFile, r, hctDbIntegrityCheckCb, (void*)&c);
     }
 
     /* Check for leaks */
-    for(ii=1; nErr==0 && ii<=nLogic; ii++){
-      assert( aLogic[ii-1]==0 || aLogic[ii-1]==1 );
-      if( aLogic[ii-1]!=1 ){
-        zRet = sqlite3_mprintf("logical page %d has been leaked", ii);
-        nErr++;
+    for(ii=1; c.nErr<c.nMaxErr && ii<=c.nLogic; ii++){
+      assert( c.aLogic[ii-1]==0 || c.aLogic[ii-1]==1 );
+      if( c.aLogic[ii-1]!=1 ){
+        hctDbICError(&c, "logical page %d has been leaked", ii);
       }
     }
-    for(ii=1; nErr==0 && ii<=nPhys; ii++){
-      assert( aPhys[ii-1]==0 || aPhys[ii-1]==1 );
-      if( aPhys[ii-1]!=1 ){
-        zRet = sqlite3_mprintf("physical page %d has been leaked", ii);
-        nErr++;
+    for(ii=1; c.nErr<c.nMaxErr && ii<=c.nPhys; ii++){
+      assert( c.aPhys[ii-1]==0 || c.aPhys[ii-1]==1 );
+      if( c.aPhys[ii-1]!=1 ){
+        hctDbICError(&c, "physical page %d has been leaked", ii);
       }
     }
   }
 
-  *pnErr = nErr;
-  sqlite3_free(aLogic);
-  return zRet;
+  *pnErr = c.nErr;
+  sqlite3_free(c.aLogic);
+  sqlite3_free(aFileRoot);
+  return c.zErr;
 }
 
 /*************************************************************************

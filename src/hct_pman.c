@@ -15,6 +15,7 @@
 #include "hctInt.h"
 
 typedef struct HctPManPageset HctPManPageset;
+typedef struct HctPManTree HctPManTree;
 
 #define PAGESET_INIT_SIZE 1000
 
@@ -51,6 +52,14 @@ struct HctPManPageset {
 };
 
 /*
+** A tree of free logical and physical pages.
+*/
+struct HctPManTree {
+  u32 iRoot;                      /* Logical root of free tree */
+  i64 iTid;                       /* Associated TID value */
+};
+
+/*
 ** Indexes into HctPManServer.apList[], HctPManClient.apAcc[] and
 ** HctPManClient.apUse[] arrays. 
 */
@@ -64,6 +73,9 @@ struct HctPManPageset {
 **   always points to the last element of this list.
 **
 **   aList[1] is similar, but for logical page ids.
+**
+** aTree[]:
+**   Array of tree structures to eventually walk and free
 */
 struct HctPManServer {
   sqlite3_mutex *pMutex;          /* Mutex to protect this object */
@@ -72,6 +84,9 @@ struct HctPManServer {
     HctPManPageset *pHead;
     HctPManPageset *pTail;
   } aList[2];
+
+  int nTree;
+  HctPManTree *aTree;
 };
 
 /*
@@ -267,6 +282,45 @@ void sqlite3HctPManClientFree(HctPManClient *pClient){
   }
 }
 
+
+typedef struct FreeTreeCtx FreeTreeCtx; 
+struct FreeTreeCtx {
+  HctFile *pFile;
+  HctPManClient *pPManClient;
+};
+
+static int pmanFreeTreeCb(void *pCtx, u32 iLogic, u32 iPhys){
+  FreeTreeCtx *p = (FreeTreeCtx*)pCtx;
+  int rc = SQLITE_OK;
+
+  if( iLogic && !sqlite3HctFilePageIsFree(p->pFile, iLogic, 1) ){
+    rc = sqlite3HctFilePageClearInUse(p->pFile, iLogic, 1);
+    sqlite3HctPManFreePg(&rc, p->pPManClient, 0, iLogic, 1);
+  }
+  if( iPhys && !sqlite3HctFilePageIsFree(p->pFile, iPhys, 0) && rc==SQLITE_OK ){
+    rc = sqlite3HctFilePageClearInUse(p->pFile, iPhys, 0);
+    sqlite3HctPManFreePg(&rc, p->pPManClient, 0, iPhys, 0);
+  }
+
+  return rc;
+}
+
+static int hctPManFreeTreeNow(
+  HctPManClient *p, 
+  HctFile *pFile, 
+  u32 iRoot
+){
+  int rc = SQLITE_OK;
+  FreeTreeCtx ctx;
+  ctx.pPManClient = p;
+  ctx.pFile = pFile;
+  rc = sqlite3HctDbWalkTree(pFile, iRoot, pmanFreeTreeCb, (void*)&ctx);
+  if( rc==SQLITE_OK ){
+    rc = sqlite3HctFilePageClearIsRoot(pFile, iRoot);
+  }
+  return rc;
+}
+
 #if 0
 static void pman_debug(
   HctPManClient *pClient, 
@@ -304,6 +358,7 @@ static void pman_debug_new_pageset(
 u32 sqlite3HctPManAllocPg(
   int *pRc,                       /* IN/OUT: Error code */
   HctPManClient *pClient,         /* page-manager client handle */
+  HctFile *pFile,
   int bLogical
 ){
   HctPManPageset *pUse = pClient->apUse[bLogical];
@@ -315,10 +370,15 @@ u32 sqlite3HctPManAllocPg(
     struct HctPManServerList *pList = &p->aList[bLogical];
     u64 iSafeTid = sqlite3HctFileSafeTID(pClient->pFile);
     u64 iServerTid = 0;
+    u32 iRoot = 0;
 
     /* First try to obtain a new pageset object from the server */
     sqlite3_mutex_enter(p->pMutex);
-    if( pList->pHead ){
+    if( p->nTree>0 && p->aTree[0].iTid<=iSafeTid ){
+      iRoot = p->aTree[0].iRoot;
+      p->nTree--;
+      memmove(&p->aTree[0], &p->aTree[1], (p->nTree)*sizeof(HctPManTree));
+    }else if( pList->pHead ){
       iServerTid = pList->pHead->iMaxTid;
       if( iServerTid<=iSafeTid ){
         pUse = pList->pHead;
@@ -327,6 +387,11 @@ u32 sqlite3HctPManAllocPg(
       }
     }
     sqlite3_mutex_leave(p->pMutex);
+
+    if( iRoot && *pRc==SQLITE_OK ){
+      *pRc = hctPManFreeTreeNow(pClient, pFile, iRoot);
+      pUse = pClient->apUse[bLogical];
+    }
 
     /* If there is still no new pageset, allocate a new one at the end 
     ** of the current domain. */
@@ -404,6 +469,40 @@ void sqlite3HctPManFreePg(
     pAcc->aPg[pAcc->nPg++] = iPg;
     if( iTid>pAcc->iMaxTid ) pAcc->iMaxTid = iTid;
   }
+}
+
+int sqlite3HctPManFreeTree(
+  HctPManClient *p, 
+  HctFile *pFile, 
+  u32 iRoot, 
+  u64 iTid
+){
+  int rc = SQLITE_OK;
+  if( iTid==0 ){
+    rc = hctPManFreeTreeNow(p, pFile, iRoot);
+  }else{
+    HctPManServer *pServer = p->pServer;
+    int nNew;
+    HctPManTree *aNew;
+
+    sqlite3_mutex_enter(pServer->pMutex);
+
+    nNew = pServer->nTree + 1;
+    aNew = (HctPManTree*)sqlite3_realloc(
+        pServer->aTree, nNew*sizeof(HctPManTree)
+    );
+    if( aNew==0 ){
+      rc = SQLITE_NOMEM_BKPT;
+    }else{
+      aNew[pServer->nTree].iRoot = iRoot;
+      aNew[pServer->nTree].iTid = iTid;
+      pServer->nTree++;
+      pServer->aTree = aNew;
+    }
+
+    sqlite3_mutex_leave(pServer->pMutex);
+  }
+  return rc;
 }
 
 /*************************************************************************
