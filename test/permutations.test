@@ -199,6 +199,7 @@ hct_reopen1.test
 hct_simple_rollback.test
 hct_overflow1.test
 hct_schema1.test
+hct_recover1.test
 
   update.test
   delete3.test

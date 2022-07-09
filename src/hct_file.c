@@ -127,6 +127,11 @@ struct HctMapping {
   HctMappingChunk *aChunk;        /* Array of database chunk mappings */
 };
 
+/*
+** eInitState:
+**   Set to one of the HCT_INIT_XXX constants defined below. See comments
+**   above those constants for details.
+*/
 struct HctFileServer {
   sqlite3_mutex *pMutex;          /* Mutex to protect this object */
   HctFile *pFileList;
@@ -146,12 +151,30 @@ struct HctFileServer {
 
   HctTMapServer *pTMapServer;     /* Transaction map server */
   HctPManServer *pPManServer;     /* Page manager server */
-  int bNeedRollback;              /* True if rollback still required */
+  int eInitState;
 
   i64 st_dev;                     /* File identification 1 */
   i64 st_ino;                     /* File identification 2 */
   HctFileServer *pServerNext;     /* Next object in g.pServerList list */
 };
+
+/*
+** System initialization state:
+**
+** HCT_INIT_NONE:
+**   No initialization has been done.
+**
+** HCT_INIT_RECOVER1:
+**   The sqlite_schema table (root page 1) has been recovered. And the
+**   page-map scanned to initialize the page-manager.
+**
+** HCT_INIT_RECOVER2:
+**   Other tables (apart from sqlite_schema) have been recovered.
+**   Initialization has finished.
+*/
+#define HCT_INIT_NONE     0
+#define HCT_INIT_RECOVER1 1
+#define HCT_INIT_RECOVER2 2
 
 /*
 ** iCurrentTid:
@@ -165,7 +188,7 @@ struct HctFile {
   HctFileServer *pServer;         /* Connection to global db object */
   HctFile *pFileNext;             /* Next handle opened on same file */
   int iFileId;                    /* Id used for debugging output */
-  int bNeedRollback;
+  int eInitState;
 
   HctTMapClient *pTMapClient;     /* Transaction map client object */
   HctPManClient *pPManClient;     /* Transaction map client object */
@@ -650,34 +673,6 @@ static int hctFileServerInit(HctFileServer *p, const char *zFile){
 
     /* Initialize the page-manager */
     p->pPManServer = sqlite3HctPManServerNew(&rc, p);
-    if( rc==SQLITE_OK ){
-      u64 nPg1 = hctFilePagemapGet(pMapping, HCT_PAGEMAP_PHYSICAL_EOF);
-      u64 nPg2 = hctFilePagemapGet(pMapping, HCT_PAGEMAP_LOGICAL_EOF);
-      u32 iPg;
-      u32 nPg;
-      
-      nPg1 = nPg1 & HCT_PAGEMAP_VMASK;
-      nPg2 = nPg2 & HCT_PAGEMAP_VMASK;
-
-      nPg = MAX((nPg1 & 0xFFFFFFFF), (nPg2 & 0xFFFFFFFF));
-      for(iPg=1; iPg<=nPg; iPg++){
-        u64 iVal = hctFilePagemapGetSafe(pMapping, iPg);
-        if( (iVal & HCT_PMF_PHYSICAL_IN_USE)==0 && (iPg<=nPg1) ){
-          sqlite3HctPManServerInit(&rc, p->pPManServer, iPg, 0);
-        }
-        if( (iVal & HCT_PMF_LOGICAL_IN_USE)==0 
-         && iPg<=nPg2 
-         && iPg>=HCT_FIRST_LOGICAL
-        ){
-          sqlite3HctPManServerInit(&rc, p->pPManServer, iPg, 1);
-        }
-      }
-    }
-
-    /* TODO: Figure out if rollback may be required by checking for log
-    ** files in the database directory. For now, just assume they are
-    ** present.  */
-    p->bNeedRollback = 1;
   }
   return rc;
 }
@@ -810,7 +805,7 @@ HctFile *sqlite3HctFileOpen(int *pRc, const char *zFile, HctConfig *pConfig){
         pNew->pMapping = pServer->pMapping;
         pNew->pMapping->nRef++;
         pNew->iFileId = pServer->iNextFileId++;
-        pNew->bNeedRollback = pServer->bNeedRollback;
+        pNew->eInitState = pServer->eInitState;
       }
       sqlite3_mutex_leave(pServer->pMutex);
 
@@ -1116,6 +1111,17 @@ void sqlite3HctFileDebugPrint(HctFile *pFile, const char *zFmt, ...){
 void sqlite3HctFileDebugPrint(HctFile *pFile, const char *zFmt, ...){ }
 #endif
 
+void hctFileFreePg(
+  int *pRc, 
+  HctFile *pFile, 
+  i64 iTid,                       /* Associated TID value */
+  u32 iPg,                        /* Page number */
+  int bLogical                    /* True for logical, false for physical */
+){
+  if( pFile->eInitState==HCT_INIT_RECOVER2 ){
+    sqlite3HctPManFreePg(pRc, pFile->pPManClient, iTid, iPg, bLogical);
+  }
+}
 
 static int hctFilePageFlush(HctFilePage *pPg){
   int rc = SQLITE_OK;
@@ -1136,7 +1142,7 @@ static int hctFilePageFlush(HctFilePage *pPg){
     }else{
       if( iOld ){
         u64 iTid = pPg->pFile->iCurrentTid;
-        sqlite3HctPManFreePg(&rc, pPg->pFile->pPManClient, iTid, iOld, 0);
+        hctFileFreePg(&rc, pPg->pFile, iTid, iOld, 0);
         hctFileClearFlag(pPg->pFile, iOld, HCT_PMF_PHYSICAL_IN_USE);
       }
       pPg->iOldPg = pPg->iNewPg;
@@ -1291,12 +1297,12 @@ void sqlite3HctFilePageUnwrite(HctFilePage *pPg){
   int rc = SQLITE_OK;
   if( pPg->aNew ){
     hctFileClearFlag(pPg->pFile, pPg->iNewPg, HCT_PMF_PHYSICAL_IN_USE);
-    sqlite3HctPManFreePg(&rc, pPg->pFile->pPManClient, 0, pPg->iNewPg, 0);
+    hctFileFreePg(&rc, pPg->pFile, 0, pPg->iNewPg, 0);
     pPg->iNewPg = 0;
     pPg->aNew = 0;
     if( pPg->iOldPg==0 ){
       assert( pPg->aOld==0 );
-      sqlite3HctPManFreePg(&rc, pPg->pFile->pPManClient, 0, pPg->iPg, 1);
+      hctFileFreePg(&rc, pPg->pFile, 0, pPg->iPg, 1);
       pPg->iPg = 0;
     }
   }
@@ -1382,8 +1388,8 @@ int sqlite3HctFileClearInUse(HctFilePage *pPg, int bReuseNow){
 
     hctFileClearFlag(pPg->pFile, pPg->iPg, HCT_PMF_LOGICAL_IN_USE);
     hctFileClearFlag(pPg->pFile, iPhysPg, HCT_PMF_PHYSICAL_IN_USE);
-    sqlite3HctPManFreePg(&rc, pPg->pFile->pPManClient, iTid, pPg->iPg, 1);
-    sqlite3HctPManFreePg(&rc, pPg->pFile->pPManClient, iTid, iPhysPg, 0);
+    hctFileFreePg(&rc, pPg->pFile, iTid, pPg->iPg, 1);
+    hctFileFreePg(&rc, pPg->pFile, iTid, iPhysPg, 0);
   }
 
   return rc;
@@ -1394,7 +1400,7 @@ int sqlite3HctFileClearPhysInUse(HctFile *pFile, u32 pgno, int bReuseNow){
   int rc = SQLITE_OK;
   
   hctFileClearFlag(pFile, pgno, HCT_PMF_PHYSICAL_IN_USE);
-  sqlite3HctPManFreePg(&rc, pFile->pPManClient, iTid, pgno, 0);
+  hctFileFreePg(&rc, pFile, iTid, pgno, 0);
   return rc;
 }
 
@@ -1418,25 +1424,56 @@ const char *sqlite3HctFileName(HctFile *pFile){
   return &pFile->pServer->zPath[nDir];
 }
 
-int sqlite3HctFileStartRecovery(HctFile *pFile){
+int sqlite3HctFileStartRecovery(HctFile *pFile, int iStage){
   int bRet = 0;
-  if( pFile->bNeedRollback ){
+  if( pFile->eInitState==iStage ){
     HctFileServer *pServer = pFile->pServer;
     sqlite3_mutex_enter(pServer->pMutex);
-    if( pServer->bNeedRollback ){
+    if( pServer->eInitState==iStage ){
       bRet = 1;
     }else{
-      pFile->bNeedRollback = 0;
+      pFile->eInitState = pServer->eInitState;
       sqlite3_mutex_leave(pServer->pMutex);
     }
   }
   return bRet;
 }
 
-int sqlite3HctFileFinishRecovery(HctFile *pFile, int rc){
+int sqlite3HctFileFinishRecovery(HctFile *pFile, int iStage, int rc){
+  HctFileServer *pServer = pFile->pServer;
   if( rc==SQLITE_OK ){
-    pFile->bNeedRollback = 0;
-    pFile->pServer->bNeedRollback = 0;
+    pFile->eInitState = iStage+1;
+    pServer->eInitState = iStage+1;
+
+    sqlite3HctPManClientHandoff(pFile->pPManClient);
+
+    if( pServer->eInitState==HCT_INIT_RECOVER2 ){
+      HctMapping *pMapping = pServer->pMapping;
+      u64 nPg1 = hctFilePagemapGet(pMapping, HCT_PAGEMAP_PHYSICAL_EOF);
+      u64 nPg2 = hctFilePagemapGet(pMapping, HCT_PAGEMAP_LOGICAL_EOF);
+      u32 iPg;
+      u32 nPg;
+      
+      nPg1 = nPg1 & HCT_PAGEMAP_VMASK;
+      nPg2 = nPg2 & HCT_PAGEMAP_VMASK;
+
+      sqlite3HctPManServerReset(pServer->pPManServer);
+
+      nPg = MAX((nPg1 & 0xFFFFFFFF), (nPg2 & 0xFFFFFFFF));
+      for(iPg=1; iPg<=nPg; iPg++){
+        u64 iVal = hctFilePagemapGetSafe(pMapping, iPg);
+        if( (iVal & HCT_PMF_PHYSICAL_IN_USE)==0 && (iPg<=nPg1) ){
+          sqlite3HctPManServerInit(&rc, pServer->pPManServer, iPg, 0);
+        }
+        if( (iVal & HCT_PMF_LOGICAL_IN_USE)==0 
+         && iPg<=nPg2 
+         && iPg>=HCT_FIRST_LOGICAL
+        ){
+          sqlite3HctPManServerInit(&rc, pServer->pPManServer, iPg, 1);
+        }
+      }
+    }
+
   }
   sqlite3_mutex_leave(pFile->pServer->pMutex);
   return rc;

@@ -82,6 +82,10 @@ void sqlite3HctPManFreePg(
   int bLogical                    /* True for logical, false for physical */
 );
 
+void sqlite3HctPManClientHandoff(HctPManClient *p);
+
+void sqlite3HctPManServerReset(HctPManServer *pServer);
+
 int sqlite3HctPManVtabInit(sqlite3 *db);
 
 /*

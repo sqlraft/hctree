@@ -151,21 +151,26 @@ HctPManServer *sqlite3HctPManServerNew(
 }
 
 
+void sqlite3HctPManServerReset(HctPManServer *pServer){
+  int ii = 0;
+  for(ii=0; ii<2; ii++){
+    HctPManPageset *pNext = pServer->aList[ii].pHead;
+    while( pNext ){
+      HctPManPageset *pDel = pNext;
+      pNext = pNext->pNext;
+      sqlite3_free(pDel);
+    }
+    memset(&pServer->aList[ii], 0, sizeof(struct HctPManServerList));
+  }
+}
+
 /*
 ** Free an HctPManServer object allocated by an earlier call to
 ** sqlite3HctPManServerNew().
 */
 void sqlite3HctPManServerFree(HctPManServer *pServer){
   if( pServer ){
-    int ii = 0;
-    for(ii=0; ii<2; ii++){
-      HctPManPageset *pNext = pServer->aList[ii].pHead;
-      while( pNext ){
-        HctPManPageset *pDel = pNext;
-        pNext = pNext->pNext;
-        sqlite3_free(pDel);
-      }
-    }
+    sqlite3HctPManServerReset(pServer);
     sqlite3_mutex_free(pServer->pMutex);
     sqlite3_free(pServer);
   }
@@ -204,6 +209,8 @@ void sqlite3HctPManServerInit(
 ){
   struct HctPManServerList *p = &pServer->aList[bLogical];
   assert( bLogical==0 || bLogical==1 );
+  printf("%s page %d is free\n", bLogical?"logical":"physical", (int)iPg);
+
   if( p->pHead==0 || p->pHead->nPg==p->pHead->nAlloc ){
     HctPManPageset *pNew = hctPManPagesetNew(pRc, PAGESET_INIT_SIZE);
     if( pNew==0 ) return;
@@ -469,6 +476,18 @@ void sqlite3HctPManFreePg(
     pAcc->aPg[pAcc->nPg++] = iPg;
     if( iTid>pAcc->iMaxTid ) pAcc->iMaxTid = iTid;
   }
+}
+
+void sqlite3HctPManClientHandoff(HctPManClient *pClient){
+  hctPManServerHandoff(pClient->pServer, pClient->apUse[0], 0, 1);
+  hctPManServerHandoff(pClient->pServer, pClient->apUse[1], 1, 1);
+  hctPManServerHandoff(pClient->pServer, pClient->apAcc[0], 0, 1);
+  hctPManServerHandoff(pClient->pServer, pClient->apAcc[1], 1, 1);
+
+  pClient->apUse[0] = 0;
+  pClient->apUse[1] = 0;
+  pClient->apAcc[0] = 0;
+  pClient->apAcc[1] = 0;
 }
 
 int sqlite3HctPManFreeTree(

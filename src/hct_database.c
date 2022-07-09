@@ -3899,9 +3899,13 @@ int sqlite3HctDbEndRead(HctDatabase *pDb){
 ** mutex and returns non-zero. Or, if recovery is not required, returns
 ** zero without grabbing the mutex.
 */
-int sqlite3HctDbStartRecovery(HctDatabase *pDb){
+int sqlite3HctDbStartRecovery(HctDatabase *pDb, int iStage){
+  assert( iStage==0 || iStage==1 );
   assert( pDb->bRollback==0 );
-  if( sqlite3HctFileStartRecovery(pDb->pFile) ){
+  if( sqlite3HctFileStartRecovery(pDb->pFile, iStage) ){
+    memset(&pDb->pa, 0, sizeof(pDb->pa));
+    hctDbPageArrayReset(&pDb->pa.writepg);
+    hctDbPageArrayReset(&pDb->pa.discardpg);
     pDb->bRollback = 1;
   }
   return pDb->bRollback;
@@ -3911,10 +3915,11 @@ void sqlite3HctDbRecoverTid(HctDatabase *pDb, u64 iTid){
   pDb->iTid = iTid;
 }
 
-int sqlite3HctDbFinishRecovery(HctDatabase *pDb, int rc){
+int sqlite3HctDbFinishRecovery(HctDatabase *pDb, int iStage, int rc){
   pDb->iTid = 0;
   pDb->bRollback = 0;
-  return sqlite3HctFileFinishRecovery(pDb->pFile, rc);
+  assert( iStage==0 || iStage==1 );
+  return sqlite3HctFileFinishRecovery(pDb->pFile, iStage, rc);
 }
 
 /*

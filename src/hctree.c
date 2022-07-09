@@ -198,6 +198,150 @@ void sqlite3BtreeCursorHintFlags(BtCursor *pCur, unsigned x){
 }
 
 /*
+** Context object passed to hctRecoverOne().
+**
+** pBt:
+**   Btree handle for database being recovered.
+**
+** iStage:
+**   Either 0 or 1. If set to 0, then only sqlite_schema records are
+**   recovered. If it is set to 1, then all other records are recovered
+**   and the log file deleted.
+*/
+typedef struct RecoverCtx RecoverCtx;
+struct RecoverCtx {
+  Btree *pBt;
+  int iStage;
+};
+
+#define HCT_RECOVER_STAGE0 0
+#define HCT_RECOVER_STAGE1 1
+
+static int hctRecoverOne(void *pCtx, const char *zFile){
+  Btree *p = ((RecoverCtx*)pCtx)->pBt;
+  int iStage = ((RecoverCtx*)pCtx)->iStage;
+
+  int rc = SQLITE_OK;
+  int nDummy = 0;
+  HctDatabase *pDb = p->pHctDb;
+  int fd = open(zFile, O_RDONLY);
+  struct stat sStat;
+  u64 iTid = 0;
+
+  u32 iPrevRoot = 0;
+  KeyInfo *pKeyInfo = 0;
+  UnpackedRecord *pRec = 0;
+
+  memset(&sStat, 0, sizeof(sStat));
+  fstat(fd, &sStat);
+
+  if( sStat.st_size<8 ) return SQLITE_OK;
+  if( read(fd, &iTid, sizeof(iTid))!=sizeof(iTid) ) return SQLITE_IOERR_READ;
+  if( iTid!=0 ){
+    sqlite3HctDbRecoverTid(pDb, iTid);
+    while( 1 ){
+      u32 aInt[2] = {0, 0};
+      u32 iRoot;
+      u32 nData;
+      if( read(fd, &aInt, sizeof(aInt))!=sizeof(aInt) ){
+        return SQLITE_IOERR_READ;
+      }
+      iRoot = aInt[0];
+      nData = aInt[1];
+      if( iRoot==0 ) break;
+
+      if( iRoot!=iPrevRoot && iStage==HCT_RECOVER_STAGE1 ){
+        Schema *pSchema = (Schema*)p->pSchema;
+        HashElem *pE = 0;
+
+        /* TODO: Find pKeyInfo and allocate pRec */
+        sqlite3KeyInfoUnref(pKeyInfo);
+        sqlite3DbFree(p->db, pRec);
+        pRec = 0;
+        pKeyInfo = 0;
+        if( iPrevRoot ){
+          rc = sqlite3HctDbInsertFlush(pDb, &nDummy);
+          if( rc ) break;
+        }
+        iPrevRoot = iRoot;
+
+        for(pE=sqliteHashFirst(&pSchema->tblHash); pE; pE=sqliteHashNext(pE)){
+          Index *pIdx = 0;
+          Table *pTab = (Table*)sqliteHashData(pE);
+          if( pTab->tnum==iRoot ) break;
+          for(pIdx=pTab->pIndex; pIdx; pIdx=pIdx->pNext){
+            if( pIdx->tnum==iRoot ){
+              Parse sParse;
+              memset(&sParse, 0, sizeof(sParse));
+              sParse.db = p->db;
+              pKeyInfo = sqlite3KeyInfoOfIndex(&sParse, pIdx);
+              rc = sParse.rc;
+              sqlite3DbFree(sParse.db, sParse.zErrMsg);
+              if( rc==SQLITE_OK ){
+                pRec = sqlite3VdbeAllocUnpackedRecord(pKeyInfo);
+                if( pRec==0 ) rc = SQLITE_NOMEM_BKPT;
+              }
+              break;
+            }
+          }
+        }
+
+        assert( rc!=SQLITE_OK || (pRec==0)==(nData==0) );
+      }
+
+      if( nData ){
+        u8 *aData = (u8*)sqlite3_malloc(nData);
+        if( !aData ){
+          rc = SQLITE_NOMEM_BKPT;
+        }else{
+          if( read(fd, aData, nData)!=nData ){
+            rc = SQLITE_IOERR_READ;
+          }
+        }
+        if( rc==SQLITE_OK && iStage==HCT_RECOVER_STAGE1 ){
+          sqlite3VdbeRecordUnpack(pKeyInfo, nData, aData, pRec);
+          rc = sqlite3HctDbInsert(pDb, iRoot, pRec, 0, 0, nData, aData,&nDummy);
+        }
+        sqlite3_free(aData);
+      }else{
+        i64 iRowid = 0;
+        if( read(fd, &iRowid, sizeof(iRowid))!=sizeof(iRowid) ){
+          rc = SQLITE_IOERR_READ;
+        }else{
+          if( (iRoot==1 && iStage==HCT_RECOVER_STAGE0)
+           || (iRoot!=1 && iStage==HCT_RECOVER_STAGE1)
+          ){
+            rc = sqlite3HctDbInsert(pDb, iRoot, 0, iRowid, 0, 0, 0, &nDummy);
+          }
+        }
+      }
+      if( rc==SQLITE_DONE ) rc = SQLITE_OK;
+      if( rc ) break;
+    }
+
+    if( rc==SQLITE_OK ){
+      rc = sqlite3HctDbInsertFlush(pDb, &nDummy);
+    }
+    sqlite3KeyInfoUnref(pKeyInfo);
+    sqlite3DbFree(p->db, pRec);
+  }
+
+  if( rc==SQLITE_OK && iStage==HCT_RECOVER_STAGE1 ){
+    unlink(zFile);
+  }
+  return rc;
+}
+
+static int hctRecoverLogs(Btree *p, int iStage){
+  RecoverCtx ctx;
+  HctFile *pFile = sqlite3HctDbFile(p->pHctDb);
+  ctx.pBt = p;
+  ctx.iStage = iStage;
+  assert( iStage==0 || iStage==1 );
+  return sqlite3HctFileFindLogs(pFile, (void*)&ctx, hctRecoverOne);
+}
+
+/*
 ** Open a database file.
 ** 
 ** zFilename is the name of the database file.  If zFilename is NULL
@@ -504,8 +648,16 @@ int sqlite3BtreeBeginTrans(Btree *p, int wrflag, int *pSchemaVersion){
   if( pSchemaVersion ){
     sqlite3BtreeGetMeta(p, 1, (u32*)pSchemaVersion);
   }
+
   if( rc==SQLITE_OK && wrflag ){
-    rc = sqlite3HctTreeBegin(p->pHctTree, 1 + p->db->nSavepoint);
+    /* Attempt stage 1 recovery here, in case it is required. */
+    if( p->pHctDb && sqlite3HctDbStartRecovery(p->pHctDb, 1) ){
+      rc = hctRecoverLogs(p, 1);
+      rc = sqlite3HctDbFinishRecovery(p->pHctDb, 1, rc);
+    }
+    if( rc==SQLITE_OK ){
+      rc = sqlite3HctTreeBegin(p->pHctTree, 1 + p->db->nSavepoint);
+    }
   }
   if( rc==SQLITE_OK && p->eTrans<req ){
     p->eTrans = req;
@@ -615,9 +767,10 @@ static int btreeFlushOneToDisk(void *pCtx, u32 iRoot, KeyInfo *pKeyInfo){
 }
 
 static int btreeLogIntkey(int fd, u32 iRoot, i64 iRowid){
-  u8 aBuf[12];
+  u8 aBuf[16];
   memcpy(&aBuf[0], &iRoot, sizeof(u32));
-  memcpy(&aBuf[4], &iRowid, sizeof(i64));
+  memset(&aBuf[4], 0, sizeof(u32));
+  memcpy(&aBuf[8], &iRowid, sizeof(i64));
   if( write(fd, aBuf, sizeof(aBuf))!=sizeof(aBuf) ) return SQLITE_IOERR_WRITE;
   return SQLITE_OK;
 }
@@ -703,7 +856,7 @@ static int btreeWriteLog(Btree *p){
     rc = sqlite3HctTreeForeach(p->pHctTree, (void*)p, btreeLogOneToDisk);
   }
   if( rc==SQLITE_OK ){
-    u8 aBuf[4] = {0,0,0,0};
+    u8 aBuf[8] = {0,0,0,0, 0,0,0,0};
     if( write(p->fdLog, aBuf, sizeof(aBuf))!=sizeof(aBuf) ){
       rc = SQLITE_IOERR_WRITE;
     }
@@ -1001,119 +1154,6 @@ int sqlite3BtreeSavepoint(Btree *p, int op, int iSavepoint){
   return rc;
 }
 
-static int hctRecoverOne(void *pCtx, const char *zFile){
-  Btree *p = (Btree*)pCtx;
-  int rc = SQLITE_OK;
-  int nDummy = 0;
-  HctDatabase *pDb = p->pHctDb;
-  int fd = open(zFile, O_RDONLY);
-  struct stat sStat;
-  u64 iTid = 0;
-
-  u32 iPrevRoot = 0;
-  KeyInfo *pKeyInfo = 0;
-  UnpackedRecord *pRec = 0;
-
-  memset(&sStat, 0, sizeof(sStat));
-  fstat(fd, &sStat);
-
-  if( sStat.st_size<8 ) return SQLITE_OK;
-  if( read(fd, &iTid, sizeof(iTid))!=sizeof(iTid) ) return SQLITE_IOERR_READ;
-  if( iTid==0 ) return SQLITE_OK;
-  sqlite3HctDbRecoverTid(pDb, iTid);
-  while( 1 ){
-    u32 iRoot = 0;
-    if( read(fd, &iRoot, sizeof(iRoot))!=sizeof(iRoot) ){
-      return SQLITE_IOERR_READ;
-    }
-    if( iRoot==0 ) break;
-    if( iRoot!=iPrevRoot ){
-      Schema *pSchema = (Schema*)p->pSchema;
-      HashElem *pE = 0;
-
-      /* TODO: Find pKeyInfo and allocate pRec */
-      sqlite3KeyInfoUnref(pKeyInfo);
-      sqlite3DbFree(p->db, pRec);
-      pRec = 0;
-      pKeyInfo = 0;
-      if( iPrevRoot ){
-        rc = sqlite3HctDbInsertFlush(pDb, &nDummy);
-        if( rc ) break;
-      }
-      iPrevRoot = iRoot;
-
-      for(pE=sqliteHashFirst(&pSchema->tblHash); pE; pE=sqliteHashNext(pE)){
-        Index *pIdx = 0;
-        Table *pTab = (Table*)sqliteHashData(pE);
-        if( pTab->tnum==iRoot ) break;
-        for(pIdx=pTab->pIndex; pIdx; pIdx=pIdx->pNext){
-          if( pIdx->tnum==iRoot ){
-            Parse sParse;
-            memset(&sParse, 0, sizeof(sParse));
-            sParse.db = p->db;
-            pKeyInfo = sqlite3KeyInfoOfIndex(&sParse, pIdx);
-            rc = sParse.rc;
-            sqlite3DbFree(sParse.db, sParse.zErrMsg);
-            if( rc==SQLITE_OK ){
-              pRec = sqlite3VdbeAllocUnpackedRecord(pKeyInfo);
-              if( pRec==0 ) rc = SQLITE_NOMEM_BKPT;
-            }
-            break;
-          }
-        }
-      }
-
-    }
-
-    if( pRec ){
-      int nData = 0;
-      u8 *aData = 0;
-      if( read(fd, &nData, sizeof(nData))!=sizeof(nData) ){
-        rc = SQLITE_IOERR_READ;
-      }else{
-        aData = (u8*)sqlite3_malloc(nData);
-        if( !aData ){
-          rc = SQLITE_NOMEM_BKPT;
-        }else{
-          if( read(fd, aData, nData)!=nData ){
-            rc = SQLITE_IOERR_READ;
-          }
-        }
-      }
-
-      if( rc==SQLITE_OK ){
-        sqlite3VdbeRecordUnpack(pKeyInfo, nData, aData, pRec);
-        rc = sqlite3HctDbInsert(pDb, iRoot, pRec, 0, 0, nData, aData, &nDummy);
-      }
-    }else{
-      i64 iRowid = 0;
-      if( read(fd, &iRowid, sizeof(iRowid))!=sizeof(iRowid) ){
-        rc = SQLITE_IOERR_READ;
-        break;
-      }
-      rc = sqlite3HctDbInsert(pDb, iRoot, 0, iRowid, 0, 0, 0, &nDummy);
-    }
-    if( rc==SQLITE_DONE ) rc = SQLITE_OK;
-    if( rc ) break;
-  }
-
-  if( rc==SQLITE_OK ){
-    rc = sqlite3HctDbInsertFlush(pDb, &nDummy);
-  }
-  sqlite3KeyInfoUnref(pKeyInfo);
-  sqlite3DbFree(p->db, pRec);
-
-  if( rc==SQLITE_OK ){
-    unlink(zFile);
-  }
-  return rc;
-}
-
-static int hctRecoverLogs(Btree *p){
-  HctFile *pFile = sqlite3HctDbFile(p->pHctDb);
-  return sqlite3HctFileFindLogs(pFile, (void*)p, hctRecoverOne);
-}
-
 /*
 ** Open a new cursor
 */
@@ -1129,9 +1169,11 @@ int sqlite3BtreeCursor(
   assert( p->eTrans!=SQLITE_TXN_NONE );
   assert( pCur->pHctTreeCsr==0 );
 
-  if( iTable!=1 && p->pHctDb && sqlite3HctDbStartRecovery(p->pHctDb) ){
-    rc = hctRecoverLogs(p);
-    rc = sqlite3HctDbFinishRecovery(p->pHctDb, rc);
+  /* If opening a cursor with root==1, try to run recovery stage 0. Or, if
+  ** opening a cursor on some other root page, try to run recovery stage 1. */
+  if( p->pHctDb && sqlite3HctDbStartRecovery(p->pHctDb, iTable!=1) ){
+    rc = hctRecoverLogs(p, iTable!=1);
+    rc = sqlite3HctDbFinishRecovery(p->pHctDb, iTable!=1, rc);
     if( rc!=SQLITE_OK ) return rc;
   }
 

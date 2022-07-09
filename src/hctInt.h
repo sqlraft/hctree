@@ -162,8 +162,8 @@ int sqlite3HctDbCsrLoadAndDecode(HctDbCsr *pCsr, UnpackedRecord **ppRec);
 
 int sqlite3HctDbIsIndex(HctDatabase *pDb, u32 iRoot, int *pbIndex);
 
-int sqlite3HctDbStartRecovery(HctDatabase *pDb);
-int sqlite3HctDbFinishRecovery(HctDatabase *db, int rc);
+int sqlite3HctDbStartRecovery(HctDatabase *pDb, int iStage);
+int sqlite3HctDbFinishRecovery(HctDatabase *db, int iStage, int rc);
 void sqlite3HctDbRecoverTid(HctDatabase *db, u64 iTid);
 
 char *sqlite3HctDbLogFile(HctDatabase*);
@@ -293,8 +293,8 @@ int sqlite3HctFileClearPhysInUse(HctFile *pFile, u32 pgno, int bReuseNow);
 void sqlite3HctFileDebugPrint(HctFile *pFile, const char *zFmt, ...);
 
 char *sqlite3HctFileLogFile(HctFile *pFile);
-int sqlite3HctFileStartRecovery(HctFile *pFile);
-int sqlite3HctFileFinishRecovery(HctFile *pFile, int rc);
+int sqlite3HctFileStartRecovery(HctFile *pFile, int iStage);
+int sqlite3HctFileFinishRecovery(HctFile *pFile, int iStage, int rc);
 
 const char *sqlite3HctFileDir(HctFile *pFile);
 const char *sqlite3HctFilePath(HctFile *pFile);
