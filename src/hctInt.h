@@ -295,6 +295,7 @@ void sqlite3HctFileDebugPrint(HctFile *pFile, const char *zFmt, ...);
 char *sqlite3HctFileLogFile(HctFile *pFile);
 int sqlite3HctFileStartRecovery(HctFile *pFile, int iStage);
 int sqlite3HctFileFinishRecovery(HctFile *pFile, int iStage, int rc);
+int sqlite3HctFileRecoverFreelists(HctFile *pFile, int nRoot, u32 *aRoot);
 
 const char *sqlite3HctFileDir(HctFile *pFile);
 const char *sqlite3HctFilePath(HctFile *pFile);
@@ -320,6 +321,8 @@ int sqlite3HctDbWalkTree(
   int (*x)(void*, u32, u32),      /* Callback function */
   void *pCtx                      /* First argument to pass to x() */
 );
+
+int sqlite3HctFileRootArray(HctFile*, u32**, int*);
 
 /*************************************************************************
 ** Interface to code in hct_record.c

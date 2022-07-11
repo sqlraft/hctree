@@ -97,3 +97,5 @@ int sqlite3HctPManVtabInit(sqlite3 *db);
 */
 int sqlite3HctPManFreeTree(HctPManClient *p, HctFile*, u32 iRoot, u64 iTid);
 
+int sqlite3HctPManServerInitRoot(int *pRc, HctPManServer*, HctFile*, u32);
+

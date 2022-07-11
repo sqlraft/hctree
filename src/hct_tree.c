@@ -882,7 +882,6 @@ int sqlite3HctTreeRollbackTo(HctTree *pTree, int iStmt){
 ** Clear the contents of the entire tree.
 */
 void sqlite3HctTreeClear(HctTree *pTree){
-  int i;
   HctTreeRoot **pp;
   HctTreeRoot **pEnd = &pTree->apRootHash[pTree->nRootHash];
   for(pp=pTree->apRootHash; pp<pEnd; pp++){

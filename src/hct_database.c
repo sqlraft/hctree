@@ -3284,11 +3284,6 @@ static int hctDbCopyOverflow(
     rc = hctDbOverflowArrayAppend(&pWriter->insOvfl, *pOvflOut, nOvfl);
   }
   return rc;
-
-}
-
-static int hctDbFreeOverflowChain(HctDbWriter *pWriter, u32 ovfl, int nOvfl){
-  return hctDbOverflowArrayAppend(&pWriter->delOvfl, ovfl, nOvfl);
 }
 
 static void hctDbRemoveCell(
@@ -3915,10 +3910,103 @@ void sqlite3HctDbRecoverTid(HctDatabase *pDb, u64 iTid){
   pDb->iTid = iTid;
 }
 
+static int hctDbRootPagelist(HctDatabase *pDb, int *pnRoot, u32 **paRoot){
+  int rc = SQLITE_OK;
+  HctDbCsr *pCsr = 0;
+  u32 *aRoot = 0;
+  int nRoot = 0;
+  int nAlloc = 0;
+
+  rc = sqlite3HctDbCsrOpen(pDb, 0, 1, &pCsr);
+  for(rc=sqlite3HctDbCsrFirst(pCsr);
+      rc==SQLITE_OK && !sqlite3HctDbCsrEof(pCsr);
+      rc=sqlite3HctDbCsrNext(pCsr)
+  ){
+    const u8 *aData = 0;
+    int nData = 0;
+    rc = sqlite3HctDbCsrData(pCsr, &nData, &aData);
+
+    if( rc==SQLITE_OK ){
+      u32 iRoot = 0;
+      u64 val = 0;
+      int ii;
+      const u8 *pHdr = aData + sqlite3GetVarint(aData, &val);
+      const u8 *pBody = &aData[val];
+
+      for(ii=0; ii<3; ii++){
+        pHdr += sqlite3GetVarint(pHdr, &val);
+        pBody += sqlite3VdbeSerialTypeLen((u32)val);
+      }
+
+      pHdr += sqlite3GetVarint(pHdr, &val);
+      switch( val ){
+        case 1:
+          iRoot = (u32)pBody[0];
+          break;
+        case 2:
+          iRoot = (((u32)pBody[0]) << 8) + pBody[1];
+          break;
+        case 3:
+          iRoot = (((u32)pBody[0]) << 16) + (((u32)pBody[1]) << 8) + pBody[2];
+          break;
+        case 4:
+          iRoot = (((u32)pBody[0]) << 24) + (((u32)pBody[1]) << 16);
+          iRoot += (((u32)pBody[2]) << 8) + pBody[3];
+          break;
+        default:
+          rc = SQLITE_CORRUPT_BKPT;
+          break;
+      }
+
+      if( nRoot==nAlloc ){
+        int nNew = nAlloc+64;
+        u32 *aNew = (u32*)sqlite3_realloc(aRoot, sizeof(u32) * nNew);
+        if( aNew==0 ){
+          rc = SQLITE_NOMEM_BKPT;
+          break;
+        }else{
+          aRoot = aNew;
+          nAlloc = nNew;
+        }
+      }
+
+      assert( iRoot>2 );
+      aRoot[nRoot] = iRoot;
+      nRoot++;
+    }
+  }
+
+  if( rc!=SQLITE_OK ){
+    sqlite3_free(aRoot);
+    aRoot = 0;
+    nRoot = 0;
+  }
+
+  *paRoot = aRoot;
+  *pnRoot = nRoot;
+  return rc;
+}
+
 int sqlite3HctDbFinishRecovery(HctDatabase *pDb, int iStage, int rc){
   pDb->iTid = 0;
   pDb->bRollback = 0;
   assert( iStage==0 || iStage==1 );
+  if( rc==SQLITE_OK && iStage==1 ){
+    /* This is the second FinishRecovery() call. All log files have been
+    ** rolled back and deleted. The lower layer will now scan the 
+    ** page-map to determine the set of free physical and logical
+    ** pages. To do this it needs a list of all current root pages - in
+    ** order to identify and mark as free any orphaned trees. This
+    ** list is extracted from the tree structure with root page 1 (the
+    ** sqlite_schema table) here.  */
+    u32 *aRoot = 0;
+    int nRoot = 0;
+    rc = hctDbRootPagelist(pDb, &nRoot, &aRoot);
+    if( rc==SQLITE_OK ){
+      rc = sqlite3HctFileRecoverFreelists(pDb->pFile, nRoot, aRoot);
+      sqlite3_free(aRoot);
+    }
+  }
   return sqlite3HctFileFinishRecovery(pDb->pFile, iStage, rc);
 }
 

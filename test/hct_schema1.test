@@ -118,5 +118,43 @@ do_execsql_test 1.14 {
   SELECT count(*) FROM hctpgmap WHERE logical_is_root;
 } {1 ok 5}
 
+#-------------------------------------------------------------------------
+reset_db
+
+do_execsql_test 2.0 {
+  CREATE TABLE t3(a, b);
+  WITH s(x) AS (
+      SELECT 1 UNION ALL SELECT x+1 FROM s WHERE x<1000
+  )
+  INSERT INTO t3 SELECT randomblob(500), randomblob(500) FROM s;
+  CREATE INDEX i1 ON t3(a, b);
+}
+
+sqlite3 db2 test.db
+do_execsql_test -db db2 2.1 {
+  SELECT count(*) FROM t3;
+} {1000}
+
+do_execsql_test -db db2 2.2 {
+  DROP INDEX i1;
+  PRAGMA hct_quiescent_integrity_check = 1;
+  PRAGMA integrity_check;
+  SELECT count(*) FROM hctpgmap WHERE logical_is_root;
+} {1 ok 4}
+
+db2 close
+db close
+
+breakpoint
+sqlite3 db test.db
+do_execsql_test 2.2 {
+  PRAGMA hct_quiescent_integrity_check = 1;
+  PRAGMA integrity_check;
+  SELECT count(*) FROM hctpgmap WHERE logical_is_root;
+} {1 ok 3}
+
+
+
+
 finish_test
 

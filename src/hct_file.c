@@ -1444,38 +1444,49 @@ int sqlite3HctFileFinishRecovery(HctFile *pFile, int iStage, int rc){
   if( rc==SQLITE_OK ){
     pFile->eInitState = iStage+1;
     pServer->eInitState = iStage+1;
+  }
+  sqlite3HctPManClientHandoff(pFile->pPManClient);
+  sqlite3_mutex_leave(pFile->pServer->pMutex);
+  return rc;
+}
 
-    sqlite3HctPManClientHandoff(pFile->pPManClient);
+int sqlite3HctFileRecoverFreelists(HctFile *pFile, int nRoot, u32 *aRoot){
+  int rc = SQLITE_OK;
+  HctFileServer *pServer = pFile->pServer;
+  HctMapping *pMapping = pServer->pMapping;
+  u64 nPg1 = hctFilePagemapGet(pMapping, HCT_PAGEMAP_PHYSICAL_EOF);
+  u64 nPg2 = hctFilePagemapGet(pMapping, HCT_PAGEMAP_LOGICAL_EOF);
+  u32 iPg;
+  u32 nPg;
 
-    if( pServer->eInitState==HCT_INIT_RECOVER2 ){
-      HctMapping *pMapping = pServer->pMapping;
-      u64 nPg1 = hctFilePagemapGet(pMapping, HCT_PAGEMAP_PHYSICAL_EOF);
-      u64 nPg2 = hctFilePagemapGet(pMapping, HCT_PAGEMAP_LOGICAL_EOF);
-      u32 iPg;
-      u32 nPg;
-      
-      nPg1 = nPg1 & HCT_PAGEMAP_VMASK;
-      nPg2 = nPg2 & HCT_PAGEMAP_VMASK;
+  nPg1 = nPg1 & HCT_PAGEMAP_VMASK;
+  nPg2 = nPg2 & HCT_PAGEMAP_VMASK;
 
-      sqlite3HctPManServerReset(pServer->pPManServer);
+  sqlite3HctPManClientHandoff(pFile->pPManClient);
+  sqlite3HctPManServerReset(pServer->pPManServer);
 
-      nPg = MAX((nPg1 & 0xFFFFFFFF), (nPg2 & 0xFFFFFFFF));
-      for(iPg=1; iPg<=nPg; iPg++){
-        u64 iVal = hctFilePagemapGetSafe(pMapping, iPg);
-        if( (iVal & HCT_PMF_PHYSICAL_IN_USE)==0 && (iPg<=nPg1) ){
-          sqlite3HctPManServerInit(&rc, pServer->pPManServer, iPg, 0);
-        }
-        if( (iVal & HCT_PMF_LOGICAL_IN_USE)==0 
-         && iPg<=nPg2 
-         && iPg>=HCT_FIRST_LOGICAL
-        ){
-          sqlite3HctPManServerInit(&rc, pServer->pPManServer, iPg, 1);
-        }
+  nPg = MAX((nPg1 & 0xFFFFFFFF), (nPg2 & 0xFFFFFFFF));
+  for(iPg=1; iPg<=nPg; iPg++){
+    u64 iVal = hctFilePagemapGetSafe(pMapping, iPg);
+    if( (iVal & HCT_PMF_PHYSICAL_IN_USE)==0 && (iPg<=nPg1) ){
+      sqlite3HctPManServerInit(&rc, pServer->pPManServer, iPg, 0);
+    }
+    if( (iVal & HCT_PMF_LOGICAL_IN_USE)==0 
+        && iPg<=nPg2 
+        && iPg>=HCT_FIRST_LOGICAL
+      ){
+      sqlite3HctPManServerInit(&rc, pServer->pPManServer, iPg, 1);
+    }
+    if( (iVal & HCT_PMF_LOGICAL_IS_ROOT) && iPg>=3  ){
+      int ii;
+      for(ii=0; ii<nRoot && aRoot[ii]!=iPg; ii++);
+      if( ii==nRoot ){
+        /* A free root page! */
+        sqlite3HctPManServerInitRoot(&rc, pServer->pPManServer, pFile, iPg);
       }
     }
-
   }
-  sqlite3_mutex_leave(pFile->pServer->pMutex);
+
   return rc;
 }
 

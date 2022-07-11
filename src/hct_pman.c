@@ -209,7 +209,6 @@ void sqlite3HctPManServerInit(
 ){
   struct HctPManServerList *p = &pServer->aList[bLogical];
   assert( bLogical==0 || bLogical==1 );
-  printf("%s page %d is free\n", bLogical?"logical":"physical", (int)iPg);
 
   if( p->pHead==0 || p->pHead->nPg==p->pHead->nAlloc ){
     HctPManPageset *pNew = hctPManPagesetNew(pRc, PAGESET_INIT_SIZE);
@@ -520,6 +519,43 @@ int sqlite3HctPManFreeTree(
     }
 
     sqlite3_mutex_leave(pServer->pMutex);
+  }
+  return rc;
+}
+
+typedef struct InitRootCtx InitRootCtx; 
+struct InitRootCtx {
+  HctFile *pFile;
+  HctPManServer *pServer;
+};
+
+static int pmanInitRootCb(void *pCtx, u32 iLogic, u32 iPhys){
+  InitRootCtx *p = (InitRootCtx*)pCtx;
+  int rc = SQLITE_OK;
+
+  if( iLogic && !sqlite3HctFilePageIsFree(p->pFile, iLogic, 1) ){
+    sqlite3HctPManServerInit(&rc, p->pServer, iLogic, 1);
+  }
+  if( iPhys && !sqlite3HctFilePageIsFree(p->pFile, iPhys, 0) && rc==SQLITE_OK ){
+    sqlite3HctPManServerInit(&rc, p->pServer, iPhys, 0);
+  }
+
+  return rc;
+}
+
+int sqlite3HctPManServerInitRoot(
+  int *pRc, 
+  HctPManServer *pServer, 
+  HctFile *pFile, 
+  u32 iRoot
+){
+  int rc = SQLITE_OK;
+  InitRootCtx ctx;
+  ctx.pServer = pServer;
+  ctx.pFile = pFile;
+  rc = sqlite3HctDbWalkTree(pFile, iRoot, pmanInitRootCb, (void*)&ctx);
+  if( rc==SQLITE_OK ){
+    rc = sqlite3HctFilePageClearIsRoot(pFile, iRoot);
   }
   return rc;
 }
