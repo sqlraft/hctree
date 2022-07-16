@@ -9,7 +9,6 @@
       <li>[#index_leaf  | 4.3. Index Leaf Page Format]
       <li>[#index_node  | 4.4. Index Internal Node Format]
       <li>[#overflow    | 4.5. Overflow Chain Format]
-      <li>[#edks        | 4.6. EDKS Page Formats]
     </ul>
   *   [#logfile | 5. Log File Format]
 
@@ -23,6 +22,8 @@ Each database consists of at least three files:
 
 If the database is configured to be robust in the face of system or power
 failures, there are three page-map files instead of one.
+<i style=color:green>See notes in blink.wiki - this may no longer be
+true...</i>
 
 Additionally, there may be one or more client log files.
 
@@ -41,20 +42,22 @@ The header file consists of two pages using the same format.
 
 <h1 id=pagemap> 3. Page Map Format </h1>
 
-Page-map slots 2-32, inclusive, are not used for a logical-to-physical page
-mapping. Instead, the lower 32-bits of these slots are used as follows:
+Page-map slots 3-32, inclusive, are not used for a logical-to-physical page
+mapping. Instead, the lower 56-bits of these slots are used as follows:
 
 <table border=1 cellpadding=5 width=90%>
   <tr><th>Slot<th>Use 
-  <tr><td>2   <td>Largest logical page number allocated in database.
-  <tr><td>3   <td>Largest physical page number allocated in database.
+  <tr><td>3   <td>Largest logical page number allocated in database.
+  <tr><td>4   <td>Largest physical page number allocated in database.
+  <tr><td>5   <td>Largest transaction id allocated so far.
+  <tr><td>6   <td>Largest commit id allocated so far.
 </table>
 
 <h1 id=db> 4. Database File Format </h1>
 
-Database pages are numbered starting from 1. Each database page is <i>pgsz</i>
-bytes in size, where <i>pgsz</i> is determined by the value stored in the
-header file.
+Both logical and physical database pages are numbered starting from 1. Each
+database page is <i>pgsz</i> bytes in size, where <i>pgsz</i> is determined by
+the value stored in the header file.
 
 There are 5 types of database page:
 
@@ -70,11 +73,8 @@ All pages begin with an 8 byte page header:
   <tr><th>Byte Offset <th>Size <th width=80%> Description
   <tr><td>0 <td>1 <td> Least-signicant nibble stores the page type:
   *  0x01 - Intkey page.
-  *  0x02 - Intkey EDKS page.
   *  0x03 - Index pages.
-  *  0x04 - Index EDKS page.
   *  0x05 - Overflow page. 
-  *  0x06 - EDKS fan page. 
 
 Other nibble contains flags:
   *  0x80 - HCT_PAGETYPE_LEFTMOST (set for leftmost page in each list)
@@ -98,11 +98,11 @@ box "free space"             wid 1.5
 box "record area"            wid 3.0
 
 text "8 bytes" at PGHDR - (0, 0.2)
-text "24 bytes" at LEHDR - (0, 0.2)
+text "16 bytes" at LEHDR - (0, 0.2)
 text "nEntry x 16 bytes" at ARRAY - (0, 0.2)
 </verbatim>
 
-Following the page header, the 24 byte intkey leaf header:
+Following the page header, the 16 byte intkey leaf header:
 
 <table border=1 cellpadding=5 width=90%>
   <tr><th>Byte Offset <th>Size <th width=80%> Description
@@ -113,20 +113,16 @@ Following the page header, the 24 byte intkey leaf header:
     record area.
   <tr><td>12 <td>2 <td> Number of delete keys on page.
   <tr><td>14 <td>2 <td> Bytes of space consumed by delete keys.
-  <tr><td>16 <td>8 <td> EDKS TID value, if any. Or 0 otherwise.
-  <tr><td>24 <td>4 <td> Physical page number of EDKS root, if any. Or 0
-    otherwise.
-  <tr><td>28 <td>4 <td> Unused.
 </table>
 
 Following the free-space header, an array of <i>nEntry</i> 16-byte entries. 
 Each 16-byte entry is comprised of the following:
 
-  *  8-byte rowid value.
   *  4-byte record size (in bytes).
   *  2-byte record offset (from start of page).
   *  1-byte flags field. Flags are HAS_TID, HAS_OLD, HAS_OVFL and IS_DELETE.
   *  1-byte unused.
+  *  8-byte rowid value.
 
 Each record within the record area consists of:
 
@@ -203,6 +199,7 @@ of 8-byte entries. Each entry consists of:
   *  A 4-byte record size value,
   *  A 2-byte record offset, and
   *  A 1-byte flags field (flags are HAS_TID, HAS_OLD and HAS_OVFL).
+  *  1-byte unused.
 
 Each record within the record area consist of:
 
@@ -256,9 +253,10 @@ As for index leaf pages, except that the <i>nEntry</i> array consists of
 12-byte entries:
 
   *  A 4-byte record size value,
-  *  A 4-byte child page number.
   *  A 2-byte record offset, and
   *  A 1-byte flags field (the only valid flag is HAS_OVFL).
+  *  1-byte unused.
+  *  A 4-byte child page number.
 
 <h2 id=overflow> 4.5. Overflow Chain Format </h2>
 
@@ -284,95 +282,6 @@ Overflow pages are identified by physical page only - both the page number
 embedded in the start of the record within the tree structure page and the
 "next page" page number on overflow pages themselves are physical, not 
 logical, page numbers
-
-<h2 id=edks> 4.6. EDKS Page Formats </h2>
-
-Each EDKS tree is similar to the main tree that it is attached to. Index
-leaves and nodes, and intkey leaves use the same page formats as their main
-tree counterparts, except that:
-
-  *  The page-type field in the page header is set to 0x02/0x04 instead of
-     0x01/0x03.
-  *  The peer-page field in the page header is always zero.
-  *  All child page numbers are physical, not logical, page numbers.
-
-<b>Intkey EDKS Leaf/Node Page Format:</b>
-
-<verbatim type="pikchr center">
-boxht=0.2 ; boxwid=0.6 ; linewid=0.2
-
-# total width is 7.5
-PGHDR: box "page hdr"        wid 0.8
-ARRAY:box "entry array"      wid 4.2
-box "free space"             wid 2.5
-
-text "8 bytes" at PGHDR - (0, 0.2)
-text "nEntry x 24 bytes" at ARRAY - (0, 0.2)
-</verbatim>
-
-Intkey EDKS leaf pages contain <i>nEntry</i> entries of 24 bytes each. Each
-entry consists of:
-
-  *  8 byte rowid value,
-  *  8 byte TID value,
-  *  4 byte physical old page number.
-  *  4 byte physical child page number (only used by nodes, not leaves).
-
-An intkey EDKS is a b-tree. Keys are stored on internal as well as external
-nodes. Notes:
-
-  *  The peer-page pointer in the page-header stores the left-hand-child
-     pointer for internal nodes.
-  *  The rightmost entry on any internal node might have a child page number
-     of 0. This indicates that there is no child page - the current entry
-     is the last in the EDKS.
-
-<b>Index EDKS Leaf/Node Page Format:</b>
-
-<verbatim type="pikchr center">
-boxht=0.2 ; boxwid=0.6 ; linewid=0.2
-
-# total width is 7.5
-PGHDR: box "page hdr"        wid 0.8
-ARRAY:box "entry array"      wid 1.2
-box "free space"             wid 1.5
-box "record area"            wid 4.5
-
-text "8 bytes" at PGHDR - (0, 0.2)
-text "nEntry x 24 bytes" at ARRAY - (0, 0.2)
-</verbatim>
-
-Intkey EDKS leaf pages contain <i>nEntry</i> entries of 24 bytes each. Each
-entry consists of:
-
-  *  8 byte TID value,
-  *  4 byte physical old page number,
-  *  4 byte physical child page number (only used by nodes, not leaves).
-  *  4 byte key size,
-  *  2 byte key offset,
-  *  1 byte flags (only valid flag is HAS_OVFL),
-
-<b>EDKS Fan Page Format:</b>
-
-<verbatim type="pikchr center">
-boxht=0.2 ; boxwid=0.6 ; linewid=0.2
-
-# total width is 7.5
-PGHDR: box "page hdr"        wid 0.8
-ARRAY:box "entry array"      wid 4.2
-box "free space"             wid 2.5
-
-text "8 bytes" at PGHDR - (0, 0.2)
-text "nEntry x 16 bytes" at ARRAY - (0, 0.2)
-</verbatim>
-
-EDKS fan pages contain <i>nEntry</i> entries of 16 bytes each. Each
-entry consists of:
-
-  *  8 byte TID value,
-  *  4 byte physical page number.
-
-Entries are rounded up to 16 bytes each to preserve 8 byte alignment.
 
 <h1 id=logfile> 5. Log File Format </h1>
 

@@ -41,6 +41,7 @@
 */
 #define HCT_ROOTPAGE_SCHEMA          1
 #define HCT_ROOTPAGE_META            2
+
 #define HCT_PAGEMAP_LOGICAL_EOF      3
 #define HCT_PAGEMAP_PHYSICAL_EOF     4
 #define HCT_PAGEMAP_TRANSID_EOF      5

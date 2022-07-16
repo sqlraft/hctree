@@ -237,11 +237,8 @@ struct HctDbPageHdr {
 ** field of a page header.
 */
 #define HCT_PAGETYPE_INTKEY      0x01
-#define HCT_PAGETYPE_INTKEY_EDKS 0x02
 #define HCT_PAGETYPE_INDEX       0x03
-#define HCT_PAGETYPE_INDEX_EDKS  0x04
 #define HCT_PAGETYPE_OVERFLOW    0x05
-#define HCT_PAGETYPE_EDKS_FAN    0x06
 
 #define HCT_PAGETYPE_MASK     0x07
 
@@ -255,7 +252,7 @@ struct HctDbPageHdr {
 #define hctPageheight(p)   (((HctDbPageHdr*)(p))->nHeight)
 
 /*
-** 24-byte leaf page header. Used by both index and intkey leaf pages.
+** 16-byte leaf page header. Used by both index and intkey leaf pages.
 ** Described in fileformat.wiki.
 */
 struct HctDbLeafHdr {
@@ -263,9 +260,6 @@ struct HctDbLeafHdr {
   u16 nFreeBytes;                 /* Total free bytes on page */
   u16 nDelete;                    /* Number of delete keys on page */
   u16 nDeleteBytes;               /* Bytes in record area used by del keys */
-  u64 iEdksVal;                   /* EDKS TID value, if any. 0 otherwise */
-  u32 iEdksPg;                    /* Physical root of first EDKS tree, if any */
-  u32 unused;
 };
 
 struct HctDbLeaf {
@@ -330,14 +324,6 @@ struct HctDbIndexNode {
   HctDbPageHdr pg;
   HctDbIndexNodeHdr hdr;
   HctDbIndexNodeEntry aEntry[0];
-};
-
-
-struct HctDbIntkeyEdksEntry {
-  i64 iRowid;
-  u64 iTid;
-  u32 iOldPgno;
-  u32 iChildPgno;
 };
 
 /*
@@ -2718,18 +2704,12 @@ static int hctDbRemoveOverflow(
 **
 ** iEntry:
 **   Only valid if (iPg>=0). The index of the cell within input page iPg.
-**
-** bEdks:
-**   True if the cell may be moved to an EKDS. In other words, if the
-**   cell is a delete-key only and is not the FP key of the leftmost
-**   page of the balance.
 */
 typedef struct HctDbCellSz HctDbCellSz;
 struct HctDbCellSz {
   int nByte;                      /* Size of cell in bytes */
   i16 iPg;                        /* Index of input page */
   u16 iEntry;                     /* Entry of cell on input page */
-  u8 bEdks;                       /* True if cell is eligible for EKDS */
 };
 
 /* 
@@ -4662,8 +4642,6 @@ struct hctdb_cursor {
   u32 iPeerPg;
   u32 nEntry;
   u32 nHeight;
-  u64 iEdksVal;
-  u32 iEdksPg;
   char *zFpKey;
 };
 
@@ -4693,8 +4671,7 @@ static int hctdbConnect(
   rc = sqlite3_declare_vtab(db,
       "CREATE TABLE x("
         "pgno INTEGER, pgtype TEXT, nheight INTEGER, "
-        "peer INTEGER, nentry INTEGER, edks_pg INTEGER, "
-        "edks_tid INTEGER, fpkey TEXT"
+        "peer INTEGER, nentry INTEGER, fpkey TEXT"
       ")"
   );
 
@@ -4831,16 +4808,20 @@ static int hctdbLoadPage(
   static const char *azType[] = {
     "!INVALID!",                /* 0x00 */
     "intkey",                   /* 0x01 */
-    "intkey_edks",              /* 0x02 */
+    "",                         /* 0x02 */
     "index",                    /* 0x03 */
-    "index_edks",               /* 0x04 */
+    "",                         /* 0x04 */
     "overflow",                 /* 0x05 */
-    "edks_fan",                 /* 0x06 */
+    "",                         /* 0x06 */
   };
   int rc = SQLITE_OK;
   HctDbPageHdr *pHdr = (HctDbPageHdr*)aPg;
   sqlite3 *db = ((hctdb_vtab*)pCur->base.pVtab)->db;
   int eType;
+
+  assert( 0==sqlite3_stricmp("intkey", azType[HCT_PAGETYPE_INTKEY]) );
+  assert( 0==sqlite3_stricmp("index", azType[HCT_PAGETYPE_INDEX]) );
+  assert( 0==sqlite3_stricmp("overflow", azType[HCT_PAGETYPE_OVERFLOW]) );
 
   sqlite3_free(pCur->zFpKey);
   pCur->zFpKey = 0;
@@ -4854,16 +4835,6 @@ static int hctdbLoadPage(
   pCur->iPeerPg = pHdr->iPeerPg;
   pCur->nEntry = pHdr->nEntry;
   pCur->nHeight = pHdr->nHeight;
-  pCur->iEdksPg = 0;
-  pCur->iEdksVal = 0;
-
-  if( (eType==HCT_PAGETYPE_INTKEY || eType==HCT_PAGETYPE_INDEX) 
-   && pHdr->nHeight==0 
-  ){
-    HctDbIntkeyLeaf *pLeaf = (HctDbIntkeyLeaf*)aPg;
-    pCur->iEdksPg = pLeaf->hdr.iEdksPg;
-    pCur->iEdksVal = pLeaf->hdr.iEdksVal;
-  }
 
   if( eType==HCT_PAGETYPE_INTKEY ){
     if( pHdr->nHeight==0 ){
@@ -4935,6 +4906,7 @@ static int hctdbColumn(
   int i                       /* Which column to return */
 ){
   hctdb_cursor *pCur = (hctdb_cursor*)cur;
+  assert( i>=0 && i<=5 );
   switch( i ){
     case 0: /* pgno */
       sqlite3_result_int64(ctx, (i64)pCur->pgno);
@@ -4951,13 +4923,7 @@ static int hctdbColumn(
     case 4: /* nEntry */
       sqlite3_result_int64(ctx, (i64)pCur->nEntry);
       break;
-    case 5: /* edks_pg */
-      sqlite3_result_int64(ctx, (i64)pCur->iEdksPg);
-      break;
-    case 6: /* edks_tid */
-      sqlite3_result_int64(ctx, (i64)pCur->iEdksVal);
-      break;
-    case 7: /* fpkey */
+    case 5: /* fpkey */
       sqlite3_result_text(ctx, pCur->zFpKey, -1, SQLITE_TRANSIENT);
       break;
   }
@@ -5139,11 +5105,7 @@ static int hctentryNext(sqlite3_vtab_cursor *cur){
   while( rc==SQLITE_OK ){
     HctDbPageHdr *pPg = (HctDbPageHdr*)pCur->pg.aOld;
     int eType = hctPagetype(pPg);
-    if( eType==HCT_PAGETYPE_INTKEY 
-     || eType==HCT_PAGETYPE_INDEX 
-     || eType==HCT_PAGETYPE_INTKEY_EDKS 
-     || eType==HCT_PAGETYPE_EDKS_FAN 
-    ){
+    if( eType==HCT_PAGETYPE_INTKEY || eType==HCT_PAGETYPE_INDEX ){
       pCur->iEntry++;
       if( pCur->iEntry<pPg->nEntry ) break;
     }
