@@ -4115,8 +4115,11 @@ int sqlite3_test_control(int op, ...){
         sqlite3ShowTriggerStepList(0);
         sqlite3ShowTrigger(0);
         sqlite3ShowTriggerList(0);
+#ifndef SQLITE_OMIT_WINDOWFUNC
         sqlite3ShowWindow(0);
         sqlite3ShowWinFunc(0);
+#endif
+        sqlite3ShowSelect(0);
       }
 #endif
       break;
@@ -4627,6 +4630,24 @@ const char *sqlite3_filename_wal(const char *zFilename){
 Btree *sqlite3DbNameToBtree(sqlite3 *db, const char *zDbName){
   int iDb = zDbName ? sqlite3FindDbName(db, zDbName) : 0;
   return iDb<0 ? 0 : db->aDb[iDb].pBt;
+}
+
+/*
+** Return the name of the N-th database schema.  Return NULL if N is out
+** of range.
+*/
+const char *sqlite3_db_name(sqlite3 *db, int N){
+#ifdef SQLITE_ENABLE_API_ARMOR
+  if( !sqlite3SafetyCheckOk(db) ){
+    (void)SQLITE_MISUSE_BKPT;
+    return 0;
+  }
+#endif
+  if( N<0 || N>=db->nDb ){
+    return 0;
+  }else{
+    return db->aDb[N].zDbSName;
+  }
 }
 
 /*

@@ -115,7 +115,14 @@ int sqlite3VdbeUsesDoubleQuotedString(
 #endif
 
 /*
-** Swap all content between two VDBE structures.
+** Swap byte-code between two VDBE structures.
+**
+** This happens after pB was previously run and returned
+** SQLITE_SCHEMA.  The statement was then reprepared in pA.
+** This routine transfers the new bytecode in pA over to pB
+** so that pB can be run again.  The old pB byte code is
+** moved back to pA so that it will be cleaned up when pA is
+** finalized.
 */
 void sqlite3VdbeSwap(Vdbe *pA, Vdbe *pB){
   Vdbe tmp, *pTmp;
@@ -592,7 +599,7 @@ void sqlite3VdbeRunOnlyOnce(Vdbe *p){
 }
 
 /*
-** Mark the VDBE as one that can only be run multiple times.
+** Mark the VDBE as one that can be run multiple times.
 */
 void sqlite3VdbeReusable(Vdbe *p){
   int i;
@@ -806,8 +813,8 @@ static void resolveP2Values(Vdbe *p, int *pMaxFuncArgs){
   p->readOnly = 1;
   p->bIsReader = 0;
   pOp = &p->aOp[p->nOp-1];
-  while(1){
-
+  assert( p->aOp[0].opcode==OP_Init );
+  while( 1 /* Loop termates when it reaches the OP_Init opcode */ ){
     /* Only JUMP opcodes and the short list of special opcodes in the switch
     ** below need to be considered.  The mkopcodeh.tcl generator script groups
     ** all these opcodes together near the front of the opcode list.  Skip
@@ -835,6 +842,10 @@ static void resolveP2Values(Vdbe *p, int *pMaxFuncArgs){
           p->readOnly = 0;
           p->bIsReader = 1;
           break;
+        }
+        case OP_Init: {
+          assert( pOp->p2>=0 );
+          goto resolve_p2_values_loop_exit;
         }
 #ifndef SQLITE_OMIT_VIRTUALTABLE
         case OP_VUpdate: {
@@ -868,9 +879,10 @@ static void resolveP2Values(Vdbe *p, int *pMaxFuncArgs){
       ** have non-negative values for P2. */
       assert( (sqlite3OpcodeProperty[pOp->opcode]&OPFLG_JUMP)==0 || pOp->p2>=0);
     }
-    if( pOp==p->aOp ) break;
+    assert( pOp>p->aOp );    
     pOp--;
   }
+resolve_p2_values_loop_exit:
   if( aLabel ){
     sqlite3DbFreeNN(p->db, pParse->aLabel);
     pParse->aLabel = 0;
@@ -879,6 +891,90 @@ static void resolveP2Values(Vdbe *p, int *pMaxFuncArgs){
   *pMaxFuncArgs = nMaxArgs;
   assert( p->bIsReader!=0 || DbMaskAllZero(p->btreeMask) );
 }
+
+#ifdef SQLITE_DEBUG
+/*
+** Check to see if a subroutine contains a jump to a location outside of
+** the subroutine.  If a jump outside the subroutine is detected, add code
+** that will cause the program to halt with an error message.
+**
+** The subroutine consists of opcodes between iFirst and iLast.  Jumps to
+** locations within the subroutine are acceptable.  iRetReg is a register
+** that contains the return address.  Jumps to outside the range of iFirst
+** through iLast are also acceptable as long as the jump destination is
+** an OP_Return to iReturnAddr.
+**
+** A jump to an unresolved label means that the jump destination will be
+** beyond the current address.  That is normally a jump to an early
+** termination and is consider acceptable.
+**
+** This routine only runs during debug builds.  The purpose is (of course)
+** to detect invalid escapes out of a subroutine.  The OP_Halt opcode
+** is generated rather than an assert() or other error, so that ".eqp full"
+** will still work to show the original bytecode, to aid in debugging.
+*/
+void sqlite3VdbeNoJumpsOutsideSubrtn(
+  Vdbe *v,          /* The byte-code program under construction */
+  int iFirst,       /* First opcode of the subroutine */
+  int iLast,        /* Last opcode of the subroutine */
+  int iRetReg       /* Subroutine return address register */
+){
+  VdbeOp *pOp;
+  Parse *pParse;
+  int i;
+  sqlite3_str *pErr = 0;
+  assert( v!=0 );
+  pParse = v->pParse;
+  assert( pParse!=0 );
+  if( pParse->nErr ) return;
+  assert( iLast>=iFirst );
+  assert( iLast<v->nOp );
+  pOp = &v->aOp[iFirst];
+  for(i=iFirst; i<=iLast; i++, pOp++){
+    if( (sqlite3OpcodeProperty[pOp->opcode] & OPFLG_JUMP)!=0 ){
+      int iDest = pOp->p2;   /* Jump destination */
+      if( iDest==0 ) continue;
+      if( pOp->opcode==OP_Gosub ) continue;
+      if( iDest<0 ){
+        int j = ADDR(iDest);
+        assert( j>=0 );
+        if( j>=-pParse->nLabel || pParse->aLabel[j]<0 ){
+          continue;
+        }
+        iDest = pParse->aLabel[j];
+      }
+      if( iDest<iFirst || iDest>iLast ){
+        int j = iDest;
+        for(; j<v->nOp; j++){
+          VdbeOp *pX = &v->aOp[j];
+          if( pX->opcode==OP_Return ){
+            if( pX->p1==iRetReg ) break;
+            continue;
+          }
+          if( pX->opcode==OP_Noop ) continue;
+          if( pX->opcode==OP_Explain ) continue;
+          if( pErr==0 ){
+            pErr = sqlite3_str_new(0);
+          }else{
+            sqlite3_str_appendchar(pErr, 1, '\n');
+          }
+          sqlite3_str_appendf(pErr,
+              "Opcode at %d jumps to %d which is outside the "
+              "subroutine at %d..%d",
+              i, iDest, iFirst, iLast);
+          break;
+        }
+      }
+    }
+  }
+  if( pErr ){
+    char *zErr = sqlite3_str_finish(pErr);
+    sqlite3VdbeAddOp4(v, OP_Halt, SQLITE_INTERNAL, OE_Abort, 0, zErr, 0);
+    sqlite3_free(zErr);
+    sqlite3MayAbort(pParse);
+  }
+}
+#endif /* SQLITE_DEBUG */
 
 /*
 ** Return the address of the next instruction to be inserted.
@@ -1492,11 +1588,9 @@ char *sqlite3VdbeDisplayComment(
         }else if( c=='X' ){
           if( pOp->zComment && pOp->zComment[0] ){
             sqlite3_str_appendall(&x, pOp->zComment);
-          }else{
-            sqlite3_str_appendall(&x, zSynopsis+1);
+            seenCom = 1;
+            break;
           }
-          seenCom = 1;
-          break;
         }else{
           int v1 = translateP(c, pOp);
           int v2;
@@ -3554,7 +3648,7 @@ int SQLITE_NOINLINE sqlite3VdbeHandleMovedCursor(VdbeCursor *p){
 ** if need be.  Return any I/O error from the restore operation.
 */
 int sqlite3VdbeCursorRestore(VdbeCursor *p){
-  assert( p->eCurType==CURTYPE_BTREE );
+  assert( p->eCurType==CURTYPE_BTREE || IsNullCursor(p) );
   if( sqlite3BtreeCursorHasMoved(p->uc.pCursor) ){
     return sqlite3VdbeHandleMovedCursor(p);
   }

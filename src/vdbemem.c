@@ -1491,7 +1491,8 @@ static int valueFromFunction(
     goto value_from_function_out;
   }
 
-  assert( pCtx->pParse->rc==SQLITE_OK );
+  testcase( pCtx->pParse->rc==SQLITE_ERROR );
+  testcase( pCtx->pParse->rc==SQLITE_OK );
   memset(&ctx, 0, sizeof(ctx));
   ctx.pOut = pVal;
   ctx.pFunc = pFunc;
@@ -1571,8 +1572,8 @@ static int valueFromExpr(
     rc = valueFromExpr(db, pExpr->pLeft, enc, aff, ppVal, pCtx);
     testcase( rc!=SQLITE_OK );
     if( *ppVal ){
-      sqlite3VdbeMemCast(*ppVal, aff, SQLITE_UTF8);
-      sqlite3ValueApplyAffinity(*ppVal, affinity, SQLITE_UTF8);
+      sqlite3VdbeMemCast(*ppVal, aff, enc);
+      sqlite3ValueApplyAffinity(*ppVal, affinity, enc);
     }
     return rc;
   }

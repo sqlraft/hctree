@@ -33,6 +33,7 @@ typedef struct WhereScan WhereScan;
 typedef struct WhereOrCost WhereOrCost;
 typedef struct WhereOrSet WhereOrSet;
 typedef struct WhereMemBlock WhereMemBlock;
+typedef struct WhereRightJoin WhereRightJoin;
 
 /*
 ** This object is a header on a block of allocated memory that will be
@@ -40,7 +41,18 @@ typedef struct WhereMemBlock WhereMemBlock;
 */
 struct WhereMemBlock {
   WhereMemBlock *pNext;      /* Next block in the chain */
-  u8 sz;                     /* Bytes of space */
+  u64 sz;                    /* Bytes of space */
+};
+
+/*
+** Extra information attached to a WhereLevel that is a RIGHT JOIN.
+*/
+struct WhereRightJoin {
+  int iMatch;          /* Cursor used to determine prior matched rows */
+  int regBloom;        /* Bloom filter for iRJMatch */
+  int regReturn;       /* Return register for the interior subroutine */
+  int addrSubrtn;      /* Starting address for the interior subroutine */
+  int endSubrtn;       /* The last opcode in the interior subroutine */
 };
 
 /*
@@ -75,6 +87,7 @@ struct WhereLevel {
   int addrLikeRep;      /* LIKE range processing address */
 #endif
   int regFilter;        /* Bloom filter */
+  WhereRightJoin *pRJ;  /* Extra information for RIGHT JOIN */
   u8 iFrom;             /* Which entry in the FROM clause */
   u8 op, p3, p5;        /* Opcode, P3 & P5 of the opcode that ends the loop */
   int p1, p2;           /* Operands of the opcode used to end the loop */
@@ -552,6 +565,11 @@ Bitmask sqlite3WhereCodeOneLoopStart(
   WhereLevel *pLevel,  /* The current level pointer */
   Bitmask notReady     /* Which tables are currently available */
 );
+SQLITE_NOINLINE void sqlite3WhereRightJoinLoop(
+  WhereInfo *pWInfo,
+  int iLevel,
+  WhereLevel *pLevel
+);
 
 /* whereexpr.c: */
 void sqlite3WhereClauseInit(WhereClause*,WhereInfo*);
@@ -594,8 +612,9 @@ void sqlite3WhereTabFuncArgs(Parse*, SrcItem*, WhereClause*);
 #define WO_AND    0x0400       /* Two or more AND-connected terms */
 #define WO_EQUIV  0x0800       /* Of the form A==B, both columns */
 #define WO_NOOP   0x1000       /* This term does not restrict search space */
+#define WO_ROWVAL 0x2000       /* A row-value term */
 
-#define WO_ALL    0x1fff       /* Mask of all possible WO_* values */
+#define WO_ALL    0x3fff       /* Mask of all possible WO_* values */
 #define WO_SINGLE 0x01ff       /* Mask of all non-compound WO_* values */
 
 /*

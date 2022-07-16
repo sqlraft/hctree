@@ -108,7 +108,9 @@ int sqlite3_finalize(sqlite3_stmt *pStmt){
     if( vdbeSafety(v) ) return SQLITE_MISUSE_BKPT;
     sqlite3_mutex_enter(db->mutex);
     checkProfileCallback(db, v);
-    rc = sqlite3VdbeFinalize(v);
+    assert( v->eVdbeState>=VDBE_READY_STATE );
+    rc = sqlite3VdbeReset(v);
+    sqlite3VdbeDelete(v);
     rc = sqlite3ApiExit(db, rc);
     sqlite3LeaveMutexAndCloseZombie(db);
   }
@@ -818,9 +820,9 @@ int sqlite3_step(sqlite3_stmt *pStmt){
     sqlite3_reset(pStmt);
     if( savedPc>=0 ){
       /* Setting minWriteFileFormat to 254 is a signal to the OP_Init and
-      ** OP_Trace opcodes to *not* perform SQLITE_TRACE_STMT because one
-      ** should output has already occurred due to SQLITE_SCHEMA.
-      ** tag-20220401a */
+      ** OP_Trace opcodes to *not* perform SQLITE_TRACE_STMT because it has
+      ** already been done once on a prior invocation that failed due to
+      ** SQLITE_SCHEMA.   tag-20220401a  */
       v->minWriteFileFormat = 254;
     }
     assert( v->expired==0 );

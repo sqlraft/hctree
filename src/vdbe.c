@@ -988,26 +988,34 @@ case OP_Gosub: {            /* jump */
 
 /* Opcode:  Return P1 P2 P3 * *
 **
-** Jump to the next instruction after the address in register P1.  After
-** the jump, register P1 becomes undefined.
+** Jump to the address stored in register P1.  If P1 is a return address
+** register, then this accomplishes a return from a subroutine.
+**
+** If P3 is 1, then the jump is only taken if register P1 holds an integer
+** values, otherwise execution falls through to the next opcode, and the
+** OP_Return becomes a no-op. If P3 is 0, then register P1 must hold an
+** integer or else an assert() is raised.  P3 should be set to 1 when
+** this opcode is used in combination with OP_BeginSubrtn, and set to 0
+** otherwise.
+**
+** The value in register P1 is unchanged by this opcode.
 **
 ** P2 is not used by the byte-code engine.  However, if P2 is positive
 ** and also less than the current address, then the "EXPLAIN" output
 ** formatter in the CLI will indent all opcodes from the P2 opcode up
 ** to be not including the current Return.   P2 should be the first opcode
-** in the subroutine from which this opcode is returnning.  Thus the P2
+** in the subroutine from which this opcode is returning.  Thus the P2
 ** value is a byte-code indentation hint.  See tag-20220407a in
 ** wherecode.c and shell.c.
-**
-** P3 is not used by the byte-code engine.  However, the code generator
-** sets P3 to address of the associated OP_BeginSubrtn opcode, if there is
-** one.
 */
 case OP_Return: {           /* in1 */
   pIn1 = &aMem[pOp->p1];
-  assert( pIn1->flags==MEM_Int );
-  pOp = &aOp[pIn1->u.i];
-  pIn1->flags = MEM_Undefined;
+  if( pIn1->flags & MEM_Int ){
+    if( pOp->p3 ){ VdbeBranchTaken(1, 2); }
+    pOp = &aOp[pIn1->u.i];
+  }else if( ALWAYS(pOp->p3) ){
+    VdbeBranchTaken(0, 2);
+  }
   break;
 }
 
@@ -1035,6 +1043,8 @@ case OP_InitCoroutine: {     /* jump */
   /* Most jump operations do a goto to this spot in order to update
   ** the pOp pointer. */
 jump_to_p2:
+  assert( pOp->p2>0 );       /* There are never any jumps to instruction 0 */
+  assert( pOp->p2<p->nOp );  /* Jumps must be in range */
   pOp = &aOp[pOp->p2 - 1];
   break;
 }
@@ -1193,22 +1203,11 @@ case OP_Halt: {
   goto vdbe_return;
 }
 
-/* Opcode: BeginSubrtn P1 P2 * * *
-** Synopsis: r[P2]=P1
-**
-** Mark the beginning of a subroutine by loading the integer value P1
-** into register r[P2].  The P2 register is used to store the return
-** address of the subroutine call.
-**
-** This opcode is identical to OP_Integer.  It has a different name
-** only to make the byte code easier to read and verify.
-*/
 /* Opcode: Integer P1 P2 * * *
 ** Synopsis: r[P2]=P1
 **
 ** The 32-bit integer value P1 is written into register P2.
 */
-case OP_BeginSubrtn:
 case OP_Integer: {         /* out2 */
   pOut = out2Prerelease(p, pOp);
   pOut->u.i = pOp->p1;
@@ -1315,6 +1314,28 @@ case OP_String: {          /* out2 */
   break;
 }
 
+/* Opcode: BeginSubrtn * P2 * * *
+** Synopsis: r[P2]=NULL
+**
+** Mark the beginning of a subroutine that can be entered in-line
+** or that can be called using OP_Gosub.  The subroutine should
+** be terminated by an OP_Return instruction that has a P1 operand that
+** is the same as the P2 operand to this opcode and that has P3 set to 1.
+** If the subroutine is entered in-line, then the OP_Return will simply
+** fall through.  But if the subroutine is entered using OP_Gosub, then
+** the OP_Return will jump back to the first instruction after the OP_Gosub.
+**
+** This routine works by loading a NULL into the P2 register.  When the
+** return address register contains a NULL, the OP_Return instruction is
+** a no-op that simply falls through to the next instruction (assuming that
+** the OP_Return opcode has a P3 value of 1).  Thus if the subroutine is
+** entered in-line, then the OP_Return will cause in-line execution to
+** continue.  But if the subroutine is entered via OP_Gosub, then the
+** OP_Return will cause a return to the address following the OP_Gosub.
+**
+** This opcode is identical to OP_Null.  It has a different name
+** only to make the byte code easier to read and verify.
+*/
 /* Opcode: Null P1 P2 P3 * *
 ** Synopsis: r[P2..P3]=NULL
 **
@@ -1327,6 +1348,7 @@ case OP_String: {          /* out2 */
 ** NULL values will not compare equal even if SQLITE_NULLEQ is set on
 ** OP_Ne or OP_Eq.
 */
+case OP_BeginSubrtn:
 case OP_Null: {           /* out2 */
   int cnt;
   u16 nullFlag;
@@ -1457,10 +1479,15 @@ case OP_Move: {
   break;
 }
 
-/* Opcode: Copy P1 P2 P3 * *
+/* Opcode: Copy P1 P2 P3 * P5
 ** Synopsis: r[P2@P3+1]=r[P1@P3+1]
 **
 ** Make a copy of registers P1..P1+P3 into registers P2..P2+P3.
+**
+** If the 0x0002 bit of P5 is set then also clear the MEM_Subtype flag in the
+** destination.  The 0x0001 bit of P5 indicates that this Copy opcode cannot
+** be merged.  The 0x0001 bit is used by the query planner and does not
+** come into play during query execution.
 **
 ** This instruction makes a deep copy of the value.  A duplicate
 ** is made of any string or blob constant.  See also OP_SCopy.
@@ -1476,6 +1503,9 @@ case OP_Copy: {
     memAboutToChange(p, pOut);
     sqlite3VdbeMemShallowCopy(pOut, pIn1, MEM_Ephem);
     Deephemeralize(pOut);
+    if( (pOut->flags & MEM_Subtype)!=0 &&  (pOp->p5 & 0x0002)!=0 ){
+      pOut->flags &= ~MEM_Subtype;
+    }
 #ifdef SQLITE_DEBUG
     pOut->pScopyFrom = 0;
 #endif
@@ -1636,7 +1666,7 @@ case OP_Concat: {           /* same as TK_CONCAT, in1, in2, out3 */
   if( nByte>db->aLimit[SQLITE_LIMIT_LENGTH] ){
     goto too_big;
   }
-  if( sqlite3VdbeMemGrow(pOut, (int)nByte+3, pOut==pIn2) ){
+  if( sqlite3VdbeMemGrow(pOut, (int)nByte+2, pOut==pIn2) ){
     goto no_mem;
   }
   MemSetTypeFlag(pOut, MEM_Str);
@@ -1648,9 +1678,9 @@ case OP_Concat: {           /* same as TK_CONCAT, in1, in2, out3 */
   memcpy(&pOut->z[pIn2->n], pIn1->z, pIn1->n);
   assert( (pIn1->flags & MEM_Dyn) == (flags1 & MEM_Dyn) );
   pIn1->flags = flags1;
+  if( encoding>SQLITE_UTF8 ) nByte &= ~1;
   pOut->z[nByte]=0;
   pOut->z[nByte+1] = 0;
-  pOut->z[nByte+2] = 0;
   pOut->flags |= MEM_Term;
   pOut->n = (int)nByte;
   pOut->enc = encoding;
@@ -2609,11 +2639,14 @@ case OP_NotNull: {            /* same as TK_NOTNULL, jump, in1 */
 ** If it is, then set register P3 to NULL and jump immediately to P2.
 ** If P1 is not on a NULL row, then fall through without making any
 ** changes.
+**
+** If P1 is not an open cursor, then this opcode is a no-op.
 */
 case OP_IfNullRow: {         /* jump */
+  VdbeCursor *pC;
   assert( pOp->p1>=0 && pOp->p1<p->nCursor );
-  assert( p->apCsr[pOp->p1]!=0 );
-  if( p->apCsr[pOp->p1]->nullRow ){
+  pC = p->apCsr[pOp->p1];
+  if( ALWAYS(pC) && pC->nullRow ){
     sqlite3VdbeMemSetNull(aMem + pOp->p3);
     goto jump_to_p2;
   }
@@ -2701,7 +2734,8 @@ case OP_Column: {
 
 op_column_restart:
   assert( pC!=0 );
-  assert( p2<(u32)pC->nField );
+  assert( p2<(u32)pC->nField
+       || (pC->eCurType==CURTYPE_PSEUDO && pC->seekResult==0) );
   aOffset = pC->aOffset;
   assert( aOffset==pC->aType+pC->nField );
   assert( pC->eCurType!=CURTYPE_VTAB );
@@ -2710,10 +2744,9 @@ op_column_restart:
 
   if( pC->cacheStatus!=p->cacheCtr ){                /*OPTIMIZATION-IF-FALSE*/
     if( pC->nullRow ){
-      if( pC->eCurType==CURTYPE_PSEUDO ){
+      if( pC->eCurType==CURTYPE_PSEUDO && pC->seekResult>0 ){
         /* For the special case of as pseudo-cursor, the seekResult field
         ** identifies the register that holds the record */
-        assert( pC->seekResult>0 );
         pReg = &aMem[pC->seekResult];
         assert( pReg->flags & MEM_Blob );
         assert( memIsValid(pReg) );
@@ -3858,6 +3891,11 @@ case OP_Transaction: {
     }
     p->expired = 1;
     rc = SQLITE_SCHEMA;
+
+    /* Set changeCntOn to 0 to prevent the value returned by sqlite3_changes()
+    ** from being modified in sqlite3VdbeHalt(). If this statement is
+    ** reprepared, changeCntOn will be set again. */
+    p->changeCntOn = 0;
   }
   if( rc ) goto abort_due_to_error;
   break;
@@ -3924,7 +3962,7 @@ case OP_SetCookie: {
   rc = sqlite3BtreeUpdateMeta(pDb->pBt, pOp->p2, pOp->p3);
   if( pOp->p2==BTREE_SCHEMA_VERSION ){
     /* When the schema cookie changes, record the new cookie internally */
-    pDb->pSchema->schema_cookie = pOp->p3 - pOp->p5;
+    *(u32*)&pDb->pSchema->schema_cookie = *(u32*)&pOp->p3 - pOp->p5;
     db->mDbFlags |= DBFLAG_SchemaChange;
     sqlite3FkClearTriggerCache(db, pOp->p1);
   }else if( pOp->p2==BTREE_FILE_FORMAT ){
@@ -4157,8 +4195,8 @@ case OP_OpenDup: {
   pCx->pgnoRoot = pOrig->pgnoRoot;
   pCx->isOrdered = pOrig->isOrdered;
   pCx->ub.pBtx = pOrig->ub.pBtx;
-  pCx->hasBeenDuped = 1;
-  pOrig->hasBeenDuped = 1;
+  pCx->noReuse = 1;
+  pOrig->noReuse = 1;
   rc = sqlite3BtreeCursor(pCx->ub.pBtx, pCx->pgnoRoot, BTREE_WRCSR, 
                           pCx->pKeyInfo, pCx->uc.pCursor);
   /* The sqlite3BtreeCursor() routine can only fail for the first cursor
@@ -4225,7 +4263,7 @@ case OP_OpenEphemeral: {
     aMem[pOp->p3].z = "";
   }
   pCx = p->apCsr[pOp->p1];
-  if( pCx && !pCx->hasBeenDuped &&  ALWAYS(pOp->p2<=pCx->nField) ){
+  if( pCx && !pCx->noReuse &&  ALWAYS(pOp->p2<=pCx->nField) ){
     /* If the ephermeral table is already open and has no duplicates from
     ** OP_OpenDup, then erase all existing content so that the table is
     ** empty again, rather than creating a new table. */
@@ -4996,18 +5034,17 @@ case OP_Found: {        /* jump, in3 */
 #ifdef SQLITE_DEBUG
   pC->seekOp = pOp->opcode;
 #endif
-  pIn3 = &aMem[pOp->p3];
+  r.aMem = &aMem[pOp->p3];
   assert( pC->eCurType==CURTYPE_BTREE );
   assert( pC->uc.pCursor!=0 );
   assert( pC->isTable==0 );
   sqlite3BtreeCursorDir(pC->uc.pCursor, 
       pOp->opcode==OP_NoConflict ? BTREE_DIR_NONE : BTREE_DIR_FORWARD
   );
-  if( pOp->p4.i>0 ){
+  r.nField = (u16)pOp->p4.i;
+  if( r.nField>0 ){
     /* Key values in an array of registers */
-    r.nField = (u16)pOp->p4.i;
     r.pKeyInfo = pC->pKeyInfo;
-    r.aMem = pIn3;
     r.default_rc = 0;
 #ifdef SQLITE_DEBUG
     for(ii=0; ii<r.nField; ii++){
@@ -5019,14 +5056,14 @@ case OP_Found: {        /* jump, in3 */
     rc = sqlite3BtreeIndexMoveto(pC->uc.pCursor, &r, &pC->seekResult);
   }else{
     /* Composite key generated by OP_MakeRecord */
-    assert( pIn3->flags & MEM_Blob );
+    assert( r.aMem->flags & MEM_Blob );
     assert( pOp->opcode!=OP_NoConflict );
-    rc = ExpandBlob(pIn3);
+    rc = ExpandBlob(r.aMem);
     assert( rc==SQLITE_OK || rc==SQLITE_NOMEM );
     if( rc ) goto no_mem;
     pIdxKey = sqlite3VdbeAllocUnpackedRecord(pC->pKeyInfo);
     if( pIdxKey==0 ) goto no_mem;
-    sqlite3VdbeRecordUnpack(pC->pKeyInfo, pIn3->n, pIn3->z, pIdxKey);
+    sqlite3VdbeRecordUnpack(pC->pKeyInfo, r.aMem->n, r.aMem->z, pIdxKey);
     pIdxKey->default_rc = 0;
     rc = sqlite3BtreeIndexMoveto(pC->uc.pCursor, pIdxKey, &pC->seekResult);
     sqlite3DbFreeNN(db, pIdxKey);
@@ -5808,16 +5845,24 @@ case OP_Rowid: {                 /* out2 */
 ** that occur while the cursor is on the null row will always
 ** write a NULL.
 **
-** Or, if P1 is a Pseudo-Cursor (a cursor opened using OP_OpenPseudo)
-** just reset the cache for that cursor.  This causes the row of
-** content held by the pseudo-cursor to be reparsed.
+** If cursor P1 is not previously opened, open it now to a special
+** pseudo-cursor that always returns NULL for every column.
 */
 case OP_NullRow: {
   VdbeCursor *pC;
 
   assert( pOp->p1>=0 && pOp->p1<p->nCursor );
   pC = p->apCsr[pOp->p1];
-  assert( pC!=0 );
+  if( pC==0 ){
+    /* If the cursor is not already open, create a special kind of
+    ** pseudo-cursor that always gives null rows. */
+    pC = allocateCursor(p, pOp->p1, 1, CURTYPE_PSEUDO);
+    if( pC==0 ) goto no_mem;
+    pC->seekResult = 0;
+    pC->isTable = 1;
+    pC->noReuse = 1;
+    pC->uc.pCursor = sqlite3BtreeFakeValidCursor();
+  }
   pC->nullRow = 1;
   pC->cacheStatus = CACHE_STALE;
   if( pC->eCurType==CURTYPE_BTREE ){
@@ -6269,9 +6314,9 @@ case OP_IdxRowid: {           /* out2 */
   assert( pOp->p1>=0 && pOp->p1<p->nCursor );
   pC = p->apCsr[pOp->p1];
   assert( pC!=0 );
-  assert( pC->eCurType==CURTYPE_BTREE );
+  assert( pC->eCurType==CURTYPE_BTREE || IsNullCursor(pC) );
   assert( pC->uc.pCursor!=0 );
-  assert( pC->isTable==0 );
+  assert( pC->isTable==0 || IsNullCursor(pC) );
   assert( pC->deferredMoveto==0 );
   assert( !pC->nullRow || pOp->opcode==OP_IdxRowid );
 
@@ -7953,7 +7998,6 @@ case OP_VColumn: {
 
   VdbeCursor *pCur = p->apCsr[pOp->p1];
   assert( pCur!=0 );
-  assert( pCur->eCurType==CURTYPE_VTAB );
   assert( pOp->p3>0 && pOp->p3<=(p->nMem+1 - p->nCursor) );
   pDest = &aMem[pOp->p3];
   memAboutToChange(p, pDest);
@@ -7961,6 +8005,7 @@ case OP_VColumn: {
     sqlite3VdbeMemSetNull(pDest);
     break;
   }
+  assert( pCur->eCurType==CURTYPE_VTAB );
   pVtab = pCur->uc.pVCur->pVtab;
   pModule = pVtab->pModule;
   assert( pModule->xColumn );
@@ -8285,6 +8330,17 @@ case OP_Function: {            /* group */
 
   REGISTER_TRACE(pOp->p3, pOut);
   UPDATE_MAX_BLOBSIZE(pOut);
+  break;
+}
+
+/* Opcode: ClrSubtype P1 * * * *
+** Synopsis:  r[P1].subtype = 0
+**
+** Clear the subtype from register P1.
+*/
+case OP_ClrSubtype: {   /* in1 */
+  pIn1 = &aMem[pOp->p1];
+  pIn1->flags &= ~MEM_Subtype;
   break;
 }
 
