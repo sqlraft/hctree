@@ -3961,6 +3961,7 @@ static int hctDbRootPagelist(HctDatabase *pDb, int *pnRoot, u32 **paRoot){
     aRoot = 0;
     nRoot = 0;
   }
+  sqlite3HctDbCsrClose(pCsr);
 
   *paRoot = aRoot;
   *pnRoot = nRoot;
