@@ -9,6 +9,7 @@
       <li>[#index_leaf  | 4.3. Index Leaf Page Format]
       <li>[#index_node  | 4.4. Index Internal Node Format]
       <li>[#overflow    | 4.5. Overflow Chain Format]
+      <li>[#history     | 4.6. History Fan Format]
     </ul>
   *   [#logfile | 5. Log File Format]
 
@@ -75,6 +76,7 @@ All pages begin with an 8 byte page header:
   *  0x01 - Intkey page.
   *  0x03 - Index pages.
   *  0x05 - Overflow page. 
+  *  0x06 - History fan page.
 
 Other nibble contains flags:
   *  0x80 - HCT_PAGETYPE_LEFTMOST (set for leftmost page in each list)
@@ -127,6 +129,7 @@ Each 16-byte entry is comprised of the following:
 Each record within the record area consists of:
 
   *  If HAS_TID is set, an 8-byte transaction id.
+  *  If HAS_RANGETID is set, an  8-byte transaction id.
   *  If HAS_OLD is set, a 4-byte "old" physical page number.
   *  If HAS_OVFL is set, a 4-byte physical overflow page number.
   *  The part of the record stored on the main page.
@@ -134,7 +137,7 @@ Each record within the record area consists of:
 The part of the record stored on the main page is calculated using:
 
 <verbatim>
-        nMax  = pgsz - 8 - 24 - 16 - 12;    /* max record that fits on page */
+        nMax  = pgsz - 8 - 16 - 16 - 20;    /* max record that fits on page */
         nMaxO = nMax - 4;                   /* max record with ovfl that fits */
         nMin  = pgsz / 8;                   /* min prefix to store on page */
 
@@ -204,6 +207,7 @@ of 8-byte entries. Each entry consists of:
 Each record within the record area consist of:
 
   *  If HAS_TID is set, an 8-byte transaction id.
+  *  If HAS_RANGETID is set, an  8-byte transaction id.
   *  If HAS_OLD is set, a 4-byte "old" physical page number.
   *  If HAS_OVFL is set, a 4-byte overflow page number.
   *  The part of the record stored on the main page.
@@ -282,6 +286,26 @@ Overflow pages are identified by physical page only - both the page number
 embedded in the start of the record within the tree structure page and the
 "next page" page number on overflow pages themselves are physical, not 
 logical, page numbers
+
+<h2 id=history> 4.6. History Fan Format </h2>
+
+<verbatim type="pikchr center">
+boxht=0.2 ; boxwid=0.6 ; linewid=0.2
+
+PGHDR: box "page hdr"        wid 0.8
+DATA: box "entry array"      wid 4.3
+box "free space"             wid 2.4
+
+text "8 bytes" at PGHDR - (0, 0.2)
+text "nEntry*16 bytes" at DATA - (0, 0.2)
+</verbatim>
+
+A history fan page consists of the page header followed by <i>nEntry</i>
+entries of 16 bytes each. Each entry consists of:
+
+  *  An 8-byte TID value.
+  *  A 4-byte old physical page number.
+  *  A 4-byte unused field.
 
 <h1 id=logfile> 5. Log File Format </h1>
 

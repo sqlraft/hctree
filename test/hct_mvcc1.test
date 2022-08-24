@@ -124,10 +124,10 @@ foreach {tn wo pk} {
 breakpoint
   if {$wo==""} {
     c1 $tn.1.12 "BEGIN"
-    c1 $tn.1.13   "INSERT INTO t1(a, b) VALUES(NULL, 'null1')"
-    c2 $tn.1.14                   "BEGIN"
-    c2 $tn.1.15                     "INSERT INTO t1(a, b) VALUES(NULL, 'null2')"
-    c2 $tn.1.16                   "COMMIT"
+    c1 $tn.1.13   "INSERT INTO t1(rowid, a, b) VALUES(350, NULL, 'null1')"
+    c2 $tn.1.14       "BEGIN"
+    c2 $tn.1.15         "INSERT INTO t1(rowid, a, b) VALUES(349, NULL, 'null2')"
+    c2 $tn.1.16       "COMMIT"
     c1 $tn.1.17 "COMMIT"
   } 
 }

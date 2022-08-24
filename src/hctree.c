@@ -53,6 +53,7 @@ struct Btree {
 
   int nSchemaOp;
   BtSchemaOp *aSchemaOp;
+  int nRollbackOp;
 
   int openFlags;
   int fdLog;                      /* File descriptor for log file */
@@ -709,8 +710,17 @@ int sqlite3BtreeCommitPhaseOne(Btree *p, const char *zSuperJrnl){
   return SQLITE_OK;
 }
 
+typedef struct FlushOneCtx FlushOneCtx;
+struct FlushOneCtx {
+  Btree *p;
+  int bRollback;
+};
+
 static int btreeFlushOneToDisk(void *pCtx, u32 iRoot, KeyInfo *pKeyInfo){
-  Btree *p = (Btree*)pCtx;
+  FlushOneCtx *pFC = (FlushOneCtx*)pCtx;
+  Btree *p = pFC->p;
+  int iRollbackDir = pFC->bRollback ? -1 : 1;
+
   HctDatabase *pDb = p->pHctDb;
   HctTreeCsr *pCsr = 0;
   int rc;
@@ -735,7 +745,22 @@ static int btreeFlushOneToDisk(void *pCtx, u32 iRoot, KeyInfo *pKeyInfo){
       bDel = sqlite3HctTreeCsrIsDelete(pCsr);
       if( pRec ) sqlite3VdbeRecordUnpack(pKeyInfo, nData, aData, pRec);
       rc = sqlite3HctDbInsert(pDb, iRoot, pRec, iKey, bDel,nData,aData,&nRetry);
+      p->nRollbackOp += (iRollbackDir * (1 - nRetry));
       if( rc ) break;
+
+      if( pFC->bRollback && p->nRollbackOp==0 ){
+        assert( nRetry==0 );
+        rc = sqlite3HctDbInsertFlush(pDb, &nRetry);
+        if( rc ) break;
+        if( nRetry==0 ){
+          rc = SQLITE_DONE;
+          break;
+        }
+        p->nRollbackOp = nRetry;
+        if( sqlite3HctTreeCsrEof(pCsr) ){
+          sqlite3HctTreeCsrLast(pCsr);
+        }
+      }
 
       if( nRetry==0 ){
         sqlite3HctTreeCsrNext(pCsr);
@@ -817,17 +842,28 @@ static int btreeLogOneToDisk(void *pCtx, u32 iRoot, KeyInfo *pKeyInfo){
 
 static int btreeFlushData(Btree *p, int bRollback){
   int rc = SQLITE_OK;
+
   sqlite3HctDbRollbackMode(p->pHctDb, bRollback);
-  if( p->eMetaState==HCT_METASTATE_DIRTY ){
+  if( bRollback && p->nRollbackOp==0 ){
+    rc = SQLITE_DONE;
+  }else if( p->eMetaState==HCT_METASTATE_DIRTY ){
     int nRetry = 0;
     int nData = SQLITE_N_BTREE_META * 4;
     rc = sqlite3HctDbInsert(p->pHctDb, 2, 0, 0, 0, nData,(u8*)p->aMeta,&nRetry);
     if( rc==SQLITE_OK ){
       rc = sqlite3HctDbInsertFlush(p->pHctDb, &nRetry);
     }
+    p->nRollbackOp += (bRollback ? -1 : 1);
+    if( rc==SQLITE_OK && bRollback && p->nRollbackOp==0 ){
+      rc = SQLITE_DONE;
+    }
   }
+
   if( rc==SQLITE_OK ){
-    rc = sqlite3HctTreeForeach(p->pHctTree, (void*)p, btreeFlushOneToDisk);
+    FlushOneCtx ctx;
+    ctx.p = p;
+    ctx.bRollback = bRollback;
+    rc = sqlite3HctTreeForeach(p->pHctTree, (void*)&ctx, btreeFlushOneToDisk);
   }
   sqlite3HctDbRollbackMode(p->pHctDb, 0);
   return rc;
@@ -919,6 +955,7 @@ static int btreeFlushToDisk(Btree *p){
 
   /* Write all the new database entries to the database. Any write/write
   ** conflicts are detected here - SQLITE_BUSY is returned in that case.  */
+  p->nRollbackOp = 0;
   if( rc==SQLITE_OK ){
     rc = btreeFlushData(p, 0);
   }
@@ -952,7 +989,7 @@ static int btreeFlushToDisk(Btree *p){
     rc = btreeWriteTid(p, 0);
   }
   if( rc==SQLITE_OK ){
-    rc = sqlite3HctDbEndWrite(p->pHctDb, (rcok==SQLITE_OK ? iCid : 0));
+    rc = sqlite3HctDbEndWrite(p->pHctDb, iCid, rcok!=SQLITE_OK);
   }
   assert( rc==SQLITE_OK );
 

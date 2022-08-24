@@ -338,6 +338,7 @@ static void pman_debug(
   printf("pman: (%p) %s %s page %d - tid=%lld\n", pClient,
     zOp, bLogical ? "LOGICAL" : "PHYSICAL", (int)iPg, iTid
   );
+  fflush(stdout);
 }
 
 static void pman_debug_new_pageset(
@@ -350,6 +351,7 @@ static void pman_debug_new_pageset(
       "pman: new %s pageset - safetid=%lld servertid=%lld\n",
       bLogical ? "LOGICAL" : "PHYSICAL", iSafeTid, iServerTid
   );
+  fflush(stdout);
 }
 #else
 

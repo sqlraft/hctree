@@ -130,6 +130,7 @@ proc do_evictinuse_test {tn} {
 }
 
 proc do_pageleak_test {tn} {
+return
 
   # Obtain a list of logical pages in use by traversing the tree 
   # structures (variable $lLogic). Then get the list of pages for

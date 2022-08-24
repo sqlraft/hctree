@@ -15,6 +15,15 @@ set testdir [file dirname $argv0]
 source $testdir/tester.tcl
 set testprefix hct_misc5
 
+proc show_db_entries {} {
+  execsql_pp {
+    SELECT slot, pgno, ikey, tid, rangetid, rangeoldpg, record 
+      FROM hctentry, hctpgmap 
+      WHERE slot>=33 AND logical_in_use AND pgno=value;
+  }
+}
+
+
 do_execsql_test 1.0 {
   CREATE TABLE tx(a INTEGER PRIMARY KEY, b TEXT);
   CREATE INDEX txb ON tx(b);

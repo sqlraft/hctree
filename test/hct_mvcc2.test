@@ -23,6 +23,21 @@ set nVal   500
 
 expr srand(0)
 
+proc show_db_entries {} {
+  execsql_pp {
+    SELECT slot, pgno, ikey, tid, rangetid, rangeoldpg, record 
+      FROM hctentry, hctpgmap 
+      WHERE slot>=33 AND logical_in_use AND pgno=value;
+  }
+}
+proc show_page_contents {pgno} {
+  execsql_pp "
+    SELECT pgno, ikey, tid, rangetid, rangeoldpg, record
+      FROM hctentry
+      WHERE pgno=$pgno
+  "
+}
+
 proc random_int {nRange} {
   expr int(rand()*$nRange)
 }
@@ -31,6 +46,19 @@ proc random_val {nMax} {
   if {$bDel} { return "" }
   set nText [expr int(rand()*$nMax)+1]
   return [string range [string repeat "x$nText." $nText] 0 [expr $nText-1]]
+}
+
+proc array_keys {nm} {
+  upvar $nm X
+  set ret [list]
+  foreach x [lsort -integer [array names X]] {
+    if {$X($x)==""} {
+      lappend ret "-$x"
+    } else {
+      lappend ret "$x"
+    }
+  }
+  set ret
 }
 
 foreach {tn ct} {
@@ -59,22 +87,12 @@ for {set i 0} {$i < $nRep} {incr i} {
     if {$b($x)=="" && [info exists T1($x)]==0} { unset b($x) }
   }
 
-  set pp_b [list]
-  foreach x [array names b] { 
-    lappend pp_b $x [string range $b($x) 0 9] 
-  }
-  set pp_a [list]
-  foreach x [array names a] { 
-    lappend pp_a $x [string range $a($x) 0 9] 
-  }
-
   set bConflict 0
   foreach x [array names a] {
     if {[info exists b($x)]} { set bConflict 1 }
   }
 
-if {$i==18} breakpoint
-  do_test $tn.1.$i.1 {
+  do_test $tn.$i.1 {
     execsql BEGIN
     foreach k [array names a] {
       set v $a($k) 
@@ -88,14 +106,15 @@ if {$i==18} breakpoint
     }
   } {}
 
-  #integrity_check $tn.1.$i.1a
+  #integrity_check $tn.$i.1a
 
 if {0 && $tn==2 && $i==($nRep-1)} {
 execsql_pp { SELECT * FROM hctpgmap natural join hctdb }
 execsql_pp { SELECT * FROM hctpgmap natural join hctentry }
 }
 
-  do_test $tn.1.$i.2 {
+#if {$i==46} breakpoint
+  do_test $tn.$i.2 {
     execsql BEGIN db2
     foreach k [array names b] {
       set v $b($k) 
@@ -111,26 +130,28 @@ execsql_pp { SELECT * FROM hctpgmap natural join hctentry }
   } {}
 
 if 0 {
-  puts "a: [lsort -integer [array names a]]"
-  puts "b: [lsort -integer [array names b]]"
+  puts "a: [array_keys a]"
+  puts "b: [array_keys b]"
   puts "bConflict=$bConflict"
 }
+
   if {$bConflict} {
-    do_catchsql_test $tn.1.$i.3a {
+    do_catchsql_test $tn.$i.3a {
       COMMIT
     } {1 {database is locked}}
     execsql ROLLBACK
   } else {
-  # execsql_pp { SELECT * FROM hctvalid }
-    do_catchsql_test $tn.1.$i.3b {
+if {$i==96} breakpoint
+    do_catchsql_test $tn.$i.3b {
       COMMIT
     } {0 {}}
   }
 
-if {0 && $tn==2 && $i==($nRep-1)} {
-  execsql_pp { SELECT * FROM hctpgmap natural join hctdb }
-  execsql_pp { SELECT * FROM hctpgmap natural join hctentry }
+if {$i==14} {
+#  show_db_entries
+#  show_page_contents 657
 }
+
 
   foreach x [array names b] {
     if {$b($x)==""} {
@@ -153,15 +174,16 @@ if {0 && $tn==2 && $i==($nRep-1)} {
   foreach x [lsort -integer [array names T1]] {
     lappend res $x $T1($x)
   }
-  do_execsql_test $tn.1.$i.4 { SELECT * FROM t1 ORDER BY a } $res
+  do_execsql_test $tn.$i.4 { SELECT * FROM t1 ORDER BY a } $res
 
   set res [list]
   foreach x [lsort -integer [array names T1]] {
     lappend res $x
   }
-  do_execsql_test $tn.1.$i.5 {
+  do_execsql_test $tn.$i.5 {
     SELECT a FROM t1 ORDER BY a
   } $res
+
 }
 
 }
