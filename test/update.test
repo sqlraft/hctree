@@ -558,6 +558,7 @@ do_test update-13.3 {
     SELECT count(*) FROM t2 WHERE a=rowid+1;
   }
 } {2048}
+breakpoint
 do_test update-13.3 {
   execsql {
     UPDATE t2 SET rowid=rowid+10000;
