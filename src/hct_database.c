@@ -215,8 +215,8 @@ struct HctDbWriter {
   u8 *aWriteFpKey;
 
   HctDbCsr writecsr;              /* Used to find target page while writing */
-
   HctDbPageArray discardpg;
+  HctFilePage fanpg;
 
   int nEvictLocked;
   u32 iEvictLockedPgno;
@@ -2408,6 +2408,8 @@ static void hctDbWriterCleanup(HctDatabase *pDb, HctDbWriter *p, int bRevert){
 
   assert_writer_is_ok(pDb, p);
 
+  sqlite3HctFilePageRelease(&p->fanpg);
+
   /* If not reverting, mark the overflow chains in p->delOvfl as free */
   if( bRevert==0 ){
     hctDbOverflowArrayFree(pDb, &p->delOvfl);
@@ -2758,7 +2760,7 @@ static int hctDbTestWriteFpKey(
 
 static int hctDbSetWriteFpKey(HctDatabase *pDb, HctDbWriter *p){
   int rc = SQLITE_OK;
-  HctDbPageHdr *pHdr = (HctDbPageHdr*)p->writepg.aPg[0].aNew;
+  HctDbPageHdr *pHdr = (HctDbPageHdr*)p->writepg.aPg[p->writepg.nPg-1].aNew;
 
   sqlite3_free(p->aWriteFpKey);
   p->aWriteFpKey = 0;
@@ -3219,12 +3221,12 @@ static int hctDbLoadPeers(HctDatabase *pDb, HctDbWriter *p, int *piPg){
   int rc = SQLITE_OK;
   int iPg = *piPg;
 
-  if( p->writepg.nPg==1 ){
+  if( p->writepg.nPg<3 ){
     HctFilePage *pLeft = &p->writepg.aPg[0];
 
-    assert( iPg==0 );
-    if( 0==hctIsLeftmost(pLeft->aNew) ){
+    if( p->writepg.nPg==1 && 0==hctIsLeftmost(pLeft->aNew) ){
       HctFilePage *pCopy = 0;
+      assert( iPg==0 );
 
       /* First, evict the page currently in p->writepg.aPg[0]. If we 
       ** successfully evict the page here, then of course no other thread
@@ -3282,6 +3284,7 @@ static int hctDbLoadPeers(HctDatabase *pDb, HctDbWriter *p, int *piPg){
         if( rc==SQLITE_OK ){
           HctFilePage *pPg = &p->writepg.aPg[p->writepg.nPg-1];
           memcpy(pPg->aNew, pCopy->aOld, pDb->pgsz);
+          rc = hctDbSetWriteFpKey(pDb, p);
         }
       }
     }
@@ -3289,7 +3292,6 @@ static int hctDbLoadPeers(HctDatabase *pDb, HctDbWriter *p, int *piPg){
 
   return rc;
 }
-
 
 static int hctDbOverflowArrayAppend(HctDbOverflowArray *p, u32 ovfl, int nOvfl){
   assert( p->nAlloc>=p->nEntry );
@@ -4135,6 +4137,7 @@ static int hctDbDelete(
   HctDbInsertOp *pOp
 ){
   u64 iSafeTid = sqlite3HctFileSafeTID(pDb->pFile);
+  u64 iTidValue = pDb->iTid | (pDb->bRollback ? HCT_TID_ROLLBACK_OVERRIDE : 0);
   int rc = SQLITE_OK;
 
   int iPrevOff = 0;
@@ -4213,86 +4216,75 @@ nCall++;
     prevFlags |= HCTDB_HAS_TID;
   }
 
-  /* Update the range-tid and range-oldpg fields */
-  if( prev.iRangeTid==0 
-   || (prev.iRangeTid & HCT_TID_MASK)<=iSafeTid 
-   || ((prev.iRangeTid & HCT_TID_MASK)==pDb->iTid && prev.iRangeOld==pgOld)
-  ){
-    u64 iActual = pDb->iTid | (pDb->bRollback ? HCT_TID_ROLLBACK_OVERRIDE : 0);
-    if( iActual==prev.iRangeTid ){
-      pOp->bFullDel = 1;
-      pOp->iInsert = -1;
-    }else{
-      prev.iRangeTid = pDb->iTid;
-      prev.iRangeOld = pgOld;
-    }
-  }else{
-    int bNewFan = 1;
-    if( 0 && prev.iRangeTid==pDb->iTid ){
-      HctFilePage pg;
-      rc = sqlite3HctFilePageGetPhysical(pDb->pFile, prev.iRangeOld, &pg);
-      if( rc==SQLITE_OK && hctPagetype(pg.aOld)==HCT_PAGETYPE_HISTORY ){
-        HctDbHistoryFan *pFan = (HctDbHistoryFan*)pg.aOld;
-        assert( pFan->iRangeTid1==pDb->iTid );
-        if( pFan->aPgOld1[pFan->pg.nEntry-2]==pgOld ){
-          pOp->bFullDel = 1;
-          pOp->iInsert = -1;
-          bNewFan = 0;
-        }else if( 
-            pFan->pg.nEntry<((pDb->pgsz - sizeof(HctDbHistoryFan))/sizeof(u32)) 
-        ){
-          HctFilePage pg2;
-          rc = sqlite3HctFilePageNewPhysical(pDb->pFile, &pg2);
-          if( rc==SQLITE_OK ){
-            memcpy(pg2.aNew, pg.aOld, pDb->pgsz);
-            pFan = (HctDbHistoryFan*)pg2.aNew;
-            pFan->aPgOld1[pFan->pg.nEntry-1] = pgOld;
-            pFan->pg.nEntry++;
-            prev.iRangeOld = pg2.iNewPg;
-            sqlite3HctFilePageRelease(&pg2);
-            bNewFan = 0;
-          }
-        }
+  /* Update the range-tid and range-oldpg fields. There are several 
+  ** possibilities:
+  **
+  **   1) The left-hand-cell already has the desired range-pointer values
+  **      (both TID and old-page-number).
+  **
+  **   2) The left-hand-cell does not have a range-pointer. Or else
+  **      has a range-pointer so old it can be overwritten with impunity.
+  **
+  **   3) The left-hand-cell has a range-pointer to a fan-page that was
+  **      created by the current HctDbWriter batch, and that fan-page
+  **      is not already full.
+  **
+  **   4) None of the above are true. A new fan-page must be created.
+  */
+  if( prev.iRangeTid==iTidValue && prev.iRangeOld==pgOld ){
+    /* Possibility (1) */
+    pOp->bFullDel = 1;
+    pOp->iInsert = -1;
+  }
+  else if( prev.iRangeTid==0 || (prev.iRangeTid & HCT_TID_MASK)<=iSafeTid ){
+    /* Possibility (2) */
+    prev.iRangeTid = iTidValue;
+    prev.iRangeOld = pgOld;
+  }else if( prev.iRangeOld==p->fanpg.iNewPg ){
+    /* Possibility (3) */
+    HctDbHistoryFan *pFan = (HctDbHistoryFan*)p->fanpg.aNew;
+    assert( pFan->iRangeTid1==iTidValue );
+    if( pFan->aPgOld1[pFan->pg.nEntry-2]!=pgOld ){
+      const int nMax = ((pDb->pgsz - sizeof(HctDbHistoryFan))/sizeof(u32));
+      assert( pFan->pg.nEntry<nMax );
+      pFan->aPgOld1[pFan->pg.nEntry-1] = pgOld;
+      pFan->pg.nEntry++;
+      if( pFan->pg.nEntry==nMax ){
+        rc = sqlite3HctFilePageRelease(&p->fanpg);
       }
-      sqlite3HctFilePageRelease(&pg);
-      if( rc!=SQLITE_OK ) return rc;
     }
-
-    if( bNewFan ){
+    pOp->bFullDel = 1;
+    pOp->iInsert = -1;
+  }else{
+    /* Possibility (4) */
+    rc = sqlite3HctFilePageRelease(&p->fanpg);
+    if( rc==SQLITE_OK ){
+      rc = sqlite3HctFilePageNewPhysical(pDb->pFile, &p->fanpg);
+    }
+    if( rc==SQLITE_OK ){
       int bDummy = 0;
-      HctFilePage pg;
-      HctDbHistoryFan *pFan = 0;
-
-      rc = sqlite3HctFilePageNewPhysical(pDb->pFile, &pg);
-      if( rc!=SQLITE_OK ) return rc;
-      memset(pg.aNew, 0, pDb->pgsz);
-      pFan = (HctDbHistoryFan*)pg.aNew;
+      HctDbHistoryFan *pFan = (HctDbHistoryFan*)p->fanpg.aNew;
+      memset(pFan, 0, pDb->pgsz);
       pFan->pg.hdrFlags = HCT_PAGETYPE_HISTORY;
       pFan->pg.nEntry = 2;
       pFan->iRangeTid0 = prev.iRangeTid;
       pFan->pgOld0 = prev.iRangeOld;
-
       rc = hctDbLeafSearch(
           pDb, pOp->aOldPg, pOp->iIntkey, pRec, &pFan->iSplit0, &bDummy
       );
       assert( bDummy );
-      pFan->iRangeTid1 = pDb->iTid;
-      if( pDb->bRollback ){
-        pFan->iRangeTid1 |= HCT_TID_ROLLBACK_OVERRIDE;
-      }
+      pFan->iRangeTid1 = iTidValue;
       pFan->aPgOld1[0] = pgOld;
+      prev.iRangeOld = p->fanpg.iNewPg;
+      if( (prev.iRangeTid & HCT_TID_MASK)<(iTidValue & HCT_TID_MASK) ){
+        prev.iRangeTid = iTidValue;
+      }
 
-      prev.iRangeTid = pDb->iTid;
-      prev.iRangeOld = pg.iNewPg;
-
-      /* TODO: pass physical page id pg.iNewPg to page-manager */
-
-      rc = sqlite3HctFilePageRelease(&pg);
-      if( rc!=SQLITE_OK ) return rc;
+      /* TODO: pass physical page id p->fanpg.iNew to page-manager */
     }
   }
 
-  if( pOp->bFullDel==0 ){
+  if( rc==SQLITE_OK && pOp->bFullDel==0 ){
     if( pDb->bRollback ) prev.iRangeTid |= HCT_TID_ROLLBACK_OVERRIDE;
     pOp->aEntry = pDb->aTmp;
     pOp->nEntry = hctDbCellPut(pOp->aEntry, &prev, nLocalSz);

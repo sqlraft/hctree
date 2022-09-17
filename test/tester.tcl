@@ -2596,5 +2596,6 @@ extra_schema_checks 1
 
 source $testdir/thread_common.tcl
 source $testdir/malloc_common.tcl
+source $testdir/hct_common.tcl
 
 set tester_tcl_has_run 1
