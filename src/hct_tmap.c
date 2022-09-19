@@ -213,6 +213,7 @@ static int hctTMapInit(HctTMapServer *p, u64 iFirstTid){
     }
 
     if( rc!=SQLITE_OK ){
+      assert( 0 );   /* OOM case */
       for(i=0; i<pNew->m.nMap; i++){
         sqlite3_free(pNew->m.aaMap[i]);
       }
@@ -311,21 +312,32 @@ static void hctTMapGetRef(HctTMapServer *p, HctTMapRef *pRef){
 static void hctTMapDropMap(HctTMapServer *p, HctTMapFull *pMap){
   HctTMapFull **pp;
   u64 iVal = 0;
+  HctTMapFull *pPrev;
 
   assert( sqlite3_mutex_held(p->pMutex) );
   assert( pMap->pRefList==0 && pMap!=p->pList );
 
-  for(pp=&p->pList; *pp!=pMap; pp=&(*pp)->pNext){
-    iVal = (*pp)->m.iMinTid;
-  }
-  *pp = pMap->pNext;
+  for(pPrev=p->pList; pPrev->pNext!=pMap; pPrev=pPrev->pNext);
+  pPrev->pNext = pMap->pNext;
+
 #if 0
   printf("dropping tmap object - iVal = %lld, last=%s\n", (i64)iVal,
       pMap->pNext ? "no" : "yes"
   );
 #endif
+
   if( pMap->pNext==0 ){
+    int nDel = 0;
+    int ii;
     HctAtomicStore(&p->iMinMinTid, iVal);
+    assert( pPrev->m.iFirstTid>=pMap->m.iFirstTid );
+    assert( ((pPrev->m.iFirstTid-pMap->m.iFirstTid) % HCT_TMAP_PAGESIZE)==0 );
+
+    nDel = (pPrev->m.iFirstTid-pMap->m.iFirstTid) / HCT_TMAP_PAGESIZE;
+    for(ii=0; ii<nDel; ii++){
+      sqlite3_free(pMap->m.aaMap[ii]);
+    }
+    assert( pPrev->m.aaMap[0]==pMap->m.aaMap[nDel] );
   }
   sqlite3_free(pMap);
 }
@@ -549,6 +561,7 @@ static HctTMapFull *hctTMapNewObject(
         int sz = sizeof(u64) * HCT_TMAP_PAGESIZE;
         pNew->m.aaMap[i-nSkip] = (u64*)sqlite3MallocZero(sz);
         if( pNew->m.aaMap[i-nSkip]==0 ){
+          assert( 0 );  /* OOM is unlikely... */
           for(i=pPrev->m.nMap; i<nMap; i++){
             sqlite3_free(pNew->m.aaMap[i-nSkip]);
           }

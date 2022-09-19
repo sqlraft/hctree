@@ -172,6 +172,7 @@ void sqlite3HctPManServerFree(HctPManServer *pServer){
   if( pServer ){
     sqlite3HctPManServerReset(pServer);
     sqlite3_mutex_free(pServer->pMutex);
+    sqlite3_free(pServer->aTree);
     sqlite3_free(pServer);
   }
 }

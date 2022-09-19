@@ -1515,6 +1515,31 @@ static void hctDbCsrReset(HctDbCsr *pCsr){
   }
 }
 
+static void hctDbFreeCsr(HctDbCsr *pCsr){
+  hctDbCsrReset(pCsr);
+  while( pCsr->intkey.pOpList ){
+    HctCsrIntkeyOp *pOp = pCsr->intkey.pOpList;
+    pCsr->intkey.pOpList = pOp->pNextOp;
+    sqlite3_free(pOp);
+  }
+  while( pCsr->index.pOpList ){
+    HctCsrIndexOp *pOp = pCsr->index.pOpList;
+    pCsr->index.pOpList = pOp->pNextOp;
+    if( pOp->pLast!=pOp->pFirst ){
+      sqlite3_free(pOp->pLast);
+    }
+    sqlite3_free(pOp->pFirst);
+    sqlite3_free(pOp);
+  }
+  if( pCsr->pRec ) sqlite3DbFree(pCsr->pKeyInfo->db, pCsr->pRec);
+  sqlite3KeyInfoUnref(pCsr->pKeyInfo);
+  hctBufferFree(&pCsr->rec);
+  sqlite3_free(pCsr->aRange);
+  pCsr->aRange = 0;
+  pCsr->nRangeAlloc = 0;
+  sqlite3_free(pCsr);
+}
+
 static void hctDbCsrCleanup(HctDbCsr *pCsr){
   hctDbCsrReset(pCsr);
   if( pCsr->pKeyInfo ){ 
@@ -1523,6 +1548,9 @@ static void hctDbCsrCleanup(HctDbCsr *pCsr){
     pCsr->pKeyInfo = 0;
     pCsr->pRec = 0;
   }
+  sqlite3_free(pCsr->aRange);
+  pCsr->aRange = 0;
+  pCsr->nRangeAlloc = 0;
   hctBufferFree(&pCsr->rec);
   pCsr->iRoot = 0;
 }
@@ -2469,7 +2497,7 @@ static void hctDbWriterCleanup(HctDatabase *pDb, HctDbWriter *p, int bRevert){
 
   /* Free/zero various buffers and caches */
   hctDbCsrCleanup(&p->writecsr);
-//hctDbCsrCleanup(&pDb->rbackcsr);
+  hctDbCsrCleanup(&pDb->rbackcsr);
 }
 
 static int hctDbInsert(
@@ -4739,10 +4767,12 @@ int sqlite3HctDbInsert(
 
     if( pDb->rbackcsr.iRoot!=iRoot ){
       hctDbCsrInit(pDb, iRoot, 0, &pDb->rbackcsr);
+      if( pRec ){
+        pDb->rbackcsr.pKeyInfo = sqlite3KeyInfoRef(pRec->pKeyInfo);
+      }
     }else{
       hctDbCsrReset(&pDb->rbackcsr);
     }
-    if( pRec ) pDb->rbackcsr.pKeyInfo = sqlite3KeyInfoRef(pRec->pKeyInfo);
 
     rc = sqlite3HctDbCsrSeek(&pDb->rbackcsr, pRec, iKey, &res);
     if( rc==SQLITE_OK ){
@@ -4819,27 +4849,6 @@ int sqlite3HctDbEndWrite(HctDatabase *p, u64 iCid, int bRollback){
 
   p->iTid = 0;
   return rc;
-}
-
-static void hctDbFreeCsr(HctDbCsr *pCsr){
-  while( pCsr->intkey.pOpList ){
-    HctCsrIntkeyOp *pOp = pCsr->intkey.pOpList;
-    pCsr->intkey.pOpList = pOp->pNextOp;
-    sqlite3_free(pOp);
-  }
-  while( pCsr->index.pOpList ){
-    HctCsrIndexOp *pOp = pCsr->index.pOpList;
-    pCsr->index.pOpList = pOp->pNextOp;
-    if( pOp->pLast!=pOp->pFirst ){
-      sqlite3_free(pOp->pLast);
-    }
-    sqlite3_free(pOp->pFirst);
-    sqlite3_free(pOp);
-  }
-  if( pCsr->pRec ) sqlite3DbFree(pCsr->pKeyInfo->db, pCsr->pRec);
-  sqlite3KeyInfoUnref(pCsr->pKeyInfo);
-  hctBufferFree(&pCsr->rec);
-  sqlite3_free(pCsr);
 }
 
 static void hctDbFreeCsrList(HctDbCsr *pList){
@@ -5032,9 +5041,6 @@ void sqlite3HctDbCsrClose(HctDbCsr *pCsr){
     HctDatabase *pDb = pCsr->pDb;
     hctDbCsrScanFinish(pCsr);
     hctDbCsrReset(pCsr);
-    sqlite3_free(pCsr->aRange);
-    pCsr->aRange = 0;
-    pCsr->nRangeAlloc = 0;
     if( pDb->iTid==0 ){
       pCsr->pNextScanner = pDb->pScannerList;
       pDb->pScannerList = pCsr;
