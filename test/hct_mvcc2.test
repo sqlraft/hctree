@@ -141,16 +141,10 @@ if 0 {
     } {1 {database is locked}}
     execsql ROLLBACK
   } else {
-if {$i==96} breakpoint
     do_catchsql_test $tn.$i.3b {
       COMMIT
     } {0 {}}
   }
-
-if {$i==14} {
-#  show_db_entries
-#  show_page_contents 657
-}
 
 
   foreach x [array names b] {
@@ -174,7 +168,7 @@ if {$i==14} {
   foreach x [lsort -integer [array names T1]] {
     lappend res $x $T1($x)
   }
-  do_execsql_test $tn.$i.4 { SELECT * FROM t1 ORDER BY a } $res
+  # do_execsql_test $tn.$i.4 { SELECT * FROM t1 ORDER BY a } $res
 
   set res [list]
   foreach x [lsort -integer [array names T1]] {

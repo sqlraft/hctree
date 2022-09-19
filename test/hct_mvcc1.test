@@ -215,5 +215,21 @@ do_execsql_test 8.10 {
 #puts -------------------------
 #execsql_pp { SELECT * FROM hctentry }
 
+catch {db2 close}
+reset_db
+sqlite3 db2 test.db
+c1 9.1 "CREATE TABLE t1(a INTEGER PRIMARY KEY, b)"
+c1 9.2 "CREATE TABLE t2(a INTEGER PRIMARY KEY, b)"
+c1 9.3 "INSERT INTO t1 VALUES(1, 'one'), (2, 'two'), (3, 'three')"
+c1 9.4 "INSERT INTO t2 VALUES(4, 'iv')"
+c1 9.5 "BEGIN"
+c1 9.6 "  UPDATE t1 SET b='TWOTWOTWO' WHERE a=2"
+c1 9.7 "  UPDATE t2 SET b='four' WHERE a=4"
+c2 9.8 "          UPDATE t2 SET b='whatever' WHERE a=4"
+c1 9.9 "COMMIT" {database is locked} 
+
+c1 9.10 "SELECT * FROM t1" {1 one 2 two 3 three}
+c2 9.11 "SELECT * FROM t1" {1 one 2 two 3 three}
+
 finish_test
 

@@ -928,6 +928,11 @@ static int hctDbPageEntrySize(void *aPg){
 */
 static int hctDbEntryInfo(const void *aPg, int iEntry, int *pnSz, int *pFlags){
   int iOff;
+
+  assert( (hctPagetype(aPg)==HCT_PAGETYPE_INTKEY && hctPageheight(aPg)==0)
+       || (hctPagetype(aPg)==HCT_PAGETYPE_INDEX)
+  );
+
   if( hctPagetype(aPg)==HCT_PAGETYPE_INTKEY ){
     HctDbIntkeyEntry *pEntry = &((HctDbIntkeyLeaf*)aPg)->aEntry[iEntry];
     iOff = pEntry->iOff;
@@ -1772,6 +1777,11 @@ static u8 hctDbCellToFlags(HctDbCell *pCell){
   return flags;
 }
 
+static u64 hctDbLocalMinTid(HctDatabase *pDb){
+  HctTMapClient *pTMapClient = sqlite3HctFileTMapClient(pDb->pFile);
+  return sqlite3HctTMapCommitedTID(pTMapClient);
+}
+
 /*
 ** This function is called when a reader encounters an old-range pointer
 ** with associated TID value iRangeTid. It returns true if the pointer
@@ -1789,19 +1799,17 @@ static u8 hctDbCellToFlags(HctDbCell *pCell){
 static int hctDbFollowRangeOld(HctDatabase *pDb, u64 iRangeTid, int *pbMerge){
   int bRet = 0;
   int bMerge = 0;
+  u64 iRangeTidValue = (iRangeTid & HCT_TID_MASK);
+  u64 iLocalMinTid = hctDbLocalMinTid(pDb);
 
   /* HctDatabase.iTid is set when writing, validating or rolling back a
   ** transaction. When writing or validating, old-ranges created by this
   ** transaction should not be merge in, even if they are followed. But, when
   ** doing rollback, they must be merged in (to find the old data).  */
   i64 iDoNotMergeTid = ((pDb->bRollback==0) ? pDb->iTid : 0);
-
   if( pDb->bValidate ) iDoNotMergeTid = 0;
-  // const i64 iDoNotMergeTid = 0;
 
-  // TODO: Can do better than this test.
-  assert( pDb->pTmap );
-  if( (iRangeTid & HCT_TID_MASK)>pDb->pTmap->iMinTid ){
+  if( iRangeTidValue>iLocalMinTid ){
     bRet = 1;
     if( iDoNotMergeTid!=iRangeTid ){
       bMerge = (0==hctDbTidIsVisible(pDb, iRangeTid));
@@ -2157,6 +2165,7 @@ static int hctDbCsrSeekAndDescend(
 
         if( p->eRange==HCT_RANGE_FAN ){
           p->iCell = hctDbFanSearch(&rc, pCsr->pDb, p->pg.aOld, pRec, iKey);
+          bExact = 0;
         }else{
           rc = hctDbLeafSearch(
               pCsr->pDb, p->pg.aOld, iKey, pRec, &p->iCell, &bExact

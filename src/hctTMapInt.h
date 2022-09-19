@@ -111,3 +111,11 @@ int sqlite3HctTMapNewTID(HctTMapClient *p, u64 iCid, u64 iTid, HctTMap **ppMap);
 
 int sqlite3HctTMapClientPragmaTidStep(HctTMapClient *p, int iVal);
 
+/*
+** Return TID value T for all transactions with tid values less than or
+** equal to T were finished (marked as committed or rolled back), last
+** time sqlite3HctTMapBegin() was called.
+*/
+u64 sqlite3HctTMapCommitedTID(HctTMapClient*);
+
+
