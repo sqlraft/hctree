@@ -397,7 +397,6 @@ struct HctDbCell {
 #define HCTDB_HAS_TID      0x01
 #define HCTDB_HAS_OLD      0x02
 #define HCTDB_HAS_OVFL     0x04
-#define HCTDB_IS_DELETE    0x08
 #define HCTDB_HAS_RANGETID 0x10
 #define HCTDB_HAS_RANGEOLD 0x20
 
@@ -3458,7 +3457,6 @@ static void hctDbBalanceGetCellSz(
   int iSz = 0;                      /* Current populated size of aSz[] */
   int szEntry = hctDbPageEntrySize(aPgCopy[0]);
   int iIns = iInsert;
-  u64 iSafeTid = sqlite3HctFileSafeTID(pDb->pFile);
 
   ii = 0;
   iCell = 0;
@@ -3480,27 +3478,10 @@ static void hctDbBalanceGetCellSz(
       }
       iIns = -1;
     }else{
-      int bSkip = 0;
-      int flags = 0;
-      if( iSz>0 ){
-        int iOff = hctDbEntryInfo((void*)pPg, iCell, 0, &flags);
-        if( flags & HCTDB_IS_DELETE ){
-          u64 iTid = hctGetU64(&((u8*)pPg)[iOff]);
-          if( iSz>0 && iTid<=iSafeTid ) bSkip = 1;
-          assert( flags & HCTDB_HAS_TID );
-        }
-      }
-      if( bSkip==0 ){
-        pSz->nByte = szEntry + hctDbPageRecordSize(pPg, pDb->pgsz, iCell);
-        pSz->iPg = ii;
-        pSz->iEntry = iCell;
-        assert( pSz->nByte>0 );
-      }else{
-        if( flags & HCTDB_HAS_OVFL ){
-          hctDbRemoveOverflow(pDb, pWriter, (u8*)pPg, iCell);
-        }
-        iSz--;
-      }
+      pSz->nByte = szEntry + hctDbPageRecordSize(pPg, pDb->pgsz, iCell);
+      pSz->iPg = ii;
+      pSz->iEntry = iCell;
+      assert( pSz->nByte>0 );
       iCell++;
     }
 
@@ -3694,25 +3675,7 @@ static int hctDbBalance(
 ** at least nReq bytes in size. Or false otherwise.
 */
 static int hctDbTestPageCapacity(HctDatabase *pDb, u8 *aPg, int nReq){
-  u64 iSafeTid = sqlite3HctFileSafeTID(pDb->pFile);
-  HctDbIndexNode *p = (HctDbIndexNode*)aPg;
-  int szEntry = 0;
-  int nFree = p->hdr.nFreeBytes;
-  int ii;
-
-  hctDbEntryArrayDim(aPg, &szEntry);
-  for(ii=1; ii<p->pg.nEntry && nFree<nReq; ii++){
-    int flags = 0;
-    int iOff = hctDbEntryInfo((void*)aPg, ii, 0, &flags);
-    if( flags & HCTDB_IS_DELETE ){
-      u64 iTid = hctGetU64(&aPg[iOff]);
-      if( iTid<=iSafeTid ){
-        nFree += szEntry + hctDbPageRecordSize(aPg, pDb->pgsz, ii);
-      }
-    }
-  }
-
-  return nFree>=nReq;
+  return ((HctDbIndexNode*)aPg)->hdr.nFreeBytes>=nReq;
 }
 
 static int hctDbBalanceIntkeyNode(
@@ -3945,47 +3908,6 @@ static int hctDbInsertOverflow(
   return rc;
 }
 
-static int hctDbCopyOverflow(
-  HctDatabase *pDb, 
-  HctDbWriter *pWriter, 
-  u32 ovfl, 
-  u32 *pOvflOut
-){
-  int rc = SQLITE_OK;
-  u32 pgno = ovfl;
-  HctFilePage prevnew;
-  int nOvfl = 0;
-
-  memset(&prevnew, 0, sizeof(prevnew));
-  while( pgno ){
-    HctFilePage pg;
-    HctFilePage pgnew;
-
-    rc = sqlite3HctFilePageGetPhysical(pDb->pFile, pgno, &pg);
-    if( rc!=SQLITE_OK ) break;
-    rc = sqlite3HctFilePageNewPhysical(pDb->pFile, &pgnew);
-    if( rc!=SQLITE_OK ) break;
-    memcpy(pgnew.aNew, pg.aOld, pDb->pgsz);
-
-    if( prevnew.aNew ){
-      ((HctDbPageHdr*)prevnew.aNew)->iPeerPg = pgnew.iNewPg;
-    }else{
-      *pOvflOut = pgnew.iNewPg;
-    }
-    pgno = ((HctDbPageHdr*)pg.aOld)->iPeerPg;
-    sqlite3HctFilePageRelease(&prevnew);
-    sqlite3HctFilePageRelease(&pg);
-    prevnew = pgnew;
-    nOvfl++;
-  }
-  sqlite3HctFilePageRelease(&prevnew);
-
-  if( rc==SQLITE_OK ){
-    rc = hctDbOverflowArrayAppend(&pWriter->insOvfl, *pOvflOut, nOvfl);
-  }
-  return rc;
-}
-
 static void hctDbRemoveCell(
   HctDatabase *pDb, 
   HctDbWriter *pWriter, 
@@ -4184,7 +4106,6 @@ static int hctDbDelete(
   int prevFlags = 0;
   int nLocalSz = 0;
   u8 *aTarget = p->writepg.aPg[pOp->iPg].aNew;
-  u32 pgOld = 0;
   int bLeftmost = (hctIsLeftmost(aTarget) && pOp->iInsert==0);
 
   HctDbCell prev;           /* Previous cell on page */
@@ -4193,10 +4114,6 @@ static int nCall = 0;
 nCall++;
 
   assert( pOp->bFullDel==0 );
-
-  /* Figure out the old physical page-number for the key being deleted. */
-  /* TODO: Fix this! */
-  pgOld = pOp->iOldPg;
 
   if( pOp->iInsert==0 && !bLeftmost ){
     /* If deleting the first key on the first page, set the bBalance flag (as 
@@ -4272,7 +4189,7 @@ nCall++;
   **
   **   4) None of the above are true. A new fan-page must be created.
   */
-  if( prev.iRangeTid==iTidValue && prev.iRangeOld==pgOld ){
+  if( prev.iRangeTid==iTidValue && prev.iRangeOld==pOp->iOldPg ){
     /* Possibility (1) */
     pOp->bFullDel = 1;
     pOp->iInsert = -1;
@@ -4280,15 +4197,15 @@ nCall++;
   else if( prev.iRangeTid==0 || (prev.iRangeTid & HCT_TID_MASK)<=iSafeTid ){
     /* Possibility (2) */
     prev.iRangeTid = iTidValue;
-    prev.iRangeOld = pgOld;
+    prev.iRangeOld = pOp->iOldPg;
   }else if( prev.iRangeOld==p->fanpg.iNewPg ){
     /* Possibility (3) */
     HctDbHistoryFan *pFan = (HctDbHistoryFan*)p->fanpg.aNew;
     assert( pFan->iRangeTid1==iTidValue );
-    if( pFan->aPgOld1[pFan->pg.nEntry-2]!=pgOld ){
+    if( pFan->aPgOld1[pFan->pg.nEntry-2]!=pOp->iOldPg ){
       const int nMax = ((pDb->pgsz - sizeof(HctDbHistoryFan))/sizeof(u32));
       assert( pFan->pg.nEntry<nMax );
-      pFan->aPgOld1[pFan->pg.nEntry-1] = pgOld;
+      pFan->aPgOld1[pFan->pg.nEntry-1] = pOp->iOldPg;
       pFan->pg.nEntry++;
       if( pFan->pg.nEntry==nMax ){
         rc = sqlite3HctFilePageRelease(&p->fanpg);
@@ -4318,7 +4235,7 @@ nCall++;
       );
       assert( bDummy );
       pFan->iRangeTid1 = iTidValue;
-      pFan->aPgOld1[0] = pgOld;
+      pFan->aPgOld1[0] = pOp->iOldPg;
       prev.iRangeOld = p->fanpg.iNewPg;
       if( (prev.iRangeTid & HCT_TID_MASK)<(iTidValue & HCT_TID_MASK) ){
         prev.iRangeTid = iTidValue;
@@ -6231,7 +6148,7 @@ static int hctentryConnect(
       "CREATE TABLE x("
         "pgno INTEGER, entry INTEGER, "
         "ikey INTEGER, size INTEGER, offset INTEGER, "
-        "child INTEGER, isdel BOOLEAN, "
+        "child INTEGER, "
         "tid INTEGER, rangetid INTEGER, "
         "oldpg INTEGER, rangeoldpg INTEGER, ovfl INTEGER, record TEXT"
       ")"
@@ -6379,12 +6296,12 @@ static int hctentryColumn(
       if( pIndexNode ) sqlite3_result_int64(ctx, pIndexNode->iChildPg);
       if( pIntkeyNode ) sqlite3_result_int64(ctx, pIntkeyNode->iChildPg);
       break;
-    case 6: /* isdel */
-    case 7: /* tid */
-    case 8: /* rangetid */
-    case 9: /* oldpg */
-    case 10: /* rangeoldpg */
-    case 11: /* ovfl */
+
+    case 6: /* tid */
+    case 7: /* rangetid */
+    case 8: /* oldpg */
+    case 9: /* rangeoldpg */
+    case 10: /* ovfl */
       if( pIntkey || pIndex || pIndexNode ){
         u8 *aPg = pCur->pg.aOld;
         int iOff;
@@ -6394,44 +6311,41 @@ static int hctentryColumn(
         iOff = hctDbEntryInfo(aPg, pCur->iEntry, 0, &flags);
         hctDbCellGet(pCur->pDb, &aPg[iOff], flags, &cell);
 
-        if( i==6 ){
-          sqlite3_result_int(ctx, (flags & HCTDB_IS_DELETE) ? 1 : 0);
-        }
-        if( i==7 && cell.iTid ){
+        if( i==6 && cell.iTid ){
           i64 iVal = (cell.iTid & HCT_TID_MASK);
           if( cell.iTid & HCT_TID_ROLLBACK_OVERRIDE ) iVal = iVal*-1;
           sqlite3_result_int64(ctx, iVal);
         }
-        if( i==8 && cell.iRangeTid ){
+        if( i==7 && cell.iRangeTid ){
           i64 iVal = (cell.iRangeTid & HCT_TID_MASK);
           if( cell.iRangeTid & HCT_TID_ROLLBACK_OVERRIDE ) iVal = iVal*-1;
           sqlite3_result_int64(ctx, iVal);
         }
-        if( i==9 && cell.iOld ){
+        if( i==8 && cell.iOld ){
           sqlite3_result_int64(ctx, (i64)cell.iOld);
         }
-        if( i==10 && cell.iRangeOld ){
+        if( i==9 && cell.iRangeOld ){
           sqlite3_result_int64(ctx, (i64)cell.iRangeOld);
         }
-        if( i==11 && cell.iOvfl ){
+        if( i==10 && cell.iOvfl ){
           sqlite3_result_int64(ctx, (i64)cell.iOvfl);
         }
       }else if( pFan ){
-        if( i==8 ){   /* rangetid */
+        if( i==7 ){   /* rangetid */
           u64 iVal = ((pCur->iEntry==0) ? pFan->iRangeTid0 : pFan->iRangeTid1);
           if( iVal & HCT_TID_ROLLBACK_OVERRIDE ){
             sqlite3_result_int64(ctx, ((i64)(iVal & HCT_TID_MASK)) * -1);
           }else{
             sqlite3_result_int64(ctx, (i64)iVal);
           }
-        }else if( i==10 ){ /* rangeoldpg */
+        }else if( i==9 ){ /* rangeoldpg */
           u32 iRangeOldPg = 
             ((pCur->iEntry==0) ? pFan->pgOld0 : pFan->aPgOld1[pCur->iEntry-1]);
           sqlite3_result_int64(ctx, (i64)iRangeOldPg);
         }
       }
       break;
-    case 12: /* record */
+    case 11: /* record */
       if( pIntkey || pIndex || pIndexNode ){
         sqlite3 *db = sqlite3_context_db_handle(ctx);
         u8 *aPg = pCur->pg.aOld;

@@ -1,5 +1,5 @@
-C Fix\sproblem\swith\sreusing\sold\spages.
-D 2022-09-20T17:01:17.637
+C Remove\ssome\sdead\scode.
+D 2022-09-20T18:16:38.295
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -544,7 +544,7 @@ F src/hash.h 3340ab6e1d13e725571d7cee6d3e3135f0779a7d8e76a9ce0a85971fa3953c51
 F src/hctInt.h 8f5ab3934ff45282e3925f159dcfaea16543b5db62d4661b77c217c4c81b6c81
 F src/hctPManInt.h cbd1981c1ce383c7b36e80d670d666fc5f3cec00b67f88f14c5a3cb464505893
 F src/hctTMapInt.h b51104d53498d5e931d59ac3cd7ff425be96960627029e613dbbd346869ce4f4
-F src/hct_database.c 54c34a9406d255eb73f71473a71132534d0fd16cf4965d0f3f2ae1fb50324d4d
+F src/hct_database.c 0ae8f34971d040a304558532afb683d25bc938249b7547b33263079b87a54f93
 F src/hct_file.c 7d74331d8b31487e8ba7f21a1a0c839b007cf59c365064dbf65f0b3ddaca04b1
 F src/hct_pman.c 007e3fc1b43a4a2dafb5eae007f2162ddff4e825f5fe85434c7ebfe98e4a4523
 F src/hct_record.c 54b0d564be580ca29a54312f9a9abdba193b234ac56ec65a7e40109107041b25
@@ -2030,8 +2030,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P adf868cc45ea4dd9ccf2b015b9de5bfb265e34a726f898e563adef10278cec3c
-R 6c8b381c4d5317d8049b3a307ae8099c
+P 5a881c2665006e23d09283e1965d478aa311070d8a69fcf25e05d61758e1074e
+R 90aec4f60053279fb75b772b804bde24
 U dan
-Z c8eadebdf0e8b57d7add61efc83d6b28
+Z 3a440caa2a9b01be4db09c60ece055d5
 # Remove this line to create a well-formed Fossil manifest.
