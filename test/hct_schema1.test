@@ -116,7 +116,7 @@ do_execsql_test 1.14 {
   PRAGMA hct_quiescent_integrity_check = 1;
   PRAGMA integrity_check;
   SELECT count(*) FROM hctpgmap WHERE logical_is_root;
-} {1 ok 5}
+} {1 ok 6}
 
 #-------------------------------------------------------------------------
 reset_db

@@ -3396,7 +3396,10 @@ static int hctDbRemoveOverflow(
     int nLocal = hctDbLocalsize(aPage, pDb->pgsz, nSize);
 
     if( flags & HCTDB_HAS_TID ) iOff += 8;
+    if( flags & HCTDB_HAS_RANGETID ) iOff += 8;
     if( flags & HCTDB_HAS_OLD ) iOff += 4;
+    if( flags & HCTDB_HAS_RANGEOLD ) iOff += 4;
+
     ovfl = hctGetU32(&aPage[iOff]);
     nOvfl = ((nSize - nLocal) + nBytePerOvfl - 1) / nBytePerOvfl;
     
@@ -4192,6 +4195,7 @@ nCall++;
   assert( pOp->bFullDel==0 );
 
   /* Figure out the old physical page-number for the key being deleted. */
+  /* TODO: Fix this! */
   pgOld = pOp->iOldPg;
 
   if( pOp->iInsert==0 && !bLeftmost ){
@@ -4299,6 +4303,9 @@ nCall++;
       rc = sqlite3HctFilePageNewPhysical(pDb->pFile, &p->fanpg);
     }
     if( rc==SQLITE_OK ){
+      rc = sqlite3HctFileClearPhysInUse(pDb->pFile, p->fanpg.iNewPg, 0);
+    }
+    if( rc==SQLITE_OK ){
       int bDummy = 0;
       HctDbHistoryFan *pFan = (HctDbHistoryFan*)p->fanpg.aNew;
       memset(pFan, 0, pDb->pgsz);
@@ -4316,8 +4323,6 @@ nCall++;
       if( (prev.iRangeTid & HCT_TID_MASK)<(iTidValue & HCT_TID_MASK) ){
         prev.iRangeTid = iTidValue;
       }
-
-      /* TODO: pass physical page id p->fanpg.iNew to page-manager */
     }
   }
 
@@ -4584,6 +4589,12 @@ nCall++;
     return rc;
   }
 
+  /* If this is a clobber operation and the entry being clobbered has an 
+  ** overflow chain, add an entry to HctDbWriter.delOvfl.  */
+  if( bClobber ){
+    hctDbRemoveOverflow(pDb, p, aTarget, op.iInsert);
+  }
+
   /* Populate the following variables:
   **
   **   entryFlags
@@ -4681,12 +4692,6 @@ nCall++;
         bSingle = hctDbTestPageCapacity(pDb, aTarget, nReq);
       }
     }
-  }
-
-  /* If this is a clobber operation and the entry being clobbered has an 
-  ** overflow chain, add an entry to HctDbWriter.delOvfl.  */
-  if( bClobber ){
-    hctDbRemoveOverflow(pDb, p, aTarget, op.iInsert);
   }
 
   if( op.bBalance ){
@@ -5671,13 +5676,11 @@ int sqlite3HctDbWalkTree(
         int iCell = 0;
         int nEntry = ((HctDbPageHdr*)pg.aOld)->nEntry;
         for(iCell=0; iCell<nEntry; iCell++){
-          u8 flags = 0;
-          int iOff = hctDbCellOffset(pg.aOld, iCell, &flags);
-          if( flags & HCTDB_HAS_OVFL ){
-            u32 ovfl = 0;
-            if( (flags & HCTDB_HAS_TID)!=0 ) iOff += 8;
-            if( (flags & HCTDB_HAS_OLD)!=0 ) iOff += 4;
-            ovfl = hctGetU32(&pg.aOld[iOff]);
+          HctDbCell cell;
+          hctDbCellGetByIdx(0, pg.aOld, iCell, &cell);
+
+          if( cell.iOvfl ){
+            u32 ovfl = cell.iOvfl;
             while( ovfl!=0 ){
               HctFilePage ov;
               rc = x(pCtx, 0, ovfl);
