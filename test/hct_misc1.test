@@ -363,5 +363,11 @@ db2 close
 sqlite3 db test.db
 # do_execsql_test 14.3 { SELECT * FROM t1 } {1 one 3 three}
 
+#-------------------------------------------------------------------------
+reset_db
+do_execsql_test 15.0 {
+  SELECT * FROM sqlite_schema
+} {}
+
 finish_test
 

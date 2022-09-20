@@ -310,14 +310,15 @@ static void hctTMapGetRef(HctTMapServer *p, HctTMapRef *pRef){
 }
 
 static void hctTMapDropMap(HctTMapServer *p, HctTMapFull *pMap){
-  HctTMapFull **pp;
-  u64 iVal = 0;
   HctTMapFull *pPrev;
 
   assert( sqlite3_mutex_held(p->pMutex) );
   assert( pMap->pRefList==0 && pMap!=p->pList );
 
-  for(pPrev=p->pList; pPrev->pNext!=pMap; pPrev=pPrev->pNext);
+  for(pPrev=p->pList; pPrev->pNext!=pMap; pPrev=pPrev->pNext){
+    assert( pPrev->m.iMinTid>=pPrev->pNext->m.iMinTid );
+    assert( pPrev->m.iMinTid>=p->iMinMinTid );
+  }
   pPrev->pNext = pMap->pNext;
 
 #if 0
@@ -329,7 +330,7 @@ static void hctTMapDropMap(HctTMapServer *p, HctTMapFull *pMap){
   if( pMap->pNext==0 ){
     int nDel = 0;
     int ii;
-    HctAtomicStore(&p->iMinMinTid, iVal);
+    HctAtomicStore(&p->iMinMinTid, pPrev->m.iMinTid);
     assert( pPrev->m.iFirstTid>=pMap->m.iFirstTid );
     assert( ((pPrev->m.iFirstTid-pMap->m.iFirstTid) % HCT_TMAP_PAGESIZE)==0 );
 
