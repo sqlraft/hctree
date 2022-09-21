@@ -369,5 +369,20 @@ do_execsql_test 15.0 {
   SELECT * FROM sqlite_schema
 } {}
 
+#-------------------------------------------------------------------------
+reset_db
+do_execsql_test 16.0 {
+  CREATE TABLE t1(a INTEGER PRIMARY KEY, b);
+  CREATE INDEX i1 ON t1(b);
+  INSERT INTO t1 VALUES(456, 'fourfivesix');
+} {}
+
+do_execsql_test 16.1 {
+  BEGIN;
+    UPDATE t1 SET b='seveneightnine';
+    UPDATE t1 SET b='teneleven';
+  COMMIT;
+}
+
 finish_test
 

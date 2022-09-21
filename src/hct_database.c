@@ -4483,10 +4483,10 @@ nCall++;
     hctDbWriterCleanup(pDb, p, 1);
     return rc;
   }
-  if( 0==(pDb->bRollback || p->iHeight>0 || bClobber || bDel==0) ){
-    // print_out_tmap(pDb, 64);
+
+  if( bClobber==0 && bDel ){
+    return SQLITE_OK;
   }
-  assert( pDb->bRollback || p->iHeight>0 || bClobber || bDel==0 );
 
   /* At this point, once the page that will be modified has been loaded
   ** and marked as writable, if the operation is on an internal list:
@@ -4504,12 +4504,8 @@ nCall++;
       return SQLITE_OK;
     }
     if( bDel ){
-      if( bClobber==0 ){
-        return SQLITE_OK;
-      }else{
-        u32 iChild = hctDbGetChildPage(aTarget, op.iInsert);
-        if( iChild!=iChildPg ) return SQLITE_OK;
-      }
+      u32 iChild = hctDbGetChildPage(aTarget, op.iInsert);
+      if( iChild!=iChildPg ) return SQLITE_OK;
     }
   }
 
@@ -4728,13 +4724,6 @@ int sqlite3HctDbInsert(
 
   if( pDb->bRollback ){
     int res = 0;
-
-#if 0
-    if( pRec==0 ){
-      printf("rollback of rowid=%lld\n", iKey);
-      fflush(stdout);
-    }
-#endif
 
     if( pDb->rbackcsr.iRoot!=iRoot ){
       hctDbCsrInit(pDb, iRoot, 0, &pDb->rbackcsr);
