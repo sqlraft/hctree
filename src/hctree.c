@@ -769,6 +769,7 @@ static int btreeFlushOneToDisk(void *pCtx, u32 iRoot, KeyInfo *pKeyInfo){
           if( nRetry ){
             sqlite3HctTreeCsrLast(pCsr);
             assert( sqlite3HctTreeCsrEof(pCsr)==0 );
+            p->nRollbackOp -= (iRollbackDir * nRetry);
           }else{
             /* Done - the table has been successfully flushed to disk */
             break;

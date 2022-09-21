@@ -437,6 +437,26 @@ static u64 hctDbTMapLookup(HctDatabase *pDb, u64 iTid, u64 *peState){
   return (iVal & HCT_TMAP_CID_MASK);
 }
 
+
+static void print_out_tmap(HctDatabase *pDb, int nLimit){
+  int ii;
+
+  for(ii=0; ii<nLimit; ii++){
+    u64 eState;
+    u64 iTid = pDb->pTmap->iFirstTid + ii;
+    u64 iCid = hctDbTMapLookup(pDb, iTid, &eState);
+
+    printf("tid=%d -> (%s, %d)\n", (int)iTid, 
+      eState==HCT_TMAP_WRITING ? "WRITING" :
+      eState==HCT_TMAP_VALIDATING ? "VALIDATING" :
+      eState==HCT_TMAP_ROLLBACK ? "ROLLBACK" :
+      eState==HCT_TMAP_COMMITTED ? "COMMITTED" : "???",
+      (int)iCid
+    );
+  }
+
+}
+
 static void hctDbPageArrayReset(HctDbPageArray *pArray){
   sqlite3_free(pArray->aDyn);
   pArray->nPg = 0;
@@ -4370,16 +4390,21 @@ static int hctDbWriteWriteConflict(
         }else{
           int bExact = 0;
           rc = hctDbLeafSearch(pDb, pg.aOld, iKey, pKey, &iCell, &bExact);
-          if( rc || bExact ){
-            if( rc==SQLITE_OK && bMerge ){
+          if( rc==SQLITE_OK && bExact ){
+            if( bMerge ){
               HctDbCell cell;
               hctDbCellGetByIdx(pDb, pg.aOld, iCell, &cell);
               if( hctDbTidIsVisible(pDb, cell.iTid) ) rc = HCT_SQLITE_BUSY;
             }
             sqlite3HctFilePageRelease(&pg);
             break;
+          }else{
+            iCell--;
           }
-          iCell--;
+          if( rc ){
+            sqlite3HctFilePageRelease(&pg);
+            break;
+          }
         }
 
         hctDbGetRange(pg.aOld, iCell, &iRangeTid, &iRangeOld);
@@ -4458,6 +4483,10 @@ nCall++;
     hctDbWriterCleanup(pDb, p, 1);
     return rc;
   }
+  if( 0==(pDb->bRollback || p->iHeight>0 || bClobber || bDel==0) ){
+    // print_out_tmap(pDb, 64);
+  }
+  assert( pDb->bRollback || p->iHeight>0 || bClobber || bDel==0 );
 
   /* At this point, once the page that will be modified has been loaded
   ** and marked as writable, if the operation is on an internal list:
@@ -4530,6 +4559,7 @@ nCall++;
     }
 
     if( bDel && p->iHeight==0 ){
+      assert( bClobber );
       rc = hctDbDelete(pDb, p, pRec, &op);
       aTarget = p->writepg.aPg[op.iPg].aNew;
       assert_page_is_ok(aTarget, pDb->pgsz);
@@ -4666,6 +4696,8 @@ nCall++;
   return rc;
 }
 
+static char *hctDbRecordToText(sqlite3 *db, const u8 *aRec, int nRec);
+
 int sqlite3HctDbInsert(
   HctDatabase *pDb,               /* Database to insert into or delete from */
   u32 iRoot,                      /* Root page of table to modify */
@@ -4675,7 +4707,7 @@ int sqlite3HctDbInsert(
   int nData, const u8 *aData,     /* Record/key to insert */
   int *pnRetry                    /* OUT: number of operations to retry */
 ){
-  int rc;
+  int rc = SQLITE_OK;
   int nRecField = pRec ? pRec->nField : 0;
 
 
@@ -4684,8 +4716,25 @@ int sqlite3HctDbInsert(
   ** collision is found in the data structure.  */
   hctDbRecordTrim(pRec);
 
+#if 0
+  {
+    char *zText = hctDbRecordToText(0, aData, nData);
+    printf("%p: sqlite3HctDbInsert(bDel=%d, iKey=%lld, aData={%s})\n", 
+        pDb, bDel, iKey, zText
+    );
+    fflush(stdout);
+  }
+#endif
+
   if( pDb->bRollback ){
     int res = 0;
+
+#if 0
+    if( pRec==0 ){
+      printf("rollback of rowid=%lld\n", iKey);
+      fflush(stdout);
+    }
+#endif
 
     if( pDb->rbackcsr.iRoot!=iRoot ){
       hctDbCsrInit(pDb, iRoot, 0, &pDb->rbackcsr);
@@ -4697,6 +4746,7 @@ int sqlite3HctDbInsert(
     }
 
     rc = sqlite3HctDbCsrSeek(&pDb->rbackcsr, pRec, iKey, &res);
+    assert( bDel==0 || res==0 );
     if( rc==SQLITE_OK ){
       if( res!=0 ){
         bDel = 1;
@@ -4706,10 +4756,28 @@ int sqlite3HctDbInsert(
         rc = sqlite3HctDbCsrData(&pDb->rbackcsr, &nData, &aData);
         bDel = 0;
       }
+
+#if 0
+      {
+        char *zText = hctDbRecordToText(0, aData, nData);
+        printf("%p: ROLLBACKTO(bDel=%d, iKey=%lld, aData={%s})\n", 
+            pDb, bDel, iKey, zText
+        );
+        fflush(stdout);
+      }
+#endif
+
+
+    }else{
+      return rc;
     }
   }
 
   rc = hctDbInsert(pDb, &pDb->pa, iRoot, pRec, iKey, 0, bDel, nData, aData);
+#if 0
+  printf("%p: hctDbInsert() -> %d\n", pDb, rc);
+  fflush(stdout);
+#endif
   if( rc==SQLITE_LOCKED || rc==SQLITE_BUSY ){
     if( rc==SQLITE_LOCKED ){
       rc = SQLITE_OK;
@@ -5306,6 +5374,22 @@ int sqlite3HctDbCsrData(HctDbCsr *pCsr, int *pnData, const u8 **paData){
 
   pPg = hctDbCsrPageAndCell(pCsr, &iCell);
   assert( hctPageheight(pPg)==0 );
+
+#if 0
+  if( pCsr->nRange ){
+    printf("%p: data from range page %d (from %d) (snapshotid=%lld)\n", 
+        pCsr->pDb,
+        (int)pCsr->aRange[pCsr->nRange-1].pg.iOldPg, 
+        (int)pCsr->pg.iOldPg, pCsr->pDb->iSnapshotId
+    );
+  }else{
+    printf("%p: data from page %d (snapshotid=%lld)\n", 
+        pCsr->pDb,
+        (int)pCsr->pg.iOldPg, pCsr->pDb->iSnapshotId
+    );
+  }
+  fflush(stdout);
+#endif
   
   return hctDbLoadRecord(pCsr->pDb, &pCsr->rec, pPg, iCell, pnData, paData);
 }
@@ -5849,54 +5933,82 @@ static char *hctDbRecordToText(sqlite3 *db, const u8 *aRec, int nRec){
   pHdr = aRec + sqlite3GetVarint(aRec, &nHdr);
   pBody = pEndHdr = &aRec[nHdr];
   while( pHdr<pEndHdr ){
-    u64 iSerialType;
-    Mem mem;
+    u64 iSerialType = 0;
+    int nByte = 0;
 
-    memset(&mem, 0, sizeof(mem));
-    mem.db = db;
-    mem.enc = ENC(db);
     pHdr += sqlite3GetVarint(pHdr, &iSerialType);
-    sqlite3VdbeSerialGet(pBody, (u32)iSerialType, &mem);
-    pBody += sqlite3VdbeSerialTypeLen((u32)iSerialType);
-    switch( sqlite3_value_type(&mem) ){
-      case SQLITE_TEXT: {
-        int nText = sqlite3_value_bytes(&mem);
-        const char *zText = (const char*)sqlite3_value_text(&mem);
-        assert( zText[nText]=='\0' );
-        zRet = sqlite3_mprintf("%z%s%Q", zRet, zSep, zText);
-        break;
-      }
+    nByte = sqlite3VdbeSerialTypeLen((u32)iSerialType);
 
-      case SQLITE_INTEGER: {
-        i64 iVal = sqlite3_value_int64(&mem);
-        zRet = sqlite3_mprintf("%z%s%lld", zRet, zSep, iVal);
-        break;
-      }
-
-      case SQLITE_NULL: {
+    switch( iSerialType ){
+      case 0: {  /* Null */
         zRet = sqlite3_mprintf("%z%sNULL", zRet, zSep);
         break;
       }
+      case 1: case 2: case 3: case 4: case 5: case 6: {
+        i64 iVal = 0;
 
-      case SQLITE_BLOB: {
-        int nBlob = sqlite3_value_bytes(&mem);
-        const u8 *aBlob = (const u8*)sqlite3_value_blob(&mem);
-        char *zHex = hex_encode(aBlob, nBlob);
-        zRet = sqlite3_mprintf("%z%sX'%z'", zRet, zSep, zHex);
+        switch( iSerialType ){
+          case 1: 
+            iVal = (i64)pBody[0];
+            break;
+          case 2: 
+            iVal = ((i64)pBody[0] << 8) + (i64)pBody[1];
+            break;
+          case 3: 
+            iVal = ((i64)pBody[0] << 16) + ((i64)pBody[1] << 8) + (i64)pBody[2];
+          case 4: 
+            iVal = ((i64)pBody[0] << 24) + ((i64)pBody[1] << 16) 
+                 + ((i64)pBody[2] << 8) + (i64)pBody[3];
+          case 5: 
+            iVal = ((i64)pBody[0] << 40) + ((i64)pBody[1] << 32) 
+                 + ((i64)pBody[2] << 24) + ((i64)pBody[3] << 16) 
+                 + ((i64)pBody[4] << 8) + (i64)pBody[5];
+            break;
+          case 6: 
+            iVal = ((i64)pBody[0] << 56) + ((i64)pBody[1] << 48) 
+                 + ((i64)pBody[2] << 40) + ((i64)pBody[3] << 32) 
+                 + ((i64)pBody[4] << 24) + ((i64)pBody[5] << 16) 
+                 + ((i64)pBody[6] << 8) + (i64)pBody[7];
+            break;
+        }
+
+        zRet = sqlite3_mprintf("%z%s%lld", zRet, zSep, iVal);
+        break;
+      }
+      case 7: {
+        double d;
+        u64 i = ((u64)pBody[0] << 56) + ((u64)pBody[1] << 48) 
+            + ((u64)pBody[2] << 40) + ((u64)pBody[3] << 32) 
+            + ((u64)pBody[4] << 24) + ((u64)pBody[5] << 16) 
+            + ((u64)pBody[6] << 8) + (u64)pBody[7];
+        memcpy(&d, &i, 8);
+        zRet = sqlite3_mprintf("%z%s%f", zRet, zSep, d);
         break;
       }
 
+      case 8: {  /* 0 */
+        zRet = sqlite3_mprintf("%z%s0", zRet, zSep);
+        break;
+      }
+      case 9: {  /* 1 */
+        zRet = sqlite3_mprintf("%z%s1", zRet, zSep);
+        break;
+      }
 
       default: {
-        zRet = sqlite3_mprintf("%z%sunsupported(%d)", zRet, zSep, 
-            sqlite3_value_type(&mem)
-        );
+        if( (iSerialType % 2) ){
+          /* A text value */
+          zRet = sqlite3_mprintf("%z%s%.*Q", zRet, zSep, nByte, pBody);
+        }else{  
+          /* A blob value */
+          char *zHex = hex_encode(pBody, nByte);
+          zRet = sqlite3_mprintf("%z%sX'%z'", zRet, zSep, zHex);
+        }
         break;
       }
     }
-
+    pBody += nByte;
     zSep = ",";
-    if( mem.szMalloc ) sqlite3DbFree(db, mem.zMalloc);
   }
 
 /* printf("%s\n", zRet); */
@@ -6362,6 +6474,12 @@ static int hctentryColumn(
           sqlite3_free(zRec);
         }
         hctBufferFree(&buf);
+      }else if( pFan ){
+        char *zRec = sqlite3_mprintf("iSplit0=%d", pFan->iSplit0);
+        if( zRec ){
+          sqlite3_result_text(ctx, zRec, -1, SQLITE_TRANSIENT);
+          sqlite3_free(zRec);
+        }
       }
       break;
   }
