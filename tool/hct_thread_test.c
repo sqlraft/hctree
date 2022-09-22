@@ -427,7 +427,7 @@ static char *test_thread(int iTid, void *pArg){
 
   TestUpdate *aUpdate = 0;
   char *zFile = sqlite3_mprintf(
-      "%s%d", HST_DATABASE_NAME, pTst->bSeparate ? iTid-1 : 0
+      "%s%d", HST_DATABASE_NAME, pTst->bSeparate ? iTid : 0
   );
 
   aUpdate = sqlite3_malloc(sizeof(TestUpdate) * pTst->nUpdate);
