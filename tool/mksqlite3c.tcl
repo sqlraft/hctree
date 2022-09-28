@@ -451,6 +451,7 @@ foreach file {
    hct_database.c
    hct_tmap.c
    hct_record.c
+   hct_stats.c
 } {
   copy_file $srcdir/$file
 }

@@ -337,6 +337,12 @@ int sqlite3HctSerializeRecord(
 );
 
 /*************************************************************************
+** Interface to code in hct_stats.c
+*/
+int sqlite3HctStatsInit(sqlite3*);
+
+/*************************************************************************
 ** Utility functions:
 */
 void *sqlite3HctMalloc(int *pRc, i64 nByte);
+
