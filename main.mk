@@ -79,7 +79,7 @@ LIBOBJ+= vdbe.o parse.o \
          wal.o walker.o where.o wherecode.o whereexpr.o \
          utf.o vtab.o window.o \
          hct_tree.o hct_file.o hct_database.o hct_tmap.o hct_pman.o \
-         hct_record.o
+         hct_record.o hct_stats.o
 
 LIBOBJ += sqlite3session.o
 
@@ -196,6 +196,7 @@ SRC += \
   $(TOP)/src/hct_tree.c \
   $(TOP)/src/hct_file.c \
   $(TOP)/src/hct_database.c \
+  $(TOP)/src/hct_stats.c \
   $(TOP)/src/hct_tmap.c \
   $(TOP)/src/hct_record.c \
   $(TOP)/src/hct_pman.c  \

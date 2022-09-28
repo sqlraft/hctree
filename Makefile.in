@@ -195,7 +195,7 @@ LIBOBJS0 = alter.lo analyze.lo attach.lo auth.lo \
          wal.lo walker.lo where.lo wherecode.lo whereexpr.lo \
          window.lo utf.lo vtab.lo
 
-LIBOBJS0 += hct_pman.lo hct_record.lo hctree.lo
+LIBOBJS0 += hct_pman.lo hct_record.lo hctree.lo hct_stats.lo
 LIBOBJS0 += hct_tree.lo hct_file.lo hct_database.lo hct_tmap.lo 
 
 # Object files for the amalgamation.
@@ -389,6 +389,7 @@ SRC += \
   $(TOP)/src/hct_tree.c \
   $(TOP)/src/hct_file.c \
   $(TOP)/src/hct_database.c \
+  $(TOP)/src/hct_stats.c \
   $(TOP)/src/hct_tmap.c \
   $(TOP)/src/hct_record.c \
   $(TOP)/src/hct_pman.c  \
@@ -1069,6 +1070,9 @@ hct_file.lo:	$(TOP)/src/hct_file.c $(HDR)
 
 hct_database.lo:	$(TOP)/src/hct_database.c $(HDR)
 	$(LTCOMPILE) $(TEMP_STORE) -c $(TOP)/src/hct_database.c
+
+hct_stats.lo:	$(TOP)/src/hct_stats.c $(HDR)
+	$(LTCOMPILE) $(TEMP_STORE) -c $(TOP)/src/hct_stats.c
 
 hct_tmap.lo:	$(TOP)/src/hct_tmap.c $(HDR)
 	$(LTCOMPILE) $(TEMP_STORE) -c $(TOP)/src/hct_tmap.c
