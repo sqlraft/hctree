@@ -178,6 +178,15 @@ struct HctFileServer {
 #define HCT_INIT_RECOVER2 2
 
 /*
+** Event counters used by the hctstats virtual table.
+*/
+typedef struct HctFileStats HctFileStats;
+struct HctFileStats {
+  i64 nCasAttempt;
+  i64 nCasFail;
+};
+
+/*
 ** iCurrentTid:
 **   Most recent value returned by sqlite3HctFileAllocateTransid(). This
 **   is the current TID while the upper layer is writing the database, and
@@ -199,6 +208,9 @@ struct HctFile {
   /* Copies of HctFileServer variables */
   int szPage;
   HctMapping *pMapping;
+
+  /* Event counters used by the hctstats virtual table */
+  HctFileStats stats;
 };
 
 static int hctLog2(int n){
@@ -279,14 +291,23 @@ static void *hctPagePtr(HctMapping *p, u32 iPhys){
   ];
 }
 
+static void hctFilePagemapSetDirect(HctMapping *p, u32 iSlot, u64 iNew){
+  u64 *pPtr = hctPagemapPtr(p, iSlot);
+  *pPtr = iNew;
+}
+
 /*
 ** Use a CAS instruction to the value of page-map slot iSlot. Return true
 ** if the slot is successfully set to value iNew, or false otherwise.
 */
-static int hctFilePagemapSet(HctMapping *p, u32 iSlot, u64 iOld, u64 iNew){
-  u64 *pPtr = hctPagemapPtr(p, iSlot);
-  return hctBoolCompareAndSwap64(pPtr, iOld, iNew);
+static int hctFilePagemapSet(HctFile *pFile, u32 iSlot, u64 iOld, u64 iNew){
+  u64 *pPtr = hctPagemapPtr(pFile->pMapping, iSlot);
+  pFile->stats.nCasAttempt++;
+  if(  hctBoolCompareAndSwap64(pPtr, iOld, iNew) ) return 1;
+  pFile->stats.nCasFail++;
+  return 0;
 }
+
 
 static u64 hctFilePagemapGet(HctMapping *p, u32 iSlot){
   return HctAtomicLoad( hctPagemapPtr(p, iSlot) );
@@ -302,13 +323,15 @@ static u64 hctFilePagemapGetSafe(HctMapping *p, u32 iSlot){
 /*
 ** Increment the value in slot iSlot by nIncr. Return the new value.
 */
-static u64 hctFilePagemapIncr(HctMapping *p, u32 iSlot, int nIncr){
-  u64 *pPtr = hctPagemapPtr(p, iSlot);
+static u64 hctFilePagemapIncr(HctFile *pFile, u32 iSlot, int nIncr){
+  u64 *pPtr = hctPagemapPtr(pFile->pMapping, iSlot);
   u64 iOld;
-  do {
+  while( 1 ){
     iOld = *pPtr;
-  }while( 0==(hctBoolCompareAndSwap64(pPtr, iOld, iOld+nIncr)) );
-  return iOld+nIncr;
+    pFile->stats.nCasAttempt++;
+    if( hctBoolCompareAndSwap64(pPtr, iOld, iOld+nIncr) ) return iOld+nIncr;
+    pFile->stats.nCasFail++;
+  }
 }
 
 /*
@@ -321,11 +344,12 @@ static u64 hctFilePagemapIncr(HctMapping *p, u32 iSlot, int nIncr){
 **     is not equal to parameter iOld.
 */
 static int hctFilePagemapSetLogical(
-  HctMapping *p,                  /* Mapping object */
+  HctFile *pFile,                 /* Use mapping object of this file */
   u32 iLogical,                   /* Logical page to set the physical id for */
   u64 iOld,                       /* Old physical page id */
   u64 iNew                        /* New physical page id */
 ){
+  HctMapping *p = pFile->pMapping;
   while( 1 ){
     u64 i1 = hctFilePagemapGet(p, iLogical);
     u64 iOld1 = (iOld & HCT_PAGEMAP_VMASK) | (i1 & HCT_PAGEMAP_FMASK);
@@ -341,7 +365,7 @@ static int hctFilePagemapSetLogical(
     iOld1 &= ~HCT_PMF_LOGICAL_EVICTED;
     iNew1 &= ~HCT_PMF_LOGICAL_EVICTED;
 
-    if( hctFilePagemapSet(p, iLogical, iOld1, iNew1) ){
+    if( hctFilePagemapSet(pFile, iLogical, iOld1, iNew1) ){
       return 1;
     }
     if( i1!=iOld1 ) return 0;
@@ -355,12 +379,12 @@ static int hctFilePagemapSetLogical(
 ** Set the EVICTED or IRREVICTED flag on page iLogical.
 */
 static int hctFileSetEvicted(
-  HctMapping *p,
+  HctFile *pFile,
   u32 iLogical,
   u32 iOldPg,
   int bIrrevocable
 ){
-  u64 *pPtr = hctPagemapPtr(p, iLogical);
+  u64 *pPtr = hctPagemapPtr(pFile->pMapping, iLogical);
   while( 1 ){
     u64 iOld = HctAtomicLoad(pPtr);
     u64 iNew = iOld | (
@@ -378,9 +402,9 @@ static int hctFileSetEvicted(
     }
     if( inject_cas_failure() ) return 0;
 
-    if( hctBoolCAS64(pPtr, iOld, iNew) ){
-      return 1;
-    }
+    pFile->stats.nCasAttempt++;
+    if( hctBoolCAS64(pPtr, iOld, iNew) ) return 1;
+    pFile->stats.nCasFail++;
   }
 
   assert( !"unreachable" );
@@ -392,26 +416,29 @@ static int hctFileSetEvicted(
 ** fail if the LOGICAL_IRREVICTED flag is already set. Return 1 if the
 ** flag is successfully cleared, or 0 otherwise.
 */ 
-static int hctFileClearEvicted(HctMapping *p, u32 iLogical){
-  u64 *pPtr = hctPagemapPtr(p, iLogical);
+static int hctFileClearEvicted(HctFile *pFile, u32 iLogical){
+  u64 *pPtr = hctPagemapPtr(pFile->pMapping, iLogical);
   while( 1 ){
     u64 iOld = HctAtomicLoad(pPtr);
     u64 iNew = iOld & ~HCT_PMF_LOGICAL_EVICTED;
 
     if( (iOld & HCT_PMF_LOGICAL_IRREVICTED) ) return 0;
     if( inject_cas_failure() ) return 0;
+
+    pFile->stats.nCasAttempt++;
     if( hctBoolCAS64(pPtr, iOld, iNew) ) return 1;
+    pFile->stats.nCasFail++;
   }
 
   assert( !"unreachable" );
   return 0;
 }
 
-static void hctFilePagemapZeroValue(HctMapping *p, u32 iSlot){
+static void hctFilePagemapZeroValue(HctFile *pFile, u32 iSlot){
   while( 1 ){
-    u64 i1 = hctFilePagemapGet(p, iSlot);
+    u64 i1 = hctFilePagemapGet(pFile->pMapping, iSlot);
     u64 i2 = (i1 & HCT_PMF_PHYSICAL_IN_USE);
-    if( hctFilePagemapSet(p, iSlot, i1, i2) ) return;
+    if( hctFilePagemapSet(pFile, iSlot, i1, i2) ) return;
   }
 }
 
@@ -657,11 +684,13 @@ static int hctFileServerInit(HctFileServer *p, const char *zFile){
                   | HCT_PMF_LOGICAL_IS_ROOT;
       u8 *a1 = (u8*)hctPagePtr(pMapping, HCT_ROOTPAGE_SCHEMA);
       u8 *a2 = (u8*)hctPagePtr(pMapping, HCT_ROOTPAGE_META);
-      hctFilePagemapSet(pMapping,HCT_PAGEMAP_LOGICAL_EOF,0,HCT_FIRST_LOGICAL-1);
-      hctFilePagemapSet(pMapping, HCT_PAGEMAP_PHYSICAL_EOF, 0, 2);
-      hctFilePagemapSet(pMapping, HCT_PAGEMAP_COMMITID, 0, 5);
-      hctFilePagemapSet(pMapping, 1, 0, 1 | f);
-      hctFilePagemapSet(pMapping, 2, 0, 2 | f);
+      hctFilePagemapSetDirect(
+          pMapping, HCT_PAGEMAP_LOGICAL_EOF, HCT_FIRST_LOGICAL-1
+      );
+      hctFilePagemapSetDirect(pMapping, HCT_PAGEMAP_PHYSICAL_EOF, 2);
+      hctFilePagemapSetDirect(pMapping, HCT_PAGEMAP_COMMITID, 5);
+      hctFilePagemapSetDirect(pMapping, 1, 1 | f);
+      hctFilePagemapSetDirect(pMapping, 2, 2 | f);
       sqlite3HctDbRootPageInit(0, a1, p->szPage);
       sqlite3HctDbRootPageInit(0, a2, p->szPage);
     }
@@ -927,7 +956,7 @@ static int hctFileSetFlag(HctFile *pFile, u32 iSlot, u64 mask){
     HctMapping *pMapping = pFile->pMapping;
     while( 1 ){
       u64 iVal = hctFilePagemapGet(pMapping, iSlot);
-      if( hctFilePagemapSet(pMapping, iSlot, iVal, iVal | mask) ) break;
+      if( hctFilePagemapSet(pFile, iSlot, iVal, iVal | mask) ) break;
     }
   }
   return rc;
@@ -942,7 +971,7 @@ static int hctFileClearFlag(HctFile *pFile, u32 iSlot, u64 mask){
     HctMapping *pMapping = pFile->pMapping;
     while( 1 ){
       u64 iVal = hctFilePagemapGet(pMapping, iSlot);
-      if( hctFilePagemapSet(pMapping, iSlot, iVal, iVal & ~mask) ) break;
+      if( hctFilePagemapSet(pFile, iSlot, iVal, iVal & ~mask) ) break;
     }
   }
   return rc;
@@ -1127,7 +1156,6 @@ void hctFileFreePg(
 static int hctFilePageFlush(HctFilePage *pPg){
   int rc = SQLITE_OK;
   if( pPg->aNew ){
-    HctMapping *pMap = pPg->pFile->pMapping;
     u32 iOld = pPg->iOldPg;
 
     DEBUG_PAGE_MUTEX_ENTER(pPg);
@@ -1138,7 +1166,7 @@ static int hctFilePageFlush(HctFilePage *pPg){
     DEBUG_PRINTF("\n");
     DEBUG_PAGE_MUTEX_LEAVE(pPg);
 
-    if( !hctFilePagemapSetLogical(pMap, pPg->iPg, iOld, pPg->iNewPg) ){
+    if( !hctFilePagemapSetLogical(pPg->pFile, pPg->iPg, iOld, pPg->iNewPg) ){
       rc = SQLITE_LOCKED_ERR(pPg->iPg);
     }else{
       if( iOld ){
@@ -1177,9 +1205,7 @@ int sqlite3HctFilePageEvict(HctFilePage *pPg, int bIrrevocable){
   );
   DEBUG_SLOT_VALUE(pPg->pFile, pPg->iPg);
 
-  ret = hctFileSetEvicted(
-      pPg->pFile->pMapping, pPg->iPg, pPg->iOldPg, bIrrevocable
-  );
+  ret = hctFileSetEvicted(pPg->pFile, pPg->iPg, pPg->iOldPg, bIrrevocable);
   ret = (ret ? SQLITE_OK : SQLITE_LOCKED_ERR(pPg->iPg));
 
   DEBUG_PRINTF(" rc=%d final=", ret);
@@ -1194,7 +1220,7 @@ void sqlite3HctFilePageUnevict(HctFilePage *pPg){
   DEBUG_PRINTF("f=%d: Unevicting page %d orig=", pPg->pFile->iFileId, pPg->iPg);
   DEBUG_SLOT_VALUE(pPg->pFile, pPg->iPg);
 
-  hctFileClearEvicted(pPg->pFile->pMapping, pPg->iPg);
+  hctFileClearEvicted(pPg->pFile, pPg->iPg);
 
   DEBUG_PRINTF(" final=");
   DEBUG_SLOT_VALUE(pPg->pFile, pPg->iPg);
@@ -1247,7 +1273,7 @@ int sqlite3HctFilePageNew(HctFile *pFile, HctFilePage *pPg){
     memset(pPg, 0, sizeof(*pPg));
     pPg->pFile = pFile;
     pPg->iPg = iLPg;
-    hctFilePagemapZeroValue(pFile->pMapping, iLPg);
+    hctFilePagemapZeroValue(pFile, iLPg);
     hctFilePageWrite(&rc, pPg);
   }
 
@@ -1261,7 +1287,7 @@ int sqlite3HctFileRootPgno(HctFile *pFile, u32 *piRoot){
   int rc = SQLITE_OK;
   u32 iRoot = hctFileAllocPg(&rc, pFile, 1);
   if( rc==SQLITE_OK ){
-    hctFilePagemapZeroValue(pFile->pMapping, iRoot);
+    hctFilePagemapZeroValue(pFile, iRoot);
     *piRoot = iRoot;
   }
   return rc;
@@ -1288,7 +1314,7 @@ int sqlite3HctFileRootNew(HctFile *pFile, u32 iRoot, HctFilePage *pPg){
     u64 i1 = hctFilePagemapGet(pFile->pMapping, iRoot);
     u64 i2 = (i1 & HCT_PMF_PHYSICAL_IN_USE);
     i2 |= (HCT_PMF_LOGICAL_IS_ROOT|HCT_PMF_LOGICAL_IN_USE);
-    if( hctFilePagemapSet(pFile->pMapping, iRoot, i1, i2) ) break;
+    if( hctFilePagemapSet(pFile, iRoot, i1, i2) ) break;
   }
 
   return rc;
@@ -1316,12 +1342,12 @@ int sqlite3HctFilePageWrite(HctFilePage *pPg){
 }
 
 u64 sqlite3HctFileAllocateTransid(HctFile *pFile){
-  u64 iVal = hctFilePagemapIncr(pFile->pMapping, HCT_PAGEMAP_TRANSID_EOF, 1);
+  u64 iVal = hctFilePagemapIncr(pFile, HCT_PAGEMAP_TRANSID_EOF, 1);
   pFile->iCurrentTid = (iVal & HCT_TID_MASK);
   return pFile->iCurrentTid;
 }
 u64 sqlite3HctFileAllocateCID(HctFile *pFile){
-  u64 iVal = hctFilePagemapIncr(pFile->pMapping, HCT_PAGEMAP_COMMITID, 1);
+  u64 iVal = hctFilePagemapIncr(pFile, HCT_PAGEMAP_COMMITID, 1);
   return iVal & HCT_TID_MASK;
 }
 
@@ -1354,7 +1380,7 @@ u32 sqlite3HctFilePageRangeAlloc(HctFile *pFile, int bLogical, int nPg){
 
   /* Increment the selected slot by nPg. The returned value, iNew, is the 
   ** new value of the slot - the last page in the range allocated. */
-  iNew = hctFilePagemapIncr(pFile->pMapping, iSlot, nPg);
+  iNew = hctFilePagemapIncr(pFile, iSlot, nPg);
 
   /* Return the first page number in the range of nPg allocated */
   return (iNew+1 - nPg);
@@ -1596,6 +1622,26 @@ void sqlite3HctFileICArrays(
   *paPhys = aPhys;
   *pnLogic = nLogic;
   *pnPhys = nPhys;
+}
+
+i64 sqlite3HctFileStats(sqlite3 *db, int iStat, const char **pzStat){
+  i64 iVal = -1;
+  HctFile *pFile = sqlite3HctDbFile(sqlite3HctDbFind(db, 0));
+
+  switch( iStat ){
+    case 0:
+      *pzStat = "cas_attempt";
+      iVal = pFile->stats.nCasAttempt;
+      break;
+    case 1:
+      *pzStat = "cas_fail";
+      iVal = pFile->stats.nCasFail;
+      break;
+    default:
+      break;
+  }
+
+  return iVal;
 }
 
 /*************************************************************************

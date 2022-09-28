@@ -6833,5 +6833,8 @@ int sqlite3HctVtabInit(sqlite3 *db){
   if( rc==SQLITE_OK ){
     rc = sqlite3HctPManVtabInit(db);
   }
+  if( rc==SQLITE_OK ){
+    rc = sqlite3HctStatsInit(db);
+  }
   return rc;
 }

@@ -400,6 +400,22 @@ static void updateBlobFunc(
   sqlite3_free(aCopy);
 }
 
+static char *testGetStats(Error *pErr, sqlite3 *db){
+  sqlite3_stmt *p = 0;
+  char *zRet = 0;
+
+  p = htt_sqlite3_prepare(pErr, db, 
+      "SELECT subsys||'/'||stat, val FROM hctstats"
+  );
+  while( SQLITE_ROW==sqlite3_step(p) ){
+    const char *zStat = (const char*)sqlite3_column_text(p, 0);
+    i64 iVal = sqlite3_column_int64(p, 1);
+    zRet = sqlite3_mprintf("%z\n        % -24s    %lld", zRet, zStat, iVal);
+  }
+
+  return zRet;
+}
+
 static char *test_thread(int iTid, void *pArg){
   TestCtx *pCtx = (TestCtx*)pArg;
   Testcase *pTst = pCtx->pTst;
@@ -424,6 +440,7 @@ static char *test_thread(int iTid, void *pArg){
   FastPrng prng = {0,0};
   Error err = {0,0,0};
   int nError = 0;
+  char *zStat = 0;
 
   TestUpdate *aUpdate = 0;
   char *zFile = sqlite3_mprintf(
@@ -542,11 +559,14 @@ static char *test_thread(int iTid, void *pArg){
   /* Find the number of CAS collisions */
   nCasFail = htt_sqlite3_exec_i64(&err, db, "PRAGMA hct_ncasfail");
 
-  zRet = sqlite3_mprintf(
-      "%d transactions (%d busy, %d cas-fail) at %d/second (%d lost updates)", 
+  zStat = testGetStats(&err, db);
+  zRet = sqlite3_mprintf("%d transactions "
+      "(%d busy, %d cas-fail) at %d/second (%d lost updates)%s", 
       nWrite, nBusy, (int)nCasFail,
-      (int)(((i64)nWrite * 1000) / (iEndTime - iStartTime)), nError
+      (int)(((i64)nWrite * 1000) / (iEndTime - iStartTime)), nError, zStat
   );
+  sqlite3_free(zStat);
+
   pCtx->nTotalTrans = nWrite;
   pCtx->nBusyTrans = nBusy;
 

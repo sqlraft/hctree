@@ -324,6 +324,9 @@ int sqlite3HctDbWalkTree(
 
 int sqlite3HctFileRootArray(HctFile*, u32**, int*);
 
+/* Interface used by hct_stats virtual table */
+i64 sqlite3HctFileStats(sqlite3*, int, const char**);
+
 /*************************************************************************
 ** Interface to code in hct_record.c
 */
