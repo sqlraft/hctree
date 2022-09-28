@@ -184,6 +184,8 @@ typedef struct HctFileStats HctFileStats;
 struct HctFileStats {
   i64 nCasAttempt;
   i64 nCasFail;
+  i64 nIncrAttempt;
+  i64 nIncrFail;
 };
 
 /*
@@ -328,9 +330,9 @@ static u64 hctFilePagemapIncr(HctFile *pFile, u32 iSlot, int nIncr){
   u64 iOld;
   while( 1 ){
     iOld = *pPtr;
-    pFile->stats.nCasAttempt++;
+    pFile->stats.nIncrAttempt++;
     if( hctBoolCompareAndSwap64(pPtr, iOld, iOld+nIncr) ) return iOld+nIncr;
-    pFile->stats.nCasFail++;
+    pFile->stats.nIncrFail++;
   }
 }
 
@@ -1636,6 +1638,14 @@ i64 sqlite3HctFileStats(sqlite3 *db, int iStat, const char **pzStat){
     case 1:
       *pzStat = "cas_fail";
       iVal = pFile->stats.nCasFail;
+      break;
+    case 2:
+      *pzStat = "incr_attempt";
+      iVal = pFile->stats.nIncrAttempt;
+      break;
+    case 3:
+      *pzStat = "incr_fail";
+      iVal = pFile->stats.nIncrFail;
       break;
     default:
       break;
