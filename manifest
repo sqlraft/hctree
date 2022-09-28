@@ -1,5 +1,5 @@
-C Add\sthe\shctstats\svirtual\stable.
-D 2022-09-28T17:55:21.051
+C Update\sthe\s./configure\sbuild\ssystem.
+D 2022-09-28T18:26:45.891
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -541,13 +541,14 @@ F src/func.c 8f72e88cccdee22185133c10f96ccd61dc34c5ea4b1fa9a73c237ef59b2e64f1
 F src/global.c e83ee571b79ee3adc32e380cf554cf1254bc43763d23786c71721fbcdfbbb965
 F src/hash.c 8d7dda241d0ebdafb6ffdeda3149a412d7df75102cecfc1021c98d6219823b19
 F src/hash.h 3340ab6e1d13e725571d7cee6d3e3135f0779a7d8e76a9ce0a85971fa3953c51
-F src/hctInt.h 29774711ddf960078bec613aa715d6767ddac5b47c39240a62490bdea8fee538
+F src/hctInt.h e8ced889c893c9482c61959f103f881467b1b6e9c4d981cebad48378bd408030
 F src/hctPManInt.h cbd1981c1ce383c7b36e80d670d666fc5f3cec00b67f88f14c5a3cb464505893
 F src/hctTMapInt.h 0a404ce775f3dcb2d6a4d43ea14c03a88eb57efd27f2fb9dcdf5d9791ac34be3
 F src/hct_database.c 327b162748f95ab0ec04ef867c57bc7474cae53f662343c0a4f35ab54ce45e4c
 F src/hct_file.c 1d50d5af6968fdd78a2f18e32527013d909105177d27a0ad15f6a08eec9d3ab5
 F src/hct_pman.c 4c978c31595077dd1ea0ea2f92ae0355b88661e4a074c84476c7dbd56fbeace0
 F src/hct_record.c 54b0d564be580ca29a54312f9a9abdba193b234ac56ec65a7e40109107041b25
+F src/hct_stats.c 4c859ad16e3a1339f684033b1933a9d88007ec3c0714f112b379ca082b5d5180
 F src/hct_tmap.c ed2958c0fdb17320b3a56f2de21cf5b114d07435865d55fd8be5d095219440bc
 F src/hct_tree.c edd6b65dd576eb329807ae6532f1ce75b75c9007b962a8063341d54196b61078
 F src/hctree.c eb6884049ccd467ac5954e62dfc15d3cd681fd346437386e45dd52a50f588e5e
@@ -1964,7 +1965,7 @@ F tool/mkshellc.tcl df5d249617f9cc94d5c48eb0401673eb3f31f383ecbc54e8a13ca3dd97e8
 F tool/mksourceid.c 36aa8020014aed0836fd13c51d6dc9219b0df1761d6b5f58ff5b616211b079b9
 F tool/mkspeedsql.tcl a1a334d288f7adfe6e996f2e712becf076745c97
 F tool/mksqlite3c-noext.tcl 4f7cfef5152b0c91920355cbfc1d608a4ad242cb819f1aea07f6d0274f584a7f
-F tool/mksqlite3c.tcl 6e191c9804aafda46db771757e6f88513af7a7e0c55abc6e9e428a758ed39a33
+F tool/mksqlite3c.tcl c43fbb3b967b0a6febd1c422f490322c085a4a6a98d2aee5cc852d6ba624f908
 F tool/mksqlite3h.tcl 1f5e4a1dbbbc43c83cc6e74fe32c6c620502240b66c7c0f33a51378e78fc4edf
 F tool/mksqlite3internalh.tcl eb994013e833359137eb53a55acdad0b5ae1049b
 F tool/mkvsix.tcl b9e0777a213c23156b6542842c238479e496ebf5
@@ -2026,12 +2027,9 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P 4583b688eed1ba5eac819339551fb1a82663e9fe63d54fc8f5e8084272770661
-Q +1ac8b7a217e76c8fd76bb58ddeacf281b45c94d6f73734692b06c0943c55d7d8
-R a2d3d5d342557949e9e21aa3b6eaa7b5
-T *branch * delete-key-branch
-T *sym-delete-key-branch *
-T -sym-hctree *
+P 76bf1752a1aad10a93a87a9a9d4efdd790420056ef46f802de52dba7849b1797
+Q +b3476beee34bbbcf4dc4ad73468bad79008b58ac1500bd529f080b68bcab751f
+R 5f90a3d47c056697cecca058a4b7c8f8
 U dan
-Z 8c36b37627fe53a310606f6407740449
+Z d3c96a2ebd6ba4d944575dbdc6eb9576
 # Remove this line to create a well-formed Fossil manifest.
