@@ -1,5 +1,5 @@
-C Update\sthe\s./configure\sbuild\ssystem.
-D 2022-09-28T18:04:46.378
+C Add\smore\sdetail\sto\scas\sattempt/fail\sstats\sin\shctstats\stable.
+D 2022-09-28T18:26:33.936
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -545,7 +545,7 @@ F src/hctInt.h a5831833857c3e12181cbd95717c087b49121f59d3ec4d5085b128ac3d669643
 F src/hctPManInt.h cbd1981c1ce383c7b36e80d670d666fc5f3cec00b67f88f14c5a3cb464505893
 F src/hctTMapInt.h b51104d53498d5e931d59ac3cd7ff425be96960627029e613dbbd346869ce4f4
 F src/hct_database.c 38a5bf227b89c0249ccbb04c0ef70fa05b163dc7be9fb67bee29973841e2f541
-F src/hct_file.c 1d50d5af6968fdd78a2f18e32527013d909105177d27a0ad15f6a08eec9d3ab5
+F src/hct_file.c 28d01312e92314da193d9606dcee1b4e8a6b2a79f7c3d4e012e65199c61996fe
 F src/hct_pman.c 007e3fc1b43a4a2dafb5eae007f2162ddff4e825f5fe85434c7ebfe98e4a4523
 F src/hct_record.c 54b0d564be580ca29a54312f9a9abdba193b234ac56ec65a7e40109107041b25
 F src/hct_stats.c 4c859ad16e3a1339f684033b1933a9d88007ec3c0714f112b379ca082b5d5180
@@ -2031,8 +2031,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P 1ac8b7a217e76c8fd76bb58ddeacf281b45c94d6f73734692b06c0943c55d7d8
-R 4476a44af257d8713c60c7c6e3b2d8e6
+P b3476beee34bbbcf4dc4ad73468bad79008b58ac1500bd529f080b68bcab751f
+R d10719ee5f3464ef11c49fc008abcabd
 U dan
-Z d86251b77a3408202f39613a26dc37d4
+Z 9bdfdfbe09f9f57f69aeff5b946738f8
 # Remove this line to create a well-formed Fossil manifest.
