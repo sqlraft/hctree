@@ -244,6 +244,7 @@ struct HctDatabase {
 
   HctTMap *pTmap;                 /* Transaction map (non-NULL if trans open) */
   u64 iSnapshotId;                /* Snapshot id for reading */
+  u64 iLocalMinTid;
   u64 iTid;                       /* Transaction id for writing */
   HctDbWriter pa;
   HctDbCsr rbackcsr;              /* Used to find old values during rollback */
@@ -397,8 +398,8 @@ struct HctDbCell {
 #define HCTDB_HAS_TID      0x01
 #define HCTDB_HAS_OLD      0x02
 #define HCTDB_HAS_OVFL     0x04
-#define HCTDB_HAS_RANGETID 0x10
-#define HCTDB_HAS_RANGEOLD 0x20
+#define HCTDB_HAS_RANGETID 0x08
+#define HCTDB_HAS_RANGEOLD 0x10
 
 
 #ifdef SQLITE_DEBUG
@@ -607,6 +608,7 @@ static void hctDbSnapshotOpen(HctDatabase *pDb){
     int rc = sqlite3HctTMapBegin(pTMapClient, &pDb->pTmap);
     assert( rc==SQLITE_OK );  /* todo */
     pDb->iSnapshotId = sqlite3HctFileGetSnapshotid(pDb->pFile);
+    pDb->iLocalMinTid = sqlite3HctTMapCommitedTID(pTMapClient);
     assert( pDb->iSnapshotId>0 );
   }
 }
@@ -632,6 +634,7 @@ static void hctPutU32(u8 *a, u32 val){
 */
 static int hctDbTidIsVisible(HctDatabase *pDb, u64 iTid){
 
+  if( iTid<=pDb->iLocalMinTid ) return 1;
   while( 1 ){
     u64 eState = 0;
     u64 iCid = hctDbTMapLookup(pDb, (iTid & HCT_TID_MASK), &eState);
@@ -665,35 +668,60 @@ static int hctDbTidIsVisible(HctDatabase *pDb, u64 iTid){
 ** false if the write should proceed.
 */
 static int hctDbTidIsConflict(HctDatabase *pDb, u64 iTid){
-  u64 eState = 0;
-  u64 iCid = hctDbTMapLookup(pDb, iTid & HCT_TID_MASK, &eState);
+  if( iTid<=pDb->iLocalMinTid ){
+    return 0;
+  }else{
+    u64 eState = 0;
+    u64 iCid = hctDbTMapLookup(pDb, iTid & HCT_TID_MASK, &eState);
 
-  /* This should only be called while writing or validating. */
-  assert( pDb->iTid );
-  if( iTid & HCT_TID_ROLLBACK_OVERRIDE ){
-    eState = HCT_TMAP_COMMITTED;
+    /* This should only be called while writing or validating. */
+    assert( pDb->iTid );
+    if( iTid & HCT_TID_ROLLBACK_OVERRIDE ){
+      eState = HCT_TMAP_COMMITTED;
+    }
+
+    if( eState==HCT_TMAP_WRITING || eState==HCT_TMAP_VALIDATING ) return 1;
+
+    /* It's tempting to return 0 here - how can a key that has been rolled
+    ** back be a conflict? The problem is that the previous version of the
+    ** key - the one before this rolled back version - may be a write/write
+    ** conflict. Ideally, this code would check that and return accordingly. */
+    if( eState==HCT_TMAP_ROLLBACK ) return 1;
+
+    assert( eState==HCT_TMAP_COMMITTED );
+    return (iCid > pDb->iSnapshotId);
   }
-
-  if( eState==HCT_TMAP_WRITING || eState==HCT_TMAP_VALIDATING ) return 1;
-
-  /* It's tempting to return 0 here - how can a key that has been rolled
-  ** back be a conflict? The problem is that the previous version of the
-  ** key - the one before this rolled back version - may be a write/write
-  ** conflict. Ideally, this code would check that and return accordingly. */
-  if( eState==HCT_TMAP_ROLLBACK ) return 1;
-
-  assert( eState==HCT_TMAP_COMMITTED );
-  return (iCid > pDb->iSnapshotId);
 }
 
 
 static int hctDbOffset(int iOff, int flags){
-  return iOff 
-    + ((flags & HCTDB_HAS_TID) ? 8 : 0)
+  static const int aVal[] = {
+    0+0+0+0+0, 0+0+0+0+8, 0+0+0+4+0, 0+0+0+4+8,
+    0+0+4+0+0, 0+0+4+0+8, 0+0+4+4+0, 0+0+4+4+8,
+    0+8+0+0+0, 0+8+0+0+8, 0+8+0+4+0, 0+8+0+4+8,
+    0+8+4+0+0, 0+8+4+0+8, 0+8+4+4+0, 0+8+4+4+8,
+
+    4+0+0+0+0, 4+0+0+0+8, 4+0+0+4+0, 4+0+0+4+8,
+    4+0+4+0+0, 4+0+4+0+8, 4+0+4+4+0, 4+0+4+4+8,
+    4+8+0+0+0, 4+8+0+0+8, 4+8+0+4+0, 4+8+0+4+8,
+    4+8+4+0+0, 4+8+4+0+8, 4+8+4+4+0, 4+8+4+4+8,
+  };
+
+  assert( HCTDB_HAS_RANGEOLD==0x10 );  /* +4 */
+  assert( HCTDB_HAS_RANGETID==0x08 );  /* +8 */
+  assert( HCTDB_HAS_OVFL==0x04 );      /* +4 */
+  assert( HCTDB_HAS_OLD==0x02 );       /* +4 */
+  assert( HCTDB_HAS_TID==0x01 );       /* +8 */
+
+  assert( aVal[ flags & 0x1F ]==(
+      ((flags & HCTDB_HAS_TID) ? 8 : 0)
     + ((flags & HCTDB_HAS_RANGETID) ? 8 : 0)
     + ((flags & HCTDB_HAS_OLD) ? 4 : 0)
     + ((flags & HCTDB_HAS_RANGEOLD) ? 4 : 0)
-    + ((flags & HCTDB_HAS_OVFL) ? 4 : 0);
+    + ((flags & HCTDB_HAS_OVFL) ? 4 : 0)
+  ));
+
+  return iOff + aVal[ flags&0x1F ];
 }
 
 /*
@@ -942,10 +970,10 @@ static int hctDbPageEntrySize(void *aPg){
 /*
 ** The buffer passed as the first argument contains a page that is 
 ** guaranteed to be either an intkey leaf, or an index leaf or node.
-** This function returns the offset of entry iEntry on the page and
-** populates output variable *pFlags with the entry flags.
+** This function returns a pointer to HctDbIndexEntry structure
+** associated with page entry iEntry.
 */
-static int hctDbEntryInfo(const void *aPg, int iEntry, int *pnSz, int *pFlags){
+static HctDbIndexEntry *hctDbEntryEntry(const void *aPg, int iEntry){
   int iOff;
 
   assert( (hctPagetype(aPg)==HCT_PAGETYPE_INTKEY && hctPageheight(aPg)==0)
@@ -953,22 +981,14 @@ static int hctDbEntryInfo(const void *aPg, int iEntry, int *pnSz, int *pFlags){
   );
 
   if( hctPagetype(aPg)==HCT_PAGETYPE_INTKEY ){
-    HctDbIntkeyEntry *pEntry = &((HctDbIntkeyLeaf*)aPg)->aEntry[iEntry];
-    iOff = pEntry->iOff;
-    *pFlags = pEntry->flags;
-    if( pnSz ) *pnSz = pEntry->nSize;
+    iOff = sizeof(HctDbIntkeyLeaf) + iEntry*sizeof(HctDbIntkeyEntry);
   }else if( hctPageheight(aPg)==0 ){
-    HctDbIndexEntry *pEntry = &((HctDbIndexLeaf*)aPg)->aEntry[iEntry];
-    iOff = pEntry->iOff;
-    *pFlags = pEntry->flags;
-    if( pnSz ) *pnSz = pEntry->nSize;
+    iOff = sizeof(HctDbIndexLeaf) + iEntry*sizeof(HctDbIndexEntry);
   }else{
-    HctDbIndexNodeEntry *pEntry = &((HctDbIndexNode*)aPg)->aEntry[iEntry];
-    iOff = pEntry->iOff;
-    *pFlags = pEntry->flags;
-    if( pnSz ) *pnSz = pEntry->nSize;
+    iOff = sizeof(HctDbIndexNode) + iEntry*sizeof(HctDbIndexNodeEntry);
   }
-  return iOff;
+
+  return (HctDbIndexEntry*)&((u8*)aPg)[iOff];
 }
 
 static int hctBufferGrow(HctBuffer *pBuf, int nSize){
@@ -1020,30 +1040,27 @@ static int hctDbLoadRecord(
   const u8 **paData
 ){
   int rc = SQLITE_OK;
-  int iOff;
-  int nSize;
-  int flags;
+  HctDbIndexEntry *p = hctDbEntryEntry(aPg, iCell);
 
-  iOff = hctDbEntryInfo(aPg, iCell, &nSize, &flags);
-  *pnData = nSize;
+  *pnData = p->nSize;
   if( paData ){
-    if( flags & HCTDB_HAS_OVFL ){
-      rc = hctBufferGrow(pBuf, nSize);
+    if( p->flags & HCTDB_HAS_OVFL ){
+      rc = hctBufferGrow(pBuf, p->nSize);
       *paData = pBuf->aBuf;
       if( rc==SQLITE_OK ){
         u32 pgOvfl;
-        int nLocal = hctDbLocalsize(aPg, pDb->pgsz, nSize);
+        int nLocal = hctDbLocalsize(aPg, pDb->pgsz, p->nSize);
 
-        iOff = hctDbOffset(iOff, flags);
+        int iOff = hctDbOffset(p->iOff, p->flags);
         memcpy(pBuf->aBuf, &aPg[iOff], nLocal);
         pgOvfl = hctGetU32(&aPg[iOff-sizeof(u32)]);
         iOff = nLocal;
 
-        while( rc==SQLITE_OK && iOff<nSize ){
+        while( rc==SQLITE_OK && iOff<p->nSize ){
           HctFilePage ovfl;
           rc = sqlite3HctFilePageGetPhysical(pDb->pFile, pgOvfl, &ovfl);
           if( rc==SQLITE_OK ){
-            int nCopy = MIN(pDb->pgsz-8, nSize-iOff);
+            int nCopy = MIN(pDb->pgsz-8, p->nSize-iOff);
             memcpy(&pBuf->aBuf[iOff],&ovfl.aOld[sizeof(HctDbPageHdr)],nCopy);
             iOff += nCopy;
             pgOvfl = ((HctDbPageHdr*)ovfl.aOld)->iPeerPg;
@@ -1052,7 +1069,7 @@ static int hctDbLoadRecord(
         }
       }
     }else{
-      iOff = hctDbOffset(iOff, flags);
+      int iOff = hctDbOffset(p->iOff, p->flags);
       *paData = &aPg[iOff];
     }
   }
@@ -1809,9 +1826,8 @@ static void hctDbCellGetByIdx(
   int iIdx,
   HctDbCell *pCell
 ){
-  int flags;
-  int iOff = hctDbEntryInfo(aPg, iIdx, 0, &flags);
-  hctDbCellGet(pDb, &aPg[iOff], flags, pCell);
+  HctDbIndexEntry *p = hctDbEntryEntry(aPg, iIdx);
+  hctDbCellGet(pDb, &aPg[p->iOff], p->flags, pCell);
 }
 
 static u8 hctDbCellToFlags(HctDbCell *pCell){
@@ -2131,11 +2147,20 @@ static void hctDbCsrGetRange(
 ** to the current transaction, or false otherwise.
 */
 static int hctDbCurrentIsVisible(HctDbCsr *pCsr){
-  HctDbCell cell;
   int iCell = 0;
+  HctDbIndexEntry *p;
   const u8 *aPg = hctDbCsrPageAndCell(pCsr, &iCell);
-  hctDbCellGetByIdx(pCsr->pDb, aPg, iCell, &cell);
-  return hctDbTidIsVisible(pCsr->pDb, cell.iTid);
+  u64 iTid = 0;
+
+  if( pCsr->pKeyInfo ){
+    p = &((HctDbIndexLeaf*)aPg)->aEntry[iCell];
+  }else{
+    p = (HctDbIndexEntry*)&((HctDbIntkeyLeaf*)aPg)->aEntry[iCell];
+  }
+  if( (p->flags & HCTDB_HAS_TID)==0 ) return 1;
+  memcpy(&iTid, &aPg[p->iOff], sizeof(u64));
+
+  return hctDbTidIsVisible(pCsr->pDb, iTid);
 }
 
 /*
@@ -4122,8 +4147,9 @@ static int hctDbDelete(
   u64 iTidValue = pDb->iTid | (pDb->bRollback ? HCT_TID_ROLLBACK_OVERRIDE : 0);
   int rc = SQLITE_OK;
 
-  int iPrevOff = 0;
   int prevFlags = 0;
+  HctDbIndexEntry *pPrev = 0;
+
   int nLocalSz = 0;
   u8 *aTarget = p->writepg.aPg[pOp->iPg].aNew;
   int bLeftmost = (hctIsLeftmost(aTarget) && pOp->iInsert==0);
@@ -4186,8 +4212,11 @@ nCall++;
   }
 
   /* Load the cell immediately before the one just removed */
-  iPrevOff = hctDbEntryInfo(aTarget, pOp->iInsert, &pOp->nEntrySize,&prevFlags);
-  hctDbCellGet(pDb, &aTarget[iPrevOff], prevFlags, &prev);
+  pPrev = hctDbEntryEntry(aTarget, pOp->iInsert);
+  pOp->nEntrySize = pPrev->nSize;
+  prevFlags = pPrev->flags;
+
+  hctDbCellGet(pDb, &aTarget[pPrev->iOff], pPrev->flags, &prev);
   nLocalSz = hctDbLocalsize(aTarget, pDb->pgsz, pOp->nEntrySize);
   if( bLeftmost ){
     prev.iTid = LARGEST_TID;
@@ -4366,10 +4395,18 @@ static int hctDbWriteWriteConflict(
   assert( p->iHeight==0 && pDb->bRollback==0 );
 
   if( bClobber ){
-    HctDbCell cell;
-    hctDbCellGetByIdx(pDb, aTarget, pOp->iInsert, &cell);
-    if( hctDbTidIsConflict(pDb, cell.iTid) ){
-      rc = HCT_SQLITE_BUSY;
+    HctDbIndexEntry *pE;
+    if( pKey ){
+      pE = &((HctDbIndexLeaf*)aTarget)->aEntry[pOp->iInsert];
+    }else{
+      pE = (HctDbIndexEntry*)&((HctDbIntkeyLeaf*)aTarget)->aEntry[pOp->iInsert];
+    }
+    if( pE->flags & HCTDB_HAS_TID ){
+      u64 iTid;
+      memcpy(&iTid, &aTarget[pE->iOff], sizeof(u64));
+      if( hctDbTidIsConflict(pDb, iTid) ){
+        rc = HCT_SQLITE_BUSY;
+      }
     }
   }else if( pOp->iInsert>0 ){
     int iCell = 0;
@@ -6405,12 +6442,9 @@ static int hctentryColumn(
     case 10: /* ovfl */
       if( pIntkey || pIndex || pIndexNode ){
         u8 *aPg = pCur->pg.aOld;
-        int iOff;
-        int flags;
         HctDbCell cell;
-
-        iOff = hctDbEntryInfo(aPg, pCur->iEntry, 0, &flags);
-        hctDbCellGet(pCur->pDb, &aPg[iOff], flags, &cell);
+        HctDbIndexEntry *p = hctDbEntryEntry(aPg, pCur->iEntry);
+        hctDbCellGet(pCur->pDb, &aPg[p->iOff], p->flags, &cell);
 
         if( i==6 && cell.iTid ){
           i64 iVal = (cell.iTid & HCT_TID_MASK);
