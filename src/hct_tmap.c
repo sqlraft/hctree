@@ -126,6 +126,15 @@ struct HctTMapRef {
 #define HCT_TMAPREF_SERVER 0x02
 #define HCT_TMAPREF_BOTH   0x03
 
+/*
+** Event counters used by the hctstats virtual table.
+*/
+typedef struct HctTMapStats HctTMapStats;
+struct HctTMapStats {
+  i64 nMutex;
+  i64 nMutexBlock;
+};
+
 
 struct HctTMapClient {
   HctTMapServer *pServer;
@@ -135,6 +144,7 @@ struct HctTMapClient {
   u64 iThisTid;                   /* TID of current/last transaction */
   u64 iLocalMinTid;
   HctTMapRef aRef[2];             /* Pair of tmap references */
+  HctTMapStats stats;
 };
 
 /*
@@ -157,7 +167,7 @@ struct HctTMapServer {
   HctTMapFull *pList;             /* List of tmaps. Newest first */
 };
 
-#define HCT_TMAP_NTIDSTEP 64
+#define HCT_TMAP_NTIDSTEP 128
 
 struct HctTMapFull {
   HctTMap m;
@@ -165,7 +175,20 @@ struct HctTMapFull {
   HctTMapFull *pNext;             /* Next entry in HctTMapServer.pList */
 };
 
+static void hctTMapMutexEnter(HctTMapClient *pClient){
+  sqlite3_mutex *pMutex = pClient->pServer->pMutex;
+  pClient->stats.nMutex++;
+  if( sqlite3_mutex_try(pMutex)!=SQLITE_OK ){
+    pClient->stats.nMutexBlock++;
+    sqlite3_mutex_enter(pMutex);
+  }
+}
+
+
+#if 0
 #define ENTER_TMAP_MUTEX(pClient) sqlite3_mutex_enter(pClient->pServer->pMutex)
+#endif
+#define ENTER_TMAP_MUTEX(pClient) hctTMapMutexEnter(pClient)
 #define LEAVE_TMAP_MUTEX(pClient) sqlite3_mutex_leave(pClient->pServer->pMutex)
 
 /*
@@ -686,5 +709,25 @@ int sqlite3HctTMapClientPragmaTidStep(HctTMapClient *p, int iVal){
   return iRet;
 }
 
+i64 sqlite3HctTMapStats(sqlite3 *db, int iStat, const char **pzStat){
+  HctTMapClient *pClient = 0;
+  i64 iVal = -1;
+
+  pClient = sqlite3HctFileTMapClient(sqlite3HctDbFile(sqlite3HctDbFind(db, 0)));
+  switch( iStat ){
+    case 0:
+      *pzStat = "mutex_attempt";
+      iVal = pClient->stats.nMutex;
+      break;
+    case 1:
+      *pzStat = "mutex_block";
+      iVal = pClient->stats.nMutexBlock;
+      break;
+    default:
+      break;
+  }
+
+  return iVal;
+}
 
 

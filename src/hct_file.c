@@ -186,6 +186,8 @@ struct HctFileStats {
   i64 nCasFail;
   i64 nIncrAttempt;
   i64 nIncrFail;
+  i64 nMutex;
+  i64 nMutexBlock;
 };
 
 /*
@@ -709,6 +711,15 @@ static int hctFileServerInit(HctFileServer *p, const char *zFile){
   return rc;
 }
 
+static void hctFileEnterServerMutex(HctFile *pFile){
+  sqlite3_mutex *pMutex = pFile->pServer->pMutex;
+  pFile->stats.nMutex++;
+  if( sqlite3_mutex_try(pMutex)!=SQLITE_OK ){
+    pFile->stats.nMutexBlock++;
+    sqlite3_mutex_enter(pMutex);
+  }
+}
+
 /*
 ** This is called to ensure that the mapping currently held by client
 ** pFile contains at least nChunk chunks.
@@ -718,7 +729,7 @@ static int hctFileGrowMapping(HctFile *pFile, int nChunk){
   if( pFile->pMapping->nChunk<nChunk ){
     HctFileServer *p = pFile->pServer;
     HctMapping *pOld;
-    sqlite3_mutex_enter(p->pMutex);
+    hctFileEnterServerMutex(pFile);
     hctMappingUnref(pFile->pMapping);
     pFile->pMapping = 0;
     pOld = p->pMapping;
@@ -1646,6 +1657,14 @@ i64 sqlite3HctFileStats(sqlite3 *db, int iStat, const char **pzStat){
     case 3:
       *pzStat = "incr_fail";
       iVal = pFile->stats.nIncrFail;
+      break;
+    case 4:
+      *pzStat = "mutex_attempt";
+      iVal = pFile->stats.nMutex;
+      break;
+    case 5:
+      *pzStat = "mutex_block";
+      iVal = pFile->stats.nMutexBlock;
       break;
     default:
       break;

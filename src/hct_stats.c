@@ -37,7 +37,10 @@ struct HctStatsSubsys {
 };
 
 static HctStatsSubsys aHctStatGlobal[] = {
-  { "file", sqlite3HctFileStats }
+  { "file", sqlite3HctFileStats },
+  { "db", sqlite3HctDbStats },
+  { "tmap", sqlite3HctTMapStats },
+  { "pman", sqlite3HctPManStats }
 };
 
 #define HCTSTATS_SCHEMA "CREATE TABLE x(subsys, stat, val)"

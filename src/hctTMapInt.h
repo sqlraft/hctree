@@ -118,4 +118,5 @@ int sqlite3HctTMapClientPragmaTidStep(HctTMapClient *p, int iVal);
 */
 u64 sqlite3HctTMapCommitedTID(HctTMapClient*);
 
+i64 sqlite3HctTMapStats(sqlite3 *db, int iStat, const char **pzStat);
 

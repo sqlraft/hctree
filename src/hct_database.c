@@ -228,6 +228,17 @@ struct HctDbWriter {
 };
 
 /*
+** This structure, an instance of which is part of each HctDatabase object,
+** holds counters collected for the hctstats structure.
+*/
+typedef struct HctDatabaseStats HctDatabaseStats;
+struct HctDatabaseStats {
+  i64 nBalanceIntkey;
+  i64 nBalanceIndex;
+  i64 nBalanceSingle;
+};
+
+/*
 ** pScannerList:
 **   Linked list of cursors used by the current transaction. If this turns
 **   out to be a write transaction, this list is used to detect read/write
@@ -251,6 +262,8 @@ struct HctDatabase {
 
   int bRollback;                  /* True when in rollback mode */
   int bValidate;                  /* True when in validate mode */
+
+  HctDatabaseStats stats;
 };
 
 /* 
@@ -1863,7 +1876,6 @@ static int hctDbFollowRangeOld(HctDatabase *pDb, u64 iRangeTid, int *pbMerge){
   int bRet = 0;
   int bMerge = 0;
   u64 iRangeTidValue = (iRangeTid & HCT_TID_MASK);
-  u64 iLocalMinTid = hctDbLocalMinTid(pDb);
 
   /* HctDatabase.iTid is set when writing, validating or rolling back a
   ** transaction. When writing or validating, old-ranges created by this
@@ -1872,7 +1884,7 @@ static int hctDbFollowRangeOld(HctDatabase *pDb, u64 iRangeTid, int *pbMerge){
   i64 iDoNotMergeTid = ((pDb->bRollback==0) ? pDb->iTid : 0);
   if( pDb->bValidate ) iDoNotMergeTid = 0;
 
-  if( iRangeTidValue>iLocalMinTid ){
+  if( iRangeTidValue>pDb->iLocalMinTid ){
     bRet = 1;
     if( iDoNotMergeTid!=iRangeTid ){
       bMerge = (0==hctDbTidIsVisible(pDb, iRangeTid));
@@ -3515,6 +3527,7 @@ static void hctDbBalanceGetCellSz(
       if( nNewCell ){
         pSz->nByte = szEntry + nNewCell;
         pSz->iPg = -1;
+        pSz->iEntry = 0;
       }else{
         iSz--;
       }
@@ -3577,6 +3590,14 @@ static int hctDbBalance(
   int aPgRem[5];
   int aPgFirst[6];
 
+  if( p->writecsr.pKeyInfo ){
+    pDb->stats.nBalanceIntkey++;
+  }else{
+    pDb->stats.nBalanceIndex++;
+  }
+  assert( bSingle==0 || bSingle==1 );
+  pDb->stats.nBalanceSingle += bSingle;
+
   /* If the HctDbWriter.writepg.aPg[] array still contains a single page, load
   ** some peer pages into it. */
   assert( p->discardpg.nPg>=0 );
@@ -3613,7 +3634,8 @@ static int hctDbBalance(
 
   /* Allocate enough space for the cell-size array and for a copy of 
   ** each input page. */
-  pFree = (u8*)sqlite3MallocZero(nIn*pDb->pgsz + nSzAlloc*sizeof(HctDbCellSz));
+  // pFree = (u8*)sqlite3MallocZero(nIn*pDb->pgsz + nSzAlloc*sizeof(HctDbCellSz));
+  pFree = (u8*)sqlite3_malloc(nIn*pDb->pgsz + nSzAlloc*sizeof(HctDbCellSz));
   if( pFree==0 ) return SQLITE_NOMEM;
   aSz = (HctDbCellSz*)&pFree[pDb->pgsz * nIn];
 
@@ -5829,6 +5851,30 @@ char *sqlite3HctDbIntegrityCheck(
   sqlite3_free(c.aLogic);
   sqlite3_free(aFileRoot);
   return c.zErr;
+}
+
+i64 sqlite3HctDbStats(sqlite3 *db, int iStat, const char **pzStat){
+  i64 iVal = -1;
+  HctDatabase *pDb = sqlite3HctDbFind(db, 0);
+
+  switch( iStat ){
+    case 0:
+      *pzStat = "balance_intkey";
+      iVal = pDb->stats.nBalanceIntkey;
+      break;
+    case 1:
+      *pzStat = "balance_index";
+      iVal = pDb->stats.nBalanceIndex;
+      break;
+    case 2:
+      *pzStat = "balance_single";
+      iVal = pDb->stats.nBalanceSingle;
+      break;
+    default:
+      break;
+  }
+
+  return iVal;
 }
 
 /*************************************************************************

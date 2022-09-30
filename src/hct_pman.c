@@ -90,6 +90,15 @@ struct HctPManServer {
 };
 
 /*
+** Event counters used by the hctstats virtual table.
+*/
+typedef struct HctPManStats HctPManStats;
+struct HctPManStats {
+  i64 nMutex;
+  i64 nMutexBlock;
+};
+
+/*
 ** apAcc[]:
 **   These two pagesets are used to accumulate physical (apAcc[0]) and
 **   logical (apAcc[1]) page ids as they are freed by the client. Once
@@ -106,7 +115,22 @@ struct HctPManClient {
   HctFile *pFile;
   HctPManPageset *apAcc[2];       /* Accumulating physical, logical sets */
   HctPManPageset *apUse[2];       /* Physical, logical sets for using */
+
+  HctPManStats stats;
 };
+
+static void hctPManMutexEnter(HctPManClient *pClient){
+  sqlite3_mutex *pMutex = pClient->pServer->pMutex;
+  pClient->stats.nMutex++;
+  if( sqlite3_mutex_try(pMutex)!=SQLITE_OK ){
+    pClient->stats.nMutexBlock++;
+    sqlite3_mutex_enter(pMutex);
+  }
+}
+
+
+#define ENTER_PMAN_MUTEX(pClient) hctPManMutexEnter(pClient)
+#define LEAVE_PMAN_MUTEX(pClient) sqlite3_mutex_leave(pClient->pServer->pMutex)
 
 /*
 ** Utility malloc function for hct.
@@ -278,12 +302,12 @@ void sqlite3HctPManClientFree(HctPManClient *pClient){
     ** server mutex. The two apUse[] pagesets go to the front of the lists - 
     ** so that they can be reused immediately. The two apAcc[] pagesets go on
     ** the end of the lists. */
-    sqlite3_mutex_enter(p->pMutex);
+    ENTER_PMAN_MUTEX(pClient);
     hctPManServerHandoff(p, pClient->apUse[0], 0, 1);
     hctPManServerHandoff(p, pClient->apUse[1], 1, 1);
     hctPManServerHandoff(p, pClient->apAcc[0], 0, 0);
     hctPManServerHandoff(p, pClient->apAcc[1], 1, 0);
-    sqlite3_mutex_leave(p->pMutex);
+    LEAVE_PMAN_MUTEX(pClient);
 
     sqlite3_free(pClient);
   }
@@ -382,7 +406,7 @@ u32 sqlite3HctPManAllocPg(
     u32 iRoot = 0;
 
     /* First try to obtain a new pageset object from the server */
-    sqlite3_mutex_enter(p->pMutex);
+    ENTER_PMAN_MUTEX(pClient);
     if( p->nTree>0 && p->aTree[0].iTid<=iSafeTid ){
       iRoot = p->aTree[0].iRoot;
       p->nTree--;
@@ -395,7 +419,7 @@ u32 sqlite3HctPManAllocPg(
         if( pList->pHead==0 ) pList->pTail = 0;
       }
     }
-    sqlite3_mutex_leave(p->pMutex);
+    LEAVE_PMAN_MUTEX(pClient);
 
     if( iRoot && *pRc==SQLITE_OK ){
       *pRc = hctPManFreeTreeNow(pClient, pFile, iRoot);
@@ -461,9 +485,9 @@ void sqlite3HctPManFreePg(
     HctPManServer *p = pClient->pServer;
 
     /* Hand pAcc off to the server. */
-    sqlite3_mutex_enter(p->pMutex);
+    ENTER_PMAN_MUTEX(pClient);
     hctPManServerHandoff(p, pAcc, bLogical, 0);
-    sqlite3_mutex_leave(p->pMutex);
+    LEAVE_PMAN_MUTEX(pClient);
 
     pAcc = 0;
   }
@@ -506,8 +530,7 @@ int sqlite3HctPManFreeTree(
     int nNew;
     HctPManTree *aNew;
 
-    sqlite3_mutex_enter(pServer->pMutex);
-
+    ENTER_PMAN_MUTEX(p);
     nNew = pServer->nTree + 1;
     aNew = (HctPManTree*)sqlite3_realloc(
         pServer->aTree, nNew*sizeof(HctPManTree)
@@ -520,8 +543,7 @@ int sqlite3HctPManFreeTree(
       pServer->nTree++;
       pServer->aTree = aNew;
     }
-
-    sqlite3_mutex_leave(pServer->pMutex);
+    LEAVE_PMAN_MUTEX(p);
   }
   return rc;
 }
@@ -779,7 +801,7 @@ static int pmanFilter(
       sqlite3HctDbFile(sqlite3HctDbFind(pTab->db, 0))
   );
 
-  sqlite3_mutex_enter(pClient->pServer->pMutex);
+  ENTER_PMAN_MUTEX(pClient);
   for(ii=0; ii<2; ii++){
     nRow += hctPagesetSize(pClient->apAcc[ii]);
     nRow += hctPagesetSize(pClient->apUse[ii]);
@@ -797,7 +819,7 @@ static int pmanFilter(
       }
     }
   }
-  sqlite3_mutex_leave(pClient->pServer->pMutex);
+  LEAVE_PMAN_MUTEX(pClient);
 
   return rc;
 }
@@ -848,5 +870,26 @@ int sqlite3HctPManVtabInit(sqlite3 *db){
   return sqlite3_create_module(db, "hctpman", &pmanModule, 0);
 }
 
+
+i64 sqlite3HctPManStats(sqlite3 *db, int iStat, const char **pzStat){
+  HctPManClient *pClient = 0;
+  i64 iVal = -1;
+
+  pClient = sqlite3HctFilePManClient(sqlite3HctDbFile(sqlite3HctDbFind(db, 0)));
+  switch( iStat ){
+    case 0:
+      *pzStat = "mutex_attempt";
+      iVal = pClient->stats.nMutex;
+      break;
+    case 1:
+      *pzStat = "mutex_block";
+      iVal = pClient->stats.nMutexBlock;
+      break;
+    default:
+      break;
+  }
+
+  return iVal;
+}
 
 

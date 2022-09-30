@@ -322,7 +322,8 @@ struct Testcase {
   int nUpdate;
   int nThread;
   int nTryBeforeUnevict;
-  int bSeparate;
+  int bSeparate;                  /* Separate database per thread */
+  int bSeptab;                    /* Separate table per thread */
   int nSleep;
   int nScan;
   int szScan;
@@ -482,8 +483,6 @@ static char *test_thread(int iTid, void *pArg){
   if( err.rc ) goto test_out;
   sqlite3_bind_int(pWrite, 1, iTid);
 
-  CALLGRIND_START_INSTRUMENTATION;
-
   iStartTime = iIntervalTime = htt_current_time();
   while( err.rc==SQLITE_OK ){
     i64 iNow = htt_current_time();
@@ -538,8 +537,6 @@ static char *test_thread(int iTid, void *pArg){
       nWrite++;
     }
   }
-
-  CALLGRIND_STOP_INSTRUMENTATION;
 
   iEndTime = htt_current_time();
   if( iEndTime<=iStartTime ) iEndTime = iStartTime + 1;
@@ -735,12 +732,14 @@ static void runtest(Testcase *pTst){
   /* Set the "time-to-stop" global */
   g.iTimeToStop = htt_current_time() + (i64)pTst->nSecond * 1000;
 
+  CALLGRIND_START_INSTRUMENTATION;
   printf("launching %d threads\n", pTst->nThread);
   fflush(stdout);
   for(ii=0; ii<pTst->nThread; ii++){
     htt_launch_thread(&err, &threadset, test_thread, (void*)&aCtx[ii]);
   }
   htt_join_threads(&err, &threadset);
+  CALLGRIND_STOP_INSTRUMENTATION;
 
   for(iDb=0; iDb<pTst->nThread; iDb++){
     sqlite3_free(aCtx[iDb].aVal);
@@ -850,8 +849,11 @@ int main(int argc, char **argv){
       if( nArg>2 && nArg<=11 && memcmp("-nmininsert", zArg, nArg)==0 ){
         pnVal = &tst.nMinInsert;
       }else
-      if( nArg>2 && nArg<=9 && memcmp("-separate", zArg, nArg)==0 ){
+      if( nArg>4 && nArg<=9 && memcmp("-separate", zArg, nArg)==0 ){
         pnVal = &tst.bSeparate;
+      }else
+      if( nArg>4 && nArg<=7 && memcmp("-septab", zArg, nArg)==0 ){
+        pnVal = &tst.bSeptab;
       }else
       if( nArg>3 && nArg<=7 && memcmp("-nsleep", zArg, nArg)==0 ){
         pnVal = &tst.nSleep;

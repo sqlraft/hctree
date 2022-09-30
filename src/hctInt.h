@@ -171,6 +171,7 @@ char *sqlite3HctDbLogFile(HctDatabase*);
 i64 sqlite3HctDbNCasFail(HctDatabase*);
 
 char *sqlite3HctDbIntegrityCheck(HctDatabase*, u32 *aRoot, int nRoot, int*);
+i64 sqlite3HctDbStats(sqlite3 *db, int iStat, const char **pzStat);
 
 /*************************************************************************
 ** Interface to code in hct_file.c
