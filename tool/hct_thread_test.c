@@ -142,10 +142,37 @@ static void htt_sqlite3_exec_printf(
     rc = sqlite3_exec(db, zSql, 0, 0, 0);
     if( rc!=SQLITE_OK ){
       pErr->rc = rc;
-      pErr->zErr = sqlite3_mprintf("sqlite3_prepare: %s", sqlite3_errmsg(db));
+      pErr->zErr = sqlite3_mprintf("sqlite3_exec: %s", sqlite3_errmsg(db));
     }
+    sqlite3_free(zSql);
   }
 }
+
+static sqlite3_stmt *htt_sqlite3_prepare_printf(
+  Error *pErr, 
+  sqlite3 *db, 
+  const char *zFmt,
+  ...
+){
+  sqlite3_stmt *pRet = 0;
+  if( pErr->rc==SQLITE_OK ){
+    int rc;
+    char *zSql = 0;
+    va_list ap;
+    va_start(ap, zFmt);
+    zSql = sqlite3_vmprintf(zFmt, ap);
+    va_end(ap);
+
+    rc = sqlite3_prepare_v2(db, zSql, -1, &pRet, 0);
+    if( rc!=SQLITE_OK ){
+      pErr->rc = rc;
+      pErr->zErr = sqlite3_mprintf("sqlite3_prepare: %s", sqlite3_errmsg(db));
+    }
+    sqlite3_free(zSql);
+  }
+  return pRet;
+}
+
 
 static sqlite3_stmt *htt_sqlite3_prepare(
   Error *pErr, 
@@ -447,6 +474,7 @@ static char *test_thread(int iTid, void *pArg){
   char *zFile = sqlite3_mprintf(
       "%s%d", HST_DATABASE_NAME, pTst->bSeparate ? iTid : 0
   );
+  char *zTbl = sqlite3_mprintf("tbl%d", pTst->bSeptab ? iTid : 0);
 
   aUpdate = sqlite3_malloc(sizeof(TestUpdate) * pTst->nUpdate);
 
@@ -466,18 +494,18 @@ static char *test_thread(int iTid, void *pArg){
   pCommit = htt_sqlite3_prepare(&err, db, "COMMIT");
   pRollback = htt_sqlite3_prepare(&err, db, "ROLLBACK");
   if( pTst->bOverflow==0 ){
-    pWrite = htt_sqlite3_prepare(&err, db, "UPDATE "
-        "tbl SET b=updateblob(b,?,?,?), c=hex(frandomblob(32)) WHERE a = ?"
+    pWrite = htt_sqlite3_prepare_printf(&err, db, "UPDATE "
+        "%s SET b=updateblob(b,?,?,?), c=hex(frandomblob(32)) WHERE a = ?", zTbl
     );
   }else{
-    pWrite = htt_sqlite3_prepare(&err, db, "UPDATE "
-        "tbl SET padding=frandomblob(9000), "
-                "b=updateblob(b,?,?,?), c=hex(frandomblob(32)) WHERE a = ?"
+    pWrite = htt_sqlite3_prepare_printf(&err, db, "UPDATE "
+        "%s SET padding=frandomblob(9000), "
+             "b=updateblob(b,?,?,?), c=hex(frandomblob(32)) WHERE a = ?", zTbl
     );
   }
-  pScan = htt_sqlite3_prepare(&err, db, 
-      "SELECT a,b,c FROM tbl WHERE substr(c, 1, 16)>=hex(frandomblob(8))"
-      " ORDER BY substr(c, 1, 16)"
+  pScan = htt_sqlite3_prepare_printf(&err, db, 
+      "SELECT a,b,c FROM %s WHERE substr(c, 1, 16)>=hex(frandomblob(8))"
+      " ORDER BY substr(c, 1, 16)", zTbl
   );
 
   if( err.rc ) goto test_out;
@@ -543,7 +571,7 @@ static char *test_thread(int iTid, void *pArg){
 
   /* Check that no updates made by this thread have been lost. */
   nError = 0;
-  pSelect = htt_sqlite3_prepare(&err, db, "SELECT a, b FROM tbl");
+  pSelect = htt_sqlite3_prepare_printf(&err, db, "SELECT a, b FROM %s", zTbl);
   if( pSelect ){
     while( SQLITE_ROW==sqlite3_step(pSelect) ){
       int iRow = sqlite3_column_int(pSelect, 0);
@@ -568,6 +596,7 @@ static char *test_thread(int iTid, void *pArg){
   pCtx->nBusyTrans = nBusy;
 
   sqlite3_free(aUpdate);
+  sqlite3_free(zTbl);
 
   sqlite3_finalize(pBegin);
   sqlite3_finalize(pCommit);
@@ -590,33 +619,52 @@ static void test_build_db(Error *pErr, Testcase *pTst, int iDb, TestCtx *aCtx){
   const int nInsertPerTrans = 10000;
   char *zRm = 0;
 
-  i64 nObj;
+  int nTbl = pTst->bSeptab ? pTst->nThread : 1;
+  int iTab = 0;
+
 
   /* Check if the database is already populated */
   db = htt_sqlite3_open(zFile);
-  nObj = htt_sqlite3_exec_i64(pErr, db, "SELECT count(*) FROM sqlite_schema");
-  if( nObj==pTst->nIdx+1 ){
-    i64 nRow = htt_sqlite3_exec_i64(pErr, db, "SELECT count(*) FROM tbl");
-    if( nRow==pTst->nRow ){
-      printf("reusing database %d.\n", iDb); 
-      fflush(stdout);
-      /* The database already exists. Populate the aCtx[x].aVal arrays. */
-      sqlite3_stmt *p = htt_sqlite3_prepare(pErr, db, "SELECT a, b FROM tbl");
+  for(iTab=0; iTab<nTbl; iTab++){
+    i64 nObj, nRow;
+    int bOk = 0;
+    char *zSql = sqlite3_mprintf(
+        "SELECT count(*) FROM sqlite_schema WHERE tbl_name='tbl%d'", iTab
+    );
+    nObj = htt_sqlite3_exec_i64(pErr, db, zSql);
+    sqlite3_free(zSql);
+    if( nObj!=pTst->nIdx+1 ) break;
+
+    zSql = sqlite3_mprintf("SELECT count(*) FROM tbl%d", iTab);
+    nRow = htt_sqlite3_exec_i64(pErr, db, zSql);
+    sqlite3_free(zSql);
+    if( nRow!=pTst->nRow ) break;
+  }
+
+  if( iTab==nTbl ){
+    printf("reusing database %d.\n", iDb); 
+    fflush(stdout);
+
+    /* The database already exists. Populate the aCtx[x].aVal arrays. */
+    for(iTab=0; iTab<nTbl; iTab++){
+      sqlite3_stmt *p = htt_sqlite3_prepare_printf(
+          pErr, db, "SELECT a, b FROM tbl%d", iTab
+      );
       while( sqlite3_step(p)==SQLITE_ROW ){
         int a = sqlite3_column_int(p, 0);
         const u32 *b = (u32*)sqlite3_column_blob(p, 1);
-	int iTid;
-	for(iTid=0; iTid<pTst->nThread; iTid++){
-	  if( pTst->bSeparate==0 || iDb==iTid ){
-	    aCtx[iTid].aVal[a] = b[iTid];
-	  }
-	}
+        int iTid;
+        for(iTid=0; iTid<pTst->nThread; iTid++){
+          if( pTst->bSeparate==1 && iDb!=iTid ) continue;
+          if( pTst->bSeptab==1 && iTab!=iTid ) continue;
+          aCtx[iTid].aVal[a] = b[iTid];
+        }
       }
       htt_sqlite3_reset(pErr, p);
       sqlite3_finalize(p);
-      sqlite3_close(db);
-      return;
     }
+    sqlite3_close(db);
+    return;
   }
   sqlite3_close(db);
 
@@ -630,52 +678,51 @@ static void test_build_db(Error *pErr, Testcase *pTst, int iDb, TestCtx *aCtx){
   sqlite3_free(zRm);
 
   db = htt_sqlite3_open(zFile);
-  htt_sqlite3_exec(db,
-      pTst->bOverflow==0 ?
-      " CREATE TABLE tbl("
-      "   a INTEGER PRIMARY KEY,"
-      "   b BLOB,"
-      "   c CHAR(64)"
-      ")"
-      :
-      " CREATE TABLE tbl("
-      "   a INTEGER PRIMARY KEY,"
-      "   padding BLOB DEFAULT (frandomblob(9000)),"
-      "   b BLOB,"
-      "   c CHAR(64)"
-      ");"
-  );
-  if( pTst->bOverflow && pTst->nIdx==1 ){
-    htt_sqlite3_exec(db, "CREATE INDEX i1 ON tbl(padding, c)");
-  }else{
-    for(ii=0; ii<pTst->nIdx; ii++){
-      char *zSql = sqlite3_mprintf(
-          "CREATE INDEX tbl_i%d ON tbl(substr(c, %d, 16));", ii+1, ii+1
-          );
-      htt_sqlite3_exec(db, zSql);
-      sqlite3_free(zSql);
-    }
-  }
-
   printf("building initial database %d.", iDb); 
   fflush(stdout);
-  pIns = htt_sqlite3_prepare(pErr, db, 
-      "INSERT INTO tbl(a,b,c) VALUES(NULL, zeroblob(?), hex(frandomblob(32)))"
-  );
-  sqlite3_bind_int(pIns, 1, pTst->nBlob);
-  htt_sqlite3_exec(db, "BEGIN");
-  for(ii=0; ii<pTst->nRow; ii++){
-    if( pTst->nRow>20 && ((ii+1) % (pTst->nRow / 20))==0 ){
-      printf(".");
-      fflush(stdout);
+  for(iTab=0; iTab<nTbl; iTab++){
+    htt_sqlite3_exec_printf(pErr, db,
+      " CREATE TABLE tbl%d("
+      "   a INTEGER PRIMARY KEY,"
+      "   %s"
+      "   b BLOB,"
+      "   c CHAR(64)"
+      ")", iTab, 
+      (pTst->bOverflow ? "   padding BLOB DEFAULT (frandomblob(9000))," : "")
+    );
+    if( pTst->bOverflow && pTst->nIdx==1 ){
+      htt_sqlite3_exec_printf(pErr, db, 
+          "CREATE INDEX tbl%d_i1 ON tbl%d(padding, c)", iTab, iTab
+      );
+    }else{
+      for(ii=0; ii<pTst->nIdx; ii++){
+        htt_sqlite3_exec_printf(pErr, db, 
+            "CREATE INDEX tbl%d_i%d ON tbl%d(substr(c, %d, 16));", 
+            iTab, ii+1, iTab, Ii+1
+        );
+      }
     }
 
-    sqlite3_step(pIns);
-    htt_sqlite3_reset(pErr, pIns);
+    pIns = htt_sqlite3_prepare_printf(pErr, db, 
+        "INSERT INTO tbl%d(a,b,c) "
+        "VALUES(NULL, zeroblob(?), hex(frandomblob(32)))", iTab
+    );
+    sqlite3_bind_int(pIns, 1, pTst->nBlob);
+    htt_sqlite3_exec(db, "BEGIN");
+    for(ii=0; ii<pTst->nRow; ii++){
+      if( pTst->nRow>20 && ((ii+1) % (pTst->nRow / 20))==0 ){
+        printf(".");
+        fflush(stdout);
+      }
+
+      sqlite3_step(pIns);
+      htt_sqlite3_reset(pErr, pIns);
+    }
+    htt_sqlite3_exec(db, "COMMIT");
+    sqlite3_finalize(pIns);
   }
-  htt_sqlite3_exec(db, "COMMIT");
-  sqlite3_finalize(pIns);
   printf("\n");
+  fflush(stdout);
   sqlite3_close(db);
 }
 
