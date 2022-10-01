@@ -44,8 +44,10 @@
 
 #define HCT_PAGEMAP_LOGICAL_EOF      3
 #define HCT_PAGEMAP_PHYSICAL_EOF     4
-#define HCT_PAGEMAP_TRANSID_EOF      5
-#define HCT_PAGEMAP_COMMITID         6
+
+#define HCT_PAGEMAP_TRANSID_EOF      16
+
+#define HCT_PAGEMAP_COMMITID         24
 
 #define HCT_PMF_LOGICAL_EVICTED    (((u64)0x00000001)<<56)
 #define HCT_PMF_LOGICAL_IRREVICTED (((u64)0x00000002)<<56)
@@ -239,12 +241,14 @@ static int hctBoolCAS64(u64 *pPtr, u64 iOld, u64 iNew){
 }
 
 static int hctBoolCompareAndSwap64(u64 *pPtr, u64 iOld, u64 iNew){
+#if 0
   if( g.nCASFailCnt>0 ){
     if( (--g.nCASFailCnt)==0 ){
       g.nCASFailCnt = g.nCASFailReset;
       return 0;
     }
   }
+#endif
   return HctCASBool(pPtr, iOld, iNew);
 }
 

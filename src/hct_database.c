@@ -256,9 +256,9 @@ struct HctDatabase {
   HctTMap *pTmap;                 /* Transaction map (non-NULL if trans open) */
   u64 iSnapshotId;                /* Snapshot id for reading */
   u64 iLocalMinTid;
-  u64 iTid;                       /* Transaction id for writing */
   HctDbWriter pa;
   HctDbCsr rbackcsr;              /* Used to find old values during rollback */
+  u64 iTid;                       /* Transaction id for writing */
 
   int bRollback;                  /* True when in rollback mode */
   int bValidate;                  /* True when in validate mode */
@@ -1851,11 +1851,6 @@ static u8 hctDbCellToFlags(HctDbCell *pCell){
   if( pCell->iRangeTid ) flags |= HCTDB_HAS_RANGETID;
   if( pCell->iRangeOld ) flags |= HCTDB_HAS_RANGEOLD;
   return flags;
-}
-
-static u64 hctDbLocalMinTid(HctDatabase *pDb){
-  HctTMapClient *pTMapClient = sqlite3HctFileTMapClient(pDb->pFile);
-  return sqlite3HctTMapCommitedTID(pTMapClient);
 }
 
 /*
@@ -3590,7 +3585,7 @@ static int hctDbBalance(
   int aPgRem[5];
   int aPgFirst[6];
 
-  if( p->writecsr.pKeyInfo ){
+  if( p->writecsr.pKeyInfo==0 ){
     pDb->stats.nBalanceIntkey++;
   }else{
     pDb->stats.nBalanceIndex++;
@@ -4866,6 +4861,7 @@ static u64 *hctDbFindTMapEntry(HctTMap *pTmap, u64 iTid){
   assert( pTmap->iFirstTid+(pTmap->nMap*HCT_TMAP_PAGESIZE)>iTid );
   iMap = (iTid - pTmap->iFirstTid) / HCT_TMAP_PAGESIZE;
   iEntry = (iTid - pTmap->iFirstTid) % HCT_TMAP_PAGESIZE;
+
   return &pTmap->aaMap[iMap][iEntry];
 }
 

@@ -26,6 +26,8 @@
 
 #define HCT_TMAP_PAGESIZE 1024
 
+#define HCT_TMAP_ENTRYSLOT(iEntry) ((iEntry >> 7) + ((iEntry & 0x7) << 3))
+
 /*
 ** Transaction state - stored in the MSB of the 8-byte transaction map entry.
 */

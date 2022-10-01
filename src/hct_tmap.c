@@ -730,4 +730,3 @@ i64 sqlite3HctTMapStats(sqlite3 *db, int iStat, const char **pzStat){
   return iVal;
 }
 
-

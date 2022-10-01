@@ -24,7 +24,8 @@ struct HctConfig {
 #define HCT_TID_MASK  ((((u64)0x00FFFFFF) << 32)|0xFFFFFFFF)
 #define HCT_PGNO_MASK ((u64)0xFFFFFFFF)
 
-#define HCT_DEFAULT_NPAGESET           64
+#define HCT_DEFAULT_NPAGESET          256
+
 #define HCT_DEFAULT_NTRYBEFOREUNEVICT 100
 
 #include <hctTMapInt.h>

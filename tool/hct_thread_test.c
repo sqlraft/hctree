@@ -698,7 +698,7 @@ static void test_build_db(Error *pErr, Testcase *pTst, int iDb, TestCtx *aCtx){
       for(ii=0; ii<pTst->nIdx; ii++){
         htt_sqlite3_exec_printf(pErr, db, 
             "CREATE INDEX tbl%d_i%d ON tbl%d(substr(c, %d, 16));", 
-            iTab, ii+1, iTab, Ii+1
+            iTab, ii+1, iTab, ii+1
         );
       }
     }
@@ -830,7 +830,7 @@ static void runtest(Testcase *pTst){
   }
 
 
-  if( pTst->bSeparate==0 ){
+  if( pTst->bSeparate==0 && pTst->bSeptab==0 ){
     htt_sqlite3_exec(db, "PRAGMA hct_quiescent_integrity_check=1");
     pIC = htt_sqlite3_prepare(&err, db, "PRAGMA integrity_check");
     if( pIC ){
