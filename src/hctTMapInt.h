@@ -24,9 +24,14 @@
 /*
 */
 
-#define HCT_TMAP_PAGESIZE 1024
+/* #define HCT_TMAP_PAGESIZE 1024 */
 
-#define HCT_TMAP_ENTRYSLOT(iEntry) ((iEntry >> 7) + ((iEntry & 0x7) << 3))
+#define HCT_TMAP_PGSZBITS 10
+#define HCT_TMAP_PAGESIZE (1 << HCT_TMAP_PGSZBITS)
+
+#define HCT_TMAP_ENTRYSLOT(iEntry) \
+    (((iEntry) >> 3) + (((iEntry) & 0x07) << (HCT_TMAP_PGSZBITS-3)))
+// #define HCT_TMAP_ENTRYSLOT(iEntry) (((iEntry) >> 3) + (((iEntry) & 0x07) << 10))
 
 /*
 ** Transaction state - stored in the MSB of the 8-byte transaction map entry.

@@ -167,7 +167,8 @@ struct HctTMapServer {
   HctTMapFull *pList;             /* List of tmaps. Newest first */
 };
 
-#define HCT_TMAP_NTIDSTEP 128
+// #define HCT_TMAP_NTIDSTEP 128
+#define HCT_TMAP_NTIDSTEP 512
 
 struct HctTMapFull {
   HctTMap m;
@@ -412,6 +413,7 @@ static void hctTMapDropRef(HctTMapServer *p, HctTMapRef *pRef){
 static u64 *hctTMapFind(HctTMapFull *pMap, u64 iTid){
   int iOff = iTid - pMap->m.iFirstTid;
   int iMap = iOff / HCT_TMAP_PAGESIZE;
+  iOff = HCT_TMAP_ENTRYSLOT( (iOff % HCT_TMAP_PAGESIZE) );
   return &pMap->m.aaMap[iMap][iOff % HCT_TMAP_PAGESIZE];
 }
 
@@ -437,7 +439,7 @@ int sqlite3HctTMapBegin(HctTMapClient *pClient, HctTMap **ppMap){
   *ppMap = &pMap->m;
   pClient->eState = HCT_CLIENT_OPEN;
 
-  {
+  if( 1 ){
     u64 iEof = pMap->m.iFirstTid + pMap->m.nMap*HCT_TMAP_PAGESIZE;
     u64 iLocalMin = pClient->iLocalMinTid;
     if( pMap->m.iMinTid>iLocalMin ) iLocalMin = pMap->m.iMinTid;

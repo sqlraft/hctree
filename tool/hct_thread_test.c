@@ -355,6 +355,7 @@ struct Testcase {
   int nScan;
   int szScan;
   int bOverflow;     
+  int bTrust;     
 };
 
 typedef struct TestCtx TestCtx;
@@ -568,23 +569,25 @@ static char *test_thread(int iTid, void *pArg){
 
   iEndTime = htt_current_time();
   if( iEndTime<=iStartTime ) iEndTime = iStartTime + 1;
+  zStat = testGetStats(&err, db);
 
   /* Check that no updates made by this thread have been lost. */
   nError = 0;
-  pSelect = htt_sqlite3_prepare_printf(&err, db, "SELECT a, b FROM %s", zTbl);
-  if( pSelect ){
-    while( SQLITE_ROW==sqlite3_step(pSelect) ){
-      int iRow = sqlite3_column_int(pSelect, 0);
-      u32 *aBlob = (u32*)sqlite3_column_blob(pSelect, 1);
-      if( aBlob[iTid]!=pCtx->aVal[iRow] ) nError++;
+  if( pTst->bTrust==0 ){
+    pSelect = htt_sqlite3_prepare_printf(&err, db, "SELECT a, b FROM %s", zTbl);
+    if( pSelect ){
+      while( SQLITE_ROW==sqlite3_step(pSelect) ){
+        int iRow = sqlite3_column_int(pSelect, 0);
+        u32 *aBlob = (u32*)sqlite3_column_blob(pSelect, 1);
+        if( aBlob[iTid]!=pCtx->aVal[iRow] ) nError++;
+      }
+      sqlite3_finalize(pSelect);
     }
-    sqlite3_finalize(pSelect);
   }
 
   /* Find the number of CAS collisions */
   nCasFail = htt_sqlite3_exec_i64(&err, db, "PRAGMA hct_ncasfail");
 
-  zStat = testGetStats(&err, db);
   zRet = sqlite3_mprintf("%d transactions "
       "(%d busy, %d cas-fail) at %d/second (%d lost updates)%s", 
       nWrite, nBusy, (int)nCasFail,
@@ -621,7 +624,6 @@ static void test_build_db(Error *pErr, Testcase *pTst, int iDb, TestCtx *aCtx){
 
   int nTbl = pTst->bSeptab ? pTst->nThread : 1;
   int iTab = 0;
-
 
   /* Check if the database is already populated */
   db = htt_sqlite3_open(zFile);
@@ -766,8 +768,10 @@ static void runtest(Testcase *pTst){
     memset(aCtx[iDb].aVal, 0, nByte);
   }
 
-  for(iDb=0; iDb<pTst->nThread && (iDb==0 || pTst->bSeparate); iDb++){
-    test_build_db(&err, pTst, iDb, aCtx);
+  if( pTst->bTrust==0 ){
+    for(iDb=0; iDb<pTst->nThread && (iDb==0 || pTst->bSeparate); iDb++){
+      test_build_db(&err, pTst, iDb, aCtx);
+    }
   }
 
   if( pTst->nSleep ){
@@ -830,7 +834,7 @@ static void runtest(Testcase *pTst){
   }
 
 
-  if( pTst->bSeparate==0 && pTst->bSeptab==0 ){
+  if( pTst->bSeparate==0 && pTst->bTrust==0 ){
     htt_sqlite3_exec(db, "PRAGMA hct_quiescent_integrity_check=1");
     pIC = htt_sqlite3_prepare(&err, db, "PRAGMA integrity_check");
     if( pIC ){
@@ -860,10 +864,12 @@ int main(int argc, char **argv){
   int iArg;
   Testcase tst;
 
+#if 0
   struct rlimit rlim;
   getrlimit(RLIMIT_FSIZE, &rlim);
-  rlim.rlim_cur = 1 * 1024*1024*1024;
+  rlim.rlim_cur = 1 * 1024*1024*1024 * 16;
   setrlimit(RLIMIT_FSIZE, &rlim);
+#endif
 
   memset(&tst, 0, sizeof(Testcase));
   tst.nBlob = 200;
@@ -925,6 +931,9 @@ int main(int argc, char **argv){
       }else
       if( nArg>1 && nArg<=9 && memcmp("-overflow", zArg, nArg)==0 ){
         pnVal = &tst.bOverflow;
+      }else 
+      if( nArg>1 && nArg<=9 && memcmp("-trustdbs", zArg, nArg)==0 ){
+        pnVal = &tst.bTrust;
       }else{
         usage(argv[0]);
       }

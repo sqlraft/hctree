@@ -236,6 +236,7 @@ struct HctDatabaseStats {
   i64 nBalanceIntkey;
   i64 nBalanceIndex;
   i64 nBalanceSingle;
+  i64 nTMapLookup;
 };
 
 /*
@@ -443,7 +444,9 @@ static u64 hctDbTMapLookup(HctDatabase *pDb, u64 iTid, u64 *peState){
 
     {
       int iOff = (iTid - pTmap->iFirstTid) % HCT_TMAP_PAGESIZE;
+      iOff = HCT_TMAP_ENTRYSLOT(iOff);
       iVal = AtomicLoad(&pTmap->aaMap[iMap][iOff]);
+      pDb->stats.nTMapLookup++;
     }
 
     *peState = (iVal & HCT_TMAP_STATE_MASK);
@@ -2166,6 +2169,7 @@ static int hctDbCurrentIsVisible(HctDbCsr *pCsr){
   }
   if( (p->flags & HCTDB_HAS_TID)==0 ) return 1;
   memcpy(&iTid, &aPg[p->iOff], sizeof(u64));
+  if( pCsr->pDb->iTid==iTid && pCsr->pDb->bValidate ) return 1;
 
   return hctDbTidIsVisible(pCsr->pDb, iTid);
 }
@@ -4862,6 +4866,7 @@ static u64 *hctDbFindTMapEntry(HctTMap *pTmap, u64 iTid){
   iMap = (iTid - pTmap->iFirstTid) / HCT_TMAP_PAGESIZE;
   iEntry = (iTid - pTmap->iFirstTid) % HCT_TMAP_PAGESIZE;
 
+  iEntry = HCT_TMAP_ENTRYSLOT(iEntry);
   return &pTmap->aaMap[iMap][iEntry];
 }
 
@@ -5865,6 +5870,10 @@ i64 sqlite3HctDbStats(sqlite3 *db, int iStat, const char **pzStat){
     case 2:
       *pzStat = "balance_single";
       iVal = pDb->stats.nBalanceSingle;
+      break;
+    case 3:
+      *pzStat = "tmap_lookup";
+      iVal = pDb->stats.nTMapLookup;
       break;
     default:
       break;
