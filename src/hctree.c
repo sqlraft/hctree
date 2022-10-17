@@ -2504,8 +2504,6 @@ int sqlite3BtreeTransferRow(BtCursor *p1, BtCursor *p2, i64 iKey){
 }
 
 int sqlite3HctLockedErr(u32 pgno){
-  static int nCall = 0;
-  nCall++;
   return SQLITE_LOCKED;
 }
 

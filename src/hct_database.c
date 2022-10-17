@@ -4177,9 +4177,6 @@ static int hctDbDelete(
 
   HctDbCell prev;           /* Previous cell on page */
 
-static int nCall = 0;
-nCall++;
-
   assert( pOp->bFullDel==0 );
 
   if( pOp->iInsert==0 && !bLeftmost ){
@@ -4492,9 +4489,6 @@ static int hctDbInsert(
   u8 *aTarget;                    /* Page to write new entry to */
   int bSingle = 0;                /* True for single-page rebalance */
   HctDbInsertOp op = {0,0,0,0,0,0,0,0,0,0,0};
-
-static int nCall = 0;
-nCall++;
 
   p->nWriteKey++;
 
@@ -5492,8 +5486,6 @@ static int hctDbValidateIntkey(HctDatabase *pDb, HctDbCsr *pCsr){
       ** found but the key would reside on the current page, then load
       ** the page into the cursor. This is faster than the hctDbCsrSeek()
       ** call below.  */
-      // TODO: Disabled this when delete was revised. Re-enable it! */
-#if 0
       if( bEvict==0 && pOp->iLogical!=pCsr->iRoot ){
         rc = sqlite3HctFilePageGetPhysical(pDb->pFile, iPhys, &pCsr->pg);
         if( rc==SQLITE_OK ){
@@ -5504,7 +5496,6 @@ static int hctDbValidateIntkey(HctDatabase *pDb, HctDbCsr *pCsr){
           }
         }
       }
-#endif
     }
 
     if( pCsr->pg.aOld==0 ){

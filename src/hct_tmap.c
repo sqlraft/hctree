@@ -168,7 +168,7 @@ struct HctTMapServer {
 };
 
 // #define HCT_TMAP_NTIDSTEP 128
-#define HCT_TMAP_NTIDSTEP 512
+#define HCT_TMAP_NTIDSTEP 1024
 
 struct HctTMapFull {
   HctTMap m;
