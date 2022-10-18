@@ -335,6 +335,15 @@ static void htt_join_threads(
   pThreads->pThread = 0;
 }
 
+static void htt_sqlite3_close(sqlite3 *db){
+  int rc = sqlite3_close(db);
+  if( rc!=SQLITE_OK ){
+    fprintf(stderr, "error in sqlite3_close: (%d)\n", rc);
+    assert( 0 );
+    exit(1);
+  }
+}
+
 
 ///////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////
@@ -441,6 +450,8 @@ static char *testGetStats(Error *pErr, sqlite3 *db){
     i64 iVal = sqlite3_column_int64(p, 1);
     zRet = sqlite3_mprintf("%z\n        % -24s    %lld", zRet, zStat, iVal);
   }
+  htt_sqlite3_reset(pErr, p);
+  sqlite3_finalize(p);
 
   return zRet;
 }
@@ -607,7 +618,7 @@ static char *test_thread(int iTid, void *pArg){
   sqlite3_finalize(pWrite);
   sqlite3_finalize(pScan);
 
-  sqlite3_close(db);
+  htt_sqlite3_close(db);
 
  test_out:
   htt_print_and_free_err(&err);
@@ -665,10 +676,10 @@ static void test_build_db(Error *pErr, Testcase *pTst, int iDb, TestCtx *aCtx){
       htt_sqlite3_reset(pErr, p);
       sqlite3_finalize(p);
     }
-    sqlite3_close(db);
+    htt_sqlite3_close(db);
     return;
   }
-  sqlite3_close(db);
+  htt_sqlite3_close(db);
 
   zRm = sqlite3_mprintf(
       "rm -rf %s%d; rm -rf %s%d-data; rm -rf %s%d-pagemap", 
@@ -725,7 +736,7 @@ static void test_build_db(Error *pErr, Testcase *pTst, int iDb, TestCtx *aCtx){
   }
   printf("\n");
   fflush(stdout);
-  sqlite3_close(db);
+  htt_sqlite3_close(db);
 }
 
 static void runtest(Testcase *pTst){
@@ -846,7 +857,7 @@ static void runtest(Testcase *pTst){
     htt_sqlite3_exec_debug(&err, db, "");   /* to avoid a compiler warning */
   }
 
-  sqlite3_close(db);
+  htt_sqlite3_close(db);
   htt_print_and_free_err(&err);
 }
 

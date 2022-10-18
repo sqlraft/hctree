@@ -167,8 +167,8 @@ struct HctTMapServer {
   HctTMapFull *pList;             /* List of tmaps. Newest first */
 };
 
-// #define HCT_TMAP_NTIDSTEP 128
-#define HCT_TMAP_NTIDSTEP 1024
+#define HCT_TMAP_NTIDSTEP 128
+// #define HCT_TMAP_NTIDSTEP 1024
 
 struct HctTMapFull {
   HctTMap m;
