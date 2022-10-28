@@ -1,15 +1,10 @@
 
 <title> Thread Test </title>
+<h1 style=font-size:200%;text-align:center> Thread Test </h1>
 
-<h1>Project Status</h1>
-
-This project contains no usable code. The database backend works well enough to
-run some test cases, but (for example):
-
-  *  it is not possible to change the database page size.
-  *  there is no way to actually lock the db to get a large transaction
-     through.
-  *  there are surely many bugs.
+This project contains no code stable enough to deploy. The database backend
+works well enough to run some test cases, but 
+<a href=abc.wiki#status>is still quite incomplete</a>.
 
 Even so, the prototype is advanced enough to use to test whether or not
 multiple writers really can run concurrently on multi-processor systems.
@@ -65,9 +60,9 @@ are also run against stock SQLite using a single client and thread. For
 these tests, SQLite is configured with the following:
 
 <pre>
-      PRAGMA journal_mode = wal";
-      PRAGMA wal_autocheckpoint = 10000";
-      PRAGMA mmap_size = 1000000000";
+      PRAGMA journal_mode = wal;
+      PRAGMA wal_autocheckpoint = 10000;
+      PRAGMA mmap_size = 1000000000;
       PRAGMA locking_mode = exclusive;
       PRAGMA synchronous = off;
 </pre>
