@@ -1,18 +1,26 @@
+<div class=fossil-doc>
+
+<style>
+  .fossil-doc h1 {
+    font-size:200%;
+  }
+</style>
+
 
 <title> Thread Test </title>
-<h1 style=font-size:200%;text-align:center> Thread Test </h1>
+<h1> Thread Test </h1>
 
-This project contains no code stable enough to deploy. The database backend
+<p>This project contains no code stable enough to deploy. The database backend
 works well enough to run some test cases, but 
-<a href=abc.wiki#status>is still quite incomplete</a>.
+<a href=index.html#status>is still quite incomplete</a>.
 
-Even so, the prototype is advanced enough to use to test whether or not
+<p>Even so, the prototype is advanced enough to use to test whether or not
 multiple writers really can run concurrently on multi-processor systems.
 That is the goal of the tests on this page - to verify the extent that
 the database allows multiple clients in separate application threads to
 run concurrent read/write transactions.
 
-Performance is also compared against a single client using the standard
+<p>Performance is also compared against a single client using the standard
 SQLite b-tree backend. This is not to show that hctree is faster than stock
 SQLite in single-threaded deployments. Although it does test faster in
 some write-heavy cases below, this is largely because it currently creates
@@ -23,7 +31,7 @@ other database backends.
 
 <h1>Test Overview</h1>
 
-All tests use the same database. The schema is:
+<p>All tests use the same database. The schema is:
 
 <pre>
       CREATE TABLE tbl(
@@ -35,11 +43,11 @@ All tests use the same database. The schema is:
       CREATE INDEX tbl_i2 ON tbl(substr(c, 2, 16));
 </pre>
 
-The initial database contains 1,000,000 rows. Column "a" contains values
+<p>The initial database contains 1,000,000 rows. Column "a" contains values
 1 to 1,000,000. Column "b" contains a 200 byte blob value. Column "c"
 contains a 64 byte text value.
 
-Each test consists of between 1 and 8 threads, all running transactions
+<p>Each test consists of between 1 and 8 threads, all running transactions
 as fast as possible for 30 seconds. Each transaction consists of:
 
 <pre>
@@ -53,9 +61,9 @@ as fast as possible for 30 seconds. Each transaction consists of:
       COMMIT;
 </pre>
 
-Where <i>nScan</i> and <i>nUpdate</i> are parameters for the test.
+<p>Where <i>nScan</i> and <i>nUpdate</i> are parameters for the test.
 
-As well as tests using hctree with between 1 and 8 client threads, tests
+<p>As well as tests using hctree with between 1 and 8 client threads, tests
 are also run against stock SQLite using a single client and thread. For
 these tests, SQLite is configured with the following:
 
@@ -69,16 +77,18 @@ these tests, SQLite is configured with the following:
 
 <h1>Test Results</h1>
 
-Each cell of the table below contains results for two test runs. For
+<p>Each cell of the table below contains results for two test runs. For
 each test run, three values are reported:
 
-  *  the total number of transactions per second, 
-  *  the percentage of these transactions that failed with SQLITE_BUSY (in
-     parenthesis), and
-  *  the per-cpu speed that this represents, relative to the single threaded
-     case, as a percentage (in bold).
+<ul>
+  <li>  the total number of transactions per second, 
+  <li>  the percentage of these transactions that failed with SQLITE_BUSY (in
+        parenthesis), and
+  <li>  the per-cpu speed that this represents, relative to the single threaded
+        case, as a percentage (in bold).
+</ul>
 
-For example, the first run of the 8 thread test with nUpdate=5 and nScan=10
+<p>For example, the first run of the 8 thread test with nUpdate=5 and nScan=10
 is reported as "71353 (2.3%) <b>74%</b>" (the cell with the <span
     style=background-color:lightgrey>grey background</span> below). This means that, considering all
 16 threads, throughput was 71353 transactions per second. This is 4459 per
@@ -86,7 +96,7 @@ second for each CPU, or roughly 74% of the average speed of the single
 threaded tests - 5996 transactions per second. Roughly 2.3% of attempted
 transactions failed to COMMIT due to conflicts between threads.
 
-These tests were run on an "AMD Ryzen 9 5950x" (16 cores) with copious memory
+<p>These tests were run on an "AMD Ryzen 9 5950x" (16 cores) with copious memory
 available. Advanced BIOS CPU frequency management features like "Core Boost",
 "AMD Cool & Quiet" and "Simultaneous Multi-Threading" were all disabled.
 
