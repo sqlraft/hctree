@@ -60,8 +60,8 @@
 /*
 ** Masks for use with pagemap values.
 */
-#define HCT_PAGEMAP_FMASK  (((u64)0xFF) << 56)
-#define HCT_PAGEMAP_VMASK  (~HCT_PAGEMAP_FMASK)
+#define HCT_PAGEMAP_FMASK  (((u64)0xFF) << 56)        /* Flags MASK */
+#define HCT_PAGEMAP_VMASK  (~HCT_PAGEMAP_FMASK)       /* Value MASK */
 
 typedef struct HctFileServer HctFileServer;
 typedef struct HctMapping HctMapping;

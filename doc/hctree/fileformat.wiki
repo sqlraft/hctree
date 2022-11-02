@@ -21,11 +21,6 @@ Each database consists of at least three files:
   *  A page-map file, containing the page-map, and
   *  A header file, containing the two header pages.
 
-If the database is configured to be robust in the face of system or power
-failures, there are three page-map files instead of one.
-<i style=color:green>See notes in blink.wiki - this may no longer be
-true...</i>
-
 Additionally, there may be one or more client log files.
 
 <h1 id=header> 2. Header File Format </h1>
@@ -34,7 +29,8 @@ The header file consists of two pages using the same format.
 
 <table border=1 cellpadding=5 width=90%>
   <tr><th>Byte Offset <th>Size <th width=80%> Description
-  <tr><td>0  <td>32 <td>Magic string identifying an hctree database.
+  <tr><td>0  <td>32 <td>Magic string identifying an hctree database - "hctree
+  version 01 database file" followed by a nul-terminator 0x00 byte.
   <tr><td>32 <td>8  <td>Checksum for header page.
   <tr><td>40 <td>4  <td>Constant Value 1234. To identify endianness of database.
   <tr><td>44 <td>4  <td>Page size in bytes.
@@ -104,7 +100,7 @@ text "16 bytes" at LEHDR - (0, 0.2)
 text "nEntry x 16 bytes" at ARRAY - (0, 0.2)
 </verbatim>
 
-Following the page header, the 16 byte intkey leaf header:
+Following the page header, the 16 byte leaf header:
 
 <table border=1 cellpadding=5 width=90%>
   <tr><th>Byte Offset <th>Size <th width=80%> Description
@@ -113,8 +109,7 @@ Following the page header, the 16 byte intkey leaf header:
     marked "free space" in the diagram above).
   <tr><td>10 <td>2 <td> number of bytes of free space (in total) within
     record area.
-  <tr><td>12 <td>2 <td> Number of delete keys on page.
-  <tr><td>14 <td>2 <td> Bytes of space consumed by delete keys.
+  <tr><td>12 <td>4 <td> Unused.
 </table>
 
 Following the free-space header, an array of <i>nEntry</i> 16-byte entries. 

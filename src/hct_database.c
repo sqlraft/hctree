@@ -305,8 +305,7 @@ struct HctDbPageHdr {
 struct HctDbLeafHdr {
   u16 nFreeGap;                   /* Size of free-space region, in bytes */
   u16 nFreeBytes;                 /* Total free bytes on page */
-  u16 nDelete;                    /* Number of delete keys on page */
-  u16 nDeleteBytes;               /* Bytes in record area used by del keys */
+  u32 unused;
 };
 
 struct HctDbLeaf {
