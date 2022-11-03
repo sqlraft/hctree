@@ -4,9 +4,22 @@
   .fossil-doc h1 {
     font-size:200%;
   }
+  .leftfloat {
+    float: right;
+    border: solid 1px black;
+    padding: 1ex;
+  }
 </style>
 
 <title> HC-tree </title>
+
+<center>
+  <b>Links:</b>
+    ...<a href=threadtest.html>Hctree Test Results</a>
+    ...<a href=design.wiki>Hctree Design Documentation</a>
+    ...<a href=fileformat.wiki>Hctree File Format</a>...
+</center>
+
 <h1> HC-tree </h1>
 
 <p>SQLite is sometimes used as the core of a client/server database system.
@@ -95,8 +108,6 @@ is incomplete. The current code has, at least, the following shortcomings:
   <li><p> There is no support for recovering from a power failure or operating
           system crash. Such an event may corrupt the database.
 </ol>
-
-<p>There is also available a description of the <a href="fileformat.wiki">hctree file format</a> and extensive <a href=design.wiki>design documentation</a>.
 
 <h1> Application Programming </h1>
 

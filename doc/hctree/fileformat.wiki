@@ -85,7 +85,7 @@ Other nibble contains flags:
 <h2 id=intkey_leaf> 4.1. Intkey Leaf Page Format</h2>
 Intkey leaf page format:
 
-<verbatim type="pikchr center">
+<center><verbatim type="pikchr">
 boxht=0.2 ; boxwid=0.6 ; linewid=0.2
 
 # total width is 7.5
@@ -98,7 +98,7 @@ box "record area"            wid 3.0
 text "8 bytes" at PGHDR - (0, 0.2)
 text "16 bytes" at LEHDR - (0, 0.2)
 text "nEntry x 16 bytes" at ARRAY - (0, 0.2)
-</verbatim>
+</verbatim></center>
 
 Following the page header, the 16 byte leaf header:
 
@@ -144,12 +144,12 @@ The part of the record stored on the main page is calculated using:
             nLocal = nMin;
           }
         }
-</verbatim>
+</verbatim></center>
 
 
 <h2 id=intkey_node> 4.2. Intkey Internal Node Format </h2>
 
-<verbatim type="pikchr center">
+<center><verbatim type="pikchr">
 boxht=0.2 ; boxwid=0.6 ; linewid=0.2
 
 # total width is 7.5
@@ -159,7 +159,7 @@ box "free space"             wid 2.5
 
 text "8 bytes" at PGHDR - (0, 0.2)
 text "nEntry x 16 bytes" at ARRAY - (0, 0.2)
-</verbatim>
+</verbatim></center>
 
 Each entry on an intkey internal node page consists of an 8 byte rowid 
 followed by a 4 byte logical page-id, and is padded out to 16 bytes.
@@ -168,11 +168,11 @@ therefore:
 
 <verbatim>
         nMax = ((pgsz-8) / 16)
-</verbatim>
+</verbatim></center>
 
 <h2 id=index_leaf> 4.3. Index Leaf Page Format </h2>
 
-<verbatim type="pikchr center">
+<center><verbatim type="pikchr">
 boxht=0.2 ; boxwid=0.6 ; linewid=0.2
 
 # total width is 7.5
@@ -185,7 +185,7 @@ box "record area"            wid 3.0
 text "8 bytes" at PGHDR - (0, 0.2)
 text "24 bytes" at LEHDR - (0, 0.2)
 text "nEntry x 8 bytes" at ARRAY - (0, 0.2)
-</verbatim>
+</verbatim></center>
 
 Index leaf pages have a 24 byte leaf header immediately following the page
 header. See the <a href=#intkey_leaf>intkey leaf page format</a> section for
@@ -219,12 +219,12 @@ main page is calculated using:
             nLocal = pgsz/16;
           }
         }
-</verbatim>
+</verbatim></center>
 
 
 <h2 id=index_node> 4.4. Index Internal Node Page Format </h2>
 
-<verbatim type="pikchr center">
+<center><verbatim type="pikchr">
 boxht=0.2 ; boxwid=0.6 ; linewid=0.2
 
 # total width is 7.5
@@ -237,7 +237,7 @@ box "record area"            wid 3.4
 text "8 bytes" at PGHDR - (0, 0.2)
 text "4 bytes" at INHDR - (0, 0.2)
 text "nEntry x 12 bytes" at ARRAY - (0, 0.2)
-</verbatim>
+</verbatim></center>
 
 <table border=1 cellpadding=5 width=90%>
   <tr><th>Byte Offset <th>Size <th width=80%> Description
@@ -259,7 +259,7 @@ As for index leaf pages, except that the <i>nEntry</i> array consists of
 
 <h2 id=overflow> 4.5. Overflow Chain Format </h2>
 
-<verbatim type="pikchr center">
+<center><verbatim type="pikchr">
 boxht=0.2 ; boxwid=0.6 ; linewid=0.2
 
 PGHDR: box "page hdr"        wid 0.8
@@ -268,7 +268,7 @@ box "free space"             wid 2.0
 
 text "8 bytes" at PGHDR - (0, 0.2)
 text "nEntry bytes" at DATA - (0, 0.2)
-</verbatim>
+</verbatim></center>
 
 As in SQLite, overflow pages are a linked list, starting with the page
 identified in the b-tree page record. The number of overflow pages in
@@ -284,23 +284,28 @@ logical, page numbers
 
 <h2 id=history> 4.6. History Fan Format </h2>
 
-<verbatim type="pikchr center">
+<center><verbatim type="pikchr">
 boxht=0.2 ; boxwid=0.6 ; linewid=0.2
 
 PGHDR: box "page hdr"        wid 0.8
-DATA: box "entry array"      wid 4.3
-box "free space"             wid 2.4
+FANHDR: box "fan page hdr"   wid 2.4
+DATA: box "entry array"      wid 3.0
+box "free space"             wid 1.3
 
 text "8 bytes" at PGHDR - (0, 0.2)
-text "nEntry*16 bytes" at DATA - (0, 0.2)
-</verbatim>
+text "24 bytes" at FANHDR - (0, 0.2)
+text "nEntry*4 bytes" at DATA - (0, 0.2)
+</verbatim></center>
 
-A history fan page consists of the page header followed by <i>nEntry</i>
-entries of 16 bytes each. Each entry consists of:
+A history fan page consists of the page header followed by a fan
+page header followed by <i>nEntry</i> 4-byte physical page numbers.
 
-  *  An 8-byte TID value.
-  *  A 4-byte old physical page number.
-  *  A 4-byte unused field.
+The 24-byte fan page header consists of
+
+  *  An 8-byte TID value for the first old-data page.
+  *  A 4-byte physical page number for the first old-data page.
+  *  Index of first key to consider of second old-data page.
+  *  An 8-byte TID value for the second and subsequent old-data pages.
 
 <h1 id=logfile> 5. Log File Format </h1>
 

@@ -46,7 +46,7 @@ The system is built around the database backend described below. It:
   *  Is a copy-on-write system (each time a database page is modified,
      a new page is allocated within the db file and the new version written
      there). When database entries are deleted or overwritten, the tree
-     includes "old-data" pointers back to the old versions of pages, so 
+     includes "history" pointers back to the old versions of pages, so 
      that existing readers can find data deleted or overwritten by transactions
      not included in their MVCC snapshot.
 
@@ -88,7 +88,7 @@ is called "validation data". Then, on COMMIT:
      to map the transaction's TID to its CID.
   #  <p>If the transaction is to be rolled back, the client undoes all writes
      made by the transaction. Old database values can be found from the db
-     itself by following old-data pointers.
+     itself by following history pointers.
 
 The progress of CID values represents the logical order in which the
 transactions are committed - an example of at least one possible order in
@@ -188,10 +188,9 @@ The first key on a page - either a leaf or internal node - is called the
 <b>fencepost key</b>. Once a page has been written to disk, its fencepost key
 never changes and the page will never contain a key smaller than the fencepost.
 The logical page number and the fencepost key value are indelibly coupled for
-all time<sup>*</sup>. Even if the database entry itself is removed, the fencepost key is
-left on the page. The only exception is the leftmost peer node at each level of
-the tree structure - the fencepost key for this node is implicitly the smallest
-possible value in the keyspace.
+all time<sup>*</sup>. If a fencepost key is deleted, the system must remove
+the logical page from the tree and redistribute keys between different
+pages.
 
 For both intkey and index trees, all entries are stored on leaf nodes.
 
@@ -200,9 +199,10 @@ key for the child node. This is different from the usual b-tree approach of N
 pointers and N-1 keys per internal node page - in this system an internal
 node with N pointer contains N keys.
 
-<sup>*</sup> Not really, of course, but as stated above for now we're
-pretending that physical and logical pages are unlimited resources that 
-need never be reused.
+<sup>*</sup> Not really, of course, as after a logical page is removed
+from the tree, its page number must eventually be reused. In this case the
+system ensures that the logical page number is not reused until
+after there are no existing readers old enough to become confused. 
 
 <h3 id=leaves>2.2.1. B-Tree Leaf Node Operations </h3>
 
@@ -310,7 +310,7 @@ arrow from TWO.e right 0.1 then right 0.3 down 0.3 then right until even with FO
 </verbatim></center>
 <center><i>Consolidating two nodes</i></center>
 
-Once the LOGICAL_EVICTED flag has been set on a page, it may not be set.
+Once the LOGICAL_EVICTED flag has been set on a page, it may not be cleared.
 
 Setting the LOGICAL_EVICTED flag on a node does not count as a lock, as it need
 not block another writer. If a writer determines that a new key should be
@@ -432,7 +432,7 @@ B1: box "00  21  38" with c at A3 + (0.35, 0.5) ; arrow ->
 B2: box "45  51" ; arrow ->
 B3: box "7A  CE  F7"
 
-C:  box "38  51  FF" with c at B2 + (0, 0.5)
+C:  box "00  45  7A" with c at B2 + (0, 0.5)
 
 arrow from C.s to B2.n
 arrow from C.s left 0.2 then to B1.n
@@ -492,76 +492,124 @@ as LOGICAL_EVICTED, but readers are allowed to traverse the parent-child
 pointer.  This allows readers (and other writers) to continue while the height
 of the tree is being decreased.
 
-<h2 id=mvcc> MVCC Key Management </h2>
+<h2 id=mvcc>2.3. MVCC Key Management </h2>
 
-When a new key/value pair is written to the database, the writer associates
-with it a transaction id. When a reader reads the page, it inspects the
-transaction id of each record and ignores those written by transactions
-that are not part of its database snapshot. If the new key/value has
-overwritten a previous version, the reader requires access to that previous
-version instead of the new one.
+When a new entry pair is written to the database, the writer associates with 
+it a transaction id (TID). When a reader reads the page, it inspects the
+transaction id of each record and ignores those written by transactions that
+are not part of its database snapshot. 
 
-To facilitate this, each key/value database entry has associated with it
-the physical page number of the last database page to contain the previous
-version (if any). As <a href=#pages>described above</a>, this page is
-guaranteed not to be reused until all readers are using a snapshot that
-includes the transaction that overwrote it, which is the same transaction
-id associated with the new key/value database entry (and so the pointer
-will never be followed after the page has become eligible for reuse).
+The above would be sufficient if database entries were never deleted or
+overwritten. In these cases though, readers reading from old snapshots require
+access to the deleted or overwritten data. In hctree, this is facilitated 
+using "history" pointers. An history pointer may be attached to any entry
+within a leaf-list, and consists of:
 
-Deletes are handled similarly. When an entry is deleted, it is clobbered
-by a delete key. So a delete key entry consists of:
+  *  a TID value, and
+  *  a physical database page number.
 
-  *  The key being deleted,
-  *  The transaction id of the transaction that did the deleting, and
-  *  The physical page id on which the deleted version of the key can be found.
-
-Whenever a page is rewritten, any delete keys with transaction ids so old that
-it is guaranteed that all extant and future readers read from snapshots that
-include it may be discarded. As may the transaction id and old page number (if
-any) from any other, non-delete, keys.
-
-<b>External Delete-Key Sets</b>
-
-<i style=color:green>Why are these even in the database file? Can they be kept
-in main memory, given that they will never be required following a process
-restart? Update: Perhaps this is not true - they are required when rolling
-back transactions based on log files following an application crash. </i>
-
-In most scenarios, the above should be sufficient. But in the presence of 
-long running read transactions or large deletes, some database pages may come
-to contain a high percentage of delete-keys. Which is inefficient for new
-readers that do not require them. And, as the delete-keys remain in place 
-until at least the next time the page is written, this situation may persist
-indefinitely.
-
-The solution is to move delete keys to an <i>external delete-key set</i>. An
-external delete-key set is an immutable b-tree structure within the database
-file that contains only delete-keys. All pointers to and within the b-tree 
-are physical page numbers. When the EDKS is constructed, all pages are 
-immediately marked as eligible for reuse once all readers are reading from
-a snapshot including transaction T, where T is the largest transaction id 
-associated with any delete-key within the data structure. This way, space
-used by the entire EDKS and its delete keys is reclaimed "automatically"
-by the same mechanism that reuses physical page locations.
-
-Each leaf page in the database may contain pointers to one or more EDKS
-b-trees. Each pointer is made up of a physical page id (the root page of
-the EDKS b-tree) and the transaction id associated with it ("T" in the 
-paragraph above). When a reader using a snapshot that does not include
-transaction T reads the page, it must merge in the contents of the 
-indicated EDKS. It is not safe for a reader using a snapshot that does
-include T to follow the pointer, as the physical pages that make up the EDSK
-may already be eligible for reuse.
-
-Multiple leaf pages within the database may contain pointers to the same EDSK.
-This may occur, for example, when a leaf page containing an EDSK pointer is
-split into two or more pages. Readers use the fencepost keys on the current
-leaf and its peer to avoid merging any out-of-range keys from the EDSK into
-the page when it is read.
+A history pointer attached to key E with TID value T and page number P, where
+E<sub>1</sub> is the key immediately following key E within the list of leaves,
+indicates that any reader for which the snapshot does not include transaction T
+should read keys in the range E to E<sub>1</sub> from physical page P. This
+range is never inclusive of E<sub>1</sub>, and only includes E if the key E in the list of leaves is not itself visible to the reader.
 
 
-<h2 id=pages> Page Management</h2>
+<center><verbatim type="pikchr">
+boxht=0.2 ; boxwid=1.25
+
+B1: box "1     2     3     4     5";
+
+C1: box "1     4     5            " at B1 + (0.0, -0.7);
+
+D1: box "1     5                  " at C1 + (0.0, -0.7);
+
+text "Physical page P1:" with e at B1.w + (-0.1, 0.0);
+text "Physical page P2:" with e at C1.w + (-0.1, 0.0);
+text "Physical page P3:" with e at D1.w + (-0.1, 0.0);
+
+A: arrow from C1.nw + (0.20, 0.0) to B1.s + (0.0, -0.02) thin;
+text "T1/P1" at A.e;
+
+A: arrow from D1.nw + (0.20, 0.0) to C1.s + (0.0, -0.02) thin;
+text "T2/P2" at A.e;
+</verbatim>
+<i>History Pointers Example 1</i>
+</center>
+
+The diagram above - history pointers example 1 - depicts a tree that initially
+consists of a single page containing key values 1 through 5 stored on
+physical page P1. Transaction T1 then deletes keys 3 and 4. Then transaction T2
+deletes key 4, so that the root of the tree is now mapped to physical page P3.
+
+The above is the outcome if (T2>T1). But note that this does not guarantee
+that the CID corresponding to T2 is greater than that corresponding to T1.
+It is quite possible that a future reader encounters this configuration of
+pages when reading a snapshot that does include transaction T2, but does
+not include T1. For this reason, readers must follow any history pointer
+if there exists any TID value not included in the readers snapshot that is
+less than or equal to the history pointer TID value for the purpose of
+following nested history pointers. But they must only merge in values
+from the indicated physical page if the history pointer TID itself is not
+included in the readers snapshot.
+
+There are still two complicated cases:
+
+  *  In the situation depicted above, T1 may be greater than T2.
+
+  *  If a contiguous set of entries spanning more than one leaf page is
+     deleted, the data structure that results from using just the technique
+     is inefficient.
+
+Hctree uses an <a href=fileformat.wiki#history>history fan pages</a> to 
+address both of these problems. A history fan page essentially contains 
+space for a large number of history pointers. Any history pointer, on a history
+fan page or attached to a leaf list entry, may point to a history fan page
+instead of an old leaf list data page. The TID attached to a history pointer
+must be the maximum of any TID associated with any history pointer on the fan
+page.
+
+<center><verbatim type="pikchr">
+boxht=0.2 ; boxwid=1.0
+
+B1: box "1     2     3     4";
+arrow thin
+B2: box "5     6     7     8";
+arrow thin 
+B3: box "9     10    11   12";
+
+text "Leaves before big DELETE:" with e at B1.w + (-0.1, 0.0);
+
+C1: box "History Fan Page" at B2 + (0.0, -0.7);
+arrow from C1.nw + (0.1,0.0) to B1.s + (0.0, -0.02) thin;
+arrow from C1.nw + (0.2,0.0) to B2.s + (0.0, -0.02) thin;
+arrow from C1.nw + (0.3,0.0) to B3.s + (0.0, -0.02) thin;
+
+D1: box "1     10    11   12" at B1 + (0.0, -1.4);
+arrow from D1.nw + (0.2,0.0) to C1.s + (0.0, -0.02) thin;
+
+text "Leaves after big DELETE:" with e at D1.w + (-0.1, 0.0);
+</verbatim>
+<i>History Pointers Example 2</i>
+</center>
+
+The figure above - history pointers example 2 - depicts a database tree that
+initially contained keys 1 to 12, distributed between 3 leaf pages. A
+transaction then deleted keys 2 through 9, inclusive, leaving the tree
+consisting of a single leaf page. Access to the deleted data is provided
+to existing readers via a history fan page.
+
+It is of course important that physical pages containing history data are
+not reused and overwritten while any transactions open on snapshots old enough
+to require them are still active. This is not a new problem introduced by
+history pointers though - any such page may also be accessed by such a 
+transaction without going via a history pointer. Any history fan pages
+allocated by a transaction are immediately scheduled for reuse using the 
+<a href=#pages>same mechanism</a> as old physical pages replaced by the
+transaction (such as page P1 in history pointers example 1 above).
+
+
+<h2 id=pages>2.4. Page Management</h2>
 
 The description in the sections above assume that there is an infinite supply
 of both physical pages and logical page ids, and that those used and no longer
