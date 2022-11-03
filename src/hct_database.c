@@ -4547,7 +4547,24 @@ static int hctDbInsert(
   **
   **   2) For a delete, check that there is an entry to delete. And if so,
   **      that the value of its child-page field matches iChildPg. If
-  **      not, return early.
+  **      not, return early. Note that the page marked as writable will
+  **      still be flushed to disk in this case - even though it may be
+  **      unmodified.
+  **
+  ** This resolves a race condition that may occur if client B starts 
+  ** removing page X from a list before client A has finished inserting
+  ** the corresponding entry into the parent list. Specifically:
+  **
+  **   + when client A gets here, if the EVICTED flag is not set on page X,
+  **     then client B will try to delete the corresponding entry from
+  **     the parent list at some point in the future. This will either 
+  **     occur after client A has updated the list, in which case no
+  **     problem, or it will cause client A's attempt to flush the modified
+  **     page to disk to fail. Client A will retry, see the EVICTED flag
+  **     is set, and continue.
+  **
+  **   + or, if EVICTED is set, then there is no point in writing the
+  **     entry into the parent list.
   */
   assert( rc==SQLITE_OK );
   if( p->iHeight>0 ){

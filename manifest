@@ -1,5 +1,5 @@
-C Further\sdocumentation\supdates.
-D 2022-11-03T20:53:43.638
+C Add\sa\scomment\sto\sclarify\show\sa\srace\scondition\sis\shandled.
+D 2022-11-03T21:18:33.298
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -537,7 +537,7 @@ F src/hash.h 3340ab6e1d13e725571d7cee6d3e3135f0779a7d8e76a9ce0a85971fa3953c51
 F src/hctInt.h 0f64563a1ffe9aa8b870cf8916cfe61b32e16f2694041c0361dcbbca53130bbb
 F src/hctPManInt.h 44e63f39e3da54ca47f5582127a12a2f33002d1f3ddcd0fc23120731dfe70b5d
 F src/hctTMapInt.h 1a0060f3cc29f5f3f13914bd34d27eb98975f980c75301697dee49cda0da21bc
-F src/hct_database.c 319c3890bdfd8db661fda95db72c48c0cdd0b5c7d228c823b23575cc7cedebcd
+F src/hct_database.c 4ec79ce6a34ba73fa77e5c01976b3a16254cb3fbffc12325cf5269c96070802a
 F src/hct_file.c 2561680418c3c59e349fe7a508f4f719de685c5fdd093d352458efa1a60688de
 F src/hct_pman.c 9e94164042d56311983153af877f2355e85be5d7c74d731ceb2bb33e38cddadf
 F src/hct_record.c 54b0d564be580ca29a54312f9a9abdba193b234ac56ec65a7e40109107041b25
@@ -2024,8 +2024,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P a0f71d7e8ca5a90910d705dba4e4f16078dac585a2d52457310b5d208537f4d4
-R a62cbc2cdb3dfc493312b877f8e863e7
+P 603e2cfe89646f14ab59b2adccd0b1a70c03db2a7abe8613a96f3bdad767fdae
+R 6b2fafa88d62986b70f3fa1dd19fc2bd
 U dan
-Z 6fb2b43ed8db2f40c8896c55f16d4691
+Z 4a140abfc843f19879f42d1a4996cd1d
 # Remove this line to create a well-formed Fossil manifest.
