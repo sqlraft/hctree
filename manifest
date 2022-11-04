@@ -1,5 +1,5 @@
-C Add\sa\scomment\sto\sclarify\show\sa\srace\scondition\sis\shandled.
-D 2022-11-03T21:18:33.298
+C Fix\sup\sdocumentation\sof\spages\smanagement\sand\scrash\srecovery.
+D 2022-11-04T20:56:12.915
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -38,7 +38,7 @@ F configure e7bc2cdb31316b1791e82812e2495e47b77c15f4dc17b28962d6b0cd72a3568d x
 F configure.ac 3ef6eeff4387585bfcab76b0c3f6e15a0618587bb90245dd5d44e4378141bb35
 F contrib/sqlitecon.tcl 210a913ad63f9f991070821e599d600bd913e0ad
 F doc/F2FS.txt c1d4a0ae9711cfe0e1d8b019d154f1c29e0d3abfe820787ba1e9ed7691160fcd
-F doc/hctree/design.wiki 80aa957e2ad24fcd80a5efb0ece08c14a61343e15bbca93fad7dab714a01c24c
+F doc/hctree/design.wiki 191924cd50b26ccc9be80eb7d0d520e7c1e07cab6b9f141d5a08aa146bcb8728
 F doc/hctree/fileformat.wiki 1292b7e0135ccaa0fb3c5ecfd7df184410764bf732c0920f02f62da24dfa44e6
 F doc/hctree/index.html ae33f9e1f633357f0c0d9374e6c56c87cdb4d933e2179a9c9ab1d8536325bcc9
 F doc/hctree/slides.wiki 4151889c5485fecd8a71d5d0089645998a2db5ebc3360b570f763e59effed60c
@@ -2024,8 +2024,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P 603e2cfe89646f14ab59b2adccd0b1a70c03db2a7abe8613a96f3bdad767fdae
-R 6b2fafa88d62986b70f3fa1dd19fc2bd
+P 6c16162dd75e6ec243f88ba82e4b56ac6af21f5f0b7d36f9a92f5d8adf95ee90
+R f2e93a9ad293d418f2608351695e27d6
 U dan
-Z 4a140abfc843f19879f42d1a4996cd1d
+Z 08b9a5c4d39cd6b25e37af3432433492
 # Remove this line to create a well-formed Fossil manifest.

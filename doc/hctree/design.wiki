@@ -12,7 +12,11 @@
     </ul>
       <li> [#mvcc|2.3. MVCC Version Management]
       <li> [#pages|2.4. Page Management]
-      <li> [#recovery|2.5. Crash Rcovery]
+      <li> [#recovery|2.5. Crash Recovery]
+    <ul>
+     <li><a href=#recover1>2.5.1. Recovery From Application Failure </a>
+     <li><a href=#recover2>2.5.2. Recovery From Power/OS Failure (ideas for)</a>
+    </ul>
     </ul>
   *  [#concurrency    |3. Concurrency Model]
     <ul>
@@ -611,143 +615,84 @@ transaction (such as page P1 in history pointers example 1 above).
 
 <h2 id=pages>2.4. Page Management</h2>
 
-The description in the sections above assume that there is an infinite supply
-of both physical pages and logical page ids, and that those used and no longer
-required may be carelessly discarded. Unfortunately, this is not the case.
+The description in the sections above give the impression that there is an
+infinite supply of both physical pages and logical page ids, and that those
+used and no longer required may be carelessly discarded. Obviously this is
+not the case - old physical pages and logical page ids must eventually
+be reused.
 
-For both physical and logical pages, we accept that a process failure at
-an inopportune moment might cause a resource leak. These are not expected
-to amount to much.
+Free pages are persistently tracked within the page-map as follows:
 
-<b>Physical Pages</b>
+  *  The header of the page-map contains two fields containing the page
+     number of the largest physical and logical page allocated so
+     far.
 
-Free physical pages are identified within the database file using the 
-following mechanisms:
+  *  For each logical page in use by the latest version of the database,
+     the LOGICAL_IN_USE flag is set in the page map.
 
-  *  A header field contains the largest physical page allocated so far.
-  *  For each page that is in use, the PHYSICAL_IN_USE flag is set in the
-     corresponding page-map slot.
+  *  For each physical page in use by the latest version of the database,
+     the PHYSICAL_IN_USE flag is set in the page map. <span style=color:green>
+     This might change. (a) it's redundant - a client can figure out which
+     physical pages are free by inspecting the set of ids that logical
+     pages with the LOGICAL_IN_USE flag set are mapped to, and (b)
+     omitting it halves the number of writes to the page-map, which
+     improves performance a little when there are lots of writer threads...
+     </span>
 
-Internally, clients allocate physical pages N (say 128) at a time. To allocate
-a set of N physical pages, the client first takes a database-wide mutex. It
-assigns itself N new physical page ids either by incrementing the header
-field or by removing elements from an in-memory table of eligible free physical
-pages.  
+The fields and flags described above are updated by writers as pages are
+used and freed. We accept that a process failure at an inopportune moment 
+might cause logical or physical pages to be leaked. This is not expected to
+be significant.
 
-When a client needs to write a physical page that has already been allocated 
-to it, it:
+At system startup time, the entire page-map is scanned to build an in-memory 
+table of free physical and logical pages. Internally, clients allocate
+physical and logical pages to themselves N (say 128) at a time. To allocate a
+set of N pages, the client must take a database-wide mutex and then either
+increase a header field or remove the required number of elements from the
+in-memory table. The client does not set the PHYSICAL_IN_USE and
+LOGICAL_IN_USE flags until the pages are actually used. When a client
+disconnects, it returns any unused pages to the in-memory table.
 
-  #  Sets the PHYSICAL_IN_USE flag in the page-map,
-  #  Writes data to the database page.
-  #  Attempts to set the page-map entry for the logical page to point to
-     the new physical page.
-  #  The above may fail if another client has already written to the logical 
-     page. If it does, the PHYSICAL_IN_USE flag set in step 1 is cleared
-     and the client retains the physical page id for use in subsequent writes.
+When a client frees a physical or logical page while writing to the database,
+it clears the PHYSICAL_IN_USE or LOGICAL_IN_USE flag immediately and retains
+the free page id. It may reuse the free page itself at some point in the 
+future, or, once it has accumulated some configurable number of pages (again,
+say 128), it may add it to the in-memory table of free pages.
 
-In order to populate the in-memory table of free physical pages, the page-map
-is scanned for entries with clear PHYSICAL_IN_USE flags on system startup.
-This is no trivial undertaking - in a database with 4KiB pages, there is 2MB of
-page-map for each 1GB of database file. A 16TB database contains a 32GB
-page-map. It might be done lazily, allowing clients to proceed by allocating
-pages only by incrementing the header file until the scan is complete. 
+Pages found to be free at system startup may be reused at any time. However
+pages that have been freed <i>since</i> system startup may only be reused
+once it is guaranteed that there are no clients reading from snapshots old
+enough to require them. In practice this means that pages free by a 
+transaction with TID T may be reused once all extant readers are reading
+from a snapshot that includes all transactions with TID values less than
+or equal to T. The system tracks readers so that it can tell when this
+condition is true.
 
-Pages that are free when the system starts may be written immediately. Pages 
-that have been made free since system startup may only be reused once it
-is sure that no reader will attempt to access the old version of the page.
-In other words, once all readers are reading from a snapshot that includes
-the transaction that removed the page from the tree.
+In the prototype, the sub-system that tracks readers is the 
+transaction-map manager (<a href=../../src/hctTMapInt.h>hctTMapInt.h</a>).
 
-When a client writes a new version of a logical page, freeing an old 
-physical page id, it clears the PHYSICAL_IN_USE flag in the page-map
-immediately. It stores the freed page id and current transaction id
-locally in a private table. If the private table grows sufficiently large,
-or if the client is closed, it transfers the contents of the private table
-to the database-wide in-memory table, under cover of the mutex mentioned
-above. The transaction id remains associated with each page id within the
-database-wide in-memory table.
+The in-memory table of free pages is implemented by the
+page manager (<a href=../../src/hctPManInt.h>hctTPManInt.h</a>).
 
-Physical pages may be reused either from a clients private table or by
-taking the mutex and allocating them from the database-wide table, so long
-as it can be determined that there are no readers old enough to be reading
-a snapshot that does not include the transaction that freed the page.
-<i style=color:green>See elsewhere for how this is determined.</i>
-
-<b>Logical Pages</b>
-
-Logical page id are managed quite similarly to physical page ids. There
-is a complication, of course, as logical page ids might be part of entries
-in parent lists.
-
-  *  A header field contains the largest logical page id allocated so far.
-  *  For each logical page that is in use within its list, the LOGICAL_IN_USE
-     flag is set in the corresponding page-map slot.
-  *  For each page for which an entry using the logical page id is present
-     in the parent list, the LOGICAL_IN_PARENT flag is set in the 
-     corresponding page-map slot.
-
-In the case of a logical page id, LOGICAL_IN_USE indicates that the page id
-might be in use as part of the latest version of its list, or that an entry
-in the parent list may exist for it.
-
-As for physical pages, the initial set of free logical page ids can be
-found by scanning the page-map for slogs with both the LOGICAL_IN_USE and
-LOGICAL_IN_PARENT flags clear.
-
-The LOGICAL_IN_USE and LOGICAL_IN_PARENT flags are initially set as part of the
-same atomic operation that sets its initial physical page id. It is then linked
-into its list (see above). And then an entry is added to the parent list.
-
-When a page is to be removed from its list:
-
-  #  The LOGICAL_EVICTED flag is set.
-  #  The list updated (see above).
-  #  The LOGICAL_IN_USE flag is cleared.
-  #  The entry removed from the parent list.
-  #  The LOGICAL_IN_PARENT flag is cleared.
-
-The client that clears the second of the LOGICAL_IN_USE and LOGICAL_IN_PARENT
-flags takes ownership of the freed page id and adds it to its private table of
-free logical page ids. As with physical page ids, this logical page id is
-associated with the current transaction id.
-
-There is a race condition on the key in the parent list if a second client
-begins to remove a page before the first client has finished adding it - 
-the second client might try to remove the entry from the parent list before
-the first client has added it. In this case it may not clear the
-LOGICAL_IN_PARENT flag, and so:
-
-  *  the second client may not consider the logical page id freed, and
-  *  there will be an unecessary entry, with the LOGICAL_EVICTED flag
-     set, left in the parent list.
-
-There are two ways these resource leaks might be avoided:
-
-  *  after inserting an entry into a parent list, the inserter could check
-     for the LOGICAL_EVICTED flag. If it is found, the parent list entry
-     may then be removed.
-
-  *  or, this could happen at some other time - e.g. when the parent list page
-     is involved in a rebalance. It will always be safe to remove parent list
-     entries with LOGICAL_EVICTED set (and then to clear LOGICAL_IN_PARENT,
-     possibly freeing the locial page id).
-
-<h2 id=recovery> Crash Recovery </h2>
+<h2 id=recovery>2.5. Crash Recovery </h2>
 
 Recovery from application failure is handled differently from recovery from
 power, OS or other system failures (hereafter summarized as "power failures").
-In the first case it is assumed that any data written to the file-system before
-the crash, either via a system call or a memory mapping, is present and
-uncorrupted following the crash. In the latter case, it is assumed that any
+In the case of application failures, it is assumed that any data written to the
+file-system before the crash, either via a system call or a memory mapping, is
+present and uncorrupted following the crash. 
+
+In the case of power or other system failures, it must be assumed that any 
 disk sector written but not synced when the failure occured may be corrupted.
 Following recovery, such a sector may contain the original data, the updated
-data, or any other values.
+data, or any other values. Supporting recovery in this case therefore requires
+periodic calls to fsync(), and some extra processing from writers. Deployments
+that do not require recovery of this nature can omit these extra operations.
+<span style=color:green>Recovery from power/system failure is not currently 
+implemented. But there are <a href=#recover2>some ideas</a> for how this
+might be done.</span>
 
-Supporting recovery from power failure requires periodic calls to fsync(), and
-some extra processing from writers. Deployments that do not require recovery of
-this nature can omit these extra operations.
-
-<h3 id=recovery1> Recovery From Application Failure </h3>
+<h3 id=recover1>2.5.1. Recovery From Application Failure </h3>
 
 To support application failure, each writer client has a log file. Before
 it begins writing a transaction into the database, a new entry containing
@@ -761,7 +706,13 @@ not marked as completed. They are then written into the database, one
 key at a time, using the usual methods. This avoids partial transactions
 being left in the database following an application failure.
 
-<h3 id=recovery2> Recovery From Power/OS Failure </h3>
+Note that all log files must be scanned and all old key/value pairs for
+transactions that will be rolled back extracted from the database before
+any are written back. This is because when the database is written to it
+may overwrite a free page that contains a key/value pair required for the
+rollback of some other log file.
+
+<h3 id=recover2>2.5.2. Recovery From Power/OS Failure (ideas for)</h3>
 
 Robustness in the face of power failures is achieved using database checkpoints
 and checksummed log files. A checkpoint is a version of the database that
@@ -876,10 +827,6 @@ checkpoint a version of the database:
 For this to work, writers must only recycle a physical page made eligible
 for recycling before the most recent completed checkpoint. Logical page
 ids may still be recycled as soon as they are eligible.
-
-
-
-
 
 <h1 id=concurrency>2. Concurrency Model</h1>
 
