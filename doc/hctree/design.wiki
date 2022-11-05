@@ -18,13 +18,15 @@
      <li><a href=#recover2>2.5.2. Recovery From Power/OS Failure (ideas for)</a>
     </ul>
     </ul>
-  *  [#concurrency    |3. Concurrency Model]
+  *  [#concurrency    |3. Concurrent Transactions Implementation]
     <ul>
-      <li> [#concurrency_bg    |3.1. Background]
-      <li> [#concurrency_hct   |3.2. Overview of HC-Tree Concurrency]
+      <li> [#concurrency_read  |3.1. Read Transactions]
+      <li> [#concurrency_write |3.2. Write Transactions]
       <li> [#concurrency_notes |3.3. Notes on HC-Tree Concurrency]
+      <li> [#concurrency_inc   |3.4. Increasing Concurrency]
     </ul>
   *  [#replication    |4. Replication and other Integration Issues]
+  *  [#concurrencytheory |Appendix A. Database Concurrency Theory]
 
 Description of the design of hctree.
 
@@ -828,9 +830,149 @@ For this to work, writers must only recycle a physical page made eligible
 for recycling before the most recent completed checkpoint. Logical page
 ids may still be recycled as soon as they are eligible.
 
-<h1 id=concurrency>2. Concurrency Model</h1>
+<h1 id=concurrency>3. Concurrent Transactions Implementation</h1>
 
-<h2 id=concurrency_bg>2.1. Background</h2>
+<h2 id=concurrency_hct>3.1. Read Transactions</h2>
+
+<h2 id=concurrency_hct>3.2. Write Transactions</h2>
+
+A write transaction writes no data into the database while executing DDL
+or DML statements. Instead, it proceeds like a read transaction while new
+database entries and delete keys are accumulated in a private, in-memory, data
+structure. Queries run within the transaction merge data from the database and
+in-memory tree structures to return to the caller. Also accumulated in memory
+is a record of the keys and key-ranges read from the database as part of the
+transaction.
+
+Associated with each record or delete-key in the database is a transaction ID
+(TID). A TID is a 56-bit integer assigned to transactions in increasing order
+as described below. A TID's only purpose is as a key to use with the
+transaction-map. The transaction-map maps each TID to two values:
+
+  *  A 56-bit commit ID (CID).
+  *  A transaction state value. The transaction state is one of WRITING,
+     VALIDATING, COMMITTED or ROLLBACK.
+
+These two values are of course stored together in a 64-bit transaction map
+entry that may be read and written using atomic primitives.
+
+Commit IDs (CIDs) are also 56-bit integers assigned to transactions in
+increasing order. A database snapshot is defined by a commit id <i>C</i> - all
+keys in the file with with TIDs mapped to CIDs less than or equal to <i>C</i>
+are part of the snapshot and should be read, all other keys should be ignored.
+
+In WRITING state, the CID value is always 0. In COMMITTED state, it is 
+always non-zero.
+
+A commit proceeds as follows:
+
+  #  <p>The transaction is assigned a transaction ID (TID). The transaction 
+     map entry is set to <b>(cid=0, state=WRITING)</b>. This is a no-op, as the
+     state WRITING is encoded as 0x00, and so the default transaction map
+     value of 0 is already correct.
+  #  <p>The transaction writes its modifications into the database. The TID
+     assigned in the previous step is associated with each new database entry.
+     If the writer finds that it must clobber a version of a key with a TID
+     that indicates that the key being clobbered was written after the writers
+     snapshot, the transaction is deemed to conflict and any changes rolled
+     back.
+  #  <p>The transaction map entry is set to <b>(cid=0, state=VALIDATING)</b>.
+  #  <p>The transaction is assigned a commit ID (CID), $cid. The transaction 
+     map entry is updated to <b>(cid=$cid, state=VALIDATING)</b>.
+  #  <p>The transaction queries the database for the keys and key ranges that
+     it queried for while it was running. If it encounters any keys with
+     TIDs mapped to CID values greater than the CID of the database snapshot
+     that the transaction was prepared against, but less than the CID assigned
+     in step 3, the transaction is deemed to conflict and all changes rolled
+     back.
+  #  The transaction map entry state is set to 
+     <b>(cid=$cid, state=COMMITTED)</b>.
+
+A rollback may be triggered in either step 2 (before the CID is assigned)
+or in step 5 (after the CID is assigned). In each case the writer must:
+
+  #  <p>Run through all keys already written to the database, restoring the
+     original values.
+  #  <p>Set the transaction map entry for the transaction to 
+     <b>(cid=$cid, state=ROLLBACK)</b>. If the rollback was triggered before
+     a CID was assigned, $cid is 0.
+
+<div style="border:1px solid black; padding: 1ex; margin: auto; color: green; width:80%">
+Question: Why not just use the TID? What is the point of the extra layer of
+indirection provided by the TID-&gt;CID mapping?
+
+Without the CID, step 5 of the above procedure would have to wait for all
+transactions with TIDs smaller than that of the current transaction to finish
+writing to the database (i.e. steps 1 to 3) before validation could proceed.
+This is awkward to arrange, and causes extra interactions between threads
+committing otherwise entirely unrelated transactions.
+</div>
+
+The snapshot read by a reader is defined by the largest CID value 
+assigned so far when the read transaction was opened. For each key 
+encountered, the state of the associated transaction determines how it
+is handled. According to the following rules:
+
+  *  A key that maps to WRITING state may always be ignored. The reader
+     should seek to find the previous version, if any, of the key.
+
+  *  If a reader encounters a key in VALIDATING state for which the CID
+     value is equal to or less than its snapshot id (including the value 0),
+     the reader must wait. It spinlocks on the transaction map slot until
+     either the state or CID value has changed.
+
+  *  A key that maps to ROLLBACK state may always be ignored.
+
+  *  For a key that maps to COMMITTED state, a reader must ignore it if
+     the CID value is greater than its snapshot id, and read it in all
+     other cases.
+
+In step (5) of a commit, when validating the transaction, the client must
+wait on any keys with (cid=0, state=VALIDATING). Whether or not the 
+transaction must be rolled back depends on the value the CID field of
+associated with the key is set to (less than the blocked transaction's CID ->
+rollback, greater than the blocke tranasction's CID -> proceed). 
+
+<h2 id=concurrency_notes>3.3. Notes on HC-Tree Concurrency</h2>
+
+  *  The system <b>does not have to store the entire transaction map</b>.
+     Instead, it can be compressed by storing a transaction id Tmin for
+     which there are no readers reading from snapshots old enough to
+     exclude transaction Tmin or any transaction with a TID smaller than
+     Tmin from the snapshot. Then all entries for TIDs Tmin and smaller
+     may be discarded.
+
+  *  <b>The validation phase can be optimized by using page level checks
+     before falling back to range and key checks</b>. When a client records
+     the list of keys and ranges that it reads during the transaction,
+     it also records the 
+     <a href=#pagemap>page-map value</a> for each logical page that
+     it reads. When validating a key or range of keys, it first compares the
+     recorded page-map values with the current page-map value or values. If the
+     page-map values have not changed, there is no need to proceed with the
+     more expensive key level checks.
+
+  *  <b>This permits less theoretical concurrency than some other schemes</b>.
+     This is largely a consequence of not wishing to validate read-only
+     transactions. The technique used most successfully to increase
+     concurrency relative to the scheme described above is Serializable
+     Snapshot Isolation (SSI): 
+     <p> [https://wiki.postgresql.org/wiki/Serializable] <p>Another, similar,
+     method is the Serial Safety Net:
+     <p>[https://event.cwi.nl/damon2015/papers/damon15-wang.pdf]
+
+<h2 id=concurrency_inc>3.4. Increasing Concurrency </h2>
+
+<i> In which it is discussed how to enhance the above to be equivalent 
+to SSN. </i>
+
+<h1 id=replication>4. Replication and other Integration Issues</h1>
+
+<i> In which it is discussed how this fits in with streaming replication
+and bootstrapping a new node</i>
+
+
+<h1 id=concurrencytheory>Appendix A. Database Concurrency Theory</h1>
 
 Until surprisingly recently, concurrency in SQL database systems was much
 simpler. Transactions were in most cases allowed to proceed concurrently so
@@ -839,6 +981,8 @@ violations. This is often termed <b>snapshot isolation</b>. Although this is
 simpler to implement and imposes relatively little overhead, it turns out to be
 quite difficult to use, as concurrent combinations of transactions that
 function correctly when run independently may malfunction.
+
+Consider a database created as follows:
 
 <pre>
     CREATE TABLE marbles(id INTEGER PRIMARY KEY, color);
@@ -937,143 +1081,4 @@ isolation.
 A full implementation of such a graph is considered too expensive in 
 practice. And so all current systems implement some compromise that allows
 for some number of false-positive conflict detections.
-
-<h2 id=concurrency_hct>2.2. Overview of HC-Tree Concurrency</h2>
-
-A write transaction writes no data into the database while executing DDL
-or DML statements. Instead, new database entries and delete keys are
-accumulated in a private, in-memory, data structure. Queries run within
-the transaction merge data from the database and in-memory tree structures
-to return to the caller. Also accumulated in memory is a record of the
-keys and key-ranges read from the database as part of the transaction.
-
-Associated with each record or delete-key in the database is a transaction ID
-(TID). A TID is a 56-bit integer assigned to transactions in increasing order
-as described below. A TID's only purpose is as a key to use with the
-transaction-map. The transaction-map maps each TID to two values:
-
-  *  A 56-bit commit ID (CID).
-  *  A transaction state value. The transaction state is one of WRITING,
-     VALIDATING, COMMITTED or ROLLBACK.
-
-These two values are of course stored together in a 64-bit transaction map
-entry that may be read and written using atomic primitives.
-
-Commit IDs (CIDs) are also 56-bit integers assigned to transactions in
-increasing order. A database snapshot is defined by a commit id <i>C</i> - all
-keys in the file with with TIDs mapped to CIDs less than or equal to <i>C</i>
-are part of the snapshot and should be read, all other keys should be ignored.
-
-In WRITING state, the CID value is always 0. In COMMITTED state, it is 
-always non-zero.
-
-A commit proceeds as follows:
-
-  #  <p>The transaction is assigned a transaction ID (TID). The transaction 
-     map entry is set to <b>(cid=0, state=WRITING)</b>. This is a no-op, as the
-     state WRITING is encoded as 0x00, and so the default transaction map
-     value of 0 is already correct.
-  #  <p>The transaction writes its set of new keys and delete-keys into the
-     database. The transaction id assigned in the previous step is associated
-     with each new database entry. If the writer finds that it must clobber
-     a version of a key with a TID that indicates that the key being clobbered
-     was written after the writers snapshot, the transaction is deemed to
-     conflict and any changes rolled back.
-  #  <p>The transaction map entry is set to <b>(cid=0, state=VALIDATING)</b>.
-  #  <p>The transaction is assigned a commit ID (CID), $cid. The transaction 
-     map entry is updated to <b>(cid=$cid, state=VALIDATING)</b>.
-  #  <p>The transaction queries the database for the keys and key ranges that
-     it queried for while it was running. If it encounters any keys with
-     TIDs mapped to CID values greater than the CID of the database snapshot
-     that the transaction was prepared against, but less than the CID assigned
-     in step 3, the transaction is deemed to conflict and all changes rolled
-     back.
-  #  The transaction map entry state is set to 
-     <b>(cid=$cid, state=COMMITTED)</b>.
-
-<div style="border:1px solid black; padding: 1ex; margin: auto; color: green; width:80%">
-Question: Why not just use the TID? What is the point of the extra layer of
-indirection provided by the TID-&gt;CID mapping?
-
-Without the CID, step 5 of the above procedure would have to wait for all
-transactions with TIDs smaller than that of the current transaction to finish
-writing to the database (i.e. steps 1 to 3) before validation could proceed.
-This is awkward to arrange, and causes extra interactions between threads
-committing otherwise entirely unrelated transactions.
-</div>
-
-A rollback may be triggered in either step 2 (before the CID is assigned)
-or in step 5 (after the CID is assigned). In each case the writer must:
-
-  #  <p>Run through all keys already written to the database, restoring the
-     original values.
-  #  <p>Set the transaction map entry for the transaction to 
-     <b>(cid=$cid, state=ROLLBACK)</b>. If the rollback was triggered before
-     a CID was assigned, $cid is 0.
-
-The snapshot read by a reader is defined by the largest CID value 
-assigned so far when the read transaction was opened. For each key 
-encountered, the state of the associated transaction determines how it
-is handled. According to the following rules:
-
-  *  A key that maps to WRITING state may always be ignored. The reader
-     should seek to find the previous version, if any, of the key.
-
-  *  If a reader encounters a key in VALIDATING state for which the CID
-     value is equal to or less than its snapshot id (including the value 0),
-     the reader must wait. It spinlocks on the transaction map slot until
-     either the state or CID value has changed.
-
-  *  A key that maps to ROLLBACK state may always be ignored.
-
-  *  For a key that maps to COMMITTED state, a reader must ignore it if
-     the CID value is greater than its snapshot id, and read it in all
-     other cases.
-
-In step (5) of a commit, when validating the transaction, the client must
-wait on any keys with (cid=0, state=VALIDATING). 
-
-A client may or may not block on keys in VALIDATING state with (0 < cid <=
-$cid), where $cid is the commit id of the transaction itself. If it does block
-on such keys, it may proceed with the commit if they move to ROLLBACK state,
-but not COMMITTED.
-
-<h2 id=concurrency_notes>2.3. Notes on HC-Tree Concurrency</h2>
-
-  *  The system <b>does not have to store the entire transaction map</b>.
-     Instead, it can be compressed by storing a transaction id Tmin for
-     which there are no readers reading from snapshots old enough to
-     exclude transaction Tmin or any transaction with a TID smaller than
-     Tmin from the snapshot. Then all entries for TIDs Tmin and smaller
-     may be discarded.
-
-  *  <b>The validation phase can be optimized by using page level checks
-     before falling back to range and key checks</b>. When a client records
-     the list of keys and ranges that it reads during the transaction,
-     it also records the 
-     <a href=blink.wiki#overview>page-map value</a> for each logical page that
-     it reads. When validating a key or range of keys, it first compares the
-     recorded page-map values with the current page-map value or values. If the
-     page-map values have not changed, there is no need to proceed with the
-     more expensive key level checks.
-
-  *  <b>This permits less theoretical concurrency than some other schemes</b>.
-     This is largely a consequence of not wishing to validate read-only
-     transactions. The technique used most successfully to increase
-     concurrency relative to the scheme described above is Serializable
-     Snapshot Isolation (SSI): 
-     <p> [https://wiki.postgresql.org/wiki/Serializable] <p>Another, similar,
-     method is the Serial Safety Net:
-     <p>[https://event.cwi.nl/damon2015/papers/damon15-wang.pdf]
-
-<h3> 2.3.1. Increasing Concurrency </h3>
-
-<i> In which it is discussed how to enhance the above to be equivalent 
-to SSN. </i>
-
-<h1 id=replication>3. Replication and other Integration Issues</h1>
-
-<i> In which it is discussed how this fits in with streaming replication
-and bootstrapping a new node</i>
-
 
