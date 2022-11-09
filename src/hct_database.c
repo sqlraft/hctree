@@ -2429,7 +2429,7 @@ static int hctDbOverflowArrayFree(HctDatabase *pDb, HctDbOverflowArray *p){
     int nRem = p->aOvfl[ii].nOvfl;
     while( 1 ){
       HctFilePage pg;
-      sqlite3HctFileClearPhysInUse(pDb->pFile, pgno, 0);
+      sqlite3HctFileFreeOverflow(pDb->pFile, pgno, 0);
       nRem--;
       if( nRem==0 ) break;
       rc = sqlite3HctFilePageGetPhysical(pDb->pFile, pgno, &pg);
@@ -3948,7 +3948,7 @@ static int hctDbInsertOverflow(
     while( rc==SQLITE_OK && nRem>nLocal ){
       HctFilePage pg;
       nOvfl++;
-      rc = sqlite3HctFilePageNewPhysical(pDb->pFile, &pg);
+      rc = sqlite3HctFilePageNewPhysical(pDb->pFile, 1, &pg);
       if( rc==SQLITE_OK ){
         HctDbPageHdr *pPg = (HctDbPageHdr*)pg.aNew;
         memset(pPg, 0, sizeof(HctDbPageHdr));
@@ -4283,10 +4283,7 @@ static int hctDbDelete(
     /* Possibility (4) */
     rc = sqlite3HctFilePageRelease(&p->fanpg);
     if( rc==SQLITE_OK ){
-      rc = sqlite3HctFilePageNewPhysical(pDb->pFile, &p->fanpg);
-    }
-    if( rc==SQLITE_OK ){
-      rc = sqlite3HctFileClearPhysInUse(pDb->pFile, p->fanpg.iNewPg, 0);
+      rc = sqlite3HctFilePageNewPhysical(pDb->pFile, 0, &p->fanpg);
     }
     if( rc==SQLITE_OK ){
       int bDummy = 0;
@@ -4651,7 +4648,7 @@ static int hctDbInsert(
       }
       rc = hctDbInsertOverflow(
           pDb, p, aTarget, nData, aData, &nLocal, &cell.iOvfl
-          );
+      );
       cell.aPayload = aData;
 
       op.aEntry = pDb->aTmp;
@@ -5789,6 +5786,27 @@ static void hctDbICError(
   va_end(ap);
 }
 
+static int hctDbIntegrityCheckFreeCb(
+  void *pCtx,
+  int bLogic,
+  u32 iPg
+){
+  IntCheckCtx *p = (IntCheckCtx*)pCtx;
+  if( bLogic ){
+    if( p->aLogic[iPg-1] ){
+      hctDbICError(p, "multiple refs to logical page %d (1)", (int)iPg);
+    }
+    p->aLogic[iPg-1] = 1;
+  }else{
+    if( p->aPhys[iPg-1] ){
+      hctDbICError(p, "multiple refs to physical page %d (1)", (int)iPg);
+    }
+    p->aPhys[iPg-1] = 1;
+  }
+
+  return (p->nErr>=p->nMaxErr) ? -1 : 0;
+}
+
 static int hctDbIntegrityCheckCb(
   void *pCtx,
   u32 iLogic,
@@ -5797,13 +5815,13 @@ static int hctDbIntegrityCheckCb(
   IntCheckCtx *p = (IntCheckCtx*)pCtx;
   if( iLogic ){
     if( p->aLogic[iLogic-1] ){
-      hctDbICError(p, "multiple refs to logical page %d", (int)iLogic);
+      hctDbICError(p, "multiple refs to logical page %d (2)", (int)iLogic);
     }
     p->aLogic[iLogic-1] = 1;
   }
   if( iPhys ){
     if( p->aPhys[iPhys-1] ){
-      hctDbICError(p, "multiple refs to physical page %d", (int)iPhys);
+      hctDbICError(p, "multiple refs to physical page %d (2)", (int)iPhys);
     }
     p->aPhys[iPhys-1] = 1;
   }
@@ -5834,6 +5852,8 @@ char *sqlite3HctDbIntegrityCheck(
     c.nErr++;
   }else{
     int ii;
+
+    sqlite3HctFileWalkFreePages(pFile, hctDbIntegrityCheckFreeCb, (void*)&c);
 
     for(ii=0; c.nErr==0 && ii<nFileRoot; ii++){
       u32 r = aFileRoot[ii];

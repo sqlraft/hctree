@@ -275,7 +275,7 @@ int sqlite3HctFilePageRelease(HctFilePage *pPg);
 
 
 int sqlite3HctFilePageGetPhysical(HctFile *pFile, u32 iPg, HctFilePage *pPg);
-int sqlite3HctFilePageNewPhysical(HctFile *pFile, HctFilePage *pPg);
+int sqlite3HctFilePageNewPhysical(HctFile *pFile, int, HctFilePage *pPg);
 
 u64 sqlite3HctFileAllocateTransid(HctFile *pFile);
 u64 sqlite3HctFileAllocateCID(HctFile *pFile);
@@ -290,7 +290,7 @@ u64 sqlite3HctFileSafeTID(HctFile*);
 u32 sqlite3HctFilePageRangeAlloc(HctFile*, int bLogical, int nPg);
 
 int sqlite3HctFileClearInUse(HctFilePage *pPg, int bReuseNow);
-int sqlite3HctFileClearPhysInUse(HctFile *pFile, u32 pgno, int bReuseNow);
+int sqlite3HctFileFreeOverflow(HctFile *pFile, u32 pgno, int bReuseNow);
 
 void sqlite3HctFileDebugPrint(HctFile *pFile, const char *zFmt, ...);
 
@@ -328,6 +328,8 @@ int sqlite3HctFileRootArray(HctFile*, u32**, int*);
 
 /* Interface used by hct_stats virtual table */
 i64 sqlite3HctFileStats(sqlite3*, int, const char**);
+
+int sqlite3HctFileWalkFreePages(HctFile *pFile, int (*x)(void*,int,u32), void*);
 
 /*************************************************************************
 ** Interface to code in hct_record.c

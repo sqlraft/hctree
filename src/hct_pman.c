@@ -328,8 +328,7 @@ static int pmanFreeTreeCb(void *pCtx, u32 iLogic, u32 iPhys){
     rc = sqlite3HctFilePageClearInUse(p->pFile, iLogic, 1);
     sqlite3HctPManFreePg(&rc, p->pPManClient, 0, iLogic, 1);
   }
-  if( iPhys && !sqlite3HctFilePageIsFree(p->pFile, iPhys, 0) && rc==SQLITE_OK ){
-    rc = sqlite3HctFilePageClearInUse(p->pFile, iPhys, 0);
+  if( iPhys && rc==SQLITE_OK ){
     sqlite3HctPManFreePg(&rc, p->pPManClient, 0, iPhys, 0);
   }
 
@@ -581,6 +580,47 @@ int sqlite3HctPManServerInitRoot(
   rc = sqlite3HctDbWalkTree(pFile, iRoot, pmanInitRootCb, (void*)&ctx);
   if( rc==SQLITE_OK ){
     rc = sqlite3HctFilePageClearIsRoot(pFile, iRoot);
+  }
+  return rc;
+}
+
+static int pmanWalkPageset(
+  HctPManPageset *pPageSet,
+  int bLogic,
+  int (*x)(void*, int, u32), 
+  void *pCtx
+){
+  int rc = 0;
+  if( pPageSet ){
+    int ii;
+    for(ii=0; rc==0 && ii<pPageSet->nPg; ii++){
+      int rc = x(pCtx, bLogic, pPageSet->aPg[ii]);
+    }
+  }
+  return rc;
+}
+
+int sqlite3HctPManWalkFreePages(
+  HctPManClient *pClient, 
+  int bServer,
+  int (*x)(void*, int, u32), 
+  void *pCtx
+){
+  int rc = SQLITE_OK;
+  rc = pmanWalkPageset(pClient->apAcc[0], 0, x, pCtx);
+  if( rc==SQLITE_OK ) rc = pmanWalkPageset(pClient->apUse[0], 0, x, pCtx);
+  if( rc==SQLITE_OK ) rc = pmanWalkPageset(pClient->apAcc[1], 1, x, pCtx);
+  if( rc==SQLITE_OK ) rc = pmanWalkPageset(pClient->apUse[1], 1, x, pCtx);
+  if( bServer ){
+    HctPManServer *pServer = pClient->pServer;
+    int ii;
+    for(ii=0; ii<2; ii++){
+      HctPManPageset *pSet;
+      for(pSet=pServer->aList[ii].pHead; !rc && pSet; pSet=pSet->pNext){
+        rc = pmanWalkPageset(pSet, ii, x, pCtx);
+      }
+    }
+    
   }
   return rc;
 }

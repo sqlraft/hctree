@@ -194,7 +194,6 @@ for {set ii 1} {$ii <= $nStep} {incr ii} {
 } 
 
 integrity_check 1.$ii.ic
-dumpdb
 
 set nStep 1000
 for {set ii 1} {$ii <= $nStep} {incr ii} {

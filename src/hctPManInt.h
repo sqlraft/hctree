@@ -99,3 +99,5 @@ int sqlite3HctPManFreeTree(HctPManClient *p, HctFile*, u32 iRoot, u64 iTid);
 
 int sqlite3HctPManServerInitRoot(int *pRc, HctPManServer*, HctFile*, u32);
 i64 sqlite3HctPManStats(sqlite3 *db, int iStat, const char **pzStat);
+
+int sqlite3HctPManWalkFreePages(HctPManClient*,int,int(*x)(void*,int,u32),void*);

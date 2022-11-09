@@ -573,14 +573,14 @@ static char *test_thread(int iTid, void *pArg){
         for(ii=0; ii<pTst->nUpdate; ii++){
           pCtx->aVal[ aUpdate[ii].iRow ] = aUpdate[ii].iVal;
         }
+        nWrite++;
       }
-      nWrite++;
     }
   }
 
   iEndTime = htt_current_time();
   if( iEndTime<=iStartTime ) iEndTime = iStartTime + 1;
-  zStat = testGetStats(&err, db);
+  // zStat = testGetStats(&err, db);
 
   /* Check that no updates made by this thread have been lost. */
   nError = 0;
@@ -817,6 +817,7 @@ static void runtest(Testcase *pTst){
 
   zFile = sqlite3_mprintf("%s0", HST_DATABASE_NAME);
   db = htt_sqlite3_open(zFile);
+  htt_sqlite3_exec(db, "SELECT 0 FROM tbl0 LIMIT 1");
 
   if( pTst->nSecond ){
     char *zThread = 0;
@@ -843,7 +844,6 @@ static void runtest(Testcase *pTst){
     );
     sqlite3_free(zThread);
   }
-
 
   if( pTst->bSeparate==0 && pTst->bTrust==0 ){
     htt_sqlite3_exec(db, "PRAGMA hct_quiescent_integrity_check=1");

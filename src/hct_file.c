@@ -55,6 +55,8 @@
 #define HCT_PMF_LOGICAL_IN_USE     (((u64)0x00000008)<<56)
 #define HCT_PMF_LOGICAL_IS_ROOT    (((u64)0x00000010)<<56)
 
+#define HCT_PMF_PHYSICAL_IS_OVFL   (((u64)0x00000020)<<56)
+
 #define HCT_FIRST_LOGICAL  33
 
 /*
@@ -445,7 +447,7 @@ static int hctFileClearEvicted(HctFile *pFile, u32 iLogical){
 static void hctFilePagemapZeroValue(HctFile *pFile, u32 iSlot){
   while( 1 ){
     u64 i1 = hctFilePagemapGet(pFile->pMapping, iSlot);
-    u64 i2 = (i1 & HCT_PMF_PHYSICAL_IN_USE);
+    u64 i2 = (i1 & HCT_PMF_PHYSICAL_IS_OVFL);
     if( hctFilePagemapSet(pFile, iSlot, i1, i2) ) return;
   }
 }
@@ -687,8 +689,7 @@ static int hctFileServerInit(HctFileServer *p, const char *zFile){
     **      to indicate no snapshot). We set it to 5.
     */
     if( rc==SQLITE_OK && hctFilePagemapGet(pMapping, 1)==0 ){
-      const u64 f = HCT_PMF_PHYSICAL_IN_USE
-                  | HCT_PMF_LOGICAL_IN_USE 
+      const u64 f = HCT_PMF_LOGICAL_IN_USE 
                   | HCT_PMF_LOGICAL_IS_ROOT;
       u8 *a1 = (u8*)hctPagePtr(pMapping, HCT_ROOTPAGE_SCHEMA);
       u8 *a2 = (u8*)hctPagePtr(pMapping, HCT_ROOTPAGE_META);
@@ -1004,7 +1005,8 @@ int sqlite3HctFilePageClearIsRoot(HctFile *pFile, u32 iRoot){
   return hctFileClearFlag(pFile, iRoot, HCT_PMF_LOGICAL_IS_ROOT);
 }
 int sqlite3HctFilePageClearInUse(HctFile *pFile, u32 iPg, int bLogic){
-  u64 flag = bLogic ? HCT_PMF_LOGICAL_IN_USE : HCT_PMF_PHYSICAL_IN_USE;
+  u64 flag = HCT_PMF_LOGICAL_IN_USE;
+  assert( bLogic || !"this is probably broken for physical pages" );
   return hctFileClearFlag(pFile, iPg, flag);
 }
 
@@ -1102,15 +1104,11 @@ static u32 hctFileAllocPg(int *pRc, HctFile *pFile, int bLogical){
 **
 **   HctFilePage.iNewPg
 **   HctFilePage.aNew
-**
-** The PHYSICAL_IN_USE flag is set on the new physical page allocated
-** here.
 */
 static void hctFilePageWrite(int *pRc, HctFilePage *pPg){
   if( pPg->aNew==0 ){
     u32 iNewPg = hctFileAllocPg(pRc, pPg->pFile, 0);
     if( iNewPg ){
-      hctFileSetFlag(pPg->pFile, iNewPg, HCT_PMF_PHYSICAL_IN_USE);
       pPg->iNewPg = iNewPg;
       pPg->aNew = (u8*)hctPagePtr(pPg->pFile->pMapping, iNewPg);
     }
@@ -1189,7 +1187,6 @@ static int hctFilePageFlush(HctFilePage *pPg){
       if( iOld ){
         u64 iTid = pPg->pFile->iCurrentTid;
         hctFileFreePg(&rc, pPg->pFile, iTid, iOld, 0);
-        hctFileClearFlag(pPg->pFile, iOld, HCT_PMF_PHYSICAL_IN_USE);
       }
       pPg->iOldPg = pPg->iNewPg;
       pPg->aOld = pPg->aNew;
@@ -1254,6 +1251,7 @@ int sqlite3HctFilePageIsEvicted(HctFile *pFile, u32 iPgno){
 int sqlite3HctFilePageIsFree(HctFile *pFile, u32 iPgno, int bLogical){
   u64 iVal = hctFilePagemapGet(pFile->pMapping, iPgno);
   u64 mask = (bLogical ? HCT_PMF_LOGICAL_IN_USE : HCT_PMF_PHYSICAL_IN_USE);
+  assert( bLogical || !"this probably is broken" );
   return (iVal & mask) ? 0 : 1;
 }
 
@@ -1270,11 +1268,21 @@ int sqlite3HctFilePageRelease(HctFilePage *pPg){
 ** Allocate a new physical page and set (*pPg) to refer to it. The new
 ** physical page number is available in HctFilePage.iNewPg.
 */
-int sqlite3HctFilePageNewPhysical(HctFile *pFile, HctFilePage *pPg){
+int sqlite3HctFilePageNewPhysical(
+  HctFile *pFile, 
+  int bOvfl,                      /* Set the HCT_PMF_PHYSICAL_IS_OVFL flag */
+  HctFilePage *pPg
+){
   int rc = SQLITE_OK;
   memset(pPg, 0, sizeof(*pPg));
   pPg->pFile = pFile;
   hctFilePageWrite(&rc, pPg);
+  if( bOvfl ){
+    hctFileSetFlag(pPg->pFile, pPg->iNewPg, HCT_PMF_PHYSICAL_IS_OVFL);
+  }else{
+    u64 iTid = pFile->iCurrentTid;
+    hctFileFreePg(&rc, pFile, iTid, pPg->iNewPg, 0);
+  }
   return rc;
 }
 
@@ -1329,7 +1337,7 @@ int sqlite3HctFileRootNew(HctFile *pFile, u32 iRoot, HctFilePage *pPg){
   ** page with page number iRoot currently in use somewhere.  */
   while( rc==SQLITE_OK ){
     u64 i1 = hctFilePagemapGet(pFile->pMapping, iRoot);
-    u64 i2 = (i1 & HCT_PMF_PHYSICAL_IN_USE);
+    u64 i2 = (i1 & HCT_PMF_PHYSICAL_IS_OVFL);
     i2 |= (HCT_PMF_LOGICAL_IS_ROOT|HCT_PMF_LOGICAL_IN_USE);
     if( hctFilePagemapSet(pFile, iRoot, i1, i2) ) break;
   }
@@ -1340,7 +1348,6 @@ int sqlite3HctFileRootNew(HctFile *pFile, u32 iRoot, HctFilePage *pPg){
 void sqlite3HctFilePageUnwrite(HctFilePage *pPg){
   int rc = SQLITE_OK;
   if( pPg->aNew ){
-    hctFileClearFlag(pPg->pFile, pPg->iNewPg, HCT_PMF_PHYSICAL_IN_USE);
     hctFileFreePg(&rc, pPg->pFile, 0, pPg->iNewPg, 0);
     pPg->iNewPg = 0;
     pPg->aNew = 0;
@@ -1407,7 +1414,6 @@ u32 sqlite3HctFilePageRangeAlloc(HctFile *pFile, int bLogical, int nPg){
 ** This function is called by the upper layer to clear the:
 **
 **   * LOGICAL_IN_USE flag on the specified page id, and the
-**   * PHYSICAL_IN_USE flag on currently mapped physical page id.
 **
 ** If parameter bReuseNow is true, then the page was never properly linked
 ** into a list, and so the logical and physical page ids can be reused 
@@ -1431,7 +1437,6 @@ int sqlite3HctFileClearInUse(HctFilePage *pPg, int bReuseNow){
 #endif
 
     hctFileClearFlag(pPg->pFile, pPg->iPg, HCT_PMF_LOGICAL_IN_USE);
-    hctFileClearFlag(pPg->pFile, iPhysPg, HCT_PMF_PHYSICAL_IN_USE);
     hctFileFreePg(&rc, pPg->pFile, iTid, pPg->iPg, 1);
     hctFileFreePg(&rc, pPg->pFile, iTid, iPhysPg, 0);
   }
@@ -1439,11 +1444,11 @@ int sqlite3HctFileClearInUse(HctFilePage *pPg, int bReuseNow){
   return rc;
 }
 
-int sqlite3HctFileClearPhysInUse(HctFile *pFile, u32 pgno, int bReuseNow){
+int sqlite3HctFileFreeOverflow(HctFile *pFile, u32 pgno, int bReuseNow){
   u64 iTid = pFile->iCurrentTid;
   int rc = SQLITE_OK;
   
-  hctFileClearFlag(pFile, pgno, HCT_PMF_PHYSICAL_IN_USE);
+  hctFileClearFlag(pFile, pgno, HCT_PMF_PHYSICAL_IS_OVFL);
   hctFileFreePg(&rc, pFile, iTid, pgno, 0);
   return rc;
 }
@@ -1494,6 +1499,17 @@ int sqlite3HctFileFinishRecovery(HctFile *pFile, int iStage, int rc){
   return rc;
 }
 
+static int hctFileFreeTreePage(void *pCtx, u32 iLogic, u32 iPhys){
+  HctFile *pFile = (HctFile*)pCtx;
+  if( iLogic ){
+    u64 mask = HCT_PMF_LOGICAL_IN_USE|HCT_PMF_LOGICAL_IS_ROOT;
+    hctFileClearFlag(pFile, iLogic, mask);
+  }else{
+    hctFileClearFlag(pFile, iPhys, HCT_PMF_PHYSICAL_IS_OVFL);
+  }
+  return SQLITE_OK;
+}
+
 int sqlite3HctFileRecoverFreelists(HctFile *pFile, int nRoot, u32 *aRoot){
   int rc = SQLITE_OK;
   HctFileServer *pServer = pFile->pServer;
@@ -1503,31 +1519,62 @@ int sqlite3HctFileRecoverFreelists(HctFile *pFile, int nRoot, u32 *aRoot){
   u32 iPg;
   u32 nPg;
 
+  u32 *aPhys = 0;
+
   nPg1 = nPg1 & HCT_PAGEMAP_VMASK;
   nPg2 = nPg2 & HCT_PAGEMAP_VMASK;
 
   sqlite3HctPManClientHandoff(pFile->pPManClient);
   sqlite3HctPManServerReset(pServer->pPManServer);
 
+  /* Allocate a bit-map to track used physical pages */
+  aPhys = (u32*)sqlite3_malloc64(((nPg1/32)+1) * sizeof(u32));
+  if( aPhys==0 ) return SQLITE_NOMEM;
+  memset(aPhys, 0, (((nPg1/32)+1) * sizeof(u32)));
+
+  /* Run through the page-map looking for root pages that are not in the
+  ** aRoot[] array. If found, iterate through the tree, marking all pages
+  ** as free. There are two problems here (TODO):
+  **
+  **   * Iterating through the tree should be depth first - so that if
+  **     a crash occurs during this procedure pages are not leaked.
+  **
+  **   * This is not good for performance - iterating an extra time
+  **     through the page-map.
+  */
+  for(iPg=HCT_FIRST_LOGICAL; rc==SQLITE_OK && iPg<=nPg2; iPg++){
+    u64 iVal = hctFilePagemapGetSafe(pMapping, iPg);
+    if( iVal & HCT_PMF_LOGICAL_IS_ROOT ){
+      int ii = 0;
+      for(ii=0; ii<nRoot && aRoot[ii]!=iPg; ii++);
+      if( ii==nRoot ){
+        rc = sqlite3HctDbWalkTree(pFile, iPg, hctFileFreeTreePage,(void*)pFile);
+      }
+    }
+  }
+
   nPg = MAX((nPg1 & 0xFFFFFFFF), (nPg2 & 0xFFFFFFFF));
   for(iPg=1; iPg<=nPg; iPg++){
     u64 iVal = hctFilePagemapGetSafe(pMapping, iPg);
-    if( (iVal & HCT_PMF_PHYSICAL_IN_USE)==0 && (iPg<=nPg1) ){
-      sqlite3HctPManServerInit(&rc, pServer->pPManServer, iPg, 0);
+    if( (iVal & HCT_PMF_PHYSICAL_IS_OVFL) ){
+      u64 iPg1 = iVal & HCT_PAGEMAP_VMASK;
+      if( iPg1<=nPg1 ) aPhys[ iPg1/32 ] |= ((u32)1) << (iPg1%32);
     }
-    if( (iVal & HCT_PMF_LOGICAL_IN_USE)==0 
-        && iPg<=nPg2 
-        && iPg>=HCT_FIRST_LOGICAL
-      ){
-      sqlite3HctPManServerInit(&rc, pServer->pPManServer, iPg, 1);
-    }
-    if( (iVal & HCT_PMF_LOGICAL_IS_ROOT) && iPg>=3  ){
-      int ii;
-      for(ii=0; ii<nRoot && aRoot[ii]!=iPg; ii++);
-      if( ii==nRoot ){
-        /* A free root page! */
-        sqlite3HctPManServerInitRoot(&rc, pServer->pPManServer, pFile, iPg);
+    if( iPg<=nPg2 && (iPg>=HCT_FIRST_LOGICAL || iPg==1 || iPg==2) ){
+      if( (iVal & HCT_PMF_LOGICAL_IN_USE)==0 ){
+        sqlite3HctPManServerInit(&rc, pServer->pPManServer, iPg, 1);
+      }else{
+        u64 iPhys = iVal & HCT_PAGEMAP_VMASK;
+        if( iPhys<=nPg1 ){
+          aPhys[ iPhys/32 ] |= ((u32)1) << (iPhys%32);
+        }
       }
+    }
+  }
+
+  for(iPg=1; iPg<=nPg1; iPg++){
+    if( (aPhys[ iPg/32 ] & (((u32)1) << (iPg%32)))==0 ){
+      sqlite3HctPManServerInit(&rc, pServer->pPManServer, iPg, 0);
     }
   }
 
@@ -1614,6 +1661,13 @@ void sqlite3HctFileICArrays(
     }
   }
 
+ if( rc==SQLITE_OK ){
+   for(ii=3; ii<HCT_FIRST_LOGICAL; ii++){
+     aLogic[ii-1] = 1;
+   }
+ }
+
+#if 0
   for(ii=1; ii<=nLogic && rc==SQLITE_OK; ii++){
     u64 val;
     rc = hctFilePagemapGetGrow(pFile, ii, &val);
@@ -1628,6 +1682,7 @@ void sqlite3HctFileICArrays(
       aPhys[ii-1] = 1;
     }
   }
+#endif
 
   if( rc!=SQLITE_OK ){
     sqlite3_free(aLogic);
@@ -1639,6 +1694,22 @@ void sqlite3HctFileICArrays(
   *paPhys = aPhys;
   *pnLogic = nLogic;
   *pnPhys = nPhys;
+}
+
+int sqlite3HctFileWalkFreePages(
+  HctFile *pFile, 
+  int (*x)(void*, int, u32), 
+  void *pCtx
+){
+  HctFileServer *pServer = pFile->pServer;
+  HctFile *p;
+  int rc = SQLITE_OK;
+  int bServer = 1;
+  for(p=pServer->pFileList; rc==SQLITE_OK && p; p=p->pFileNext){
+    rc = sqlite3HctPManWalkFreePages(p->pPManClient, bServer, x, pCtx);
+    bServer = 0;
+  }
+  return rc;
 }
 
 i64 sqlite3HctFileStats(sqlite3 *db, int iStat, const char **pzStat){
@@ -1685,7 +1756,7 @@ i64 sqlite3HctFileStats(sqlite3 *db, int iStat, const char **pzStat){
 "  CREATE TABLE hct_pgmap("      \
 "    slot INTEGER,"              \
 "    value INTEGER,"             \
-"    physical_in_use BOOLEAN,"   \
+"    physical_is_ovfl BOOLEAN,"   \
 "    logical_in_use BOOLEAN,"    \
 "    logical_evicted BOOLEAN,"   \
 "    logical_irrevicted BOOLEAN,"\
@@ -1819,7 +1890,7 @@ static int pgmapColumn(
       break;
     }
     case 2: {  /* physical_in_use */
-      sqlite3_result_int64(ctx, (pCur->iVal & HCT_PMF_PHYSICAL_IN_USE)?1:0);
+      sqlite3_result_int64(ctx, (pCur->iVal & HCT_PMF_PHYSICAL_IS_OVFL)?1:0);
       break;
     }
     case 3: {  /* logical_in_use */
@@ -1950,7 +2021,7 @@ static int pgmapUpdate(
   bLogicalIsRoot = sqlite3_value_int(apVal[8]);
 
   val = iValue & HCT_PAGEMAP_VMASK;
-  val |= (bPhysicalInUse ? HCT_PMF_PHYSICAL_IN_USE : 0);
+  val |= (bPhysicalInUse ? HCT_PMF_PHYSICAL_IS_OVFL : 0);
   val |= (bLogicalInUse ? HCT_PMF_LOGICAL_IN_USE : 0);
   val |= (bLogicalEvicted ? HCT_PMF_LOGICAL_EVICTED : 0);
   val |= (bLogicalIrrevicted ? HCT_PMF_LOGICAL_IRREVICTED : 0);

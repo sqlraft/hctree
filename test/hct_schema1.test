@@ -147,6 +147,7 @@ db close
 
 breakpoint
 sqlite3 db test.db
+db eval { SELECT * FROM t3 }
 do_execsql_test 2.2 {
   PRAGMA hct_quiescent_integrity_check = 1;
   PRAGMA integrity_check;
