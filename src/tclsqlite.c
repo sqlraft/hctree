@@ -2047,7 +2047,6 @@ static int SQLITE_TCLAPI DbObjCmd(
   ** FILENAME database.
   */
   case DB_BACKUP: {
-#ifndef SQLITE_ENABLE_HCT
     const char *zDestFile;
     const char *zSrcDb;
     sqlite3 *pDest;
@@ -2088,7 +2087,6 @@ static int SQLITE_TCLAPI DbObjCmd(
       rc = TCL_ERROR;
     }
     sqlite3_close(pDest);
-#endif
     break;
   }
 

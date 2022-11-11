@@ -52,9 +52,7 @@
 
 #define SQLITE_ENABLE_HCT 1
 #ifdef SQLITE_ENABLE_HCT
-# define SQLITE_OMIT_WAL 1
 # define SQLITE_OMIT_SHARED_CACHE 1
-# define SQLITE_OMIT_VACUUM 1
 #endif
 
 /*
@@ -1272,6 +1270,7 @@ typedef int VList;
 */
 #include "pager.h"
 #include "btree.h"
+#include "btreeModules.h"
 #include "vdbe.h"
 #include "pcache.h"
 #include "os.h"

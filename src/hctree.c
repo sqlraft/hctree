@@ -37,16 +37,18 @@ typedef struct BtSchemaOp BtSchemaOp;
 **   Set to SQLITE_TXN_NONE, READ or WRITE to indicate the type of 
 **   transaction that is open. This is set by the following functions:
 **
-**     sqlite3BtreeBeginTrans()
-**     sqlite3BtreeCommitPhaseTwo()
-**     sqlite3BtreeRollback()
+**     sqlite3HctBtreeBeginTrans()
+**     sqlite3HctBtreeCommitPhaseTwo()
+**     sqlite3HctBtreeRollback()
 */
 struct Btree {
+  BtreeMethods *pMethods;
+
   sqlite3 *db;
   HctConfig config;               /* Configuration for this connection */
   HctTree *pHctTree;              /* In-memory part of database */
   HctDatabase *pHctDb;            /* On-disk part of db, if any */
-  void *pSchema;                  /* Schema memory from sqlite3BtreeSchema() */
+  void *pSchema;                  /* Schema memory from sqlite3HctBtreeSchema() */
   void(*xSchemaFree)(void*);      /* Function to free pSchema */
   int eTrans;                     /* SQLITE_TXN_NONE, READ or WRITE */
   BtCursor *pCsrList;             /* List of all open cursors */
@@ -62,6 +64,8 @@ struct Btree {
   u32 iNextRoot;                  /* Next root page to allocate if pHctDb==0 */
   u32 aMeta[SQLITE_N_BTREE_META]; /* 16 database meta values */
   int eMetaState;
+
+  Pager *pFakePager;
 };
 
 /*
@@ -89,8 +93,9 @@ struct BtSchemaOp {
 
 
 struct BtCursor {
-  Btree *pBtree;
+  BtCursorMethods *pMethods;
 
+  Btree *pBtree;
   HctTreeCsr *pHctTreeCsr;
   HctDbCsr *pHctDbCsr;
   int bUseTree;                   /* 1 if tree-csr is current entry, else 0 */
@@ -126,7 +131,7 @@ int sqlite3_enable_shared_cache(int enable){
 /*
 ** Return an reset the seek counter for a Btree object.
 */
-sqlite3_uint64 sqlite3BtreeSeekCount(Btree *pBt){
+sqlite3_uint64 sqlite3HctBtreeSeekCount(Btree *pBt){
   assert( 0 );
   return 0;
 }
@@ -135,7 +140,7 @@ sqlite3_uint64 sqlite3BtreeSeekCount(Btree *pBt){
 /*
 ** Clear the current cursor position.
 */
-void sqlite3BtreeClearCursor(BtCursor *pCur){
+void sqlite3HctBtreeClearCursor(BtCursor *pCur){
   /* assert( 0 ); */
 }
 
@@ -148,22 +153,24 @@ void sqlite3BtreeClearCursor(BtCursor *pCur){
 **
 ** Calling this routine with a NULL cursor pointer returns false.
 **
-** Use the separate sqlite3BtreeCursorRestore() routine to restore a cursor
+** Use the separate sqlite3HctBtreeCursorRestore() routine to restore a cursor
 ** back to where it ought to be if this routine returns true.
 */
-int sqlite3BtreeCursorHasMoved(BtCursor *pCur){
+int sqlite3HctBtreeCursorHasMoved(BtCursor *pCur){
   return sqlite3HctTreeCsrHasMoved(pCur->pHctTreeCsr);
 }
 
 /*
 ** Return a pointer to a fake BtCursor object that will always answer
-** false to the sqlite3BtreeCursorHasMoved() routine above.  The fake
+** false to the sqlite3HctBtreeCursorHasMoved() routine above.  The fake
 ** cursor returned must not be used with any other Btree interface.
 */
-BtCursor *sqlite3BtreeFakeValidCursor(void){
+#if 0 
+BtCursor *sqlite3HctBtreeFakeValidCursor(void){
   static BtCursor csr = {0,0,0};
   return &csr;
 }
+#endif
 
 /*
 ** This routine restores a cursor back to its original position after it
@@ -176,9 +183,9 @@ BtCursor *sqlite3BtreeFakeValidCursor(void){
 ** nearby row.
 **
 ** This routine should only be called for a cursor that just returned
-** TRUE from sqlite3BtreeCursorHasMoved().
+** TRUE from sqlite3HctBtreeCursorHasMoved().
 */
-int sqlite3BtreeCursorRestore(BtCursor *pCur, int *pDifferentRow){
+int sqlite3HctBtreeCursorRestore(BtCursor *pCur, int *pDifferentRow){
   return sqlite3HctTreeCsrRestore(pCur->pHctTreeCsr, pDifferentRow);
 }
 
@@ -186,14 +193,14 @@ int sqlite3BtreeCursorRestore(BtCursor *pCur, int *pDifferentRow){
 ** Return the size of the database file in pages. If there is any kind of
 ** error, return ((unsigned int)-1).
 */
-Pgno sqlite3BtreeLastPage(Btree *p){
+Pgno sqlite3HctBtreeLastPage(Btree *p){
   return 0xFFFFFFFF;
 }
 
 /*
 ** Provide flag hints to the cursor.
 */
-void sqlite3BtreeCursorHintFlags(BtCursor *pCur, unsigned x){
+void sqlite3HctBtreeCursorHintFlags(BtCursor *pCur, unsigned x){
   /* no-op */
   assert( x==BTREE_SEEK_EQ || x==BTREE_BULKLOAD || x==0 );
 }
@@ -349,7 +356,7 @@ static int hctRecoverLogs(Btree *p, int iStage){
 ** then an ephemeral database is created.  The ephemeral database might
 ** be exclusively in memory, or it might use a disk-based memory cache.
 ** Either way, the ephemeral database will be automatically deleted 
-** when sqlite3BtreeClose() is called.
+** when sqlite3HctBtreeClose() is called.
 **
 ** If zFilename is ":memory:" then an in-memory database is created
 ** that is automatically destroyed when it is closed.
@@ -363,7 +370,7 @@ static int hctRecoverLogs(Btree *p, int iStage){
 ** objects in the same database connection since doing so will lead
 ** to problems with locking.
 */
-int sqlite3BtreeOpen(
+int sqlite3HctBtreeOpen(
   sqlite3_vfs *pVfs,      /* VFS to use for this b-tree */
   const char *zFilename,  /* Name of the file containing the BTree database */
   sqlite3 *db,            /* Associated database handle */
@@ -384,6 +391,7 @@ int sqlite3BtreeOpen(
     pNew->config.nPageSet = HCT_DEFAULT_NPAGESET;
     pNew->config.nTryBeforeUnevict = HCT_DEFAULT_NTRYBEFOREUNEVICT;
     rc = sqlite3HctTreeNew(&pNew->pHctTree);
+    pNew->pFakePager = (Pager*)sqlite3HctMalloc(&rc, 4096);
   }else{
     rc = SQLITE_NOMEM;
   }
@@ -393,7 +401,7 @@ int sqlite3BtreeOpen(
   }
 
   if( rc!=SQLITE_OK ){
-    sqlite3BtreeClose(pNew);
+    sqlite3HctBtreeClose(pNew);
     pNew = 0;
   }
   *ppBtree = pNew;
@@ -403,18 +411,18 @@ int sqlite3BtreeOpen(
 /*
 ** Close an open database and invalidate all cursors.
 */
-int sqlite3BtreeClose(Btree *p){
+int sqlite3HctBtreeClose(Btree *p){
   if( p ){
     while(p->pCsrList){
-      sqlite3BtreeCloseCursor(p->pCsrList);
+      sqlite3HctBtreeCloseCursor(p->pCsrList);
     }
     if( p->zLogFile ){
       close(p->fdLog);
       unlink(p->zLogFile);
       sqlite3_free(p->zLogFile);
     }
-    sqlite3BtreeRollback(p, SQLITE_OK, 0);
-    sqlite3BtreeCommit(p);
+    sqlite3HctBtreeRollback(p, SQLITE_OK, 0);
+    sqlite3HctBtreeCommit(p);
     if( p->xSchemaFree ){
       p->xSchemaFree(p->pSchema);
     }
@@ -422,6 +430,7 @@ int sqlite3BtreeClose(Btree *p){
     sqlite3HctTreeFree(p->pHctTree);
     sqlite3HctDbClose(p->pHctDb);
     sqlite3_free(p->aSchemaOp);
+    sqlite3_free(p->pFakePager);
     sqlite3_free(p);
   }
   return SQLITE_OK;
@@ -434,7 +443,7 @@ int sqlite3BtreeClose(Btree *p){
 ** cache is allowed to grow larger than this limit if it contains
 ** dirty pages or pages still in active use.
 */
-int sqlite3BtreeSetCacheSize(Btree *p, int mxPage){
+int sqlite3HctBtreeSetCacheSize(Btree *p, int mxPage){
   /* no-op in hct */
   return SQLITE_OK;
 }
@@ -449,7 +458,7 @@ int sqlite3BtreeSetCacheSize(Btree *p, int mxPage){
 ** as an argument, no changes are made to the spill size setting, so
 ** using mxPage of 0 is a way to query the current spill size.
 */
-int sqlite3BtreeSetSpillSize(Btree *p, int mxPage){
+int sqlite3HctBtreeSetSpillSize(Btree *p, int mxPage){
   return 1024;
 }
 
@@ -458,7 +467,7 @@ int sqlite3BtreeSetSpillSize(Btree *p, int mxPage){
 ** Change the limit on the amount of the database file that may be
 ** memory mapped.
 */
-int sqlite3BtreeSetMmapLimit(Btree *p, sqlite3_int64 szMmap){
+int sqlite3HctBtreeSetMmapLimit(Btree *p, sqlite3_int64 szMmap){
   /* assert( 0 ); */
   return SQLITE_OK;
 }
@@ -473,7 +482,7 @@ int sqlite3BtreeSetMmapLimit(Btree *p, sqlite3_int64 szMmap){
 ** probability of damage to near zero but with a write performance reduction.
 */
 #ifndef SQLITE_OMIT_PAGER_PRAGMAS
-int sqlite3BtreeSetPagerFlags(
+int sqlite3HctBtreeSetPagerFlags(
   Btree *p,              /* The btree to set the safety level on */
   unsigned pgFlags       /* Various PAGER_* flags */
 ){
@@ -502,7 +511,7 @@ int sqlite3BtreeSetPagerFlags(
 ** If the iFix!=0 then the BTS_PAGESIZE_FIXED flag is set so that the page size
 ** and autovacuum mode can no longer be changed.
 */
-int sqlite3BtreeSetPageSize(Btree *p, int pageSize, int nReserve, int iFix){
+int sqlite3HctBtreeSetPageSize(Btree *p, int pageSize, int nReserve, int iFix){
   int rc = SQLITE_OK;
   return rc;
 }
@@ -510,22 +519,22 @@ int sqlite3BtreeSetPageSize(Btree *p, int pageSize, int nReserve, int iFix){
 /*
 ** Return the currently defined page size
 */
-int sqlite3BtreeGetPageSize(Btree *p){
+int sqlite3HctBtreeGetPageSize(Btree *p){
   return 4096;
 }
 
 /*
-** This function is similar to sqlite3BtreeGetReserve(), except that it
+** This function is similar to sqlite3HctBtreeGetReserve(), except that it
 ** may only be called if it is guaranteed that the b-tree mutex is already
 ** held.
 **
 ** This is useful in one special case in the backup API code where it is
 ** known that the shared b-tree mutex is held, but the mutex on the 
-** database handle that owns *p is not. In this case if sqlite3BtreeEnter()
+** database handle that owns *p is not. In this case if sqlite3HctBtreeEnter()
 ** were to be called, it might collide with some other operation on the
 ** database handle that owns *p, causing undefined behavior.
 */
-int sqlite3BtreeGetReserveNoMutex(Btree *p){
+int sqlite3HctBtreeGetReserveNoMutex(Btree *p){
   assert( 0 );
   return 0;
 }
@@ -539,7 +548,7 @@ int sqlite3BtreeGetReserveNoMutex(Btree *p){
 ** the latest reserve size requested by SQLITE_FILECTRL_RESERVE_BYTES.
 ** The amount of reserve can only grow - never shrink.
 */
-int sqlite3BtreeGetRequestedReserve(Btree *p){
+int sqlite3HctBtreeGetRequestedReserve(Btree *p){
   return 0;
 }
 
@@ -549,7 +558,7 @@ int sqlite3BtreeGetRequestedReserve(Btree *p){
 ** No changes are made if mxPage is 0 or negative.
 ** Regardless of the value of mxPage, return the maximum page count.
 */
-Pgno sqlite3BtreeMaxPageCount(Btree *p, Pgno mxPage){
+Pgno sqlite3HctBtreeMaxPageCount(Btree *p, Pgno mxPage){
   assert( 0 );
   return 0xFFFFFFFF;
 }
@@ -572,7 +581,7 @@ Pgno sqlite3BtreeMaxPageCount(Btree *p, Pgno mxPage){
 ** that freelist leaf pages are written back into the database, increasing
 ** the amount of disk I/O.
 */
-int sqlite3BtreeSecureDelete(Btree *p, int newFlag){
+int sqlite3HctBtreeSecureDelete(Btree *p, int newFlag){
   return 0;
 }
 
@@ -582,7 +591,7 @@ int sqlite3BtreeSecureDelete(Btree *p, int newFlag){
 ** is disabled. The default value for the auto-vacuum property is 
 ** determined by the SQLITE_DEFAULT_AUTOVACUUM macro.
 */
-int sqlite3BtreeSetAutoVacuum(Btree *p, int autoVacuum){
+int sqlite3HctBtreeSetAutoVacuum(Btree *p, int autoVacuum){
   return SQLITE_OK;
 }
 
@@ -590,7 +599,7 @@ int sqlite3BtreeSetAutoVacuum(Btree *p, int autoVacuum){
 ** Return the value of the 'auto-vacuum' property. If auto-vacuum is 
 ** enabled 1 is returned. Otherwise 0.
 */
-int sqlite3BtreeGetAutoVacuum(Btree *p){
+int sqlite3HctBtreeGetAutoVacuum(Btree *p){
   /* hct is never in auto-vacuum mode */
   return 0;
 }
@@ -600,7 +609,7 @@ int sqlite3BtreeGetAutoVacuum(Btree *p){
 ** consisting of a single page and no schema objects). Return SQLITE_OK
 ** if successful, or an SQLite error code otherwise.
 */
-int sqlite3BtreeNewDb(Btree *p){
+int sqlite3HctBtreeNewDb(Btree *p){
   int rc = SQLITE_OK;
   assert( 0 );
   return rc;
@@ -619,13 +628,13 @@ int sqlite3BtreeNewDb(Btree *p){
 ** changes to the database.  None of the following routines 
 ** will work unless a transaction is started first:
 **
-**      sqlite3BtreeCreateTable()
-**      sqlite3BtreeCreateIndex()
-**      sqlite3BtreeClearTable()
-**      sqlite3BtreeDropTable()
-**      sqlite3BtreeInsert()
-**      sqlite3BtreeDelete()
-**      sqlite3BtreeUpdateMeta()
+**      sqlite3HctBtreeCreateTable()
+**      sqlite3HctBtreeCreateIndex()
+**      sqlite3HctBtreeClearTable()
+**      sqlite3HctBtreeDropTable()
+**      sqlite3HctBtreeInsert()
+**      sqlite3HctBtreeDelete()
+**      sqlite3HctBtreeUpdateMeta()
 **
 ** If an initial attempt to acquire the lock fails because of lock contention
 ** and the database was previously unlocked, then invoke the busy handler
@@ -641,13 +650,13 @@ int sqlite3BtreeNewDb(Btree *p){
 ** when A already has a read lock, we encourage A to give up and let B
 ** proceed.
 */
-int sqlite3BtreeBeginTrans(Btree *p, int wrflag, int *pSchemaVersion){
+int sqlite3HctBtreeBeginTrans(Btree *p, int wrflag, int *pSchemaVersion){
   int rc = SQLITE_OK;
   int req = wrflag ? SQLITE_TXN_WRITE : SQLITE_TXN_READ;
 
   assert( wrflag==0 || p->pHctDb==0 || pSchemaVersion );
   if( pSchemaVersion ){
-    sqlite3BtreeGetMeta(p, 1, (u32*)pSchemaVersion);
+    sqlite3HctBtreeGetMeta(p, 1, (u32*)pSchemaVersion);
   }
 
   if( rc==SQLITE_OK && wrflag ){
@@ -674,7 +683,7 @@ int sqlite3BtreeBeginTrans(Btree *p, int wrflag, int *pSchemaVersion){
 ** SQLITE_DONE is returned. If it is not finished, but no error occurred,
 ** SQLITE_OK is returned. Otherwise an SQLite error code. 
 */
-int sqlite3BtreeIncrVacuum(Btree *p){
+int sqlite3HctBtreeIncrVacuum(Btree *p){
   assert( 0 );
   return SQLITE_OK;
 }
@@ -689,7 +698,7 @@ int sqlite3BtreeIncrVacuum(Btree *p){
 ** database are written into the database file and flushed to oxide.
 ** At the end of this call, the rollback journal still exists on the
 ** disk and we are still holding all locks, so the transaction has not
-** committed.  See sqlite3BtreeCommitPhaseTwo() for the second phase of the
+** committed.  See sqlite3HctBtreeCommitPhaseTwo() for the second phase of the
 ** commit process.
 **
 ** This call is a no-op if no write-transaction is currently active on pBt.
@@ -705,8 +714,8 @@ int sqlite3BtreeIncrVacuum(Btree *p){
 ** Once this is routine has returned, the only thing required to commit
 ** the write-transaction for this database file is to delete the journal.
 */
-int sqlite3BtreeCommitPhaseOne(Btree *p, const char *zSuperJrnl){
-  /* Everything happens in sqlite3BtreeCommitPhaseTwo() */
+int sqlite3HctBtreeCommitPhaseOne(Btree *p, const char *zSuperJrnl){
+  /* Everything happens in sqlite3HctBtreeCommitPhaseTwo() */
   return SQLITE_OK;
 }
 
@@ -1001,8 +1010,8 @@ static int btreeFlushToDisk(Btree *p){
 ** Commit the transaction currently in progress.
 **
 ** This routine implements the second phase of a 2-phase commit.  The
-** sqlite3BtreeCommitPhaseOne() routine does the first phase and should
-** be invoked prior to calling this routine.  The sqlite3BtreeCommitPhaseOne()
+** sqlite3HctBtreeCommitPhaseOne() routine does the first phase and should
+** be invoked prior to calling this routine.  The sqlite3HctBtreeCommitPhaseOne()
 ** routine did all the work of writing information out to disk and flushing the
 ** contents so that they are written onto the disk platter.  All this
 ** routine has to do is delete or truncate or zero the header in the
@@ -1023,7 +1032,7 @@ static int btreeFlushToDisk(Btree *p){
 ** This will release the write lock on the database file.  If there
 ** are no active cursors, it also releases the read lock.
 */
-int sqlite3BtreeCommitPhaseTwo(Btree *p, int bCleanup){
+int sqlite3HctBtreeCommitPhaseTwo(Btree *p, int bCleanup){
   int rc = SQLITE_OK;
   if( p->eTrans==SQLITE_TXN_WRITE ){
     /* TODO: Invalidate any active cursors */
@@ -1050,14 +1059,12 @@ int sqlite3BtreeCommitPhaseTwo(Btree *p, int bCleanup){
 /*
 ** Do both phases of a commit.
 */
-int sqlite3BtreeCommit(Btree *p){
+int sqlite3HctBtreeCommit(Btree *p){
   int rc;
-  sqlite3BtreeEnter(p);
-  rc = sqlite3BtreeCommitPhaseOne(p, 0);
+  rc = sqlite3HctBtreeCommitPhaseOne(p, 0);
   if( rc==SQLITE_OK ){
-    rc = sqlite3BtreeCommitPhaseTwo(p, 0);
+    rc = sqlite3HctBtreeCommitPhaseTwo(p, 0);
   }
-  sqlite3BtreeLeave(p);
   return rc;
 }
 
@@ -1087,7 +1094,7 @@ int sqlite3BtreeCommit(Btree *p){
 ** SQLITE_OK is returned if successful, or if an error occurs while
 ** saving a cursor position, an SQLite error code.
 */
-int sqlite3BtreeTripAllCursors(Btree *pBtree, int errCode, int writeOnly){
+int sqlite3HctBtreeTripAllCursors(Btree *pBtree, int errCode, int writeOnly){
   int rc = SQLITE_OK;
   if( pBtree ){
     BtCursor *p;
@@ -1113,7 +1120,7 @@ int sqlite3BtreeTripAllCursors(Btree *pBtree, int errCode, int writeOnly){
 ** This will release the write lock on the database file.  If there
 ** are no active cursors, it also releases the read lock.
 */
-int sqlite3BtreeRollback(Btree *p, int tripCode, int writeOnly){
+int sqlite3HctBtreeRollback(Btree *p, int tripCode, int writeOnly){
   if( p->eTrans==SQLITE_TXN_WRITE ){
     sqlite3HctTreeRollbackTo(p->pHctTree, 0);
     if( p->pHctDb ){
@@ -1141,9 +1148,9 @@ int sqlite3BtreeRollback(Btree *p, int tripCode, int writeOnly){
 ** including the new anonymous savepoint, open on the B-Tree. i.e. if there
 ** are no active savepoints and no other statement-transactions open,
 ** iStatement is 1. This anonymous savepoint can be released or rolled back
-** using the sqlite3BtreeSavepoint() function.
+** using the sqlite3HctBtreeSavepoint() function.
 */
-int sqlite3BtreeBeginStmt(Btree *p, int iStatement){
+int sqlite3HctBtreeBeginStmt(Btree *p, int iStatement){
   int rc = SQLITE_OK;
   rc = sqlite3HctTreeBegin(p->pHctTree, iStatement+1);
   return rc;
@@ -1172,7 +1179,7 @@ static int btreeRollbackRoot(Btree *p, int iSavepoint){
 ** from a normal transaction rollback, as no locks are released and the
 ** transaction remains open.
 */
-int sqlite3BtreeSavepoint(Btree *p, int op, int iSavepoint){
+int sqlite3HctBtreeSavepoint(Btree *p, int op, int iSavepoint){
   int rc = SQLITE_OK;
   if( p && p->eTrans==SQLITE_TXN_WRITE ){
     int i;
@@ -1195,7 +1202,7 @@ int sqlite3BtreeSavepoint(Btree *p, int op, int iSavepoint){
 /*
 ** Open a new cursor
 */
-int sqlite3BtreeCursor(
+int sqlite3HctBtreeCursor(
   Btree *p,                                   /* The btree */
   Pgno iTable,                                /* Root page of table to open */
   int wrFlag,                                 /* 1 to write. 0 read-only */
@@ -1244,7 +1251,7 @@ int sqlite3BtreeCursor(
 ** to users so they cannot do the sizeof() themselves - they must call
 ** this routine.
 */
-int sqlite3BtreeCursorSize(void){
+int sqlite3HctBtreeCursorSize(void){
   return ROUND8(sizeof(BtCursor));
 }
 
@@ -1256,7 +1263,7 @@ int sqlite3BtreeCursorSize(void){
 ** do not need to be zeroed and they are large, so we can save a lot
 ** of run-time by skipping the initialization of those elements.
 */
-void sqlite3BtreeCursorZero(BtCursor *p){
+void sqlite3HctBtreeCursorZero(BtCursor *p){
   /* hct takes the simple approach mentioned above */
   memset(p, 0, sizeof(BtCursor));
 }
@@ -1265,7 +1272,7 @@ void sqlite3BtreeCursorZero(BtCursor *p){
 ** Close a cursor.  The read lock on the database file is released
 ** when the last cursor is closed.
 */
-int sqlite3BtreeCloseCursor(BtCursor *pCur){
+int sqlite3HctBtreeCloseCursor(BtCursor *pCur){
   Btree *pBtree = pCur->pBtree;
   if( pBtree ){
     BtCursor **pp;
@@ -1277,7 +1284,7 @@ int sqlite3BtreeCloseCursor(BtCursor *pCur){
     pCur->pBtree = 0;
     pCur->pCsrNext = 0;
     if( (pBtree->openFlags & BTREE_SINGLE) && pBtree->pCsrList==0 ){
-      sqlite3BtreeClose(pBtree);
+      sqlite3HctBtreeClose(pBtree);
     }
   }
   return SQLITE_OK;
@@ -1289,14 +1296,14 @@ int sqlite3BtreeCloseCursor(BtCursor *pCur){
 ** that is currently pointing to a row in a (non-empty) table.
 ** This is a verification routine is used only within assert() statements.
 */
-int sqlite3BtreeCursorIsValid(BtCursor *pCur){
+int sqlite3HctBtreeCursorIsValid(BtCursor *pCur){
   return pCur && (
       !sqlite3HctTreeCsrEof(pCur->pHctTreeCsr)
    || !sqlite3HctDbCsrEof(pCur->pHctDbCsr)
   );
 }
 #endif /* NDEBUG */
-int sqlite3BtreeCursorIsValidNN(BtCursor *pCur){
+int sqlite3HctBtreeCursorIsValidNN(BtCursor *pCur){
   return (
       !sqlite3HctTreeCsrEof(pCur->pHctTreeCsr)
    || !sqlite3HctDbCsrEof(pCur->pHctDbCsr)
@@ -1309,7 +1316,7 @@ int sqlite3BtreeCursorIsValidNN(BtCursor *pCur){
 ** ordinary table btree.  If the cursor points to an index btree or
 ** is invalid, the result of this routine is undefined.
 */
-i64 sqlite3BtreeIntegerKey(BtCursor *pCur){
+i64 sqlite3HctBtreeIntegerKey(BtCursor *pCur){
   i64 iKey;
   if( pCur->bUseTree ){
     sqlite3HctTreeCsrKey(pCur->pHctTreeCsr, &iKey);
@@ -1322,10 +1329,10 @@ i64 sqlite3BtreeIntegerKey(BtCursor *pCur){
 /*
 ** Pin or unpin a cursor.
 */
-void sqlite3BtreeCursorPin(BtCursor *pCur){
+void sqlite3HctBtreeCursorPin(BtCursor *pCur){
   sqlite3HctTreeCsrPin(pCur->pHctTreeCsr);
 }
-void sqlite3BtreeCursorUnpin(BtCursor *pCur){
+void sqlite3HctBtreeCursorUnpin(BtCursor *pCur){
   sqlite3HctTreeCsrUnpin(pCur->pHctTreeCsr);
 }
 
@@ -1334,7 +1341,7 @@ void sqlite3BtreeCursorUnpin(BtCursor *pCur){
 ** Return the offset into the database file for the start of the
 ** payload to which the cursor is pointing.
 */
-i64 sqlite3BtreeOffset(BtCursor *pCur){
+i64 sqlite3HctBtreeOffset(BtCursor *pCur){
   assert( 0 );
   return 0;
 }
@@ -1349,7 +1356,7 @@ i64 sqlite3BtreeOffset(BtCursor *pCur){
 ** valid entry.  In other words, the calling procedure must guarantee
 ** that the cursor has Cursor.eState==CURSOR_VALID.
 */
-u32 sqlite3BtreePayloadSize(BtCursor *pCur){
+u32 sqlite3HctBtreePayloadSize(BtCursor *pCur){
   int nData;
   if( pCur->bUseTree ){
     sqlite3HctTreeCsrData(pCur->pHctTreeCsr, &nData, 0);
@@ -1372,7 +1379,7 @@ u32 sqlite3BtreePayloadSize(BtCursor *pCur){
 ** The current implementation merely returns the size of the underlying
 ** database file.
 */
-sqlite3_int64 sqlite3BtreeMaxRecordSize(BtCursor *pCur){
+sqlite3_int64 sqlite3HctBtreeMaxRecordSize(BtCursor *pCur){
   assert( 0 );
   return 0x7FFFFFFF;
 }
@@ -1386,26 +1393,26 @@ sqlite3_int64 sqlite3BtreeMaxRecordSize(BtCursor *pCur){
 ** If pointing to a table btree, then the content section is read.  If
 ** pCur is pointing to an index b-tree then the key section is read.
 **
-** For sqlite3BtreePayload(), the caller must ensure that pCur is pointing
-** to a valid row in the table.  For sqlite3BtreePayloadChecked(), the
+** For sqlite3HctBtreePayload(), the caller must ensure that pCur is pointing
+** to a valid row in the table.  For sqlite3HctBtreePayloadChecked(), the
 ** cursor might be invalid or might need to be restored before being read.
 **
 ** Return SQLITE_OK on success or an error code if anything goes
 ** wrong.  An error is returned if "offset+amt" is larger than
 ** the available payload.
 */
-int sqlite3BtreePayload(BtCursor *pCur, u32 offset, u32 amt, void *pBuf){
+int sqlite3HctBtreePayload(BtCursor *pCur, u32 offset, u32 amt, void *pBuf){
   assert( 0 );
   return SQLITE_OK;
 }
 
 /*
-** This variant of sqlite3BtreePayload() works even if the cursor has not
+** This variant of sqlite3HctBtreePayload() works even if the cursor has not
 ** in the CURSOR_VALID state.  It is only used by the sqlite3_blob_read()
 ** interface.
 */
 #ifndef SQLITE_OMIT_INCRBLOB
-int sqlite3BtreePayloadChecked(BtCursor *pCur, u32 offset, u32 amt, void *pBuf){
+int sqlite3HctBtreePayloadChecked(BtCursor *pCur, u32 offset, u32 amt, void *pBuf){
   assert( 0 );
   return SQLITE_OK;
 }
@@ -1425,7 +1432,7 @@ int sqlite3BtreePayloadChecked(BtCursor *pCur, u32 offset, u32 amt, void *pBuf){
 ** These routines is used to get quick access to key and data
 ** in the common case where no overflow pages are used.
 */
-const void *sqlite3BtreePayloadFetch(BtCursor *pCur, u32 *pAmt){
+const void *sqlite3HctBtreePayloadFetch(BtCursor *pCur, u32 *pAmt){
   const u8 *aData;
   int nData;
   if( pCur->bUseTree ){
@@ -1487,7 +1494,7 @@ static int btreeSetUseTree(BtCursor *pCur){
 ** on success.  Set *pRes to 0 if the cursor actually points to something
 ** or set *pRes to 1 if the table is empty.
 */
-int sqlite3BtreeFirst(BtCursor *pCur, int *pRes){
+int sqlite3HctBtreeFirst(BtCursor *pCur, int *pRes){
   int rc = SQLITE_OK;
 
   sqlite3HctTreeCsrFirst(pCur->pHctTreeCsr);
@@ -1498,10 +1505,10 @@ int sqlite3BtreeFirst(BtCursor *pCur, int *pRes){
     pCur->eDir = BTREE_DIR_FORWARD;
     btreeSetUseTree(pCur);
     if( pCur->bUseTree && sqlite3HctTreeCsrIsDelete(pCur->pHctTreeCsr) ){
-      rc = sqlite3BtreeNext(pCur, 0);
+      rc = sqlite3HctBtreeNext(pCur, 0);
       if( rc==SQLITE_DONE ) rc = SQLITE_OK;
     }
-    *pRes = sqlite3BtreeEof(pCur);
+    *pRes = sqlite3HctBtreeEof(pCur);
   }
 
   return rc;
@@ -1511,7 +1518,7 @@ int sqlite3BtreeFirst(BtCursor *pCur, int *pRes){
 ** on success.  Set *pRes to 0 if the cursor actually points to something
 ** or set *pRes to 1 if the table is empty.
 */
-int sqlite3BtreeLast(BtCursor *pCur, int *pRes){
+int sqlite3HctBtreeLast(BtCursor *pCur, int *pRes){
   int rc = SQLITE_OK;
 
   sqlite3HctTreeCsrLast(pCur->pHctTreeCsr);
@@ -1525,9 +1532,9 @@ int sqlite3BtreeLast(BtCursor *pCur, int *pRes){
     pCur->eDir = BTREE_DIR_REVERSE;
     btreeSetUseTree(pCur);
     if( pCur->bUseTree && sqlite3HctTreeCsrIsDelete(pCur->pHctTreeCsr) ){
-      rc = sqlite3BtreePrevious(pCur, 0);
+      rc = sqlite3HctBtreePrevious(pCur, 0);
       if( rc==SQLITE_DONE ){
-        *pRes = sqlite3BtreeEof(pCur);
+        *pRes = sqlite3HctBtreeEof(pCur);
         rc = SQLITE_OK;
       }
     }
@@ -1566,7 +1573,7 @@ int sqlite3BtreeLast(BtCursor *pCur, int *pRes){
 ** For index tables, the pIdxKey->eqSeen field is set to 1 if there
 ** exists an entry in the table that exactly matches pIdxKey.  
 */
-int sqlite3BtreeMovetoUnpacked(
+int sqlite3HctBtreeMovetoUnpacked(
   BtCursor *pCur,          /* The cursor to be moved */
   UnpackedRecord *pIdxKey, /* Unpacked index key */
   i64 intKey,              /* The table key */
@@ -1627,11 +1634,11 @@ int sqlite3BtreeMovetoUnpacked(
     btreeSetUseTree(pCur);
     if( pCur->bUseTree && sqlite3HctTreeCsrIsDelete(pCur->pHctTreeCsr) ){
       if( pCur->eDir==BTREE_DIR_FORWARD ){
-        rc = sqlite3BtreeNext(pCur, 0);
+        rc = sqlite3HctBtreeNext(pCur, 0);
         if( rc==SQLITE_DONE ) rc = SQLITE_OK;
         *pRes = 1;
       }else{
-        rc = sqlite3BtreePrevious(pCur, 0);
+        rc = sqlite3HctBtreePrevious(pCur, 0);
         if( rc==SQLITE_DONE ) rc = SQLITE_OK;
         *pRes = -1;
       }
@@ -1641,23 +1648,23 @@ int sqlite3BtreeMovetoUnpacked(
   return rc;
 }
 
-int sqlite3BtreeTableMoveto(
+int sqlite3HctBtreeTableMoveto(
   BtCursor *pCur,          /* The cursor to be moved */
   i64 intKey,              /* The table key */
   int biasRight,           /* If true, bias the search to the high end */
   int *pRes                /* Write search results here */
 ){
-  return sqlite3BtreeMovetoUnpacked(pCur, 0, intKey, biasRight, pRes);
+  return sqlite3HctBtreeMovetoUnpacked(pCur, 0, intKey, biasRight, pRes);
 }
-int sqlite3BtreeIndexMoveto(
+int sqlite3HctBtreeIndexMoveto(
   BtCursor *pCur,          /* The cursor to be moved */
   UnpackedRecord *pIdxKey, /* Unpacked index key */
   int *pRes                /* Write search results here */
 ){
-  return sqlite3BtreeMovetoUnpacked(pCur, pIdxKey, 0, 0, pRes);
+  return sqlite3HctBtreeMovetoUnpacked(pCur, pIdxKey, 0, 0, pRes);
 }
 
-void sqlite3BtreeCursorDir(BtCursor *pCur, int eDir){
+void sqlite3HctBtreeCursorDir(BtCursor *pCur, int eDir){
   assert( eDir==BTREE_DIR_NONE 
        || eDir==BTREE_DIR_FORWARD 
        || eDir==BTREE_DIR_REVERSE
@@ -1671,11 +1678,11 @@ void sqlite3BtreeCursorDir(BtCursor *pCur, int eDir){
 /*
 ** Return TRUE if the cursor is not pointing at an entry of the table.
 **
-** TRUE will be returned after a call to sqlite3BtreeNext() moves
-** past the last entry in the table or sqlite3BtreePrev() moves past
+** TRUE will be returned after a call to sqlite3HctBtreeNext() moves
+** past the last entry in the table or sqlite3HctBtreePrev() moves past
 ** the first entry.  TRUE is also returned if the table is empty.
 */
-int sqlite3BtreeEof(BtCursor *pCur){
+int sqlite3HctBtreeEof(BtCursor *pCur){
   /* TODO: What if the cursor is in CURSOR_REQUIRESEEK but all table entries
   ** have been deleted? This API will need to change to return an error code
   ** as well as the boolean result value.
@@ -1691,7 +1698,7 @@ int sqlite3BtreeEof(BtCursor *pCur){
 ** pointing to.  Return a negative number if no estimate is currently 
 ** available.
 */
-i64 sqlite3BtreeRowCountEst(BtCursor *pCur){
+i64 sqlite3HctBtreeRowCountEst(BtCursor *pCur){
   assert( 0 );
   return -1;
 }
@@ -1704,27 +1711,27 @@ i64 sqlite3BtreeRowCountEst(BtCursor *pCur){
 **    SQLITE_DONE      cursor is already pointing at the last element
 **    otherwise        some kind of error occurred
 **
-** The main entry point is sqlite3BtreeNext().  That routine is optimized
+** The main entry point is sqlite3HctBtreeNext().  That routine is optimized
 ** for the common case of merely incrementing the cell counter BtCursor.aiIdx
 ** to the next cell on the current page.  The (slower) btreeNext() helper
 ** routine is called when it is necessary to move to a different page or
 ** to restore the cursor.
 **
-** If bit 0x01 of the F argument in sqlite3BtreeNext(C,F) is 1, then the
+** If bit 0x01 of the F argument in sqlite3HctBtreeNext(C,F) is 1, then the
 ** cursor corresponds to an SQL index and this routine could have been
 ** skipped if the SQL index had been a unique index.  The F argument
 ** is a hint to the implement. SQLite btree implementation does not use
 ** this hint, but COMDB2 does.
 */
-int sqlite3BtreeNext(BtCursor *pCur, int flags){
+int sqlite3HctBtreeNext(BtCursor *pCur, int flags){
   int rc = SQLITE_OK;
   int bDummy;
   assert( pCur->eDir==BTREE_DIR_FORWARD );
 
-  rc = sqlite3BtreeCursorRestore(pCur, &bDummy);
+  rc = sqlite3HctBtreeCursorRestore(pCur, &bDummy);
   if( rc!=SQLITE_OK ) return rc;
 
-  if( sqlite3BtreeEof(pCur) ){
+  if( sqlite3HctBtreeEof(pCur) ){
     rc = SQLITE_DONE;
   }else{
     do{
@@ -1735,7 +1742,7 @@ int sqlite3BtreeNext(BtCursor *pCur, int flags){
         rc = sqlite3HctDbCsrNext(pCur->pHctDbCsr);
       }
       if( rc==SQLITE_OK ){
-        if( sqlite3BtreeEof(pCur) ){
+        if( sqlite3HctBtreeEof(pCur) ){
           rc = SQLITE_DONE;
         }else{
           btreeSetUseTree(pCur);
@@ -1756,24 +1763,24 @@ int sqlite3BtreeNext(BtCursor *pCur, int flags){
 **     SQLITE_DONE   the cursor is already on the first element of the table
 **     otherwise     some kind of error occurred
 **
-** The main entry point is sqlite3BtreePrevious().  That routine is optimized
+** The main entry point is sqlite3HctBtreePrevious().  That routine is optimized
 ** for the common case of merely decrementing the cell counter BtCursor.aiIdx
 ** to the previous cell on the current page.  The (slower) btreePrevious()
 ** helper routine is called when it is necessary to move to a different page
 ** or to restore the cursor.
 **
-** If bit 0x01 of the F argument to sqlite3BtreePrevious(C,F) is 1, then
+** If bit 0x01 of the F argument to sqlite3HctBtreePrevious(C,F) is 1, then
 ** the cursor corresponds to an SQL index and this routine could have been
 ** skipped if the SQL index had been a unique index.  The F argument is a
 ** hint to the implement.  The native SQLite btree implementation does not
 ** use this hint, but COMDB2 does.
 */
-int sqlite3BtreePrevious(BtCursor *pCur, int flags){
+int sqlite3HctBtreePrevious(BtCursor *pCur, int flags){
   int rc = SQLITE_OK;
   int bDummy;
   assert( pCur->eDir==BTREE_DIR_REVERSE );
 
-  rc = sqlite3BtreeCursorRestore(pCur, &bDummy);
+  rc = sqlite3HctBtreeCursorRestore(pCur, &bDummy);
   if( rc!=SQLITE_OK ) return rc;
 
   do{
@@ -1784,7 +1791,7 @@ int sqlite3BtreePrevious(BtCursor *pCur, int flags){
       rc = sqlite3HctDbCsrPrev(pCur->pHctDbCsr);
     }
     if( rc==SQLITE_OK ){
-      if( sqlite3BtreeEof(pCur) ){
+      if( sqlite3HctBtreeEof(pCur) ){
         rc = SQLITE_DONE;
       }else{
         btreeSetUseTree(pCur);
@@ -1826,7 +1833,7 @@ int sqlite3BtreePrevious(BtCursor *pCur, int flags){
 ** key values and pX->aMem can be used instead of pX->pKey to avoid having
 ** to decode the key.
 */
-int sqlite3BtreeInsert(
+int sqlite3HctBtreeInsert(
   BtCursor *pCur,                /* Insert data into the table of this cursor */
   const BtreePayload *pX,        /* Content of the row to be inserted */
   int flags,                     /* True if this is likely an append */
@@ -1887,16 +1894,16 @@ int sqlite3BtreeInsert(
 ** The BTREE_AUXDELETE bit is a hint that is not used by this implementation,
 ** but which might be used by alternative storage engines.
 */
-int sqlite3BtreeDelete(BtCursor *pCur, u8 flags){
+int sqlite3HctBtreeDelete(BtCursor *pCur, u8 flags){
   int rc = SQLITE_OK;
   if( pCur->pHctDbCsr==0 ){
     rc = sqlite3HctTreeDelete(pCur->pHctTreeCsr);
   }else if( pCur->pKeyInfo==0 ){
-    i64 iKey = sqlite3BtreeIntegerKey(pCur);
+    i64 iKey = sqlite3HctBtreeIntegerKey(pCur);
     rc = sqlite3HctTreeDeleteKey(pCur->pHctTreeCsr, 0, iKey, 0, 0);
   }else{
     u32 nKey;
-    const u8 *aKey = (u8*)sqlite3BtreePayloadFetch(pCur, &nKey);
+    const u8 *aKey = (u8*)sqlite3HctBtreePayloadFetch(pCur, &nKey);
     UnpackedRecord *pRec = sqlite3VdbeAllocUnpackedRecord(pCur->pKeyInfo);
 
     if( pRec==0 ){
@@ -1910,7 +1917,7 @@ int sqlite3BtreeDelete(BtCursor *pCur, u8 flags){
   return rc;
 }
 
-int sqlite3BtreeIdxDelete(BtCursor *pCur, UnpackedRecord *pKey){
+int sqlite3HctBtreeIdxDelete(BtCursor *pCur, UnpackedRecord *pKey){
   int rc = SQLITE_OK;
   if( pCur->pHctDbCsr ){
     u8 *aRec = 0;
@@ -1965,7 +1972,7 @@ static int hctreeAddNewRoot(Btree *p, u32 iRoot, int bIndex){
 **     BTREE_INTKEY|BTREE_LEAFDATA     Used for SQL tables with rowid keys
 **     BTREE_ZERODATA                  Used for SQL indices
 */
-int sqlite3BtreeCreateTable(Btree *p, Pgno *piTable, int flags){
+int sqlite3HctBtreeCreateTable(Btree *p, Pgno *piTable, int flags){
   Pgno iNew = 0;
   int rc = SQLITE_OK;
   if( p->pHctDb ){
@@ -1993,7 +2000,7 @@ int sqlite3BtreeCreateTable(Btree *p, Pgno *piTable, int flags){
 ** integer value pointed to by pnChange is incremented by the number of
 ** entries in the table.
 */
-int sqlite3BtreeClearTable(Btree *p, int iTable, i64 *pnChange){
+int sqlite3HctBtreeClearTable(Btree *p, int iTable, i64 *pnChange){
   int rc = sqlite3HctTreeClearOne(p->pHctTree, iTable, pnChange);
   if( rc==SQLITE_OK && p->pHctDb ){
     int ii;
@@ -2019,7 +2026,7 @@ int sqlite3BtreeClearTable(Btree *p, int iTable, i64 *pnChange){
 **
 ** This routine only work for pCur on an ephemeral table.
 */
-int sqlite3BtreeClearTableOfCursor(BtCursor *pCur){
+int sqlite3HctBtreeClearTableOfCursor(BtCursor *pCur){
   return sqlite3HctTreeClearOne(
       pCur->pBtree->pHctTree, sqlite3HctTreeCsrRoot(pCur->pHctTreeCsr), 0
   );
@@ -2029,7 +2036,7 @@ int sqlite3BtreeClearTableOfCursor(BtCursor *pCur){
 ** Drop the table with root page iTable. Set (*piMoved) to 0 before
 ** returning.
 */
-int sqlite3BtreeDropTable(Btree *p, int iTable, int *piMoved){
+int sqlite3HctBtreeDropTable(Btree *p, int iTable, int *piMoved){
   *piMoved = 0;
   return hctreeAddNewSchemaOp(p, iTable, HCT_SCHEMAOP_DROP);
 }
@@ -2055,7 +2062,7 @@ int sqlite3BtreeDropTable(Btree *p, int iTable, int *piMoved){
 ** pattern is the same as header meta values, and so it is convenient to
 ** read it from this routine.
 */
-void sqlite3BtreeGetMeta(Btree *p, int idx, u32 *pMeta){
+void sqlite3HctBtreeGetMeta(Btree *p, int idx, u32 *pMeta){
   assert( idx>=0 && idx<SQLITE_N_BTREE_META );
   if( p->pHctDb && p->eMetaState==HCT_METASTATE_NONE ){
     sqlite3HctDbGetMeta(p->pHctDb, (u8*)p->aMeta, SQLITE_N_BTREE_META*4);
@@ -2068,11 +2075,11 @@ void sqlite3BtreeGetMeta(Btree *p, int idx, u32 *pMeta){
 ** Write meta-information back into the database.  Meta[0] is
 ** read-only and may not be written.
 */
-int sqlite3BtreeUpdateMeta(Btree *p, int idx, u32 iMeta){
+int sqlite3HctBtreeUpdateMeta(Btree *p, int idx, u32 iMeta){
   /* HCT: This is a problem - meta values should be subject to normal
   ** transaction/savepoint rollback.  */
   u32 dummy;
-  sqlite3BtreeGetMeta(p, 0, &dummy);
+  sqlite3HctBtreeGetMeta(p, 0, &dummy);
   p->aMeta[idx] = iMeta;
   p->eMetaState = HCT_METASTATE_DIRTY;
   return SQLITE_OK;
@@ -2090,7 +2097,7 @@ static char *hctDbMPrintf(int *pRc, const char *zFormat, ...){
   return zRet;
 }
 
-int sqlite3BtreePragma(Btree *p, char **aFnctl){
+int sqlite3HctBtreePragma(Btree *p, char **aFnctl){
   int rc = SQLITE_NOTFOUND;
   const char *zLeft = aFnctl[1];
   const char *zRight = aFnctl[2];
@@ -2143,13 +2150,13 @@ int sqlite3BtreePragma(Btree *p, char **aFnctl){
 ** Otherwise, if an error is encountered (i.e. an IO error or database
 ** corruption) an SQLite error code is returned.
 */
-int sqlite3BtreeCount(sqlite3 *db, BtCursor *pCur, i64 *pnEntry){
+int sqlite3HctBtreeCount(sqlite3 *db, BtCursor *pCur, i64 *pnEntry){
   i64 nEntry = 0;
   int dummy = 0;
   int rc;
-  for(rc = sqlite3BtreeFirst(pCur, &dummy);
-      rc==SQLITE_OK && 0==sqlite3BtreeEof(pCur);
-      rc = sqlite3BtreeNext(pCur, 0)
+  for(rc = sqlite3HctBtreeFirst(pCur, &dummy);
+      rc==SQLITE_OK && 0==sqlite3HctBtreeEof(pCur);
+      rc = sqlite3HctBtreeNext(pCur, 0)
   ){
     nEntry++;
   }
@@ -2161,8 +2168,8 @@ int sqlite3BtreeCount(sqlite3 *db, BtCursor *pCur, i64 *pnEntry){
 ** Return the pager associated with a BTree.  This routine is used for
 ** testing and debugging only.
 */
-Pager *sqlite3BtreePager(Btree *p){
-  return (Pager*)p;
+Pager *sqlite3HctBtreePager(Btree *p){
+  return p->pFakePager;
 }
 
 #ifndef SQLITE_OMIT_INTEGRITY_CHECK
@@ -2188,7 +2195,7 @@ Pager *sqlite3BtreePager(Btree *p){
 ** the unverified btrees.  Except, if aRoot[1] is 1, then the freelist
 ** checks are still performed.
 */
-char *sqlite3BtreeIntegrityCheck(
+char *sqlite3HctBtreeIntegrityCheck(
   sqlite3 *db,  /* Database connection that is running the check */
   Btree *p,     /* The btree to be checked */
   Pgno *aRoot,  /* An array of root pages numbers for individual trees */
@@ -2213,7 +2220,7 @@ char *sqlite3BtreeIntegrityCheck(
 ** The pager filename is invariant as long as the pager is
 ** open so it is safe to access without the BtShared mutex.
 */
-const char *sqlite3BtreeGetFilename(Btree *p){
+const char *sqlite3HctBtreeGetFilename(Btree *p){
   return 0;
 }
 
@@ -2225,7 +2232,7 @@ const char *sqlite3BtreeGetFilename(Btree *p){
 ** The pager journal filename is invariant as long as the pager is
 ** open so it is safe to access without the BtShared mutex.
 */
-const char *sqlite3BtreeGetJournalname(Btree *p){
+const char *sqlite3HctBtreeGetJournalname(Btree *p){
   return 0;
 }
 
@@ -2233,7 +2240,7 @@ const char *sqlite3BtreeGetJournalname(Btree *p){
 ** Return one of SQLITE_TXN_NONE, SQLITE_TXN_READ, or SQLITE_TXN_WRITE
 ** to describe the current transaction state of Btree p.
 */
-int sqlite3BtreeTxnState(Btree *p){
+int sqlite3HctBtreeTxnState(Btree *p){
   return p ? p->eTrans : SQLITE_TXN_NONE;
 }
 
@@ -2246,7 +2253,7 @@ int sqlite3BtreeTxnState(Btree *p){
 **
 ** Parameter eMode is one of SQLITE_CHECKPOINT_PASSIVE, FULL or RESTART.
 */
-int sqlite3BtreeCheckpoint(Btree *p, int eMode, int *pnLog, int *pnCkpt){
+int sqlite3HctBtreeCheckpoint(Btree *p, int eMode, int *pnLog, int *pnCkpt){
   int rc = SQLITE_OK;
   assert( 0 );
   return rc;
@@ -2256,7 +2263,7 @@ int sqlite3BtreeCheckpoint(Btree *p, int eMode, int *pnLog, int *pnCkpt){
 /*
 ** Return true if there is currently a backup running on Btree p.
 */
-int sqlite3BtreeIsInBackup(Btree *p){
+int sqlite3HctBtreeIsInBackup(Btree *p){
   return 0;
 }
 
@@ -2280,7 +2287,7 @@ int sqlite3BtreeIsInBackup(Btree *p){
 ** blob of allocated memory. The xFree function should not call sqlite3_free()
 ** on the memory, the btree layer does that.
 */
-void *sqlite3BtreeSchema(Btree *p, int nBytes, void(*xFree)(void *)){
+void *sqlite3HctBtreeSchema(Btree *p, int nBytes, void(*xFree)(void *)){
   void *pRet = 0;
   if( p->pSchema ){
     pRet = p->pSchema;
@@ -2299,7 +2306,7 @@ void *sqlite3BtreeSchema(Btree *p, int nBytes, void(*xFree)(void *)){
 ** btree as the argument handle holds an exclusive lock on the 
 ** sqlite_schema table. Otherwise SQLITE_OK.
 */
-int sqlite3BtreeSchemaLocked(Btree *p){
+int sqlite3HctBtreeSchemaLocked(Btree *p){
   return SQLITE_OK;
 }
 
@@ -2313,7 +2320,7 @@ HctDatabase *sqlite3HctDbFind(sqlite3 *db, int iDb){
 ** lock is a write lock if isWritelock is true or a read lock
 ** if it is false.
 */
-int sqlite3BtreeLockTable(Btree *p, int iTab, u8 isWriteLock){
+int sqlite3HctBtreeLockTable(Btree *p, int iTab, u8 isWriteLock){
   int rc = SQLITE_OK;
   assert( 0 );
   return rc;
@@ -2331,7 +2338,7 @@ int sqlite3BtreeLockTable(Btree *p, int iTab, u8 isWriteLock){
 ** parameters that attempt to write past the end of the existing data,
 ** no modifications are made and SQLITE_CORRUPT is returned.
 */
-int sqlite3BtreePutData(BtCursor *pCsr, u32 offset, u32 amt, void *z){
+int sqlite3HctBtreePutData(BtCursor *pCsr, u32 offset, u32 amt, void *z){
   assert( 0 );
   return SQLITE_OK;
 }
@@ -2339,7 +2346,7 @@ int sqlite3BtreePutData(BtCursor *pCsr, u32 offset, u32 amt, void *z){
 /* 
 ** Mark this cursor as an incremental blob cursor.
 */
-void sqlite3BtreeIncrblobCursor(BtCursor *pCur){
+void sqlite3HctBtreeIncrblobCursor(BtCursor *pCur){
   assert( 0 );
 }
 #endif
@@ -2349,7 +2356,7 @@ void sqlite3BtreeIncrblobCursor(BtCursor *pCur){
 ** "write version" (single byte at byte offset 19) fields in the database
 ** header to iVersion.
 */
-int sqlite3BtreeSetVersion(Btree *pBtree, int iVersion){
+int sqlite3HctBtreeSetVersion(Btree *pBtree, int iVersion){
   assert( 0 );
   return SQLITE_OK;
 }
@@ -2358,22 +2365,14 @@ int sqlite3BtreeSetVersion(Btree *pBtree, int iVersion){
 ** Return true if the cursor has a hint specified.  This routine is
 ** only used from within assert() statements
 */
-int sqlite3BtreeCursorHasHint(BtCursor *pCsr, unsigned int mask){
+int sqlite3HctBtreeCursorHasHint(BtCursor *pCsr, unsigned int mask){
   return 0;
 }
 
 /*
 ** Return true if the given Btree is read-only.
 */
-int sqlite3BtreeIsReadonly(Btree *p){
-  assert( 0 );
-  return 0;
-}
-
-/*
-** Return the size of the header added to each page by this module.
-*/
-int sqlite3HeaderSizeBtree(void){ 
+int sqlite3HctBtreeIsReadonly(Btree *p){
   assert( 0 );
   return 0;
 }
@@ -2382,7 +2381,7 @@ int sqlite3HeaderSizeBtree(void){
 /*
 ** Return true if the Btree passed as the only argument is sharable.
 */
-int sqlite3BtreeSharable(Btree *p){
+int sqlite3HctBtreeSharable(Btree *p){
   assert( 0 );
   return 0;
 }
@@ -2392,113 +2391,14 @@ int sqlite3BtreeSharable(Btree *p){
 ** the Btree handle passed as the only argument. For private caches 
 ** this is always 1. For shared caches it may be 1 or greater.
 */
-int sqlite3BtreeConnectionCount(Btree *p){
+int sqlite3HctBtreeConnectionCount(Btree *p){
   assert( 0 );
   return 1;
 }
 #endif
 
 
-int sqlite3PagerIsMemdb(Pager *pPager){
-  return 1;
-}
-int sqlite3PagerExclusiveLock(Pager *pPager){
-  /* hct - noop */
-  return SQLITE_OK;
-}
-int sqlite3PagerGetJournalMode(Pager *pPager){
-  return PAGER_JOURNALMODE_OFF;
-}
-int sqlite3PagerLockingMode(Pager *pPager, int m){
-  /* no-op */
-  return SQLITE_OK;
-}
-
-
-int sqlite3PagerGet(Pager *pPager, Pgno pgno, DbPage **ppPage, int clrFlag){
-  assert( 0 );
-  return SQLITE_ERROR;
-}
-int sqlite3PagerWrite(DbPage *pPg){
-  assert( 0 );
-  return SQLITE_ERROR;
-}
-void *sqlite3PagerGetData(DbPage *pPg){
-  assert( 0 );
-  return 0;
-}
-void *sqlite3PagerGetExtra(DbPage *pPg){
-  assert( 0 );
-  return 0;
-}
-sqlite3_backup **sqlite3PagerBackupPtr(Pager *pPager){
-  assert( 0 );
-  return 0;
-}
-void sqlite3PagerUnref(DbPage *pPg){
-  assert( 0 );
-}
-sqlite3_file *sqlite3PagerFile(Pager *pPager){
-  static sqlite3_file f = { 0 };
-  return &f;
-}
-void sqlite3PagerPagecount(Pager *pPager, int *pnPg){
-  assert( 0 );
-}
-int sqlite3PagerCommitPhaseOne(Pager *pPager, const char *zSuper, int f){
-  assert( 0 );
-  return SQLITE_ERROR;
-}
-int sqlite3PagerSync(Pager *pPager, const char *zSuper){
-  assert( 0 );
-  return SQLITE_ERROR;
-}
-void sqlite3PagerTruncateImage(Pager *pPager, Pgno pgno){
-  assert( 0 );
-}
-void sqlite3PagerClearCache(Pager *pPager){
-  assert( 0 );
-}
-void sqlite3PagerUnrefPageOne(DbPage *pPg){
-  assert( 0 );
-}
-void sqlite3PagerShrink(Pager *pPager){
-  assert( 0 );
-}
-int sqlite3PagerFlush(Pager *pPager){
-  assert( 0 );
-}
-sqlite3_vfs *sqlite3PagerVfs(Pager *pPager){
-  assert( 0 );
-  return 0;
-}
-sqlite3_file *sqlite3PagerJrnlFile(Pager *pPager){
-  static sqlite3_file f = { 0 };
-  assert( 0 );
-  return &f;
-}
-u32 sqlite3PagerDataVersion(Pager *pPager){
-  return 0;
-}
-i64 sqlite3PagerJournalSizeLimit(Pager *pPager, i64 ii){
-  assert( 0 );
-  return 0;
-}
-int sqlite3PagerOkToChangeJournalMode(Pager *pPager){
-  return 0;
-}
-int sqlite3PagerSetJournalMode(Pager *pPager, int m){
-  return m;
-}
-int sqlite3PagerMemUsed(Pager *pPager){
-  assert( 0 );
-  return 0;
-}
-void sqlite3PagerCacheStat(Pager *pPager, int a, int b, int *c){
-  assert( 0 );
-}
-
-int sqlite3BtreeTransferRow(BtCursor *p1, BtCursor *p2, i64 iKey){
+int sqlite3HctBtreeTransferRow(BtCursor *p1, BtCursor *p2, i64 iKey){
   assert( 0 );
   return SQLITE_LOCKED;
 }
@@ -2507,95 +2407,4 @@ int sqlite3HctLockedErr(u32 pgno){
   return SQLITE_LOCKED;
 }
 
-/*
-** The following set of routines are used to disable the simulated
-** I/O error mechanism.  These routines are used to avoid simulated
-** errors in places where we do not care about errors.
-**
-** Unless -DSQLITE_TEST=1 is used, these routines are all no-ops
-** and generate no code.
-*/
-#ifdef SQLITE_TEST
-extern int sqlite3_io_error_pending;
-extern int sqlite3_io_error_hit;
-static int saved_cnt;
-void disable_simulated_io_errors(void){
-  saved_cnt = sqlite3_io_error_pending;
-  sqlite3_io_error_pending = -1;
-}
-void enable_simulated_io_errors(void){
-  sqlite3_io_error_pending = saved_cnt;
-}
-int *sqlite3PagerStats(Pager *pPager){
-  assert( 0 );
-  return 0;
-}
-#else
-# define disable_simulated_io_errors()
-# define enable_simulated_io_errors()
-#endif
-
-/*
-** Return the sqlite3_file for the main database given the name
-** of the corresonding WAL or Journal name as passed into
-** xOpen.
-*/
-sqlite3_file *sqlite3_database_file_object(const char *zName){
-  assert( 0 );
-  return 0;
-}
-
-#ifdef SQLITE_TEST
-int sqlite3_opentemp_count = 0;
-int sqlite3_pager_readdb_count = 0;
-int sqlite3_pager_writedb_count = 0;
-int sqlite3_pager_writej_count = 0;
-
-int sqlite3PagerOpen(
-    sqlite3_vfs *pVfs, Pager **ppPager, const char *zFile,
-    int a, int b, int c, void(*x)(DbPage*)
-){
-  assert( 0 );
-  return SQLITE_ERROR;
-}
-int sqlite3PagerClose(Pager *pPager, sqlite3 *db){
-  assert( 0 );
-  return SQLITE_ERROR;
-}
-void sqlite3PagerSetCachesize(Pager *pPager, int n){
-  assert( 0 );
-}
-int sqlite3PagerSetPagesize(Pager *pPager, u32 *p, int n){
-  assert( 0 );
-  return SQLITE_ERROR;
-}
-int sqlite3PagerRollback(Pager *pPager){
-  assert( 0 );
-  return SQLITE_ERROR;
-}
-int sqlite3PagerCommitPhaseTwo(Pager *pPager){
-  assert( 0 );
-  return SQLITE_ERROR;
-}
-int sqlite3PagerOpenSavepoint(Pager *pPager, int n){
-  assert( 0 );
-  return SQLITE_ERROR;
-}
-int sqlite3PagerSavepoint(Pager *pPager, int op, int iSavepoint){
-  assert( 0 );
-  return SQLITE_ERROR;
-}
-int sqlite3PagerSharedLock(Pager *pPager){
-  assert( 0 );
-  return SQLITE_ERROR;
-}
-DbPage *sqlite3PagerLookup(Pager *pPager, Pgno pgno){
-  assert( 0 );
-  return 0;
-}
-Pgno sqlite3PagerPagenumber(DbPage *pPg){
-  assert( 0 );
-  return 0;
-}
-#endif
 #endif /* SQLITE_ENABLE_HCT */

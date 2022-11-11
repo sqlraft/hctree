@@ -15,8 +15,6 @@
 #include "sqliteInt.h"
 #include "btreeInt.h"
 
-#ifndef SQLITE_ENABLE_HCT
-
 /*
 ** Structure allocated for each backup operation.
 */
@@ -770,20 +768,3 @@ copy_finished:
   return rc;
 }
 #endif /* SQLITE_OMIT_VACUUM */
-
-#else /* SQLITE_ENABLE_HCTREE */
-sqlite3_backup *sqlite3_backup_init(
-  sqlite3* pDestDb,                     /* Database to write to */
-  const char *zDestDb,                  /* Name of database within pDestDb */
-  sqlite3* pSrcDb,                      /* Database connection to read from */
-  const char *zSrcDb                    /* Name of database within pSrcDb */
-){
-  return SQLITE_OK;
-}
-int sqlite3_backup_step(sqlite3_backup *p, int nPage){
-  return SQLITE_OK;
-}
-int sqlite3_backup_finish(sqlite3_backup *p){
-  return SQLITE_OK;
-}
-#endif /* SQLITE_ENABLE_HCTREE */

@@ -14,8 +14,7 @@
 ** Including a description of file format and an overview of operation.
 */
 #include "btreeInt.h"
-
-#ifndef SQLITE_ENABLE_HCT
+#include "btreeDefine.h"
 
 /*
 ** The header string that appears at the beginning of every
@@ -11098,4 +11097,3 @@ int sqlite3BtreeConnectionCount(Btree *p){
 }
 #endif
 
-#endif /* SQLITE_ENABLE_HCT */

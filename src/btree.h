@@ -33,6 +33,9 @@
 #define BTREE_AUTOVACUUM_FULL 1        /* Do full auto-vacuum */
 #define BTREE_AUTOVACUUM_INCR 2        /* Incremental vacuum */
 
+typedef struct BtCursorMethods BtCursorMethods;
+typedef struct BtreeMethods BtreeMethods;
+
 /*
 ** Forward declarations of structure
 */
