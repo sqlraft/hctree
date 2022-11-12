@@ -20,8 +20,12 @@ if {[permutation] == "inmemory_journal"} {
   return
 }
 
-set testprefix dbpagefault
+ifcapable !vtab {
+  finish_test
+  return
+}
 
+set testprefix dbpagefault
 
 faultsim_save_and_close
 do_faultsim_test 1 -prep {
@@ -49,4 +53,36 @@ do_faultsim_test 2 -prep {
   faultsim_test_result {1 {no such schema}}  {1 {SQL logic error}}
 }
 
+reset_db
+do_execsql_test 3.0 {
+  CREATE TABLE x1(z, b);
+  CREATE TRIGGER BEFORE INSERT ON x1 BEGIN
+    DELETE FROM sqlite_dbpage WHERE pgno=100;
+    UPDATE sqlite_dbpage SET data=null WHERE pgno=100;
+  END;
+}
+
+# This test case no longer works, as it is no longer possible to use
+# virtual table sqlite_dbpage from within a trigger.
+#
+do_execsql_test 3.1 {
+  PRAGMA trusted_schema = 1;
+}
+do_catchsql_test 3.2 {
+  PRAGMA trusted_schema = 1;
+  INSERT INTO x1 DEFAULT VALUES;
+} {1 {unsafe use of virtual table "sqlite_dbpage"}}
+#do_faultsim_test 3 -prep {
+#  catch { db close }
+#  sqlite3 db test.db
+#  execsql { PRAGMA trusted_schema = 1 }
+#} -body {
+#  execsql { INSERT INTO x1 DEFAULT VALUES; }
+#} -test {
+#  faultsim_test_result {0 {}}
+#}
+
+
 finish_test
+
+

@@ -1573,7 +1573,7 @@ int sqlite3HctBtreeLast(BtCursor *pCur, int *pRes){
 ** For index tables, the pIdxKey->eqSeen field is set to 1 if there
 ** exists an entry in the table that exactly matches pIdxKey.  
 */
-int sqlite3HctBtreeMovetoUnpacked(
+static int hctBtreeMovetoUnpacked(
   BtCursor *pCur,          /* The cursor to be moved */
   UnpackedRecord *pIdxKey, /* Unpacked index key */
   i64 intKey,              /* The table key */
@@ -1654,14 +1654,14 @@ int sqlite3HctBtreeTableMoveto(
   int biasRight,           /* If true, bias the search to the high end */
   int *pRes                /* Write search results here */
 ){
-  return sqlite3HctBtreeMovetoUnpacked(pCur, 0, intKey, biasRight, pRes);
+  return hctBtreeMovetoUnpacked(pCur, 0, intKey, biasRight, pRes);
 }
 int sqlite3HctBtreeIndexMoveto(
   BtCursor *pCur,          /* The cursor to be moved */
   UnpackedRecord *pIdxKey, /* Unpacked index key */
   int *pRes                /* Write search results here */
 ){
-  return sqlite3HctBtreeMovetoUnpacked(pCur, pIdxKey, 0, 0, pRes);
+  return hctBtreeMovetoUnpacked(pCur, pIdxKey, 0, 0, pRes);
 }
 
 void sqlite3HctBtreeCursorDir(BtCursor *pCur, int eDir){

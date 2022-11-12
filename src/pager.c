@@ -5791,6 +5791,7 @@ static int pager_open_journal(Pager *pPager){
 
         if( pPager->tempFile ){
           flags |= (SQLITE_OPEN_DELETEONCLOSE|SQLITE_OPEN_TEMP_JOURNAL);
+          flags |= SQLITE_OPEN_EXCLUSIVE;
           nSpill = sqlite3Config.nStmtSpill;
         }else{
           flags |= SQLITE_OPEN_MAIN_JOURNAL;
@@ -5826,6 +5827,7 @@ static int pager_open_journal(Pager *pPager){
   if( rc!=SQLITE_OK ){
     sqlite3BitvecDestroy(pPager->pInJournal);
     pPager->pInJournal = 0;
+    pPager->journalOff = 0;
   }else{
     assert( pPager->eState==PAGER_WRITER_LOCKED );
     pPager->eState = PAGER_WRITER_CACHEMOD;

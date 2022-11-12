@@ -890,11 +890,16 @@ static int btreeRestoreCursorPosition(BtCursor *pCur){
 ** back to where it ought to be if this routine returns true.
 */
 int sqlite3BtreeCursorHasMoved(BtCursor *pCur){
+#ifdef SQLITE_ENABLE_HCT
+  assert( EIGHT_BYTE_ALIGNMENT(pCur) );
+  return (CURSOR_VALID!=pCur->eState);
+#else
   assert( EIGHT_BYTE_ALIGNMENT(pCur)
        || pCur==sqlite3BtreeFakeValidCursor() );
   assert( offsetof(BtCursor, eState)==0 );
   assert( sizeof(pCur->eState)==1 );
   return CURSOR_VALID != *(u8*)pCur;
+#endif
 }
 
 /*
@@ -1514,7 +1519,7 @@ static int defragmentPage(MemPage *pPage, int nMaxFrag){
   assert( pPage->pBt->usableSize <= SQLITE_MAX_PAGE_SIZE );
   assert( pPage->nOverflow==0 );
   assert( sqlite3_mutex_held(pPage->pBt->mutex) );
-  src = data = pPage->aData;
+  data = pPage->aData;
   hdr = pPage->hdrOffset;
   cellOffset = pPage->cellOffset;
   nCell = pPage->nCell;
@@ -1548,7 +1553,7 @@ static int defragmentPage(MemPage *pPage, int nMaxFrag){
           if( iFree2+sz2 > usableSize ) return SQLITE_CORRUPT_PAGE(pPage);
           memmove(&data[iFree+sz+sz2], &data[iFree+sz], iFree2-(iFree+sz));
           sz += sz2;
-        }else if( NEVER(iFree+sz>usableSize) ){
+        }else if( iFree+sz>usableSize ){
           return SQLITE_CORRUPT_PAGE(pPage);
         }
 
@@ -1656,7 +1661,6 @@ static u8 *pageFindSlot(MemPage *pPg, int nByte, int *pRc){
         ** fragmented bytes within the page. */
         memcpy(&aData[iAddr], &aData[pc], 2);
         aData[hdr+7] += (u8)x;
-        testcase( pc+x>maxPC );
         return &aData[pc];
       }else if( x+pc > maxPC ){
         /* This slot extends off the end of the usable part of the page */
@@ -3744,6 +3748,9 @@ static int modifyPagePointer(MemPage *pPage, Pgno iFrom, Pgno iTo, u8 eType){
           }
         }
       }else{
+        if( pCell+4 > pPage->aData+pPage->pBt->usableSize ){
+          return SQLITE_CORRUPT_PAGE(pPage);
+        }
         if( get4byte(pCell)==iFrom ){
           put4byte(pCell, iTo);
           break;
@@ -6078,14 +6085,7 @@ static SQLITE_NOINLINE int btreeNext(BtCursor *pCur){
 
   pPage = pCur->pPage;
   idx = ++pCur->ix;
-  if( !pPage->isInit || sqlite3FaultSim(412) ){
-    /* The only known way for this to happen is for there to be a
-    ** recursive SQL function that does a DELETE operation as part of a
-    ** SELECT which deletes content out from under an active cursor
-    ** in a corrupt database file where the table being DELETE-ed from
-    ** has pages in common with the table being queried.  See TH3
-    ** module cov1/btree78.test testcase 220 (2018-06-08) for an
-    ** example. */
+  if( NEVER(!pPage->isInit) || sqlite3FaultSim(412) ){
     return SQLITE_CORRUPT_BKPT;
   }
 
@@ -6261,8 +6261,8 @@ static int allocateBtreePage(
   assert( eMode==BTALLOC_ANY || (nearby>0 && IfNotOmitAV(pBt->autoVacuum)) );
   pPage1 = pBt->pPage1;
   mxPage = btreePagecount(pBt);
-  /* EVIDENCE-OF: R-05119-02637 The 4-byte big-endian integer at offset 36
-  ** stores stores the total number of pages on the freelist. */
+  /* EVIDENCE-OF: R-21003-45125 The 4-byte big-endian integer at offset 36
+  ** stores the total number of pages on the freelist. */
   n = get4byte(&pPage1->aData[36]);
   testcase( n==mxPage-1 );
   if( n>=mxPage ){
@@ -7894,8 +7894,6 @@ static int balance_nonroot(
   Pgno pgno;                   /* Temp var to store a page number in */
   u8 abDone[NB+2];             /* True after i'th new page is populated */
   Pgno aPgno[NB+2];            /* Page numbers of new pages before shuffling */
-  Pgno aPgOrder[NB+2];         /* Copy of aPgno[] used for sorting pages */
-  u16 aPgFlags[NB+2];          /* flags field of new pages before shuffling */
   CellArray b;                 /* Parsed information on cells being balanced */
 
   memset(abDone, 0, sizeof(abDone));
@@ -8319,42 +8317,39 @@ static int balance_nonroot(
   ** of the table is closer to a linear scan through the file. That in turn 
   ** helps the operating system to deliver pages from the disk more rapidly.
   **
-  ** An O(n^2) insertion sort algorithm is used, but since n is never more 
-  ** than (NB+2) (a small constant), that should not be a problem.
+  ** An O(N*N) sort algorithm is used, but since N is never more than NB+2
+  ** (5), that is not a performance concern.
   **
   ** When NB==3, this one optimization makes the database about 25% faster 
   ** for large insertions and deletions.
   */
   for(i=0; i<nNew; i++){
-    aPgOrder[i] = aPgno[i] = apNew[i]->pgno;
-    aPgFlags[i] = apNew[i]->pDbPage->flags;
-    for(j=0; j<i; j++){
-      if( NEVER(aPgno[j]==aPgno[i]) ){
-        /* This branch is taken if the set of sibling pages somehow contains
-        ** duplicate entries. This can happen if the database is corrupt. 
-        ** It would be simpler to detect this as part of the loop below, but
-        ** we do the detection here in order to avoid populating the pager
-        ** cache with two separate objects associated with the same
-        ** page number.  */
-        assert( CORRUPT_DB );
-        rc = SQLITE_CORRUPT_BKPT;
-        goto balance_cleanup;
-      }
-    }
+    aPgno[i] = apNew[i]->pgno;
+    assert( apNew[i]->pDbPage->flags & PGHDR_WRITEABLE );
+    assert( apNew[i]->pDbPage->flags & PGHDR_DIRTY );
   }
-  for(i=0; i<nNew; i++){
-    int iBest = 0;                /* aPgno[] index of page number to use */
-    for(j=1; j<nNew; j++){
-      if( aPgOrder[j]<aPgOrder[iBest] ) iBest = j;
+  for(i=0; i<nNew-1; i++){
+    int iB = i;
+    for(j=i+1; j<nNew; j++){
+      if( apNew[j]->pgno < apNew[iB]->pgno ) iB = j;
     }
-    pgno = aPgOrder[iBest];
-    aPgOrder[iBest] = 0xffffffff;
-    if( iBest!=i ){
-      if( iBest>i ){
-        sqlite3PagerRekey(apNew[iBest]->pDbPage, pBt->nPage+iBest+1, 0);
-      }
-      sqlite3PagerRekey(apNew[i]->pDbPage, pgno, aPgFlags[iBest]);
-      apNew[i]->pgno = pgno;
+
+    /* If apNew[i] has a page number that is bigger than any of the
+    ** subsequence apNew[i] entries, then swap apNew[i] with the subsequent
+    ** entry that has the smallest page number (which we know to be
+    ** entry apNew[iB]).
+    */
+    if( iB!=i ){
+      Pgno pgnoA = apNew[i]->pgno;
+      Pgno pgnoB = apNew[iB]->pgno;
+      Pgno pgnoTemp = (PENDING_BYTE/pBt->pageSize)+1;
+      u16 fgA = apNew[i]->pDbPage->flags;
+      u16 fgB = apNew[iB]->pDbPage->flags;
+      sqlite3PagerRekey(apNew[i]->pDbPage, pgnoTemp, fgB);
+      sqlite3PagerRekey(apNew[iB]->pDbPage, pgnoA, fgA);
+      sqlite3PagerRekey(apNew[i]->pDbPage, pgnoB, fgB);
+      apNew[i]->pgno = pgnoB;
+      apNew[iB]->pgno = pgnoA;
     }
   }
 
@@ -8780,6 +8775,11 @@ static int balance(BtCursor *pCur){
       }else{
         break;
       }
+    }else if( sqlite3PagerPageRefcount(pPage->pDbPage)>1 ){
+      /* The page being written is not a root page, and there is currently
+      ** more than one reference to it. This only happens if the page is one 
+      ** of its own ancestor pages. Corruption. */
+      rc = SQLITE_CORRUPT_BKPT;
     }else{
       MemPage * const pParent = pCur->apPage[iPage-1];
       int const iIdx = pCur->aiIdx[iPage-1];

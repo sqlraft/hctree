@@ -29,7 +29,6 @@ set cursor_apis {
   const void *sqlite3BtreePayloadFetch(BtCursor*, u32*);
   int sqlite3BtreeFirst(BtCursor*, int*);
   int sqlite3BtreeLast(BtCursor*, int*);
-  int sqlite3BtreeMovetoUnpacked(BtCursor*, UnpackedRecord*, i64, int, int*);
   int sqlite3BtreeTableMoveto(BtCursor*, i64, int, int*);
   int sqlite3BtreeIndexMoveto(BtCursor*, UnpackedRecord*, int*);
   void sqlite3BtreeCursorDir(BtCursor*, int);
@@ -96,6 +95,7 @@ set check_for_null_object {
   sqlite3BtreeTxnState
   sqlite3BtreeTripAllCursors
   sqlite3BtreeSavepoint
+  sqlite3BtreeSecureDelete
 }
 
 # Do not generate a wrapper for any of these functions.
@@ -103,6 +103,7 @@ set check_for_null_object {
 set no_wrapper_for {
   sqlite3BtreeCursor
   sqlite3BtreeCursorHasMoved
+  sqlite3BtreeCloseCursor
 }
 
 set extra_redefines {
@@ -187,6 +188,7 @@ proc mk_btcursor_methods {} {
 
 proc mk_btree_methods {} {
   set ret "struct BtreeMethods {\n"
+  append ret "  BtCursorMethods *pCsrMethods;\n"
   foreach c [split $::tree_apis ";"] {
     if {[string trim $c]==""} continue
     array set A [parse_signature $c]
@@ -270,14 +272,7 @@ proc mk_hct_fwddecl {} {
 proc mk_tables {nm} {
   set lc [string tolower $nm]
 
-  set ret "static const BtreeMethods ${lc}_btree_methods = {\n"
-  foreach c [split $::tree_apis ";"] {
-    if {[string trim $c]==""} continue
-    array set A [parse_signature $c]
-    append ret "  x$A(name) : sqlite3${nm}$A(name),\n"
-  }
-  append ret "};\n\n"
-
+  set ret ""
   append ret "static const BtCursorMethods ${lc}_btcursor_methods = {\n"
   foreach c [split $::cursor_apis ";"] {
     if {[string trim $c]==""} continue
@@ -285,6 +280,15 @@ proc mk_tables {nm} {
     append ret "  x$A(name) : sqlite3${nm}$A(name),\n"
   }
   append ret "};\n"
+
+  append ret "static const BtreeMethods ${lc}_btree_methods = {\n"
+  append ret "  pCsrMethods : &${lc}_btcursor_methods,\n"
+  foreach c [split $::tree_apis ";"] {
+    if {[string trim $c]==""} continue
+    array set A [parse_signature $c]
+    append ret "  x$A(name) : sqlite3${nm}$A(name),\n"
+  }
+  append ret "};\n\n"
 
   set ret
 }

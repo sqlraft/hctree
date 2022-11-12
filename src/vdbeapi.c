@@ -318,6 +318,9 @@ int sqlite3_value_type(sqlite3_value* pVal){
 #endif
   return aType[pVal->flags&MEM_AffMask];
 }
+int sqlite3_value_encoding(sqlite3_value *pVal){
+  return pVal->enc;
+}
 
 /* Return true if a parameter to xUpdate represents an unchanged column */
 int sqlite3_value_nochange(sqlite3_value *pVal){
@@ -1432,7 +1435,7 @@ const void *sqlite3_column_origin_name16(sqlite3_stmt *pStmt, int N){
 ** The error code stored in database p->db is overwritten with the return
 ** value in any case.
 */
-static int vdbeUnbind(Vdbe *p, int i){
+static int vdbeUnbind(Vdbe *p, unsigned int i){
   Mem *pVar;
   if( vdbeSafetyNotNull(p) ){
     return SQLITE_MISUSE_BKPT;
@@ -1445,12 +1448,11 @@ static int vdbeUnbind(Vdbe *p, int i){
         "bind on a busy prepared statement: [%s]", p->zSql);
     return SQLITE_MISUSE_BKPT;
   }
-  if( i<1 || i>p->nVar ){
+  if( i>=(unsigned int)p->nVar ){
     sqlite3Error(p->db, SQLITE_RANGE);
     sqlite3_mutex_leave(p->db->mutex);
     return SQLITE_RANGE;
   }
-  i--;
   pVar = &p->aVar[i];
   sqlite3VdbeMemRelease(pVar);
   pVar->flags = MEM_Null;
@@ -1487,7 +1489,7 @@ static int bindText(
   Mem *pVar;
   int rc;
 
-  rc = vdbeUnbind(p, i);
+  rc = vdbeUnbind(p, (u32)(i-1));
   if( rc==SQLITE_OK ){
     if( zData!=0 ){
       pVar = &p->aVar[i-1];
@@ -1536,7 +1538,7 @@ int sqlite3_bind_blob64(
 int sqlite3_bind_double(sqlite3_stmt *pStmt, int i, double rValue){
   int rc;
   Vdbe *p = (Vdbe *)pStmt;
-  rc = vdbeUnbind(p, i);
+  rc = vdbeUnbind(p, (u32)(i-1));
   if( rc==SQLITE_OK ){
     sqlite3VdbeMemSetDouble(&p->aVar[i-1], rValue);
     sqlite3_mutex_leave(p->db->mutex);
@@ -1549,7 +1551,7 @@ int sqlite3_bind_int(sqlite3_stmt *p, int i, int iValue){
 int sqlite3_bind_int64(sqlite3_stmt *pStmt, int i, sqlite_int64 iValue){
   int rc;
   Vdbe *p = (Vdbe *)pStmt;
-  rc = vdbeUnbind(p, i);
+  rc = vdbeUnbind(p, (u32)(i-1));
   if( rc==SQLITE_OK ){
     sqlite3VdbeMemSetInt64(&p->aVar[i-1], iValue);
     sqlite3_mutex_leave(p->db->mutex);
@@ -1559,7 +1561,7 @@ int sqlite3_bind_int64(sqlite3_stmt *pStmt, int i, sqlite_int64 iValue){
 int sqlite3_bind_null(sqlite3_stmt *pStmt, int i){
   int rc;
   Vdbe *p = (Vdbe*)pStmt;
-  rc = vdbeUnbind(p, i);
+  rc = vdbeUnbind(p, (u32)(i-1));
   if( rc==SQLITE_OK ){
     sqlite3_mutex_leave(p->db->mutex);
   }
@@ -1574,7 +1576,7 @@ int sqlite3_bind_pointer(
 ){
   int rc;
   Vdbe *p = (Vdbe*)pStmt;
-  rc = vdbeUnbind(p, i);
+  rc = vdbeUnbind(p, (u32)(i-1));
   if( rc==SQLITE_OK ){
     sqlite3VdbeMemSetPointer(&p->aVar[i-1], pPtr, zPTtype, xDestructor);
     sqlite3_mutex_leave(p->db->mutex);
@@ -1652,7 +1654,7 @@ int sqlite3_bind_value(sqlite3_stmt *pStmt, int i, const sqlite3_value *pValue){
 int sqlite3_bind_zeroblob(sqlite3_stmt *pStmt, int i, int n){
   int rc;
   Vdbe *p = (Vdbe *)pStmt;
-  rc = vdbeUnbind(p, i);
+  rc = vdbeUnbind(p, (u32)(i-1));
   if( rc==SQLITE_OK ){
 #ifndef SQLITE_OMIT_INCRBLOB
     sqlite3VdbeMemSetZeroBlob(&p->aVar[i-1], n);
@@ -1812,7 +1814,7 @@ sqlite3_stmt *sqlite3_next_stmt(sqlite3 *pDb, sqlite3_stmt *pStmt){
   if( pStmt==0 ){
     pNext = (sqlite3_stmt*)pDb->pVdbe;
   }else{
-    pNext = (sqlite3_stmt*)((Vdbe*)pStmt)->pNext;
+    pNext = (sqlite3_stmt*)((Vdbe*)pStmt)->pVNext;
   }
   sqlite3_mutex_leave(pDb->mutex);
   return pNext;
@@ -1837,8 +1839,11 @@ int sqlite3_stmt_status(sqlite3_stmt *pStmt, int op, int resetFlag){
     sqlite3_mutex_enter(db->mutex);
     v = 0;
     db->pnBytesFreed = (int*)&v;
+    assert( db->lookaside.pEnd==db->lookaside.pTrueEnd );
+    db->lookaside.pEnd = db->lookaside.pStart;
     sqlite3VdbeDelete(pVdbe);
     db->pnBytesFreed = 0;
+    db->lookaside.pEnd = db->lookaside.pTrueEnd;
     sqlite3_mutex_leave(db->mutex);
   }else{
     v = pVdbe->aCounter[op];

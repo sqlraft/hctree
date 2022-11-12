@@ -32,12 +32,20 @@ int sqlite3StockBtreePragma(Btree *p, char **a){
   return SQLITE_NOTFOUND;
 }
 void sqlite3StockBtreeCursorDir(BtCursor *p, int a){
+  /* no-op */
 }
-int sqlite3StockBtreeIdxDelete(BtCursor *p, UnpackedRecord *a){
-  return SQLITE_OK;
-}
-int sqlite3StockBtreeMovetoUnpacked(BtCursor *p, UnpackedRecord *a, i64 b, int c, int *d){
-  return SQLITE_OK;
+
+
+int sqlite3StockBtreeIdxDelete(BtCursor *p, UnpackedRecord *pRec){
+  int rc = SQLITE_OK;
+  int res = 0;
+
+  rc = sqlite3BtreeIndexMoveto(p, pRec, &res);
+  if( rc==SQLITE_OK && res==0 ){
+    rc = sqlite3BtreeDelete(p, BTREE_AUXDELETE);
+  }
+
+  return rc;
 }
 
 
@@ -66,7 +74,6 @@ struct BtCursorMethods {
   const void *(*xBtreePayloadFetch)(BtCursor*, u32*);
   int(*xBtreeFirst)(BtCursor*, int*);
   int(*xBtreeLast)(BtCursor*, int*);
-  int(*xBtreeMovetoUnpacked)(BtCursor*, UnpackedRecord*, i64, int, int*);
   int(*xBtreeTableMoveto)(BtCursor*, i64, int, int*);
   int(*xBtreeIndexMoveto)(BtCursor*, UnpackedRecord*, int*);
   void(*xBtreeCursorDir)(BtCursor*, int);
@@ -84,6 +91,7 @@ struct BtCursorMethods {
   int(*xBtreeCount)(sqlite3*, BtCursor*, i64*);
 };
 struct BtreeMethods {
+  BtCursorMethods *pCsrMethods;
   int(*xBtreeCursor)(Btree*, Pgno, int, struct KeyInfo*, BtCursor*);
   sqlite3_uint64(*xBtreeSeekCount)(Btree*);
   Pgno(*xBtreeLastPage)(Btree*);
@@ -139,9 +147,6 @@ int sqlite3BtreeCursorRestore(BtCursor *p, int *a){
 void sqlite3BtreeCursorHintFlags(BtCursor *p, unsigned a){
   p->pMethods->xBtreeCursorHintFlags(p, a);
 }
-int sqlite3BtreeCloseCursor(BtCursor *p){
-  return p->pMethods->xBtreeCloseCursor(p);
-}
 int sqlite3BtreeCursorIsValid(BtCursor *p){
   return p->pMethods->xBtreeCursorIsValid(p);
 }
@@ -177,9 +182,6 @@ int sqlite3BtreeFirst(BtCursor *p, int *a){
 }
 int sqlite3BtreeLast(BtCursor *p, int *a){
   return p->pMethods->xBtreeLast(p, a);
-}
-int sqlite3BtreeMovetoUnpacked(BtCursor *p, UnpackedRecord *a, i64 b, int c, int *d){
-  return p->pMethods->xBtreeMovetoUnpacked(p, a, b, c, d);
 }
 int sqlite3BtreeTableMoveto(BtCursor *p, i64 a, int b, int *c){
   return p->pMethods->xBtreeTableMoveto(p, a, b, c);
@@ -263,6 +265,7 @@ Pgno sqlite3BtreeMaxPageCount(Btree *p, Pgno a){
   return p->pMethods->xBtreeMaxPageCount(p, a);
 }
 int sqlite3BtreeSecureDelete(Btree *p, int a){
+  if( p==0 ) return 0;
   return p->pMethods->xBtreeSecureDelete(p, a);
 }
 int sqlite3BtreeSetAutoVacuum(Btree *p, int a){
@@ -352,7 +355,43 @@ int sqlite3BtreeSetVersion(Btree *p, int a){
 char * sqlite3BtreeIntegrityCheck(sqlite3 *a, Btree *p, Pgno *b, int c, int d, int *e){
   return p->pMethods->xBtreeIntegrityCheck(a, p, b, c, d, e);
 }
+static const BtCursorMethods hct_btcursor_methods = {
+  xBtreeNext : sqlite3HctBtreeNext,
+  xBtreeCursorHasMoved : sqlite3HctBtreeCursorHasMoved,
+  xBtreeClearCursor : sqlite3HctBtreeClearCursor,
+  xBtreeCursorRestore : sqlite3HctBtreeCursorRestore,
+  xBtreeCursorHintFlags : sqlite3HctBtreeCursorHintFlags,
+  xBtreeCloseCursor : sqlite3HctBtreeCloseCursor,
+  xBtreeCursorIsValid : sqlite3HctBtreeCursorIsValid,
+  xBtreeCursorIsValidNN : sqlite3HctBtreeCursorIsValidNN,
+  xBtreeIntegerKey : sqlite3HctBtreeIntegerKey,
+  xBtreeCursorPin : sqlite3HctBtreeCursorPin,
+  xBtreeCursorUnpin : sqlite3HctBtreeCursorUnpin,
+  xBtreePayloadSize : sqlite3HctBtreePayloadSize,
+  xBtreeMaxRecordSize : sqlite3HctBtreeMaxRecordSize,
+  xBtreePayload : sqlite3HctBtreePayload,
+  xBtreePayloadChecked : sqlite3HctBtreePayloadChecked,
+  xBtreePayloadFetch : sqlite3HctBtreePayloadFetch,
+  xBtreeFirst : sqlite3HctBtreeFirst,
+  xBtreeLast : sqlite3HctBtreeLast,
+  xBtreeTableMoveto : sqlite3HctBtreeTableMoveto,
+  xBtreeIndexMoveto : sqlite3HctBtreeIndexMoveto,
+  xBtreeCursorDir : sqlite3HctBtreeCursorDir,
+  xBtreeEof : sqlite3HctBtreeEof,
+  xBtreeRowCountEst : sqlite3HctBtreeRowCountEst,
+  xBtreePrevious : sqlite3HctBtreePrevious,
+  xBtreeInsert : sqlite3HctBtreeInsert,
+  xBtreeDelete : sqlite3HctBtreeDelete,
+  xBtreeIdxDelete : sqlite3HctBtreeIdxDelete,
+  xBtreePutData : sqlite3HctBtreePutData,
+  xBtreeIncrblobCursor : sqlite3HctBtreeIncrblobCursor,
+  xBtreeCursorHasHint : sqlite3HctBtreeCursorHasHint,
+  xBtreeTransferRow : sqlite3HctBtreeTransferRow,
+  xBtreeClearTableOfCursor : sqlite3HctBtreeClearTableOfCursor,
+  xBtreeCount : sqlite3HctBtreeCount,
+};
 static const BtreeMethods hct_btree_methods = {
+  pCsrMethods : &hct_btcursor_methods,
   xBtreeCursor : sqlite3HctBtreeCursor,
   xBtreeSeekCount : sqlite3HctBtreeSeekCount,
   xBtreeLastPage : sqlite3HctBtreeLastPage,
@@ -397,43 +436,43 @@ static const BtreeMethods hct_btree_methods = {
   xBtreeIntegrityCheck : sqlite3HctBtreeIntegrityCheck,
 };
 
-static const BtCursorMethods hct_btcursor_methods = {
-  xBtreeNext : sqlite3HctBtreeNext,
-  xBtreeCursorHasMoved : sqlite3HctBtreeCursorHasMoved,
-  xBtreeClearCursor : sqlite3HctBtreeClearCursor,
-  xBtreeCursorRestore : sqlite3HctBtreeCursorRestore,
-  xBtreeCursorHintFlags : sqlite3HctBtreeCursorHintFlags,
-  xBtreeCloseCursor : sqlite3HctBtreeCloseCursor,
-  xBtreeCursorIsValid : sqlite3HctBtreeCursorIsValid,
-  xBtreeCursorIsValidNN : sqlite3HctBtreeCursorIsValidNN,
-  xBtreeIntegerKey : sqlite3HctBtreeIntegerKey,
-  xBtreeCursorPin : sqlite3HctBtreeCursorPin,
-  xBtreeCursorUnpin : sqlite3HctBtreeCursorUnpin,
-  xBtreePayloadSize : sqlite3HctBtreePayloadSize,
-  xBtreeMaxRecordSize : sqlite3HctBtreeMaxRecordSize,
-  xBtreePayload : sqlite3HctBtreePayload,
-  xBtreePayloadChecked : sqlite3HctBtreePayloadChecked,
-  xBtreePayloadFetch : sqlite3HctBtreePayloadFetch,
-  xBtreeFirst : sqlite3HctBtreeFirst,
-  xBtreeLast : sqlite3HctBtreeLast,
-  xBtreeMovetoUnpacked : sqlite3HctBtreeMovetoUnpacked,
-  xBtreeTableMoveto : sqlite3HctBtreeTableMoveto,
-  xBtreeIndexMoveto : sqlite3HctBtreeIndexMoveto,
-  xBtreeCursorDir : sqlite3HctBtreeCursorDir,
-  xBtreeEof : sqlite3HctBtreeEof,
-  xBtreeRowCountEst : sqlite3HctBtreeRowCountEst,
-  xBtreePrevious : sqlite3HctBtreePrevious,
-  xBtreeInsert : sqlite3HctBtreeInsert,
-  xBtreeDelete : sqlite3HctBtreeDelete,
-  xBtreeIdxDelete : sqlite3HctBtreeIdxDelete,
-  xBtreePutData : sqlite3HctBtreePutData,
-  xBtreeIncrblobCursor : sqlite3HctBtreeIncrblobCursor,
-  xBtreeCursorHasHint : sqlite3HctBtreeCursorHasHint,
-  xBtreeTransferRow : sqlite3HctBtreeTransferRow,
-  xBtreeClearTableOfCursor : sqlite3HctBtreeClearTableOfCursor,
-  xBtreeCount : sqlite3HctBtreeCount,
+static const BtCursorMethods stock_btcursor_methods = {
+  xBtreeNext : sqlite3StockBtreeNext,
+  xBtreeCursorHasMoved : sqlite3StockBtreeCursorHasMoved,
+  xBtreeClearCursor : sqlite3StockBtreeClearCursor,
+  xBtreeCursorRestore : sqlite3StockBtreeCursorRestore,
+  xBtreeCursorHintFlags : sqlite3StockBtreeCursorHintFlags,
+  xBtreeCloseCursor : sqlite3StockBtreeCloseCursor,
+  xBtreeCursorIsValid : sqlite3StockBtreeCursorIsValid,
+  xBtreeCursorIsValidNN : sqlite3StockBtreeCursorIsValidNN,
+  xBtreeIntegerKey : sqlite3StockBtreeIntegerKey,
+  xBtreeCursorPin : sqlite3StockBtreeCursorPin,
+  xBtreeCursorUnpin : sqlite3StockBtreeCursorUnpin,
+  xBtreePayloadSize : sqlite3StockBtreePayloadSize,
+  xBtreeMaxRecordSize : sqlite3StockBtreeMaxRecordSize,
+  xBtreePayload : sqlite3StockBtreePayload,
+  xBtreePayloadChecked : sqlite3StockBtreePayloadChecked,
+  xBtreePayloadFetch : sqlite3StockBtreePayloadFetch,
+  xBtreeFirst : sqlite3StockBtreeFirst,
+  xBtreeLast : sqlite3StockBtreeLast,
+  xBtreeTableMoveto : sqlite3StockBtreeTableMoveto,
+  xBtreeIndexMoveto : sqlite3StockBtreeIndexMoveto,
+  xBtreeCursorDir : sqlite3StockBtreeCursorDir,
+  xBtreeEof : sqlite3StockBtreeEof,
+  xBtreeRowCountEst : sqlite3StockBtreeRowCountEst,
+  xBtreePrevious : sqlite3StockBtreePrevious,
+  xBtreeInsert : sqlite3StockBtreeInsert,
+  xBtreeDelete : sqlite3StockBtreeDelete,
+  xBtreeIdxDelete : sqlite3StockBtreeIdxDelete,
+  xBtreePutData : sqlite3StockBtreePutData,
+  xBtreeIncrblobCursor : sqlite3StockBtreeIncrblobCursor,
+  xBtreeCursorHasHint : sqlite3StockBtreeCursorHasHint,
+  xBtreeTransferRow : sqlite3StockBtreeTransferRow,
+  xBtreeClearTableOfCursor : sqlite3StockBtreeClearTableOfCursor,
+  xBtreeCount : sqlite3StockBtreeCount,
 };
 static const BtreeMethods stock_btree_methods = {
+  pCsrMethods : &stock_btcursor_methods,
   xBtreeCursor : sqlite3StockBtreeCursor,
   xBtreeSeekCount : sqlite3StockBtreeSeekCount,
   xBtreeLastPage : sqlite3StockBtreeLastPage,
@@ -478,42 +517,6 @@ static const BtreeMethods stock_btree_methods = {
   xBtreeIntegrityCheck : sqlite3StockBtreeIntegrityCheck,
 };
 
-static const BtCursorMethods stock_btcursor_methods = {
-  xBtreeNext : sqlite3StockBtreeNext,
-  xBtreeCursorHasMoved : sqlite3StockBtreeCursorHasMoved,
-  xBtreeClearCursor : sqlite3StockBtreeClearCursor,
-  xBtreeCursorRestore : sqlite3StockBtreeCursorRestore,
-  xBtreeCursorHintFlags : sqlite3StockBtreeCursorHintFlags,
-  xBtreeCloseCursor : sqlite3StockBtreeCloseCursor,
-  xBtreeCursorIsValid : sqlite3StockBtreeCursorIsValid,
-  xBtreeCursorIsValidNN : sqlite3StockBtreeCursorIsValidNN,
-  xBtreeIntegerKey : sqlite3StockBtreeIntegerKey,
-  xBtreeCursorPin : sqlite3StockBtreeCursorPin,
-  xBtreeCursorUnpin : sqlite3StockBtreeCursorUnpin,
-  xBtreePayloadSize : sqlite3StockBtreePayloadSize,
-  xBtreeMaxRecordSize : sqlite3StockBtreeMaxRecordSize,
-  xBtreePayload : sqlite3StockBtreePayload,
-  xBtreePayloadChecked : sqlite3StockBtreePayloadChecked,
-  xBtreePayloadFetch : sqlite3StockBtreePayloadFetch,
-  xBtreeFirst : sqlite3StockBtreeFirst,
-  xBtreeLast : sqlite3StockBtreeLast,
-  xBtreeMovetoUnpacked : sqlite3StockBtreeMovetoUnpacked,
-  xBtreeTableMoveto : sqlite3StockBtreeTableMoveto,
-  xBtreeIndexMoveto : sqlite3StockBtreeIndexMoveto,
-  xBtreeCursorDir : sqlite3StockBtreeCursorDir,
-  xBtreeEof : sqlite3StockBtreeEof,
-  xBtreeRowCountEst : sqlite3StockBtreeRowCountEst,
-  xBtreePrevious : sqlite3StockBtreePrevious,
-  xBtreeInsert : sqlite3StockBtreeInsert,
-  xBtreeDelete : sqlite3StockBtreeDelete,
-  xBtreeIdxDelete : sqlite3StockBtreeIdxDelete,
-  xBtreePutData : sqlite3StockBtreePutData,
-  xBtreeIncrblobCursor : sqlite3StockBtreeIncrblobCursor,
-  xBtreeCursorHasHint : sqlite3StockBtreeCursorHasHint,
-  xBtreeTransferRow : sqlite3StockBtreeTransferRow,
-  xBtreeClearTableOfCursor : sqlite3StockBtreeClearTableOfCursor,
-  xBtreeCount : sqlite3StockBtreeCount,
-};
 /*
 ** END OF GENERATED CODE
 ******************************************************************/
@@ -540,6 +543,11 @@ int sqlite3BtreeCursorHasMoved(BtCursor *pCur){
   return pCur->pMethods->xBtreeCursorHasMoved(pCur);
 }
 
+int sqlite3BtreeCloseCursor(BtCursor *pCur){
+  if( pCur->pMethods==0 ) return 0;
+  return pCur->pMethods->xBtreeCloseCursor(pCur);
+}
+
 int sqlite3BtreeCursor(
   Btree *p,                                   /* The btree */
   Pgno iTable,                                /* Root page of table to open */
@@ -548,7 +556,7 @@ int sqlite3BtreeCursor(
   BtCursor *pCur                              /* Write new cursor here */
 ){
   int rc = p->pMethods->xBtreeCursor(p, iTable, wrFlag, pKeyInfo, pCur);
-  pCur->pMethods = &hct_btcursor_methods;
+  pCur->pMethods = p->pMethods->pCsrMethods;
   return rc;
 }
 
@@ -561,9 +569,14 @@ int sqlite3BtreeOpen(
   int vfsFlags            /* Flags passed through to sqlite3_vfs.xOpen() */
 ){
   Btree *pBtree = 0;
-  int rc = sqlite3HctBtreeOpen(pVfs, zFilename, db, &pBtree, flags, vfsFlags);
-  if( rc==SQLITE_OK ){
-    pBtree->pMethods = &hct_btree_methods;
+  int rc = SQLITE_OK;
+
+  if( 1 ){
+    rc = sqlite3HctBtreeOpen(pVfs, zFilename, db, &pBtree, flags, vfsFlags);
+    if( rc==SQLITE_OK ) pBtree->pMethods = &hct_btree_methods;
+  }else{
+    rc = sqlite3StockBtreeOpen(pVfs, zFilename, db, &pBtree, flags, vfsFlags);
+    if( rc==SQLITE_OK ) pBtree->pMethods = &stock_btree_methods;
   }
   *ppBtree = pBtree;
   return rc;

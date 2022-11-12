@@ -87,13 +87,13 @@
 /*
 ** standard include files.
 */
-#include <sys/types.h>
-#include <sys/stat.h>
+#include <sys/types.h>   /* amalgamator: keep */
+#include <sys/stat.h>    /* amalgamator: keep */
 #include <fcntl.h>
 #include <sys/ioctl.h>
-#include <unistd.h>
+#include <unistd.h>      /* amalgamator: keep */
 #include <time.h>
-#include <sys/time.h>
+#include <sys/time.h>    /* amalgamator: keep */
 #include <errno.h>
 #if !defined(SQLITE_OMIT_WAL) || SQLITE_MAX_MMAP_SIZE>0
 # include <sys/mman.h>
@@ -5857,6 +5857,7 @@ static const char *unixTempFileDir(void){
 static int unixGetTempname(int nBuf, char *zBuf){
   const char *zDir;
   int iLimit = 0;
+  int rc = SQLITE_OK;
 
   /* It's odd to simulate an io-error here, but really this is just
   ** using the io-error infrastructure to test that SQLite handles this
@@ -5865,18 +5866,26 @@ static int unixGetTempname(int nBuf, char *zBuf){
   zBuf[0] = 0;
   SimulateIOError( return SQLITE_IOERR );
 
+  sqlite3_mutex_enter(sqlite3MutexAlloc(SQLITE_MUTEX_STATIC_TEMPDIR));
   zDir = unixTempFileDir();
-  if( zDir==0 ) return SQLITE_IOERR_GETTEMPPATH;
-  do{
-    u64 r;
-    sqlite3_randomness(sizeof(r), &r);
-    assert( nBuf>2 );
-    zBuf[nBuf-2] = 0;
-    sqlite3_snprintf(nBuf, zBuf, "%s/"SQLITE_TEMP_FILE_PREFIX"%llx%c",
-                     zDir, r, 0);
-    if( zBuf[nBuf-2]!=0 || (iLimit++)>10 ) return SQLITE_ERROR;
-  }while( osAccess(zBuf,0)==0 );
-  return SQLITE_OK;
+  if( zDir==0 ){
+    rc = SQLITE_IOERR_GETTEMPPATH;
+  }else{
+    do{
+      u64 r;
+      sqlite3_randomness(sizeof(r), &r);
+      assert( nBuf>2 );
+      zBuf[nBuf-2] = 0;
+      sqlite3_snprintf(nBuf, zBuf, "%s/"SQLITE_TEMP_FILE_PREFIX"%llx%c",
+                       zDir, r, 0);
+      if( zBuf[nBuf-2]!=0 || (iLimit++)>10 ){
+        rc = SQLITE_ERROR;
+        break;
+      }
+    }while( osAccess(zBuf,0)==0 );
+  }
+  sqlite3_mutex_leave(sqlite3MutexAlloc(SQLITE_MUTEX_STATIC_TEMPDIR));
+  return rc;
 }
 
 #if SQLITE_ENABLE_LOCKING_STYLE && defined(__APPLE__)
@@ -8051,8 +8060,16 @@ int sqlite3_os_init(void){
 
   /* Register all VFSes defined in the aVfs[] array */
   for(i=0; i<(sizeof(aVfs)/sizeof(sqlite3_vfs)); i++){
+#ifdef SQLITE_DEFAULT_UNIX_VFS
+    sqlite3_vfs_register(&aVfs[i],
+           0==strcmp(aVfs[i].zName,SQLITE_DEFAULT_UNIX_VFS));
+#else
     sqlite3_vfs_register(&aVfs[i], i==0);
+#endif
   }
+#ifdef SQLITE_OS_KV_OPTIONAL
+  sqlite3KvvfsInit();
+#endif
   unixBigLock = sqlite3MutexAlloc(SQLITE_MUTEX_STATIC_VFS1);
 
 #ifndef SQLITE_OMIT_WAL

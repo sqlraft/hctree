@@ -743,6 +743,43 @@ static void whereTraceIndexInfoOutputs(sqlite3_index_info *p){
 #define whereTraceIndexInfoOutputs(A)
 #endif
 
+/*
+** We know that pSrc is an operand of an outer join.  Return true if
+** pTerm is a constraint that is compatible with that join.
+**
+** pTerm must be EP_OuterON if pSrc is the right operand of an
+** outer join.  pTerm can be either EP_OuterON or EP_InnerON if pSrc
+** is the left operand of a RIGHT join.
+**
+** See https://sqlite.org/forum/forumpost/206d99a16dd9212f
+** for an example of a WHERE clause constraints that may not be used on
+** the right table of a RIGHT JOIN because the constraint implies a
+** not-NULL condition on the left table of the RIGHT JOIN.
+*/
+static int constraintCompatibleWithOuterJoin(
+  const WhereTerm *pTerm,       /* WHERE clause term to check */
+  const SrcItem *pSrc           /* Table we are trying to access */
+){
+  assert( (pSrc->fg.jointype&(JT_LEFT|JT_LTORJ|JT_RIGHT))!=0 ); /* By caller */
+  testcase( (pSrc->fg.jointype & (JT_LEFT|JT_LTORJ|JT_RIGHT))==JT_LEFT );
+  testcase( (pSrc->fg.jointype & (JT_LEFT|JT_LTORJ|JT_RIGHT))==JT_LTORJ );
+  testcase( ExprHasProperty(pTerm->pExpr, EP_OuterON) )
+  testcase( ExprHasProperty(pTerm->pExpr, EP_InnerON) );
+  if( !ExprHasProperty(pTerm->pExpr, EP_OuterON|EP_InnerON)
+   || pTerm->pExpr->w.iJoin != pSrc->iCursor
+  ){
+    return 0;
+  }
+  if( (pSrc->fg.jointype & (JT_LEFT|JT_RIGHT))!=0
+   && ExprHasProperty(pTerm->pExpr, EP_InnerON)
+  ){
+    return 0;
+  }
+  return 1;
+}
+ 
+
+
 #ifndef SQLITE_OMIT_AUTOMATIC_INDEX
 /*
 ** Return TRUE if the WHERE clause term pTerm is of a form where it
@@ -758,16 +795,10 @@ static int termCanDriveIndex(
   if( pTerm->leftCursor!=pSrc->iCursor ) return 0;
   if( (pTerm->eOperator & (WO_EQ|WO_IS))==0 ) return 0;
   assert( (pSrc->fg.jointype & JT_RIGHT)==0 );
-  if( (pSrc->fg.jointype & (JT_LEFT|JT_LTORJ|JT_RIGHT))!=0 ){
-    testcase( (pSrc->fg.jointype & (JT_LEFT|JT_LTORJ|JT_RIGHT))==JT_LEFT );
-    testcase( (pSrc->fg.jointype & (JT_LEFT|JT_LTORJ|JT_RIGHT))==JT_LTORJ );
-    testcase( ExprHasProperty(pTerm->pExpr, EP_OuterON) )
-    testcase( ExprHasProperty(pTerm->pExpr, EP_InnerON) );
-    if( !ExprHasProperty(pTerm->pExpr, EP_OuterON|EP_InnerON)
-     || pTerm->pExpr->w.iJoin != pSrc->iCursor
-    ){
-      return 0;  /* See tag-20191211-001 */
-    }
+  if( (pSrc->fg.jointype & (JT_LEFT|JT_LTORJ|JT_RIGHT))!=0
+   && !constraintCompatibleWithOuterJoin(pTerm,pSrc)
+  ){
+    return 0;  /* See https://sqlite.org/forum/forumpost/51e6959f61 */
   }
   if( (pTerm->prereqRight & notReady)!=0 ) return 0;
   assert( (pTerm->eOperator & (WO_OR|WO_AND))==0 );
@@ -1179,22 +1210,10 @@ static sqlite3_index_info *allocateIndexInfo(
     assert( (pTerm->eOperator & (WO_OR|WO_AND))==0 );
     assert( pTerm->u.x.leftColumn>=XN_ROWID );
     assert( pTerm->u.x.leftColumn<pTab->nCol );
-
-    /* tag-20191211-002: WHERE-clause constraints are not useful to the
-    ** right-hand table of a LEFT JOIN nor to the either table of a
-    ** RIGHT JOIN.  See tag-20191211-001 for the
-    ** equivalent restriction for ordinary tables. */
-    if( (pSrc->fg.jointype & (JT_LEFT|JT_LTORJ|JT_RIGHT))!=0 ){
-      testcase( (pSrc->fg.jointype & (JT_LEFT|JT_LTORJ|JT_RIGHT))==JT_LEFT );
-      testcase( (pSrc->fg.jointype & (JT_LEFT|JT_LTORJ|JT_RIGHT))==JT_RIGHT );
-      testcase( (pSrc->fg.jointype & (JT_LEFT|JT_LTORJ|JT_RIGHT))==JT_LTORJ );
-      testcase( ExprHasProperty(pTerm->pExpr, EP_OuterON) );
-      testcase( ExprHasProperty(pTerm->pExpr, EP_InnerON) );
-      if( !ExprHasProperty(pTerm->pExpr, EP_OuterON|EP_InnerON)
-       || pTerm->pExpr->w.iJoin != pSrc->iCursor
-      ){
-        continue;
-      }
+    if( (pSrc->fg.jointype & (JT_LEFT|JT_LTORJ|JT_RIGHT))!=0
+     && !constraintCompatibleWithOuterJoin(pTerm,pSrc)
+    ){
+      continue;
     }
     nTerm++;
     pTerm->wtFlags |= TERM_OK;
@@ -1567,7 +1586,7 @@ static int whereKeyStats(
     ** is larger than all samples in the array. */
     tRowcnt iUpper, iGap;
     if( i>=pIdx->nSample ){
-      iUpper = sqlite3LogEstToInt(pIdx->aiRowLogEst[0]);
+      iUpper = pIdx->nRowEst0;
     }else{
       iUpper = aSample[i].anLt[iCol];
     }
@@ -2251,8 +2270,9 @@ static int whereLoopXfer(sqlite3 *db, WhereLoop *pTo, WhereLoop *pFrom){
 ** Delete a WhereLoop object
 */
 static void whereLoopDelete(sqlite3 *db, WhereLoop *p){
+  assert( db!=0 );
   whereLoopClear(db, p);
-  sqlite3DbFreeNN(db, p);
+  sqlite3DbNNFreeNN(db, p);
 }
 
 /*
@@ -2260,30 +2280,19 @@ static void whereLoopDelete(sqlite3 *db, WhereLoop *p){
 */
 static void whereInfoFree(sqlite3 *db, WhereInfo *pWInfo){
   assert( pWInfo!=0 );
+  assert( db!=0 );
   sqlite3WhereClauseClear(&pWInfo->sWC);
   while( pWInfo->pLoops ){
     WhereLoop *p = pWInfo->pLoops;
     pWInfo->pLoops = p->pNextLoop;
     whereLoopDelete(db, p);
   }
-  assert( pWInfo->pExprMods==0 );
   while( pWInfo->pMemToFree ){
     WhereMemBlock *pNext = pWInfo->pMemToFree->pNext;
-    sqlite3DbFreeNN(db, pWInfo->pMemToFree);
+    sqlite3DbNNFreeNN(db, pWInfo->pMemToFree);
     pWInfo->pMemToFree = pNext;
   }
-  sqlite3DbFreeNN(db, pWInfo);
-}
-
-/* Undo all Expr node modifications
-*/
-static void whereUndoExprMods(WhereInfo *pWInfo){
-  while( pWInfo->pExprMods ){
-    WhereExprMod *p = pWInfo->pExprMods;
-    pWInfo->pExprMods = p->pNext;
-    memcpy(p->pExpr, &p->orig, sizeof(p->orig));
-    sqlite3DbFree(pWInfo->pParse->db, p);
-  }
+  sqlite3DbNNFreeNN(db, pWInfo);
 }
 
 /*
@@ -2850,32 +2859,11 @@ static int whereLoopAddBtreeIndex(
     ** to mix with a lower range bound from some other source */
     if( pTerm->wtFlags & TERM_LIKEOPT && pTerm->eOperator==WO_LT ) continue;
 
-    /* tag-20191211-001:  Do not allow constraints from the WHERE clause to
-    ** be used by the right table of a LEFT JOIN nor by the left table of a
-    ** RIGHT JOIN.  Only constraints in the ON clause are allowed.
-    ** See tag-20191211-002 for the vtab equivalent.  
-    **
-    ** 2022-06-06: See https://sqlite.org/forum/forumpost/206d99a16dd9212f
-    ** for an example of a WHERE clause constraints that may not be used on
-    ** the right table of a RIGHT JOIN because the constraint implies a
-    ** not-NULL condition on the left table of the RIGHT JOIN.
-    **
-    ** 2022-06-10: The same condition applies to termCanDriveIndex() above.
-    ** https://sqlite.org/forum/forumpost/51e6959f61
-    */
-    if( (pSrc->fg.jointype & (JT_LEFT|JT_LTORJ|JT_RIGHT))!=0 ){
-      testcase( (pSrc->fg.jointype & (JT_LEFT|JT_LTORJ|JT_RIGHT))==JT_LEFT );
-      testcase( (pSrc->fg.jointype & (JT_LEFT|JT_LTORJ|JT_RIGHT))==JT_RIGHT );
-      testcase( (pSrc->fg.jointype & (JT_LEFT|JT_LTORJ|JT_RIGHT))==JT_LTORJ );
-      testcase( ExprHasProperty(pTerm->pExpr, EP_OuterON) )
-      testcase( ExprHasProperty(pTerm->pExpr, EP_InnerON) );
-      if( !ExprHasProperty(pTerm->pExpr, EP_OuterON|EP_InnerON)
-       || pTerm->pExpr->w.iJoin != pSrc->iCursor
-      ){
-        continue;
-      }
+    if( (pSrc->fg.jointype & (JT_LEFT|JT_LTORJ|JT_RIGHT))!=0
+     && !constraintCompatibleWithOuterJoin(pTerm,pSrc)
+    ){
+      continue;
     }
-
     if( IsUniqueIndex(pProbe) && saved_nEq==pProbe->nKeyCol-1 ){
       pBuilder->bldFlags1 |= SQLITE_BLDF1_UNIQUE;
     }else{
@@ -3260,6 +3248,94 @@ static int whereUsablePartialIndex(
 }
 
 /*
+** Structure passed to the whereIsCoveringIndex Walker callback.
+*/
+struct CoveringIndexCheck {
+  Index *pIdx;       /* The index */
+  int iTabCur;       /* Cursor number for the corresponding table */
+};
+
+/*
+** Information passed in is pWalk->u.pCovIdxCk.  Call is pCk.
+**
+** If the Expr node references the table with cursor pCk->iTabCur, then
+** make sure that column is covered by the index pCk->pIdx.  We know that
+** all columns less than 63 (really BMS-1) are covered, so we don't need
+** to check them.  But we do need to check any column at 63 or greater.
+**
+** If the index does not cover the column, then set pWalk->eCode to 
+** non-zero and return WRC_Abort to stop the search.
+**
+** If this node does not disprove that the index can be a covering index,
+** then just return WRC_Continue, to continue the search.
+*/
+static int whereIsCoveringIndexWalkCallback(Walker *pWalk, Expr *pExpr){
+  int i;                  /* Loop counter */
+  const Index *pIdx;      /* The index of interest */
+  const i16 *aiColumn;    /* Columns contained in the index */
+  u16 nColumn;            /* Number of columns in the index */
+  if( pExpr->op!=TK_COLUMN && pExpr->op!=TK_AGG_COLUMN ) return WRC_Continue;
+  if( pExpr->iColumn<(BMS-1) ) return WRC_Continue;
+  if( pExpr->iTable!=pWalk->u.pCovIdxCk->iTabCur ) return WRC_Continue;
+  pIdx = pWalk->u.pCovIdxCk->pIdx;
+  aiColumn = pIdx->aiColumn;
+  nColumn = pIdx->nColumn;
+  for(i=0; i<nColumn; i++){
+    if( aiColumn[i]==pExpr->iColumn ) return WRC_Continue;
+  }
+  pWalk->eCode = 1;
+  return WRC_Abort;
+}
+
+
+/*
+** pIdx is an index that covers all of the low-number columns used by
+** pWInfo->pSelect (columns from 0 through 62).  But there are columns
+** in pWInfo->pSelect beyond 62.  This routine tries to answer the question
+** of whether pIdx covers *all* columns in the query.
+**
+** Return 0 if pIdx is a covering index.   Return non-zero if pIdx is
+** not a covering index or if we are unable to determine if pIdx is a
+** covering index.
+**
+** This routine is an optimization.  It is always safe to return non-zero.
+** But returning zero when non-zero should have been returned can lead to
+** incorrect bytecode and assertion faults.
+*/
+static SQLITE_NOINLINE u32 whereIsCoveringIndex(
+  WhereInfo *pWInfo,     /* The WHERE clause context */
+  Index *pIdx,           /* Index that is being tested */
+  int iTabCur            /* Cursor for the table being indexed */
+){
+  int i;
+  struct CoveringIndexCheck ck;
+  Walker w;
+  if( pWInfo->pSelect==0 ){
+    /* We don't have access to the full query, so we cannot check to see
+    ** if pIdx is covering.  Assume it is not. */
+    return 1;
+  }
+  for(i=0; i<pIdx->nColumn; i++){
+    if( pIdx->aiColumn[i]>=BMS-1 ) break;
+  }
+  if( i>=pIdx->nColumn ){
+    /* pIdx does not index any columns greater than 62, but we know from
+    ** colMask that columns greater than 62 are used, so this is not a
+    ** covering index */
+    return 1;
+  }
+  ck.pIdx = pIdx;
+  ck.iTabCur = iTabCur;
+  memset(&w, 0, sizeof(w));
+  w.xExprCallback = whereIsCoveringIndexWalkCallback;
+  w.xSelectCallback = sqlite3SelectWalkNoop;
+  w.u.pCovIdxCk = &ck;
+  w.eCode = 0;
+  sqlite3WalkSelect(&w, pWInfo->pSelect);
+  return w.eCode;
+}
+
+/*
 ** Add all WhereLoop objects for a single table of the join where the table
 ** is identified by pBuilder->pNew->iTab.  That table is guaranteed to be
 ** a b-tree table, not a virtual table.
@@ -3461,6 +3537,9 @@ static int whereLoopAddBtree(
 #else
       pNew->rRun = rSize + 16;
 #endif
+      if( IsView(pTab) || (pTab->tabFlags & TF_Ephemeral)!=0 ){
+        pNew->wsFlags |= WHERE_VIEWSCAN;
+      }
       ApplyCostMultiplier(pNew->rRun, pTab->costMult);
       whereLoopOutputAdjust(pWC, pNew, rSize);
       rc = whereLoopInsert(pBuilder, pNew);
@@ -3473,6 +3552,9 @@ static int whereLoopAddBtree(
         m = 0;
       }else{
         m = pSrc->colUsed & pProbe->colNotIdxed;
+        if( m==TOPBIT ){
+          m = whereIsCoveringIndex(pWInfo, pProbe, pSrc->iCursor);
+        }
         pNew->wsFlags = (m==0) ? (WHERE_IDX_ONLY|WHERE_INDEXED) : WHERE_INDEXED;
       }
 
@@ -4698,7 +4780,6 @@ static int wherePathSolver(WhereInfo *pWInfo, LogEst nRowEst){
   int mxChoice;             /* Maximum number of simultaneous paths tracked */
   int nLoop;                /* Number of terms in the join */
   Parse *pParse;            /* Parsing context */
-  sqlite3 *db;              /* The database connection */
   int iLoop;                /* Loop counter over the terms of the join */
   int ii, jj;               /* Loop counters */
   int mxI = 0;              /* Index of next entry to replace */
@@ -4717,7 +4798,6 @@ static int wherePathSolver(WhereInfo *pWInfo, LogEst nRowEst){
   int nSpace;               /* Bytes of space allocated at pSpace */
 
   pParse = pWInfo->pParse;
-  db = pParse->db;
   nLoop = pWInfo->nLevel;
   /* TUNING: For simple queries, only the best path is tracked.
   ** For 2-way joins, the 5 best paths are followed.
@@ -4740,7 +4820,7 @@ static int wherePathSolver(WhereInfo *pWInfo, LogEst nRowEst){
   /* Allocate and initialize space for aTo, aFrom and aSortCost[] */
   nSpace = (sizeof(WherePath)+sizeof(WhereLoop*)*nLoop)*mxChoice*2;
   nSpace += sizeof(LogEst) * nOrderBy;
-  pSpace = sqlite3DbMallocRawNN(db, nSpace);
+  pSpace = sqlite3StackAllocRawNN(pParse->db, nSpace);
   if( pSpace==0 ) return SQLITE_NOMEM_BKPT;
   aTo = (WherePath*)pSpace;
   aFrom = aTo+mxChoice;
@@ -4839,6 +4919,13 @@ static int wherePathSolver(WhereInfo *pWInfo, LogEst nRowEst){
         }else{
           rCost = rUnsorted;
           rUnsorted -= 2;  /* TUNING:  Slight bias in favor of no-sort plans */
+        }
+
+        /* TUNING:  A full-scan of a VIEW or subquery in the outer loop
+        ** is not so bad. */
+        if( iLoop==0 && (pWLoop->wsFlags & WHERE_VIEWSCAN)!=0 ){
+          rCost += -10;
+          nOut += -30;
         }
 
         /* Check to see if pWLoop should be added to the set of
@@ -4991,7 +5078,7 @@ static int wherePathSolver(WhereInfo *pWInfo, LogEst nRowEst){
 
   if( nFrom==0 ){
     sqlite3ErrorMsg(pParse, "no query solution");
-    sqlite3DbFreeNN(db, pSpace);
+    sqlite3StackFreeNN(pParse->db, pSpace);
     return SQLITE_ERROR;
   }
   
@@ -5073,7 +5160,7 @@ static int wherePathSolver(WhereInfo *pWInfo, LogEst nRowEst){
   pWInfo->nRowOut = pFrom->nRow;
 
   /* Free temporary memory and return success */
-  sqlite3DbFreeNN(db, pSpace);
+  sqlite3StackFreeNN(pParse->db, pSpace);
   return SQLITE_OK;
 }
 
@@ -5373,6 +5460,77 @@ static SQLITE_NOINLINE void whereCheckIfBloomFilterIsUseful(
 }
 
 /*
+** This is an sqlite3ParserAddCleanup() callback that is invoked to
+** free the Parse->pIdxExpr list when the Parse object is destroyed.
+*/
+static void whereIndexedExprCleanup(sqlite3 *db, void *pObject){
+  Parse *pParse = (Parse*)pObject;
+  while( pParse->pIdxExpr!=0 ){
+    IndexedExpr *p = pParse->pIdxExpr;
+    pParse->pIdxExpr = p->pIENext;
+    sqlite3ExprDelete(db, p->pExpr);
+    sqlite3DbFreeNN(db, p);
+  }
+}
+
+/*
+** The index pIdx is used by a query and contains one or more expressions.
+** In other words pIdx is an index on an expression.  iIdxCur is the cursor
+** number for the index and iDataCur is the cursor number for the corresponding
+** table.
+**
+** This routine adds IndexedExpr entries to the Parse->pIdxExpr field for
+** each of the expressions in the index so that the expression code generator
+** will know to replace occurrences of the indexed expression with
+** references to the corresponding column of the index.
+*/
+static SQLITE_NOINLINE void whereAddIndexedExpr(
+  Parse *pParse,     /* Add IndexedExpr entries to pParse->pIdxExpr */
+  Index *pIdx,       /* The index-on-expression that contains the expressions */
+  int iIdxCur,       /* Cursor number for pIdx */
+  SrcItem *pTabItem  /* The FROM clause entry for the table */
+){
+  int i;
+  IndexedExpr *p;
+  Table *pTab;
+  assert( pIdx->bHasExpr );
+  pTab = pIdx->pTable;
+  for(i=0; i<pIdx->nColumn; i++){
+    Expr *pExpr;
+    int j = pIdx->aiColumn[i];
+    int bMaybeNullRow;
+    if( j==XN_EXPR ){
+      pExpr = pIdx->aColExpr->a[i].pExpr;
+      testcase( pTabItem->fg.jointype & JT_LEFT );
+      testcase( pTabItem->fg.jointype & JT_RIGHT );
+      testcase( pTabItem->fg.jointype & JT_LTORJ );
+      bMaybeNullRow = (pTabItem->fg.jointype & (JT_LEFT|JT_LTORJ|JT_RIGHT))!=0;
+    }else if( j>=0 && (pTab->aCol[j].colFlags & COLFLAG_VIRTUAL)!=0 ){
+      pExpr = sqlite3ColumnExpr(pTab, &pTab->aCol[j]);
+      bMaybeNullRow = 0;
+    }else{
+      continue;
+    }
+    if( sqlite3ExprIsConstant(pExpr) ) continue;
+    p = sqlite3DbMallocRaw(pParse->db,  sizeof(IndexedExpr));
+    if( p==0 ) break;
+    p->pIENext = pParse->pIdxExpr;
+    p->pExpr = sqlite3ExprDup(pParse->db, pExpr, 0);
+    p->iDataCur = pTabItem->iCursor;
+    p->iIdxCur = iIdxCur;
+    p->iIdxCol = i;
+    p->bMaybeNullRow = bMaybeNullRow;
+#ifdef SQLITE_ENABLE_EXPLAIN_COMMENTS
+    p->zIdxName = pIdx->zName;
+#endif
+    pParse->pIdxExpr = p;
+    if( p->pIENext==0 ){
+      sqlite3ParserAddCleanup(pParse, whereIndexedExprCleanup, pParse);
+    }
+  }
+}
+
+/*
 ** Generate the beginning of the loop used for WHERE clause processing.
 ** The return value is a pointer to an opaque structure that contains
 ** information needed to terminate the loop.  Later, the calling routine
@@ -5466,7 +5624,7 @@ WhereInfo *sqlite3WhereBegin(
   Expr *pWhere,           /* The WHERE clause */
   ExprList *pOrderBy,     /* An ORDER BY (or GROUP BY) clause, or NULL */
   ExprList *pResultSet,   /* Query result set.  Req'd for DISTINCT */
-  Select *pLimit,         /* Use this LIMIT/OFFSET clause, if any */
+  Select *pSelect,        /* The entire SELECT statement */
   u16 wctrlFlags,         /* The WHERE_* flags defined in sqliteInt.h */
   int iAuxArg             /* If WHERE_OR_SUBCLAUSE is set, index cursor number
                           ** If WHERE_USE_LIMIT, then the limit amount */
@@ -5535,7 +5693,9 @@ WhereInfo *sqlite3WhereBegin(
   pWInfo->pParse = pParse;
   pWInfo->pTabList = pTabList;
   pWInfo->pOrderBy = pOrderBy;
+#if WHERETRACE_ENABLED
   pWInfo->pWhere = pWhere;
+#endif
   pWInfo->pResultSet = pResultSet;
   pWInfo->aiCurOnePass[0] = pWInfo->aiCurOnePass[1] = -1;
   pWInfo->nLevel = nTabList;
@@ -5543,9 +5703,7 @@ WhereInfo *sqlite3WhereBegin(
   pWInfo->wctrlFlags = wctrlFlags;
   pWInfo->iLimit = iAuxArg;
   pWInfo->savedNQueryLoop = pParse->nQueryLoop;
-#ifndef SQLITE_OMIT_VIRTUALTABLE
-  pWInfo->pLimit = pLimit;
-#endif
+  pWInfo->pSelect = pSelect;
   memset(&pWInfo->nOBSat, 0, 
          offsetof(WhereInfo,sWC) - offsetof(WhereInfo,nOBSat));
   memset(&pWInfo->a[0], 0, sizeof(WhereLoop)+nTabList*sizeof(WhereLevel));
@@ -5614,7 +5772,9 @@ WhereInfo *sqlite3WhereBegin(
   
   /* Analyze all of the subexpressions. */
   sqlite3WhereExprAnalyze(pTabList, &pWInfo->sWC);
-  sqlite3WhereAddLimit(&pWInfo->sWC, pLimit);
+  if( pSelect && pSelect->pLimit ){
+    sqlite3WhereAddLimit(&pWInfo->sWC, pSelect);
+  }
   if( pParse->nErr ) goto whereBeginError;
 
   /* Special case: WHERE terms that do not refer to any tables in the join
@@ -5917,6 +6077,9 @@ WhereInfo *sqlite3WhereBegin(
         op = OP_ReopenIdx;
       }else{
         iIndexCur = pParse->nTab++;
+        if( pIx->bHasExpr && OptimizationEnabled(db, SQLITE_IndexedExpr) ){
+          whereAddIndexedExpr(pParse, pIx, iIndexCur, pTabItem);
+        }
       }
       pLevel->iIdxCur = iIndexCur;
       assert( pIx!=0 );
@@ -6039,8 +6202,6 @@ WhereInfo *sqlite3WhereBegin(
   /* Jump here if malloc fails */
 whereBeginError:
   if( pWInfo ){
-    testcase( pWInfo->pExprMods!=0 );
-    whereUndoExprMods(pWInfo);
     pParse->nQueryLoop = pWInfo->savedNQueryLoop;
     whereInfoFree(db, pWInfo);
   }
@@ -6259,7 +6420,6 @@ void sqlite3WhereEnd(WhereInfo *pWInfo){
   }
 
   assert( pWInfo->nLevel<=pTabList->nSrc );
-  if( pWInfo->pExprMods ) whereUndoExprMods(pWInfo);
   for(i=0, pLevel=pWInfo->a; i<pWInfo->nLevel; i++, pLevel++){
     int k, last;
     VdbeOp *pOp, *pLastOp;
@@ -6312,6 +6472,16 @@ void sqlite3WhereEnd(WhereInfo *pWInfo){
         last = iEnd;
       }else{
         last = pWInfo->iEndWhere;
+      }
+      if( pIdx->bHasExpr ){
+        IndexedExpr *p = pParse->pIdxExpr;
+        while( p ){
+          if( p->iIdxCur==pLevel->iIdxCur ){
+            p->iDataCur = -1;
+            p->iIdxCur = -1;
+          }
+          p = p->pIENext;
+        }
       }
       k = pLevel->addrBody + 1;
 #ifdef SQLITE_DEBUG
