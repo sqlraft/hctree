@@ -83,27 +83,26 @@ used in all the same ways as the stock SQLite library code.
 is incomplete. The current code has, at least, the following shortcomings:
 
 <ol>
-  <li><p> The prototype library may only access hctree databases, not stock
-          SQLite databases.
+  <li><p> All transactions against hctree databases, implicit and explicit, are
+          processed as if they were opened using 
+          <a href=#transactiontypes>"BEGIN CONCURRENT"</a>.
 
-  <li><p> The prototype library only works on POSIX, not win32, systems.
-
-  <li><p> All clients, read or read/write, must access the database from
-          within the same OS process.
-
-  <li><p> All transactions, implicit and explicit, are processed as if they
-          were opened using <a href=#transactiontypes>"BEGIN CONCURRENT"</a>.
-
-  <li><p> No support for replication is implemented.
-
-  <li><p> All databases currently use 4096 byte pages and 32-bit page numbers.
-          It is not yet possible to change these.
+  <li><p> All hctree databases currently use 4096 byte pages and 32-bit page 
+          numbers (maximum database size of 16TiB). It is not yet possible to
+          change these.
 
   <li><p> The database is always accessed using mmap(). It is not possible
           to fallback to pread()/pwrite().
 
   <li><p> Transactions that do not fit entirely in main memory (e.g. large
           CREATE INDEX statements) are not handled efficiently.
+
+  <li><p> No support for replication is implemented.
+
+  <li><p> The prototype library only works on POSIX, not win32, systems.
+
+  <li><p> All clients of an hctree database, read or read/write, must access
+          the database from within the same OS process.
 
   <li><p> There is no support for recovering from a power failure or operating
           system crash. Such an event may corrupt the database.

@@ -1,5 +1,5 @@
-C Automatically\sopen\sstock\sand\shct\sdatabases\susing\sthe\scorrect\sbtree\sbackend.\sCreate\sa\snew\shct\sdatabase\sonly\sif\sthe\s"hctree=1"\sURI\sparameter\sis\sspecified.
-D 2022-11-14T15:06:05.575
+C Docs\supdate.
+D 2022-11-14T15:46:19.501
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -39,7 +39,7 @@ F contrib/sqlitecon.tcl 210a913ad63f9f991070821e599d600bd913e0ad
 F doc/F2FS.txt c1d4a0ae9711cfe0e1d8b019d154f1c29e0d3abfe820787ba1e9ed7691160fcd
 F doc/hctree/design.wiki 5e7a5eab1d0c7082e7c1c6aa3c2943422a3a1a328e2b0c9fd6eddc0b4f99602e
 F doc/hctree/fileformat.wiki 1292b7e0135ccaa0fb3c5ecfd7df184410764bf732c0920f02f62da24dfa44e6
-F doc/hctree/index.html ae33f9e1f633357f0c0d9374e6c56c87cdb4d933e2179a9c9ab1d8536325bcc9
+F doc/hctree/index.html 895579183e54109702566230b35f8f15cdeb897322b5e25b3f1410297e31ccbf
 F doc/hctree/slides.wiki 4151889c5485fecd8a71d5d0089645998a2db5ebc3360b570f763e59effed60c
 F doc/hctree/threadtest.html 2e27b4ca5e708780a2b5c8c72302ff95f6283d7e1f86429ea7291946f0d5f59e
 F doc/json-enhancements.md e356fc834781f1f1aa22ee300027a270b2c960122468499bf347bb123ce1ea4f
@@ -2108,8 +2108,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P 8bb4d3020a2bd59770662e9153f7aa9e62e27f54da0f7fdd7bde18aeb922ae90
-R 0e371b5c7ad0dbbc8d83e8b016ec069e
+P a58353f15537a459c54bf905eae0a55f9c9286b9553b19816f27901d961bd62e
+R ea847e51e803cad9960046f1b08de70c
 U dan
-Z 185cdd27a77588c1697b621f21cb53ab
+Z 698bc62b50b8c8ebf0004037ad137f4f
 # Remove this line to create a well-formed Fossil manifest.
