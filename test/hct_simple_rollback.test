@@ -18,7 +18,7 @@ set testprefix hct_simple_rollback
 foreach {tn str1 str2} {
   1 "abcdefghij" "ABCDEFGHIJ"
 } {
-  reset_db
+  hct_reset_db
   sqlite3 db2 test.db
 
   do_execsql_test 1.0 {

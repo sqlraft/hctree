@@ -15,6 +15,8 @@ set testdir [file dirname $argv0]
 source $testdir/tester.tcl
 set testprefix hct_misc3
 
+hct_reset_db
+
 do_execsql_test 1.0 {
   CREATE TABLE tx(a INTEGER PRIMARY KEY, b TEXT);
 }
@@ -64,7 +66,7 @@ do_execsql_test 1.10 {
 }
 
 #-------------------------------------------------------------------------
-reset_db
+hct_reset_db
 do_execsql_test 2.0 {
   CREATE TABLE t2(a INTEGER PRIMARY KEY, b TEXT);
 }
@@ -92,7 +94,7 @@ foreach a [db eval {SELECT a FROM t2}] {
 }
 
 #-------------------------------------------------------------------------
-reset_db
+hct_reset_db
 do_execsql_test 3.1 {
   CREATE TABLE t3(a INTEGER PRIMARY KEY, b TEXT);
   INSERT INTO t3 VALUES(4, 'four');

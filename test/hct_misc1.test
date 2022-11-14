@@ -15,7 +15,7 @@ set testdir [file dirname $argv0]
 source $testdir/tester.tcl
 set testprefix hct_misc1
 
-if 1 {
+hct_reset_db
 
 do_execsql_test 1.1a { 
   CREATE TABLE t1(a, b);
@@ -59,7 +59,7 @@ do_execsql_test 1.4 {
   #set res
 #} {1 1 a {} {} b 2 2 a {} {} b}
 
-reset_db
+hct_reset_db
 do_execsql_test 2.0 {
   CREATE TABLE t1(a INTEGER PRIMARY KEY, b, c);
   -- CREATE INDEX x1 ON t1(b, c);
@@ -70,7 +70,7 @@ do_execsql_test 2.0 {
   INSERT INTO t1(a,b,c) SELECT a+20, 3, c FROM t1 WHERE b=1;
 }
 
-reset_db
+hct_reset_db
 do_execsql_test 3.0 {
   CREATE TABLE test1(f1 int, f2 int);
   INSERT INTO test1(f1,f2) VALUES(11,22);
@@ -80,7 +80,7 @@ do_execsql_test 3.1 {
   DELETE FROM test1;
 }
 
-reset_db
+hct_reset_db
 do_execsql_test 4.0 {
   CREATE TABLE t1(k INTEGER PRIMARY KEY, v BLOB);
 }
@@ -96,7 +96,7 @@ do_execsql_test 4.2 {
 } {}
 
 #-------------------------------------------------------------------------
-reset_db
+hct_reset_db
 do_execsql_test 5.0 {
   CREATE TABLE v1(k INTEGER PRIMARY KEY, v BLOB);
 }
@@ -116,7 +116,7 @@ do_execsql_test 5.2 {
 }
 
 #-------------------------------------------------------------------------
-reset_db
+hct_reset_db
 do_execsql_test 6.0 {
   BEGIN;
     SAVEPOINT abc;
@@ -126,10 +126,8 @@ do_execsql_test 6.0 {
   COMMIT;
 }
 
-}
-
 #-------------------------------------------------------------------------
-reset_db
+hct_reset_db
 do_execsql_test 7.0 {
   CREATE TABLE t1(a, b);
 }
@@ -153,7 +151,7 @@ do_execsql_test 7.5 {
 } {1 abc def  2 ghi jkl 3 mno pqr 4 stu vwx}
 
 #-------------------------------------------------------------------------
-reset_db
+hct_reset_db
 do_execsql_test 8.0 {
   CREATE TABLE t1(a, b);
 }
@@ -180,7 +178,7 @@ do_execsql_test 8.5 {
 
 #-------------------------------------------------------------------------
 #
-reset_db
+hct_reset_db
 do_execsql_test 9.0 {
   CREATE TABLE t1(x INTEGER PRIMARY KEY, b TEXT);
 }
@@ -221,7 +219,7 @@ do_execsql_test 9.6 {
 
 #-------------------------------------------------------------------------
 #
-reset_db
+hct_reset_db
 do_execsql_test 10.0 {
   CREATE TABLE t1(x INTEGER PRIMARY KEY, b TEXT);
 }
@@ -260,7 +258,7 @@ db2 close
 
 #-------------------------------------------------------------------------
 #
-reset_db
+hct_reset_db
 do_execsql_test 11.0 {
   CREATE TABLE t1(x INTEGER PRIMARY KEY, b TEXT);
 }
@@ -296,7 +294,7 @@ do_execsql_test -db db2 11.7 {
 db2 close
 
 #-------------------------------------------------------------------------
-reset_db
+hct_reset_db
 sqlite3 db2 test.db
 
 foreach {tn db sql res} {
@@ -321,7 +319,7 @@ foreach {tn db sql res} {
 db2 close
 
 #-------------------------------------------------------------------------
-reset_db
+hct_reset_db
 sqlite3 db2 test.db
 do_execsql_test 13.0 {
   CREATE TABLE t1(x INTEGER PRIMARY KEY, b TEXT);
@@ -340,7 +338,7 @@ do_execsql_test 13.1 {
 } {}
 
 #-------------------------------------------------------------------------
-reset_db
+hct_reset_db
 sqlite3 db2 test.db
 do_execsql_test 14.0 {
   CREATE TABLE t1(x INTEGER PRIMARY KEY, b TEXT);
@@ -364,13 +362,13 @@ sqlite3 db test.db
 # do_execsql_test 14.3 { SELECT * FROM t1 } {1 one 3 three}
 
 #-------------------------------------------------------------------------
-reset_db
+hct_reset_db
 do_execsql_test 15.0 {
   SELECT * FROM sqlite_schema
 } {}
 
 #-------------------------------------------------------------------------
-reset_db
+hct_reset_db
 do_execsql_test 16.0 {
   CREATE TABLE t1(a INTEGER PRIMARY KEY, b);
   CREATE INDEX i1 ON t1(b);

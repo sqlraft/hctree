@@ -15,7 +15,7 @@ set testdir [file dirname $argv0]
 source $testdir/tester.tcl
 set testprefix hct_delete3
 
-reset_db
+hct_reset_db
 sqlite3 db2 test.db
 
 proc show_db_lists {} {
@@ -53,7 +53,7 @@ foreach {tn keytype} {
   1 {INTEGER PRIMARY KEY}
   2 {INT PRIMARY KEY}
 } {
-  reset_db
+  hct_reset_db
   sqlite3 db2 test.db
 
   do_execsql_test 1.$tn.0 "

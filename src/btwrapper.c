@@ -560,6 +560,53 @@ int sqlite3BtreeCursor(
   return rc;
 }
 
+static int btWrapperUseHct(
+  sqlite3_vfs *pVfs, 
+  const char *zFilename, 
+  int *pbUseHct
+){
+  int rc = SQLITE_OK;
+  char *zFull = 0;
+  char *zData = 0;
+  char *zPagemap = 0;
+  int bUseHct = 0;
+
+  if( zFilename && zFilename[0] ){
+    int nAlloc = pVfs->mxPathname+2;
+    int bExists = 0;
+
+    zFull = (char*)sqlite3_malloc(nAlloc);
+    if( zFull==0 ){
+      rc = SQLITE_NOMEM_BKPT;
+    }else{
+      memset(zFull, 0, nAlloc);
+      rc = pVfs->xFullPathname(pVfs, zFilename, pVfs->mxPathname, zFull);
+    }
+
+    if( rc==SQLITE_OK ){
+      rc = pVfs->xAccess(pVfs, zFull, SQLITE_ACCESS_EXISTS, &bExists);
+    }
+    if( rc==SQLITE_OK ){
+      zData = sqlite3_mprintf("%s-data", zFull);
+      zPagemap = sqlite3_mprintf("%s-pagemap", zFull);
+      if( zData==0 || zPagemap==0 ){
+        rc = SQLITE_NOMEM_BKPT;
+      }else if( bExists ){
+        rc = pVfs->xAccess(pVfs, zData, SQLITE_ACCESS_EXISTS, &bUseHct);
+      }else{
+        sqlite3OsDelete(pVfs, zData, 0);
+        sqlite3OsDelete(pVfs, zPagemap, 0);
+        bUseHct = sqlite3_uri_boolean(zFilename, "hctree", 0);
+      }
+    }
+  }
+
+  sqlite3_free(zFull);
+  sqlite3_free(zData);
+  *pbUseHct = bUseHct;
+  return rc;
+}
+
 int sqlite3BtreeOpen(
   sqlite3_vfs *pVfs,      /* VFS to use for this b-tree */
   const char *zFilename,  /* Name of the file containing the BTree database */
@@ -570,19 +617,20 @@ int sqlite3BtreeOpen(
 ){
   Btree *pBtree = 0;
   int rc = SQLITE_OK;
+  int bUseHct = 0;
 
-  if( 1 ){
-    rc = sqlite3HctBtreeOpen(pVfs, zFilename, db, &pBtree, flags, vfsFlags);
-    if( rc==SQLITE_OK ) pBtree->pMethods = &hct_btree_methods;
-  }else{
-    rc = sqlite3StockBtreeOpen(pVfs, zFilename, db, &pBtree, flags, vfsFlags);
-    if( rc==SQLITE_OK ) pBtree->pMethods = &stock_btree_methods;
+  rc = btWrapperUseHct(pVfs, zFilename, &bUseHct);
+  if( rc==SQLITE_OK ){
+    if( bUseHct ){
+      rc = sqlite3HctBtreeOpen(pVfs, zFilename, db, &pBtree, flags, vfsFlags);
+      if( rc==SQLITE_OK ) pBtree->pMethods = &hct_btree_methods;
+    }else{
+      rc = sqlite3StockBtreeOpen(pVfs, zFilename, db, &pBtree, flags, vfsFlags);
+      if( rc==SQLITE_OK ) pBtree->pMethods = &stock_btree_methods;
+    }
   }
   *ppBtree = pBtree;
   return rc;
 }
-
-
-
 
 

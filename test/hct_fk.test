@@ -15,6 +15,8 @@ set testdir [file dirname $argv0]
 source $testdir/tester.tcl
 set testprefix hct_fk
 
+hct_reset_db
+
 foreach {tn sql} {
   1 { 
     CREATE TABLE p1(a INTEGER PRIMARY KEY, b TEXT);
@@ -25,7 +27,7 @@ foreach {tn sql} {
     CREATE TABLE c1(x INTEGER PRIMARY KEY, y INTEGER REFERENCES p1(a));
   }
 } {
-  reset_db
+  hct_reset_db
   execsql $sql
   do_execsql_test 1.$tn.1 {
     PRAGMA foreign_keys = on;

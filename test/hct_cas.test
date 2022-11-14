@@ -16,7 +16,7 @@ source $testdir/tester.tcl
 set testprefix hct_cas
 
 for {set tn 0} {$tn < 20} {incr tn} {
-  reset_db
+  hct_reset_db
   do_execsql_test 1.$tn.0 {
     CREATE TABLE t1(x INTEGER PRIMARY KEY, y);
   }
@@ -34,7 +34,7 @@ for {set tn 0} {$tn < 20} {incr tn} {
 }
 
 for {set tn 0} {$tn < 20} {incr tn} {
-  reset_db
+  hct_reset_db
   do_execsql_test 2.$tn.0 {
     CREATE TABLE t1(x INTEGER PRIMARY KEY, y);
     WITH s(i) AS (

@@ -23,7 +23,7 @@ proc show_db_entries {} {
   }
 }
 
-reset_db
+hct_reset_db
 sqlite3 db2 test.db
 
 do_execsql_test 1.0 {
@@ -122,7 +122,7 @@ foreach {tn dlist} {
      }
   14 { {1 2 3} {5 6 7} 4 }
 } {
-  reset_db
+  hct_reset_db
   sqlite3 db2 test.db
 
   do_execsql_test 2.$tn.1 {
@@ -149,7 +149,7 @@ foreach {tn dlist} {
 foreach {tn dlist} {
   1 {100 900}
 } {
-  reset_db
+  hct_reset_db
   sqlite3 db2 test.db
 
   do_execsql_test 3.$tn.1 {
@@ -182,7 +182,7 @@ foreach {tn dlist} {
   3 {1-100 +50}
   4 {30-30 +30 30-30 +30 30-30 +30}
 } {
-  reset_db
+  hct_reset_db
   sqlite3 db2 test.db
 
   do_execsql_test 4.$tn.1 {

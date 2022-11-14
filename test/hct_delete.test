@@ -15,6 +15,8 @@ set testdir [file dirname $argv0]
 source $testdir/tester.tcl
 set testprefix hct_delete
 
+hct_reset_db
+
 sqlite3 db2 test.db
 
 do_execsql_test 1.1 {
@@ -63,7 +65,7 @@ proc lreverse {L} {
 }
 
 
-reset_db
+hct_reset_db
 sqlite3 db2 test.db
 do_execsql_test 2.0 {
   BEGIN;
@@ -140,7 +142,7 @@ proc run_delete_range_test3 {tn2 data} {
     "
   }
 
-  reset_db
+  hct_reset_db
   do_execsql_test $tn2.0 {
     BEGIN;
     CREATE TABLE x1(y INTEGER PRIMARY KEY, z TEXT);

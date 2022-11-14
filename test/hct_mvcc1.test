@@ -15,6 +15,7 @@ set testdir [file dirname $argv0]
 source $testdir/tester.tcl
 set testprefix hct_mvcc1
 
+hct_reset_db
 
 proc c_common {db tn sql res} {
   if {$res=="database is locked"} {
@@ -36,7 +37,7 @@ foreach {tn type} {
   2 "INT"
 } {
   catch {db2 close}
-  reset_db
+  hct_reset_db
   sqlite3 db2 test.db
 
   c1 $tn.1.1 "CREATE TABLE t1(a $type PRIMARY KEY, b)"
@@ -100,7 +101,7 @@ foreach {tn wo pk} {
   5 "WITHOUT ROWID" "PRIMARY KEY"
 } {
   catch {db2 close}
-  reset_db
+  hct_reset_db
   sqlite3 db2 test.db
 
   c1 $tn.1.1 "CREATE TABLE t1(a INT $pk, b) $wo"
@@ -133,7 +134,7 @@ breakpoint
 }
 
 catch {db2 close}
-reset_db
+hct_reset_db
 sqlite3 db2 test.db
 
 c1 6.1  "CREATE TABLE t1(a INTEGER PRIMARY KEY, b UNIQUE)"
@@ -153,7 +154,7 @@ c2 6.12                "END"
 c2 6.13                  "SELECT a FROM t1 ORDER BY b" {1 3 2}
 
 catch {db2 close}
-reset_db
+hct_reset_db
 sqlite3 db2 test.db
 c1 7.1  "CREATE TABLE t1(a INTEGER PRIMARY KEY, b)"
 c1 7.2  "INSERT INTO t1 VALUES(1, 'one'), (2, 'two'), (3, 'three')"
@@ -167,7 +168,7 @@ c2 7.9                 "END"
 c2 7.10                  "SELECT b FROM t1 ORDER BY a" {one TOO three}
 
 catch {db2 close}
-reset_db
+hct_reset_db
 sqlite3 db2 test.db
 c1 7.1  "CREATE TABLE t1(a INTEGER PRIMARY KEY, b)"
 c1 7.2  "CREATE UNIQUE INDEX i1 ON t1(b)"
@@ -193,7 +194,7 @@ foreach {tn sz} {
   2 10000
 } {
   catch {db2 close}
-  reset_db
+  hct_reset_db
   sqlite3 db2 test.db
   c1 8.$tn.1  "CREATE TABLE t1(a INTEGER PRIMARY KEY, b UNIQUE)"
   c1 8.$tn.2  "CREATE TABLE t2(a INTEGER PRIMARY KEY, b)"
@@ -216,7 +217,7 @@ do_execsql_test 8.10 {
 #execsql_pp { SELECT * FROM hctentry }
 
 catch {db2 close}
-reset_db
+hct_reset_db
 sqlite3 db2 test.db
 c1 9.1 "CREATE TABLE t1(a INTEGER PRIMARY KEY, b)"
 c1 9.2 "CREATE TABLE t2(a INTEGER PRIMARY KEY, b)"

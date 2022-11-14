@@ -621,6 +621,12 @@ proc reset_db {} {
 }
 reset_db
 
+proc hct_reset_db {} {
+  catch {db close}
+  forcedelete test.db
+  sqlite3 db file:test.db?hctree=1 -uri 1
+}
+
 # Abort early if this script has been run before.
 #
 if {[info exists TC(count)]} return
