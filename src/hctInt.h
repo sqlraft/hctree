@@ -348,3 +348,5 @@ int sqlite3HctStatsInit(sqlite3*);
 */
 void *sqlite3HctMalloc(int *pRc, i64 nByte);
 
+int sqlite3IsHct(Btree*);
+

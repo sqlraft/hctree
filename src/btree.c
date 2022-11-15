@@ -11097,3 +11097,4 @@ int sqlite3BtreeConnectionCount(Btree *p){
 }
 #endif
 
+#include "btreeUndef.h"

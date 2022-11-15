@@ -6367,7 +6367,6 @@ case OP_SorterInsert: {     /* in2 */
 case OP_IdxDelete: {
   VdbeCursor *pC;
   BtCursor *pCrsr;
-  int res;
   UnpackedRecord r;
 
   assert( pOp->p3>0 );

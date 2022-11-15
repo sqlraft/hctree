@@ -95,7 +95,8 @@ static void frandomBlobFunc(
 
 static sqlite3 *htt_sqlite3_open(const char *zDb){
   sqlite3 *db = 0;
-  int flags = SQLITE_OPEN_CREATE|SQLITE_OPEN_READWRITE|SQLITE_OPEN_NOMUTEX;
+  int flags = SQLITE_OPEN_CREATE|SQLITE_OPEN_READWRITE
+             |SQLITE_OPEN_NOMUTEX|SQLITE_OPEN_URI;
   int rc = sqlite3_open_v2(zDb, &db, flags, 0);
   if( rc!=SQLITE_OK ){
     fprintf(stderr, "error in sqlite3_open: (%d) %s\n", rc, sqlite3_errmsg(db));
@@ -629,7 +630,7 @@ static void test_build_db(Error *pErr, Testcase *pTst, int iDb, TestCtx *aCtx){
   int ii;
   sqlite3_stmt *pIns = 0;
   sqlite3 *db = 0;
-  char *zFile = sqlite3_mprintf("%s%d", HST_DATABASE_NAME, iDb);
+  char *zFile = sqlite3_mprintf("file:%s%d?hctree=1", HST_DATABASE_NAME, iDb);
   const int nInsertPerTrans = 10000;
   char *zRm = 0;
 

@@ -137,6 +137,11 @@ static int hctstatsFilter(
 ){
   hctstats_cursor *pCsr = (hctstats_cursor*)cur;
 
+  if( sqlite3HctDbFind(((hctstats_vtab*)cur->pVtab)->db, 0)==0 ){
+    /* Main database is not an hctree db */
+    return SQLITE_OK;
+  }
+
   pCsr->iStat = -1;
   pCsr->iSubsys = 0;
   pCsr->iRowid = 0;

@@ -396,7 +396,11 @@ SRC += \
   $(TOP)/src/hct_pman.c  \
   $(TOP)/src/hctInt.h      \
   $(TOP)/src/hctPManInt.h  \
-  $(TOP)/src/hctTMapInt.h
+  $(TOP)/src/hctTMapInt.h  \
+  $(TOP)/src/btreeModules.h \
+  $(TOP)/src/btreeDefine.h \
+  $(TOP)/src/btreeUndef.h \
+  $(TOP)/src/btwrapper.c
 
 # Source code to the test files.
 #

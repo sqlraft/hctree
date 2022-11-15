@@ -166,6 +166,9 @@ foreach hdr {
    hctInt.h
    hctPManInt.h
    hctTMapInt.h
+   btreeModules.h
+   btreeDefine.h
+   btreeUndef.h
 } {
   set available_hdr($hdr) 1
 }
@@ -372,7 +375,10 @@ foreach file {
    wal.c
 
    btmutex.c
+   btree.c
    backup.c
+
+   btwrapper.c
 
    vdbemem.c
    vdbeaux.c

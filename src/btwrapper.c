@@ -14,6 +14,7 @@
 
 #include "sqliteInt.h"
 
+#ifndef SQLITE_AMALGAMATION
 struct BtCursor {
   const BtCursorMethods *pMethods;
 };
@@ -21,6 +22,7 @@ struct BtCursor {
 struct Btree {
   const BtreeMethods *pMethods;
 };
+#endif
 
 int sqlite3HctBtreeCursorSize(void);
 int sqlite3HctBtreeOpen(sqlite3_vfs*, const char*, sqlite3*, Btree**, int, int);
@@ -48,6 +50,14 @@ int sqlite3StockBtreeIdxDelete(BtCursor *p, UnpackedRecord *pRec){
   return rc;
 }
 
+#ifndef SQLITE_DEBUG
+int sqlite3StockBtreeCursorIsValid(BtCursor *pCursor){
+  return 1;
+}
+sqlite3_uint64 sqlite3StockBtreeSeekCount(Btree *p){
+  return 0;
+}
+#endif
 
 /* BEGIN_HCT_MKBTREEWRAPPER_TCL_CODE */
 /******************************************************************
@@ -91,7 +101,7 @@ struct BtCursorMethods {
   int(*xBtreeCount)(sqlite3*, BtCursor*, i64*);
 };
 struct BtreeMethods {
-  BtCursorMethods *pCsrMethods;
+  BtCursorMethods const *pCsrMethods;
   int(*xBtreeCursor)(Btree*, Pgno, int, struct KeyInfo*, BtCursor*);
   sqlite3_uint64(*xBtreeSeekCount)(Btree*);
   Pgno(*xBtreeLastPage)(Btree*);
@@ -631,6 +641,10 @@ int sqlite3BtreeOpen(
   }
   *ppBtree = pBtree;
   return rc;
+}
+
+int sqlite3IsHct(Btree *pBt){
+  return (pBt && pBt->pMethods==&hct_btree_methods);
 }
 
 

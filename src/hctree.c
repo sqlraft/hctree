@@ -25,13 +25,16 @@
 
 typedef struct BtSchemaOp BtSchemaOp;
 
+typedef struct HBtree HBtree;
+typedef struct HBtCursor HBtCursor;
+
 /*
 ** aSchemaOp[]:
 **   Array of nSchemaOp BtSchemaOp structures. Each such structure represents
 **   a new table or index created by the current transaction. 
 **   aSchemaOp[x].iSavepoint contains the open savepoint count when the table
 **   with root page aSchemaOp[x].pgnoRoot was created. The value 
-**   Btree.db->nSavepoint.
+**   HBtree.db->nSavepoint.
 **
 ** eTrans:
 **   Set to SQLITE_TXN_NONE, READ or WRITE to indicate the type of 
@@ -41,17 +44,17 @@ typedef struct BtSchemaOp BtSchemaOp;
 **     sqlite3HctBtreeCommitPhaseTwo()
 **     sqlite3HctBtreeRollback()
 */
-struct Btree {
+struct HBtree {
   BtreeMethods *pMethods;
 
   sqlite3 *db;
   HctConfig config;               /* Configuration for this connection */
   HctTree *pHctTree;              /* In-memory part of database */
   HctDatabase *pHctDb;            /* On-disk part of db, if any */
-  void *pSchema;                  /* Schema memory from sqlite3HctBtreeSchema() */
+  void *pSchema;                  /* Memory from sqlite3HctBtreeSchema() */
   void(*xSchemaFree)(void*);      /* Function to free pSchema */
   int eTrans;                     /* SQLITE_TXN_NONE, READ or WRITE */
-  BtCursor *pCsrList;             /* List of all open cursors */
+  HBtCursor *pCsrList;            /* List of all open cursors */
 
   int nSchemaOp;
   BtSchemaOp *aSchemaOp;
@@ -69,7 +72,7 @@ struct Btree {
 };
 
 /*
-** Candidate values for Btree.eMetaState.
+** Candidate values for HBtree.eMetaState.
 */
 #define HCT_METASTATE_NONE  0
 #define HCT_METASTATE_READ  1
@@ -92,10 +95,10 @@ struct BtSchemaOp {
 #define HCT_SCHEMAOP_CREATE_INDEX  3
 
 
-struct BtCursor {
+struct HBtCursor {
   BtCursorMethods *pMethods;
 
-  Btree *pBtree;
+  HBtree *pBtree;
   HctTreeCsr *pHctTreeCsr;
   HctDbCsr *pHctDbCsr;
   int bUseTree;                   /* 1 if tree-csr is current entry, else 0 */
@@ -104,7 +107,7 @@ struct BtCursor {
   KeyInfo *pKeyInfo;              /* For non-intkey tables */
   int errCode;
   int wrFlag;                     /* Value of wrFlag when cursor opened */
-  BtCursor *pCsrNext;             /* Next element in Btree.pCsrList list */
+  HBtCursor *pCsrNext;            /* Next element in Btree.pCsrList list */
 };
 
 
@@ -127,7 +130,6 @@ int sqlite3_enable_shared_cache(int enable){
 #endif
 
 
-#ifdef SQLITE_DEBUG
 /*
 ** Return an reset the seek counter for a Btree object.
 */
@@ -135,7 +137,6 @@ sqlite3_uint64 sqlite3HctBtreeSeekCount(Btree *pBt){
   assert( 0 );
   return 0;
 }
-#endif
 
 /*
 ** Clear the current cursor position.
@@ -156,7 +157,8 @@ void sqlite3HctBtreeClearCursor(BtCursor *pCur){
 ** Use the separate sqlite3HctBtreeCursorRestore() routine to restore a cursor
 ** back to where it ought to be if this routine returns true.
 */
-int sqlite3HctBtreeCursorHasMoved(BtCursor *pCur){
+int sqlite3HctBtreeCursorHasMoved(BtCursor *pCursor){
+  HBtCursor *const pCur = (HBtCursor*)pCursor;
   return sqlite3HctTreeCsrHasMoved(pCur->pHctTreeCsr);
 }
 
@@ -185,7 +187,8 @@ BtCursor *sqlite3HctBtreeFakeValidCursor(void){
 ** This routine should only be called for a cursor that just returned
 ** TRUE from sqlite3HctBtreeCursorHasMoved().
 */
-int sqlite3HctBtreeCursorRestore(BtCursor *pCur, int *pDifferentRow){
+int sqlite3HctBtreeCursorRestore(BtCursor *pCursor, int *pDifferentRow){
+  HBtCursor *const pCur = (HBtCursor*)pCursor;
   return sqlite3HctTreeCsrRestore(pCur->pHctTreeCsr, pDifferentRow);
 }
 
@@ -218,7 +221,7 @@ void sqlite3HctBtreeCursorHintFlags(BtCursor *pCur, unsigned x){
 */
 typedef struct RecoverCtx RecoverCtx;
 struct RecoverCtx {
-  Btree *pBt;
+  HBtree *pBt;
   int iStage;
 };
 
@@ -226,7 +229,7 @@ struct RecoverCtx {
 #define HCT_RECOVER_STAGE1 1
 
 static int hctRecoverOne(void *pCtx, const char *zFile){
-  Btree *p = ((RecoverCtx*)pCtx)->pBt;
+  HBtree *p = ((RecoverCtx*)pCtx)->pBt;
   int iStage = ((RecoverCtx*)pCtx)->iStage;
 
   int rc = SQLITE_OK;
@@ -340,7 +343,7 @@ static int hctRecoverOne(void *pCtx, const char *zFile){
   return rc;
 }
 
-static int hctRecoverLogs(Btree *p, int iStage){
+static int hctRecoverLogs(HBtree *p, int iStage){
   RecoverCtx ctx;
   HctFile *pFile = sqlite3HctDbFile(p->pHctDb);
   ctx.pBt = p;
@@ -379,11 +382,11 @@ int sqlite3HctBtreeOpen(
   int vfsFlags            /* Flags passed through to sqlite3_vfs.xOpen() */
 ){
   int rc = SQLITE_OK;
-  Btree *pNew;
+  HBtree *pNew;
 
-  pNew = (Btree*)sqlite3_malloc(sizeof(Btree));
+  pNew = (HBtree*)sqlite3_malloc(sizeof(HBtree));
   if( pNew ){
-    memset(pNew, 0, sizeof(Btree));
+    memset(pNew, 0, sizeof(HBtree));
     pNew->iNextRoot = 2;
     pNew->fdLog = -1;
     pNew->db = db;
@@ -401,28 +404,29 @@ int sqlite3HctBtreeOpen(
   }
 
   if( rc!=SQLITE_OK ){
-    sqlite3HctBtreeClose(pNew);
+    sqlite3HctBtreeClose((Btree*)pNew);
     pNew = 0;
   }
-  *ppBtree = pNew;
+  *ppBtree = (Btree*)pNew;
   return rc;
 }
 
 /*
 ** Close an open database and invalidate all cursors.
 */
-int sqlite3HctBtreeClose(Btree *p){
+int sqlite3HctBtreeClose(Btree *pBt){
+  HBtree *const p = (HBtree*)pBt;
   if( p ){
     while(p->pCsrList){
-      sqlite3HctBtreeCloseCursor(p->pCsrList);
+      sqlite3HctBtreeCloseCursor((BtCursor*)p->pCsrList);
     }
     if( p->zLogFile ){
       close(p->fdLog);
       unlink(p->zLogFile);
       sqlite3_free(p->zLogFile);
     }
-    sqlite3HctBtreeRollback(p, SQLITE_OK, 0);
-    sqlite3HctBtreeCommit(p);
+    sqlite3HctBtreeRollback((Btree*)p, SQLITE_OK, 0);
+    sqlite3HctBtreeCommit((Btree*)p);
     if( p->xSchemaFree ){
       p->xSchemaFree(p->pSchema);
     }
@@ -650,13 +654,14 @@ int sqlite3HctBtreeNewDb(Btree *p){
 ** when A already has a read lock, we encourage A to give up and let B
 ** proceed.
 */
-int sqlite3HctBtreeBeginTrans(Btree *p, int wrflag, int *pSchemaVersion){
+int sqlite3HctBtreeBeginTrans(Btree *pBt, int wrflag, int *pSchemaVersion){
+  HBtree *const p = (HBtree*)pBt;
   int rc = SQLITE_OK;
   int req = wrflag ? SQLITE_TXN_WRITE : SQLITE_TXN_READ;
 
   assert( wrflag==0 || p->pHctDb==0 || pSchemaVersion );
   if( pSchemaVersion ){
-    sqlite3HctBtreeGetMeta(p, 1, (u32*)pSchemaVersion);
+    sqlite3HctBtreeGetMeta((Btree*)p, 1, (u32*)pSchemaVersion);
   }
 
   if( rc==SQLITE_OK && wrflag ){
@@ -721,13 +726,13 @@ int sqlite3HctBtreeCommitPhaseOne(Btree *p, const char *zSuperJrnl){
 
 typedef struct FlushOneCtx FlushOneCtx;
 struct FlushOneCtx {
-  Btree *p;
+  HBtree *p;
   int bRollback;
 };
 
 static int btreeFlushOneToDisk(void *pCtx, u32 iRoot, KeyInfo *pKeyInfo){
   FlushOneCtx *pFC = (FlushOneCtx*)pCtx;
-  Btree *p = pFC->p;
+  HBtree *p = pFC->p;
   int iRollbackDir = pFC->bRollback ? -1 : 1;
 
   HctDatabase *pDb = p->pHctDb;
@@ -821,7 +826,7 @@ static int btreeLogIndex(int fd, u32 iRoot, const u8 *aData, int nData){
 }
 
 static int btreeLogOneToDisk(void *pCtx, u32 iRoot, KeyInfo *pKeyInfo){
-  Btree *p = (Btree*)pCtx;
+  HBtree *p = (HBtree*)pCtx;
   HctTreeCsr *pCsr = 0;
   int rc;
 
@@ -850,7 +855,7 @@ static int btreeLogOneToDisk(void *pCtx, u32 iRoot, KeyInfo *pKeyInfo){
   return rc;
 }
 
-static int btreeFlushData(Btree *p, int bRollback){
+static int btreeFlushData(HBtree *p, int bRollback){
   int rc = SQLITE_OK;
 
   sqlite3HctDbRollbackMode(p->pHctDb, bRollback);
@@ -879,7 +884,7 @@ static int btreeFlushData(Btree *p, int bRollback){
   return rc;
 }
 
-static int btreeWriteLog(Btree *p){
+static int btreeWriteLog(HBtree *p){
   int rc = SQLITE_OK;
 
   if( p->zLogFile==0 ){
@@ -911,7 +916,7 @@ static int btreeWriteLog(Btree *p){
   return rc;
 }
 
-static int btreeWriteTid(Btree *p, u64 iTid){
+static int btreeWriteTid(HBtree *p, u64 iTid){
   lseek(p->fdLog, 0, SEEK_SET);
   if( write(p->fdLog, &iTid, sizeof(iTid))!=sizeof(iTid) ){
     return SQLITE_IOERR_WRITE;
@@ -922,7 +927,7 @@ static int btreeWriteTid(Btree *p, u64 iTid){
 /*
 ** Flush the contents of Btree.pHctTree to Btree.pHctDb.
 */
-static int btreeFlushToDisk(Btree *p){
+static int btreeFlushToDisk(HBtree *p){
   int i;
   int rc = SQLITE_OK;
   int rcok = SQLITE_OK;
@@ -1032,7 +1037,8 @@ static int btreeFlushToDisk(Btree *p){
 ** This will release the write lock on the database file.  If there
 ** are no active cursors, it also releases the read lock.
 */
-int sqlite3HctBtreeCommitPhaseTwo(Btree *p, int bCleanup){
+int sqlite3HctBtreeCommitPhaseTwo(Btree *pBt, int bCleanup){
+  HBtree *const p = (HBtree*)pBt;
   int rc = SQLITE_OK;
   if( p->eTrans==SQLITE_TXN_WRITE ){
     /* TODO: Invalidate any active cursors */
@@ -1059,11 +1065,12 @@ int sqlite3HctBtreeCommitPhaseTwo(Btree *p, int bCleanup){
 /*
 ** Do both phases of a commit.
 */
-int sqlite3HctBtreeCommit(Btree *p){
+int sqlite3HctBtreeCommit(Btree *pBt){
   int rc;
-  rc = sqlite3HctBtreeCommitPhaseOne(p, 0);
+  HBtree *const p = (HBtree*)pBt;
+  rc = sqlite3HctBtreeCommitPhaseOne((Btree*)p, 0);
   if( rc==SQLITE_OK ){
-    rc = sqlite3HctBtreeCommitPhaseTwo(p, 0);
+    rc = sqlite3HctBtreeCommitPhaseTwo((Btree*)p, 0);
   }
   return rc;
 }
@@ -1094,15 +1101,16 @@ int sqlite3HctBtreeCommit(Btree *p){
 ** SQLITE_OK is returned if successful, or if an error occurs while
 ** saving a cursor position, an SQLite error code.
 */
-int sqlite3HctBtreeTripAllCursors(Btree *pBtree, int errCode, int writeOnly){
+int sqlite3HctBtreeTripAllCursors(Btree *pBt, int errCode, int writeOnly){
+  HBtree *const p = (HBtree*)pBt;
   int rc = SQLITE_OK;
-  if( pBtree ){
-    BtCursor *p;
-    for(p=pBtree->pCsrList; p; p=p->pCsrNext){
-      if( writeOnly==0 || p->wrFlag ){
-        sqlite3HctTreeCsrClose(p->pHctTreeCsr);
-        p->pHctTreeCsr = 0;
-        p->errCode = errCode;
+  if( p ){
+    HBtCursor *pCur;
+    for(pCur=p->pCsrList; pCur; pCur=pCur->pCsrNext){
+      if( writeOnly==0 || pCur->wrFlag ){
+        sqlite3HctTreeCsrClose(pCur->pHctTreeCsr);
+        pCur->pHctTreeCsr = 0;
+        pCur->errCode = errCode;
       }
     }
   }
@@ -1120,7 +1128,8 @@ int sqlite3HctBtreeTripAllCursors(Btree *pBtree, int errCode, int writeOnly){
 ** This will release the write lock on the database file.  If there
 ** are no active cursors, it also releases the read lock.
 */
-int sqlite3HctBtreeRollback(Btree *p, int tripCode, int writeOnly){
+int sqlite3HctBtreeRollback(Btree *pBt, int tripCode, int writeOnly){
+  HBtree *const p = (HBtree*)pBt;
   if( p->eTrans==SQLITE_TXN_WRITE ){
     sqlite3HctTreeRollbackTo(p->pHctTree, 0);
     if( p->pHctDb ){
@@ -1150,13 +1159,14 @@ int sqlite3HctBtreeRollback(Btree *p, int tripCode, int writeOnly){
 ** iStatement is 1. This anonymous savepoint can be released or rolled back
 ** using the sqlite3HctBtreeSavepoint() function.
 */
-int sqlite3HctBtreeBeginStmt(Btree *p, int iStatement){
+int sqlite3HctBtreeBeginStmt(Btree *pBt, int iStatement){
+  HBtree *const p = (HBtree*)pBt;
   int rc = SQLITE_OK;
   rc = sqlite3HctTreeBegin(p->pHctTree, iStatement+1);
   return rc;
 }
 
-static int btreeRollbackRoot(Btree *p, int iSavepoint){
+static int btreeRollbackRoot(HBtree *p, int iSavepoint){
   int i;
   int rc = SQLITE_OK;
   for(i=p->nSchemaOp-1; rc==SQLITE_OK && i>=0; i--){
@@ -1179,7 +1189,8 @@ static int btreeRollbackRoot(Btree *p, int iSavepoint){
 ** from a normal transaction rollback, as no locks are released and the
 ** transaction remains open.
 */
-int sqlite3HctBtreeSavepoint(Btree *p, int op, int iSavepoint){
+int sqlite3HctBtreeSavepoint(Btree *pBt, int op, int iSavepoint){
+  HBtree *const p = (HBtree*)pBt;
   int rc = SQLITE_OK;
   if( p && p->eTrans==SQLITE_TXN_WRITE ){
     int i;
@@ -1203,12 +1214,14 @@ int sqlite3HctBtreeSavepoint(Btree *p, int op, int iSavepoint){
 ** Open a new cursor
 */
 int sqlite3HctBtreeCursor(
-  Btree *p,                                   /* The btree */
+  Btree *pBt,                                 /* The btree */
   Pgno iTable,                                /* Root page of table to open */
   int wrFlag,                                 /* 1 to write. 0 read-only */
   struct KeyInfo *pKeyInfo,                   /* First arg to xCompare() */
-  BtCursor *pCur                              /* Write new cursor here */
-){
+  BtCursor *pCursor                           /* Write new cursor here */
+){ 
+  HBtCursor *const pCur = (HBtCursor*)pCursor;
+  HBtree *const p = (HBtree*)pBt;
   int rc = SQLITE_OK;
 
   assert( p->eTrans!=SQLITE_TXN_NONE );
@@ -1252,7 +1265,7 @@ int sqlite3HctBtreeCursor(
 ** this routine.
 */
 int sqlite3HctBtreeCursorSize(void){
-  return ROUND8(sizeof(BtCursor));
+  return ROUND8(sizeof(HBtCursor));
 }
 
 /*
@@ -1265,17 +1278,18 @@ int sqlite3HctBtreeCursorSize(void){
 */
 void sqlite3HctBtreeCursorZero(BtCursor *p){
   /* hct takes the simple approach mentioned above */
-  memset(p, 0, sizeof(BtCursor));
+  memset(p, 0, sizeof(HBtCursor));
 }
 
 /*
 ** Close a cursor.  The read lock on the database file is released
 ** when the last cursor is closed.
 */
-int sqlite3HctBtreeCloseCursor(BtCursor *pCur){
-  Btree *pBtree = pCur->pBtree;
+int sqlite3HctBtreeCloseCursor(BtCursor *pCursor){
+  HBtCursor *const pCur = (HBtCursor*)pCursor;
+  HBtree *const pBtree = pCur->pBtree;
   if( pBtree ){
-    BtCursor **pp;
+    HBtCursor **pp;
     sqlite3HctTreeCsrClose(pCur->pHctTreeCsr);
     sqlite3HctDbCsrClose(pCur->pHctDbCsr);
     for(pp=&pBtree->pCsrList; *pp!=pCur; pp=&(*pp)->pCsrNext);
@@ -1284,26 +1298,26 @@ int sqlite3HctBtreeCloseCursor(BtCursor *pCur){
     pCur->pBtree = 0;
     pCur->pCsrNext = 0;
     if( (pBtree->openFlags & BTREE_SINGLE) && pBtree->pCsrList==0 ){
-      sqlite3HctBtreeClose(pBtree);
+      sqlite3HctBtreeClose((Btree*)pBtree);
     }
   }
   return SQLITE_OK;
 }
 
-#ifndef NDEBUG  /* The next routine used only within assert() statements */
 /*
 ** Return true if the given BtCursor is valid.  A valid cursor is one
 ** that is currently pointing to a row in a (non-empty) table.
 ** This is a verification routine is used only within assert() statements.
 */
-int sqlite3HctBtreeCursorIsValid(BtCursor *pCur){
+int sqlite3HctBtreeCursorIsValid(BtCursor *pCursor){
+  HBtCursor *const pCur = (HBtCursor*)pCursor;
   return pCur && (
       !sqlite3HctTreeCsrEof(pCur->pHctTreeCsr)
    || !sqlite3HctDbCsrEof(pCur->pHctDbCsr)
   );
 }
-#endif /* NDEBUG */
-int sqlite3HctBtreeCursorIsValidNN(BtCursor *pCur){
+int sqlite3HctBtreeCursorIsValidNN(BtCursor *pCursor){
+  HBtCursor *const pCur = (HBtCursor*)pCursor;
   return (
       !sqlite3HctTreeCsrEof(pCur->pHctTreeCsr)
    || !sqlite3HctDbCsrEof(pCur->pHctDbCsr)
@@ -1316,7 +1330,8 @@ int sqlite3HctBtreeCursorIsValidNN(BtCursor *pCur){
 ** ordinary table btree.  If the cursor points to an index btree or
 ** is invalid, the result of this routine is undefined.
 */
-i64 sqlite3HctBtreeIntegerKey(BtCursor *pCur){
+i64 sqlite3HctBtreeIntegerKey(BtCursor *pCursor){
+  HBtCursor *const pCur = (HBtCursor*)pCursor;
   i64 iKey;
   if( pCur->bUseTree ){
     sqlite3HctTreeCsrKey(pCur->pHctTreeCsr, &iKey);
@@ -1329,10 +1344,12 @@ i64 sqlite3HctBtreeIntegerKey(BtCursor *pCur){
 /*
 ** Pin or unpin a cursor.
 */
-void sqlite3HctBtreeCursorPin(BtCursor *pCur){
+void sqlite3HctBtreeCursorPin(BtCursor *pCursor){
+  HBtCursor *const pCur = (HBtCursor*)pCursor;
   sqlite3HctTreeCsrPin(pCur->pHctTreeCsr);
 }
-void sqlite3HctBtreeCursorUnpin(BtCursor *pCur){
+void sqlite3HctBtreeCursorUnpin(BtCursor *pCursor){
+  HBtCursor *const pCur = (HBtCursor*)pCursor;
   sqlite3HctTreeCsrUnpin(pCur->pHctTreeCsr);
 }
 
@@ -1356,7 +1373,8 @@ i64 sqlite3HctBtreeOffset(BtCursor *pCur){
 ** valid entry.  In other words, the calling procedure must guarantee
 ** that the cursor has Cursor.eState==CURSOR_VALID.
 */
-u32 sqlite3HctBtreePayloadSize(BtCursor *pCur){
+u32 sqlite3HctBtreePayloadSize(BtCursor *pCursor){
+  HBtCursor *const pCur = (HBtCursor*)pCursor;
   int nData;
   if( pCur->bUseTree ){
     sqlite3HctTreeCsrData(pCur->pHctTreeCsr, &nData, 0);
@@ -1432,7 +1450,8 @@ int sqlite3HctBtreePayloadChecked(BtCursor *pCur, u32 offset, u32 amt, void *pBu
 ** These routines is used to get quick access to key and data
 ** in the common case where no overflow pages are used.
 */
-const void *sqlite3HctBtreePayloadFetch(BtCursor *pCur, u32 *pAmt){
+const void *sqlite3HctBtreePayloadFetch(BtCursor *pCursor, u32 *pAmt){
+  HBtCursor *const pCur = (HBtCursor*)pCursor;
   const u8 *aData;
   int nData;
   if( pCur->bUseTree ){
@@ -1444,7 +1463,7 @@ const void *sqlite3HctBtreePayloadFetch(BtCursor *pCur, u32 *pAmt){
   return aData;
 }
 
-static int btreeSetUseTree(BtCursor *pCur){
+static int btreeSetUseTree(HBtCursor *pCur){
   int rc = SQLITE_OK;
   int bTreeEof = sqlite3HctTreeCsrEof(pCur->pHctTreeCsr);
   int bDbEof = sqlite3HctDbCsrEof(pCur->pHctDbCsr);
@@ -1494,7 +1513,8 @@ static int btreeSetUseTree(BtCursor *pCur){
 ** on success.  Set *pRes to 0 if the cursor actually points to something
 ** or set *pRes to 1 if the table is empty.
 */
-int sqlite3HctBtreeFirst(BtCursor *pCur, int *pRes){
+int sqlite3HctBtreeFirst(BtCursor *pCursor, int *pRes){
+  HBtCursor *const pCur = (HBtCursor*)pCursor;
   int rc = SQLITE_OK;
 
   sqlite3HctTreeCsrFirst(pCur->pHctTreeCsr);
@@ -1505,10 +1525,10 @@ int sqlite3HctBtreeFirst(BtCursor *pCur, int *pRes){
     pCur->eDir = BTREE_DIR_FORWARD;
     btreeSetUseTree(pCur);
     if( pCur->bUseTree && sqlite3HctTreeCsrIsDelete(pCur->pHctTreeCsr) ){
-      rc = sqlite3HctBtreeNext(pCur, 0);
+      rc = sqlite3HctBtreeNext((BtCursor*)pCur, 0);
       if( rc==SQLITE_DONE ) rc = SQLITE_OK;
     }
-    *pRes = sqlite3HctBtreeEof(pCur);
+    *pRes = sqlite3HctBtreeEof((BtCursor*)pCur);
   }
 
   return rc;
@@ -1518,7 +1538,8 @@ int sqlite3HctBtreeFirst(BtCursor *pCur, int *pRes){
 ** on success.  Set *pRes to 0 if the cursor actually points to something
 ** or set *pRes to 1 if the table is empty.
 */
-int sqlite3HctBtreeLast(BtCursor *pCur, int *pRes){
+int sqlite3HctBtreeLast(BtCursor *pCursor, int *pRes){
+  HBtCursor *const pCur = (HBtCursor*)pCursor;
   int rc = SQLITE_OK;
 
   sqlite3HctTreeCsrLast(pCur->pHctTreeCsr);
@@ -1532,9 +1553,9 @@ int sqlite3HctBtreeLast(BtCursor *pCur, int *pRes){
     pCur->eDir = BTREE_DIR_REVERSE;
     btreeSetUseTree(pCur);
     if( pCur->bUseTree && sqlite3HctTreeCsrIsDelete(pCur->pHctTreeCsr) ){
-      rc = sqlite3HctBtreePrevious(pCur, 0);
+      rc = sqlite3HctBtreePrevious((BtCursor*)pCur, 0);
       if( rc==SQLITE_DONE ){
-        *pRes = sqlite3HctBtreeEof(pCur);
+        *pRes = sqlite3HctBtreeEof((BtCursor*)pCur);
         rc = SQLITE_OK;
       }
     }
@@ -1574,7 +1595,7 @@ int sqlite3HctBtreeLast(BtCursor *pCur, int *pRes){
 ** exists an entry in the table that exactly matches pIdxKey.  
 */
 static int hctBtreeMovetoUnpacked(
-  BtCursor *pCur,          /* The cursor to be moved */
+  HBtCursor *pCur,         /* The cursor to be moved */
   UnpackedRecord *pIdxKey, /* Unpacked index key */
   i64 intKey,              /* The table key */
   int biasRight,           /* If true, bias the search to the high end */
@@ -1634,11 +1655,11 @@ static int hctBtreeMovetoUnpacked(
     btreeSetUseTree(pCur);
     if( pCur->bUseTree && sqlite3HctTreeCsrIsDelete(pCur->pHctTreeCsr) ){
       if( pCur->eDir==BTREE_DIR_FORWARD ){
-        rc = sqlite3HctBtreeNext(pCur, 0);
+        rc = sqlite3HctBtreeNext((BtCursor*)pCur, 0);
         if( rc==SQLITE_DONE ) rc = SQLITE_OK;
         *pRes = 1;
       }else{
-        rc = sqlite3HctBtreePrevious(pCur, 0);
+        rc = sqlite3HctBtreePrevious((BtCursor*)pCur, 0);
         if( rc==SQLITE_DONE ) rc = SQLITE_OK;
         *pRes = -1;
       }
@@ -1649,22 +1670,25 @@ static int hctBtreeMovetoUnpacked(
 }
 
 int sqlite3HctBtreeTableMoveto(
-  BtCursor *pCur,          /* The cursor to be moved */
+  BtCursor *pCursor,       /* The cursor to be moved */
   i64 intKey,              /* The table key */
   int biasRight,           /* If true, bias the search to the high end */
   int *pRes                /* Write search results here */
 ){
+  HBtCursor *const pCur = (HBtCursor*)pCursor;
   return hctBtreeMovetoUnpacked(pCur, 0, intKey, biasRight, pRes);
 }
 int sqlite3HctBtreeIndexMoveto(
-  BtCursor *pCur,          /* The cursor to be moved */
+  BtCursor *pCursor,       /* The cursor to be moved */
   UnpackedRecord *pIdxKey, /* Unpacked index key */
   int *pRes                /* Write search results here */
 ){
+  HBtCursor *const pCur = (HBtCursor*)pCursor;
   return hctBtreeMovetoUnpacked(pCur, pIdxKey, 0, 0, pRes);
 }
 
-void sqlite3HctBtreeCursorDir(BtCursor *pCur, int eDir){
+void sqlite3HctBtreeCursorDir(BtCursor *pCursor, int eDir){
+  HBtCursor *const pCur = (HBtCursor*)pCursor;
   assert( eDir==BTREE_DIR_NONE 
        || eDir==BTREE_DIR_FORWARD 
        || eDir==BTREE_DIR_REVERSE
@@ -1682,7 +1706,8 @@ void sqlite3HctBtreeCursorDir(BtCursor *pCur, int eDir){
 ** past the last entry in the table or sqlite3HctBtreePrev() moves past
 ** the first entry.  TRUE is also returned if the table is empty.
 */
-int sqlite3HctBtreeEof(BtCursor *pCur){
+int sqlite3HctBtreeEof(BtCursor *pCursor){
+  HBtCursor *const pCur = (HBtCursor*)pCursor;
   /* TODO: What if the cursor is in CURSOR_REQUIRESEEK but all table entries
   ** have been deleted? This API will need to change to return an error code
   ** as well as the boolean result value.
@@ -1723,15 +1748,16 @@ i64 sqlite3HctBtreeRowCountEst(BtCursor *pCur){
 ** is a hint to the implement. SQLite btree implementation does not use
 ** this hint, but COMDB2 does.
 */
-int sqlite3HctBtreeNext(BtCursor *pCur, int flags){
+int sqlite3HctBtreeNext(BtCursor *pCursor, int flags){
+  HBtCursor *const pCur = (HBtCursor*)pCursor;
   int rc = SQLITE_OK;
   int bDummy;
   assert( pCur->eDir==BTREE_DIR_FORWARD );
 
-  rc = sqlite3HctBtreeCursorRestore(pCur, &bDummy);
+  rc = sqlite3HctBtreeCursorRestore((BtCursor*)pCur, &bDummy);
   if( rc!=SQLITE_OK ) return rc;
 
-  if( sqlite3HctBtreeEof(pCur) ){
+  if( sqlite3HctBtreeEof((BtCursor*)pCur) ){
     rc = SQLITE_DONE;
   }else{
     do{
@@ -1742,7 +1768,7 @@ int sqlite3HctBtreeNext(BtCursor *pCur, int flags){
         rc = sqlite3HctDbCsrNext(pCur->pHctDbCsr);
       }
       if( rc==SQLITE_OK ){
-        if( sqlite3HctBtreeEof(pCur) ){
+        if( sqlite3HctBtreeEof((BtCursor*)pCur) ){
           rc = SQLITE_DONE;
         }else{
           btreeSetUseTree(pCur);
@@ -1775,12 +1801,13 @@ int sqlite3HctBtreeNext(BtCursor *pCur, int flags){
 ** hint to the implement.  The native SQLite btree implementation does not
 ** use this hint, but COMDB2 does.
 */
-int sqlite3HctBtreePrevious(BtCursor *pCur, int flags){
+int sqlite3HctBtreePrevious(BtCursor *pCursor, int flags){
+  HBtCursor *const pCur = (HBtCursor*)pCursor;
   int rc = SQLITE_OK;
   int bDummy;
   assert( pCur->eDir==BTREE_DIR_REVERSE );
 
-  rc = sqlite3HctBtreeCursorRestore(pCur, &bDummy);
+  rc = sqlite3HctBtreeCursorRestore((BtCursor*)pCur, &bDummy);
   if( rc!=SQLITE_OK ) return rc;
 
   do{
@@ -1791,7 +1818,7 @@ int sqlite3HctBtreePrevious(BtCursor *pCur, int flags){
       rc = sqlite3HctDbCsrPrev(pCur->pHctDbCsr);
     }
     if( rc==SQLITE_OK ){
-      if( sqlite3HctBtreeEof(pCur) ){
+      if( sqlite3HctBtreeEof((BtCursor*)pCur) ){
         rc = SQLITE_DONE;
       }else{
         btreeSetUseTree(pCur);
@@ -1834,11 +1861,12 @@ int sqlite3HctBtreePrevious(BtCursor *pCur, int flags){
 ** to decode the key.
 */
 int sqlite3HctBtreeInsert(
-  BtCursor *pCur,                /* Insert data into the table of this cursor */
+  BtCursor *pCursor,             /* Insert data into the table of this cursor */
   const BtreePayload *pX,        /* Content of the row to be inserted */
   int flags,                     /* True if this is likely an append */
   int seekResult                 /* Result of prior MovetoUnpacked() call */
 ){
+  HBtCursor *const pCur = (HBtCursor*)pCursor;
   int rc = SQLITE_OK;
   UnpackedRecord r;
   UnpackedRecord *pRec = 0;
@@ -1894,16 +1922,17 @@ int sqlite3HctBtreeInsert(
 ** The BTREE_AUXDELETE bit is a hint that is not used by this implementation,
 ** but which might be used by alternative storage engines.
 */
-int sqlite3HctBtreeDelete(BtCursor *pCur, u8 flags){
+int sqlite3HctBtreeDelete(BtCursor *pCursor, u8 flags){
+  HBtCursor *const pCur = (HBtCursor*)pCursor;
   int rc = SQLITE_OK;
   if( pCur->pHctDbCsr==0 ){
     rc = sqlite3HctTreeDelete(pCur->pHctTreeCsr);
   }else if( pCur->pKeyInfo==0 ){
-    i64 iKey = sqlite3HctBtreeIntegerKey(pCur);
+    i64 iKey = sqlite3HctBtreeIntegerKey((BtCursor*)pCur);
     rc = sqlite3HctTreeDeleteKey(pCur->pHctTreeCsr, 0, iKey, 0, 0);
   }else{
     u32 nKey;
-    const u8 *aKey = (u8*)sqlite3HctBtreePayloadFetch(pCur, &nKey);
+    const u8 *aKey = (u8*)sqlite3HctBtreePayloadFetch((BtCursor*)pCur, &nKey);
     UnpackedRecord *pRec = sqlite3VdbeAllocUnpackedRecord(pCur->pKeyInfo);
 
     if( pRec==0 ){
@@ -1917,7 +1946,8 @@ int sqlite3HctBtreeDelete(BtCursor *pCur, u8 flags){
   return rc;
 }
 
-int sqlite3HctBtreeIdxDelete(BtCursor *pCur, UnpackedRecord *pKey){
+int sqlite3HctBtreeIdxDelete(BtCursor *pCursor, UnpackedRecord *pKey){
+  HBtCursor *const pCur = (HBtCursor*)pCursor;
   int rc = SQLITE_OK;
   if( pCur->pHctDbCsr ){
     u8 *aRec = 0;
@@ -1937,7 +1967,7 @@ int sqlite3HctBtreeIdxDelete(BtCursor *pCur, UnpackedRecord *pKey){
   return rc;
 }
 
-static int hctreeAddNewSchemaOp(Btree *p, u32 iRoot, int eOp){
+static int hctreeAddNewSchemaOp(HBtree *p, u32 iRoot, int eOp){
   BtSchemaOp *aSchemaOp;
 
   /* Grow the Btree.aSchemaOp array */
@@ -1956,7 +1986,7 @@ static int hctreeAddNewSchemaOp(Btree *p, u32 iRoot, int eOp){
   return SQLITE_OK;
 }
 
-static int hctreeAddNewRoot(Btree *p, u32 iRoot, int bIndex){
+static int hctreeAddNewRoot(HBtree *p, u32 iRoot, int bIndex){
   int eOp = bIndex ? HCT_SCHEMAOP_CREATE_INDEX : HCT_SCHEMAOP_CREATE_INTKEY;
   return hctreeAddNewSchemaOp(p, iRoot, eOp);
 }
@@ -1972,7 +2002,8 @@ static int hctreeAddNewRoot(Btree *p, u32 iRoot, int bIndex){
 **     BTREE_INTKEY|BTREE_LEAFDATA     Used for SQL tables with rowid keys
 **     BTREE_ZERODATA                  Used for SQL indices
 */
-int sqlite3HctBtreeCreateTable(Btree *p, Pgno *piTable, int flags){
+int sqlite3HctBtreeCreateTable(Btree *pBt, Pgno *piTable, int flags){
+  HBtree *const p = (HBtree*)pBt;
   Pgno iNew = 0;
   int rc = SQLITE_OK;
   if( p->pHctDb ){
@@ -2000,7 +2031,8 @@ int sqlite3HctBtreeCreateTable(Btree *p, Pgno *piTable, int flags){
 ** integer value pointed to by pnChange is incremented by the number of
 ** entries in the table.
 */
-int sqlite3HctBtreeClearTable(Btree *p, int iTable, i64 *pnChange){
+int sqlite3HctBtreeClearTable(Btree *pBt, int iTable, i64 *pnChange){
+  HBtree *const p = (HBtree*)pBt;
   int rc = sqlite3HctTreeClearOne(p->pHctTree, iTable, pnChange);
   if( rc==SQLITE_OK && p->pHctDb ){
     int ii;
@@ -2026,7 +2058,8 @@ int sqlite3HctBtreeClearTable(Btree *p, int iTable, i64 *pnChange){
 **
 ** This routine only work for pCur on an ephemeral table.
 */
-int sqlite3HctBtreeClearTableOfCursor(BtCursor *pCur){
+int sqlite3HctBtreeClearTableOfCursor(BtCursor *pCursor){
+  HBtCursor *const pCur = (HBtCursor*)pCursor;
   return sqlite3HctTreeClearOne(
       pCur->pBtree->pHctTree, sqlite3HctTreeCsrRoot(pCur->pHctTreeCsr), 0
   );
@@ -2036,7 +2069,8 @@ int sqlite3HctBtreeClearTableOfCursor(BtCursor *pCur){
 ** Drop the table with root page iTable. Set (*piMoved) to 0 before
 ** returning.
 */
-int sqlite3HctBtreeDropTable(Btree *p, int iTable, int *piMoved){
+int sqlite3HctBtreeDropTable(Btree *pBt, int iTable, int *piMoved){
+  HBtree *const p = (HBtree*)pBt;
   *piMoved = 0;
   return hctreeAddNewSchemaOp(p, iTable, HCT_SCHEMAOP_DROP);
 }
@@ -2062,7 +2096,8 @@ int sqlite3HctBtreeDropTable(Btree *p, int iTable, int *piMoved){
 ** pattern is the same as header meta values, and so it is convenient to
 ** read it from this routine.
 */
-void sqlite3HctBtreeGetMeta(Btree *p, int idx, u32 *pMeta){
+void sqlite3HctBtreeGetMeta(Btree *pBt, int idx, u32 *pMeta){
+  HBtree *const p = (HBtree*)pBt;
   assert( idx>=0 && idx<SQLITE_N_BTREE_META );
   if( p->pHctDb && p->eMetaState==HCT_METASTATE_NONE ){
     sqlite3HctDbGetMeta(p->pHctDb, (u8*)p->aMeta, SQLITE_N_BTREE_META*4);
@@ -2075,11 +2110,12 @@ void sqlite3HctBtreeGetMeta(Btree *p, int idx, u32 *pMeta){
 ** Write meta-information back into the database.  Meta[0] is
 ** read-only and may not be written.
 */
-int sqlite3HctBtreeUpdateMeta(Btree *p, int idx, u32 iMeta){
+int sqlite3HctBtreeUpdateMeta(Btree *pBt, int idx, u32 iMeta){
   /* HCT: This is a problem - meta values should be subject to normal
   ** transaction/savepoint rollback.  */
+  HBtree *const p = (HBtree*)pBt;
   u32 dummy;
-  sqlite3HctBtreeGetMeta(p, 0, &dummy);
+  sqlite3HctBtreeGetMeta((Btree*)p, 0, &dummy);
   p->aMeta[idx] = iMeta;
   p->eMetaState = HCT_METASTATE_DIRTY;
   return SQLITE_OK;
@@ -2097,7 +2133,8 @@ static char *hctDbMPrintf(int *pRc, const char *zFormat, ...){
   return zRet;
 }
 
-int sqlite3HctBtreePragma(Btree *p, char **aFnctl){
+int sqlite3HctBtreePragma(Btree *pBt, char **aFnctl){
+  HBtree *const p = (HBtree*)pBt;
   int rc = SQLITE_NOTFOUND;
   const char *zLeft = aFnctl[1];
   const char *zRight = aFnctl[2];
@@ -2150,13 +2187,14 @@ int sqlite3HctBtreePragma(Btree *p, char **aFnctl){
 ** Otherwise, if an error is encountered (i.e. an IO error or database
 ** corruption) an SQLite error code is returned.
 */
-int sqlite3HctBtreeCount(sqlite3 *db, BtCursor *pCur, i64 *pnEntry){
+int sqlite3HctBtreeCount(sqlite3 *db, BtCursor *pCursor, i64 *pnEntry){
+  HBtCursor *const pCur = (HBtCursor*)pCursor;
   i64 nEntry = 0;
   int dummy = 0;
   int rc;
-  for(rc = sqlite3HctBtreeFirst(pCur, &dummy);
-      rc==SQLITE_OK && 0==sqlite3HctBtreeEof(pCur);
-      rc = sqlite3HctBtreeNext(pCur, 0)
+  for(rc = sqlite3HctBtreeFirst((BtCursor*)pCur, &dummy);
+      rc==SQLITE_OK && 0==sqlite3HctBtreeEof((BtCursor*)pCur);
+      rc = sqlite3HctBtreeNext((BtCursor*)pCur, 0)
   ){
     nEntry++;
   }
@@ -2168,7 +2206,8 @@ int sqlite3HctBtreeCount(sqlite3 *db, BtCursor *pCur, i64 *pnEntry){
 ** Return the pager associated with a BTree.  This routine is used for
 ** testing and debugging only.
 */
-Pager *sqlite3HctBtreePager(Btree *p){
+Pager *sqlite3HctBtreePager(Btree *pBt){
+  HBtree *const p = (HBtree*)pBt;
   return p->pFakePager;
 }
 
@@ -2197,12 +2236,13 @@ Pager *sqlite3HctBtreePager(Btree *p){
 */
 char *sqlite3HctBtreeIntegrityCheck(
   sqlite3 *db,  /* Database connection that is running the check */
-  Btree *p,     /* The btree to be checked */
+  Btree *pBt,   /* The btree to be checked */
   Pgno *aRoot,  /* An array of root pages numbers for individual trees */
   int nRoot,    /* Number of entries in aRoot[] */
   int mxErr,    /* Stop reporting errors after this many */
   int *pnErr    /* Write number of errors seen to this variable */
 ){
+  HBtree *const p = (HBtree*)pBt;
   char *zRet = 0;                 /* Return value */
   *pnErr = 0;
   if( p->config.bQuiescentIntegrityCheck && nRoot>0 && aRoot[0]!=0 ){
@@ -2240,7 +2280,8 @@ const char *sqlite3HctBtreeGetJournalname(Btree *p){
 ** Return one of SQLITE_TXN_NONE, SQLITE_TXN_READ, or SQLITE_TXN_WRITE
 ** to describe the current transaction state of Btree p.
 */
-int sqlite3HctBtreeTxnState(Btree *p){
+int sqlite3HctBtreeTxnState(Btree *pBt){
+  HBtree *const p = (HBtree*)pBt;
   return p ? p->eTrans : SQLITE_TXN_NONE;
 }
 
@@ -2287,7 +2328,8 @@ int sqlite3HctBtreeIsInBackup(Btree *p){
 ** blob of allocated memory. The xFree function should not call sqlite3_free()
 ** on the memory, the btree layer does that.
 */
-void *sqlite3HctBtreeSchema(Btree *p, int nBytes, void(*xFree)(void *)){
+void *sqlite3HctBtreeSchema(Btree *pBt, int nBytes, void(*xFree)(void *)){
+  HBtree *const p = (HBtree*)pBt;
   void *pRet = 0;
   if( p->pSchema ){
     pRet = p->pSchema;
@@ -2311,7 +2353,8 @@ int sqlite3HctBtreeSchemaLocked(Btree *p){
 }
 
 HctDatabase *sqlite3HctDbFind(sqlite3 *db, int iDb){
-  return db->aDb[iDb].pBt->pHctDb;
+  Btree *pBt = db->aDb[iDb].pBt;
+  return sqlite3IsHct(pBt) ? ((HBtree*)pBt)->pHctDb : 0;
 }
 
 #ifndef SQLITE_OMIT_SHARED_CACHE

@@ -188,7 +188,7 @@ proc mk_btcursor_methods {} {
 
 proc mk_btree_methods {} {
   set ret "struct BtreeMethods {\n"
-  append ret "  BtCursorMethods *pCsrMethods;\n"
+  append ret "  BtCursorMethods const *pCsrMethods;\n"
   foreach c [split $::tree_apis ";"] {
     if {[string trim $c]==""} continue
     array set A [parse_signature $c]
@@ -245,7 +245,19 @@ proc mk_stock_undef {} {
     array set A [parse_signature $c]
     append ret "#undef sqlite3$A(name)\n"
   }
+
+  foreach r $::extra_redefines {
+    set name [string range $r 7 end]
+    append ret "#undef sqlite3$name\n"
+  }
   set ret
+}
+
+proc fix_return_type {in} {
+  if {[string range $in end end]=="*"} {
+    return $in
+  }
+  return "$in "
 }
 
 proc mk_hct_fwddecl {} {
@@ -254,14 +266,16 @@ proc mk_hct_fwddecl {} {
   foreach c [split $::tree_apis ";"] {
     if {[string trim $c]==""} continue
     array set A [parse_signature $c]
-    append ret "$A(return_type) sqlite3Hct$A(name)($A(param_type_list));\n"
-    append ret2 "$A(return_type) sqlite3Stock$A(name)($A(param_type_list));\n"
+    set t [fix_return_type $A(return_type)]
+    append ret "${t}sqlite3Hct$A(name)($A(param_type_list));\n"
+    append ret2 "${t}sqlite3Stock$A(name)($A(param_type_list));\n"
   }
   foreach c [split $::cursor_apis ";"] {
     if {[string trim $c]==""} continue
     array set A [parse_signature $c]
-    append ret "$A(return_type) sqlite3Hct$A(name)($A(param_type_list));\n"
-    append ret2 "$A(return_type) sqlite3Stock$A(name)($A(param_type_list));\n"
+    set t [fix_return_type $A(return_type)]
+    append ret "${t}sqlite3Hct$A(name)($A(param_type_list));\n"
+    append ret2 "${t}sqlite3Stock$A(name)($A(param_type_list));\n"
   }
 
   set ret3 "BtCursor *sqlite3StockBtreeFakeValidCursor(void);\n"
