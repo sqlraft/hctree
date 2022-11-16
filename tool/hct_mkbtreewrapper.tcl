@@ -104,6 +104,7 @@ set no_wrapper_for {
   sqlite3BtreeCursor
   sqlite3BtreeCursorHasMoved
   sqlite3BtreeCloseCursor
+  sqlite3BtreeSeekCount
 }
 
 set extra_redefines {
@@ -250,6 +251,10 @@ proc mk_stock_undef {} {
     set name [string range $r 7 end]
     append ret "#undef sqlite3$name\n"
   }
+
+  append ret "#ifndef SQLITE_DEBUG\n"
+  append ret "# define sqlite3BtreeSeekCount(X) 0\n"
+  append ret "#endif\n"
   set ret
 }
 

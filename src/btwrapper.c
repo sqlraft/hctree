@@ -238,9 +238,6 @@ int sqlite3BtreeClearTableOfCursor(BtCursor *p){
 int sqlite3BtreeCount(sqlite3 *a, BtCursor *p, i64 *b){
   return p->pMethods->xBtreeCount(a, p, b);
 }
-sqlite3_uint64 sqlite3BtreeSeekCount(Btree *p){
-  return p->pMethods->xBtreeSeekCount(p);
-}
 Pgno sqlite3BtreeLastPage(Btree *p){
   return p->pMethods->xBtreeLastPage(p);
 }
@@ -531,6 +528,12 @@ static const BtreeMethods stock_btree_methods = {
 ** END OF GENERATED CODE
 ******************************************************************/
 /* END_HCT_MKBTREEWRAPPER_TCL_CODE */
+
+#ifdef SQLITE_DEBUG
+sqlite3_uint64 sqlite3BtreeSeekCount(Btree *p){
+  return p->pMethods->xBtreeSeekCount(p);
+}
+#endif
 
 BtCursor *sqlite3BtreeFakeValidCursor(void){
   static BtCursor csr = {0};

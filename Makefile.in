@@ -197,6 +197,7 @@ LIBOBJS0 = alter.lo analyze.lo attach.lo auth.lo \
 
 LIBOBJS0 += hct_pman.lo hct_record.lo hctree.lo hct_stats.lo
 LIBOBJS0 += hct_tree.lo hct_file.lo hct_database.lo hct_tmap.lo 
+LIBOBJS0 += btwrapper.lo
 
 # Object files for the amalgamation.
 #
@@ -457,7 +458,8 @@ TESTSRC = \
   $(TOP)/ext/recover/sqlite3recover.c \
   $(TOP)/ext/recover/dbdata.c \
   $(TOP)/ext/recover/test_recover.c \
-  $(TOP)/ext/rbu/test_rbu.c 
+  $(TOP)/ext/rbu/test_rbu.c \
+  $(TOP)/ext/hct/hct_vtab.c
 
 # Statically linked extensions
 #
@@ -1095,6 +1097,9 @@ hct_database.lo:	$(TOP)/src/hct_database.c $(HDR)
 hct_stats.lo:	$(TOP)/src/hct_stats.c $(HDR)
 	$(LTCOMPILE) $(TEMP_STORE) -c $(TOP)/src/hct_stats.c
 
+btwrapper.lo:	$(TOP)/src/btwrapper.c $(HDR)
+	$(LTCOMPILE) $(TEMP_STORE) -c $(TOP)/src/btwrapper.c
+
 hct_tmap.lo:	$(TOP)/src/hct_tmap.c $(HDR)
 	$(LTCOMPILE) $(TEMP_STORE) -c $(TOP)/src/hct_tmap.c
 
@@ -1116,9 +1121,8 @@ tclsqlite-shell.lo:	$(TOP)/src/tclsqlite.c $(HDR)
 tclsqlite-stubs.lo:	$(TOP)/src/tclsqlite.c $(HDR)
 	$(LTCOMPILE) -DUSE_TCL_STUBS=1 -o $@ -c $(TOP)/src/tclsqlite.c
 
-tclsqlite3$(TEXE):	tclsqlite-shell.lo libsqlite3.la
-	$(LTLINK) -o $@ tclsqlite-shell.lo \
-		 libsqlite3.la $(LIBTCL)
+tclsqlite3$(TEXE):	tclsqlite3.c
+	$(LTLINK) -DTCLSH -o $@ tclsqlite3.c $(LIBTCL) $(TLIBS)
 
 # Rules to build opcodes.c and opcodes.h
 #
