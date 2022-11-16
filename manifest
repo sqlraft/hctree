@@ -1,9 +1,9 @@
-C Add\stcl\sextension\sfor\srunning\smulti-threaded\sSQL\stests.
-D 2022-11-16T20:24:16.996
+C Have\sthe\sconfigure\sbuild\ssystem\sinclude\ssqlite_thread_test\sin\stclsqlite3\sbuilds.
+D 2022-11-16T21:16:37.101
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
-F Makefile.in 0c886f655aea578753b1bc19263cf061f098ce5bf676f33c1684c7c4e844f757
+F Makefile.in 0ee78dc1d015368ed9dc97dcd29a3240b13f67ae91b70416376da85df790fdd7
 F Makefile.linux-gcc f609543700659711fbd230eced1f01353117621dccae7b9fb70daa64236c5241
 F Makefile.msc e7a564ceec71f0d9666031d5638cf0d4f88b050b44e8df5d32125137cd259ac0
 F README.md 8b8df9ca852aeac4864eb1e400002633ee6db84065bd01b78c33817f97d31f5e
@@ -665,7 +665,7 @@ F src/sqliteInt.h 32c16553ebc897b681a5e28e9be21379b84f0acc09a7f47d770d59b68412e4
 F src/sqliteLimit.h d7323ffea5208c6af2734574bae933ca8ed2ab728083caa117c9738581a31657
 F src/status.c 160c445d7d28c984a0eae38c144f6419311ed3eace59b44ac6dafc20db4af749
 F src/table.c 0f141b58a16de7e2fbe81c308379e7279f4c6b50eb08efeec5892794a0ba30d1
-F src/tclsqlite.c 41839bab46c191ba090286b151a37cc499d126c34c86a6dd97cf6dba8204a274
+F src/tclsqlite.c 00b64fd132987e7e992e815cf4bfca16444853557257f09b90a8c5765cc40a82
 F src/test1.c c98cd3b975a5e2d01abafee4a6311aab5654d3a9d36241cb2c8ea702d2643f56
 F src/test2.c 3efb99ab7f1fc8d154933e02ae1378bac9637da5
 F src/test3.c 61798bb0d38b915067a8c8e03f5a534b431181f802659a6616f9b4ff7d872644
@@ -2109,8 +2109,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P 3a36f53055beaf55c1bce98d4d8f0888f7c75911e4ab229e9c44eaa316dc4d76
-R e4392653db18a12e1deb48643f2806e4
+P 56faa2bb3464f01a8d4fabe9119957bd4455d8f63b227cb905582a30f823d580
+R 5f3227490ca01a777b2d0db237b5b70e
 U dan
-Z 293eb3ff7575a66de2cffdca88ada168
+Z 8fe896152abece74fce2fd0fdc04cbe1
 # Remove this line to create a well-formed Fossil manifest.

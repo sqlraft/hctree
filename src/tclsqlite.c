@@ -4029,6 +4029,9 @@ int SQLITE_CDECL TCLSH_MAIN(int argc, char **argv){
   Tcl_SetSystemEncoding(NULL, "utf-8");
   interp = Tcl_CreateInterp();
   Sqlite3_Init(interp);
+#ifdef TCLSQLITE3_EXTRA_INIT
+  TCLSQLITE3_EXTRA_INIT(interp);
+#endif
 
   sqlite3_snprintf(sizeof(zArgc), zArgc, "%d", argc-1);
   Tcl_SetVar(interp,"argc", zArgc, TCL_GLOBAL_ONLY);

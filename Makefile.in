@@ -459,7 +459,8 @@ TESTSRC = \
   $(TOP)/ext/recover/dbdata.c \
   $(TOP)/ext/recover/test_recover.c \
   $(TOP)/ext/rbu/test_rbu.c \
-  $(TOP)/ext/hct/hct_vtab.c
+  $(TOP)/ext/hct/hct_vtab.c \
+  $(TOP)/src/test_mtperf.c
 
 # Statically linked extensions
 #
@@ -1121,8 +1122,11 @@ tclsqlite-shell.lo:	$(TOP)/src/tclsqlite.c $(HDR)
 tclsqlite-stubs.lo:	$(TOP)/src/tclsqlite.c $(HDR)
 	$(LTCOMPILE) -DUSE_TCL_STUBS=1 -o $@ -c $(TOP)/src/tclsqlite.c
 
-tclsqlite3$(TEXE):	tclsqlite3.c
-	$(LTLINK) -DTCLSH -o $@ tclsqlite3.c $(LIBTCL) $(TLIBS)
+#tclsqlite3$(TEXE):	tclsqlite3.c
+#       $(LTLINK) -DTCLSH -o $@ tclsqlite3.c $(LIBTCL) $(TLIBS)
+
+tclsqlite3$(TEXE): $(TOP)/src/test_mtperf.c tclsqlite3.c
+	$(LTLINK) -DTCLSH -o $@ -DTCLSQLITE3_EXTRA_INIT=SqliteThreadTest_Init $(TOP)/src/test_mtperf.c tclsqlite3.c $(LIBTCL) $(TLIBS)
 
 # Rules to build opcodes.c and opcodes.h
 #
