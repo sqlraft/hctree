@@ -800,8 +800,10 @@ int sqlite3HctTreeBegin(HctTree *pTree, int iStmt){
       int nNew = iStmt+16;
       HctTreeNode **apNew = (HctTreeNode**)hctMallocZero(nNew*sizeof(*apNew));
       if( apNew==0 ) return SQLITE_NOMEM;
-      memcpy(apNew, pTree->apStmt, pTree->nStmt*sizeof(*apNew));
-      sqlite3_free(pTree->apStmt);
+      if( pTree->apStmt ){
+        memcpy(apNew, pTree->apStmt, pTree->nStmt*sizeof(*apNew));
+        sqlite3_free(pTree->apStmt);
+      }
       pTree->apStmt = apNew;
       pTree->nStmt = nNew;
     }

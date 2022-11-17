@@ -616,6 +616,7 @@ static int btWrapperUseHct(
 
   sqlite3_free(zFull);
   sqlite3_free(zData);
+  sqlite3_free(zPagemap);
   *pbUseHct = bUseHct;
   return rc;
 }
