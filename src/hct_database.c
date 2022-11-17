@@ -6040,9 +6040,11 @@ static char *hctDbRecordToText(sqlite3 *db, const u8 *aRec, int nRec){
             break;
           case 3: 
             iVal = ((i64)pBody[0] << 16) + ((i64)pBody[1] << 8) + (i64)pBody[2];
+            break;
           case 4: 
             iVal = ((i64)pBody[0] << 24) + ((i64)pBody[1] << 16) 
                  + ((i64)pBody[2] << 8) + (i64)pBody[3];
+            break;
           case 5: 
             iVal = ((i64)pBody[0] << 40) + ((i64)pBody[1] << 32) 
                  + ((i64)pBody[2] << 24) + ((i64)pBody[3] << 16) 

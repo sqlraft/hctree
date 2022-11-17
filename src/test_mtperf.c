@@ -47,10 +47,20 @@ struct TT_Step {
 #define STEP_SQL          1
 #define STEP_MUTEX_COMMIT 2
 
+/*
+** State of a simple PRNG used for the per-connection and per-pager
+** pseudo-random number generators.
+*/
+typedef struct FastPrng FastPrng;
+struct FastPrng {
+  unsigned int x, y;
+};
+
 struct TT_Thread {
   TT_Test *pTest;
   Tcl_Obj *pName;                 /* Name of thread */
 
+  FastPrng prng;
 
   int nStep;
   TT_Step *aStep;
@@ -68,10 +78,45 @@ struct TT_Thread {
 struct TT_Test {
   Tcl_Obj *pDatabase;             /* Path (or URI) to test database */
   Tcl_Interp *interp;
+  int nTrans;                     /* At least this many transactions */
   int nSecond;                    /* Number of seconds to run for */
   int nThread;                    /* Number of entries in aThread[] */
   TT_Thread *aThread;
 };
+
+/*
+** Generate N bytes of pseudo-randomness using a FastPrng
+*/
+static void ttFastRandomness(FastPrng *pPrng, int N, void *P){
+  unsigned char *pOut = (unsigned char*)P;
+  while( N-->0 ){
+    pPrng->x = ((pPrng->x)>>1) ^ ((1+~((pPrng->x)&1)) & 0xd0000001);
+    pPrng->y = (pPrng->y)*1103515245 + 12345;
+    *(pOut++) = (pPrng->x ^ pPrng->y) & 0xff;
+  }
+}
+
+static void frandomFunc(sqlite3_context *ctx, int nArg, sqlite3_value **aArg){
+  FastPrng *p = (FastPrng*)sqlite3_user_data(ctx);
+  sqlite3_int64 ret;
+  ttFastRandomness(p, sizeof(ret), &ret);
+  sqlite3_result_int64(ctx, ret);
+}
+
+static void frandomBlobFunc(
+  sqlite3_context *ctx, 
+  int nArg, 
+  sqlite3_value **aArg
+){
+  FastPrng *p = (FastPrng*)sqlite3_user_data(ctx);
+  int nBlob = sqlite3_value_int(aArg[0]);
+  unsigned char *aBlob = 0;
+
+  aBlob = (unsigned char*)sqlite3_malloc(nBlob);
+  ttFastRandomness(p, nBlob, aBlob);
+  sqlite3_result_blob(ctx, aBlob, nBlob, SQLITE_TRANSIENT);
+  sqlite3_free(aBlob);
+}
 
 /*
 ** Add a new thread to test object p.
@@ -89,6 +134,8 @@ static int ttAddThread(TT_Test *p, Tcl_Obj *pName, Tcl_Obj *pSql){
   memset(pNew, 0, sizeof(TT_Thread));
 
   /* Populate TT_Thread.pTest and TT_Thread.pName. */
+  sqlite3_randomness(sizeof(FastPrng), (void*)&pNew->prng);
+  pNew->prng.x |= 1;
   pNew->pTest = p;
   pNew->pName = pName;
   Tcl_IncrRefCount(pNew->pName);
@@ -105,6 +152,13 @@ static int ttAddThread(TT_Test *p, Tcl_Obj *pName, Tcl_Obj *pSql){
     );
     return TCL_ERROR;
   }
+
+  sqlite3_create_function(pNew->db, "frandom", 
+      0, SQLITE_ANY, (void*)&pNew->prng, frandomFunc, 0, 0
+  );
+  sqlite3_create_function(pNew->db, "frandomblob", 
+      1, SQLITE_ANY, (void*)&pNew->prng, frandomBlobFunc, 0, 0
+  );
 
   while( zSql ){
     sqlite3_stmt *pStmt = 0;
@@ -142,11 +196,13 @@ static void *ttThreadMain(void *pArg){
   TT_Thread *pThread = (TT_Thread*)pArg;
   TT_Test *p = pThread->pTest;
   sqlite3_int64 iStop = tt_current_time() + (p->nSecond * 1000);
+  int nTrans = p->nTrans;
 
   while( 1 ){
     int rc;
     int ii;
-    if( tt_current_time()>=iStop ) break;
+    if( nTrans==0 && tt_current_time()>=iStop ) break;
+    if( nTrans>0 && (pThread->nTransOk+pThread->nTransBusy)>=nTrans ) break;
 
     for(ii=0; ii<pThread->nStep; ii++){
       TT_Step *pStep = &pThread->aStep[ii];
@@ -260,20 +316,20 @@ static int tt_cmd(
   if( rc!=TCL_OK ) return rc;
 
   switch( iCmd ){
-    case 0: assert( 0==strcmp(Tcl_GetString(objv[1]), "configure") ); {
+    case 0: assert( 0==strcmp(azCmd[iCmd], "configure") ); {
       if( objc!=3 && objc!=4 ){
         Tcl_WrongNumArgs(interp, 1, objv, "configure OPTION ?VALUE?");
         return TCL_ERROR;
       }else{
         const char *azOpt[] = {
-          "-nsecond", 0
+          "-nsecond", "-ntransaction", 0
         };
         int iOpt = 0;
         rc = Tcl_GetIndexFromObj(interp, objv[2], azOpt, "option", 0, &iOpt);
         if( rc!=TCL_OK ) return rc;
 
         switch( iOpt ){
-          case 0: assert( 0==strcmp(Tcl_GetString(objv[2]), "-nsecond") ); {
+          case 0: assert( 0==strcmp(azOpt[iOpt], "-nsecond") ); {
             if( objc==4 ){
               int nSec = 0;
               rc = Tcl_GetIntFromObj(interp, objv[3], &nSec);
@@ -283,6 +339,16 @@ static int tt_cmd(
             Tcl_SetObjResult(interp, Tcl_NewIntObj(p->nSecond));
             break;
           }
+          case 1: assert( 0==strcmp(azOpt[iOpt], "-ntransaction") ); {
+            if( objc==4 ){
+              int nTrans = 0;
+              rc = Tcl_GetIntFromObj(interp, objv[3], &nTrans);
+              if( rc!=TCL_OK ) return TCL_ERROR;
+              p->nTrans = nTrans;
+            }
+            Tcl_SetObjResult(interp, Tcl_NewIntObj(p->nTrans));
+            break;
+          }
           default:
             assert( !"cannot happen" );
         }
@@ -290,7 +356,7 @@ static int tt_cmd(
       break;
     }
 
-    case 1: assert( 0==strcmp(Tcl_GetString(objv[1]), "thread") ); {
+    case 1: assert( 0==strcmp(azCmd[iCmd], "thread") ); {
       if( objc!=4 ){
         Tcl_WrongNumArgs(interp, 2, objv, "NAME SQL");
         return TCL_ERROR;
@@ -301,7 +367,7 @@ static int tt_cmd(
       break;
     }
 
-    case 2: assert( 0==strcmp(Tcl_GetString(objv[1]), "run") ); {
+    case 2: assert( 0==strcmp(azCmd[iCmd], "run") ); {
       if( objc!=2 ){
         Tcl_WrongNumArgs(interp, 2, objv, NULL);
         return TCL_ERROR;
@@ -312,7 +378,7 @@ static int tt_cmd(
       break;
     }
 
-    case 3: assert( 0==strcmp(Tcl_GetString(objv[1]), "result") ); {
+    case 3: assert( 0==strcmp(azCmd[iCmd], "result") ); {
       if( objc!=2 ){
         Tcl_WrongNumArgs(interp, 2, objv, NULL);
         return TCL_ERROR;
@@ -323,7 +389,7 @@ static int tt_cmd(
       break;
     }
 
-    case 4: assert( 0==strcmp(Tcl_GetString(objv[1]), "destroy") ); {
+    case 4: assert( 0==strcmp(azCmd[iCmd], "destroy") ); {
       if( objc!=2 ){
         Tcl_WrongNumArgs(interp, 1, objv, "");
         return TCL_ERROR;

@@ -4024,6 +4024,7 @@ int SQLITE_CDECL TCLSH_MAIN(int argc, char **argv){
   ** test that sqlite3_shutdown() can be safely called by a process before
   ** sqlite3_initialize() is. */
   sqlite3_shutdown();
+  sqlite3_config(SQLITE_CONFIG_MEMSTATUS, (int)0);
 
   Tcl_FindExecutable(argv[0]);
   Tcl_SetSystemEncoding(NULL, "utf-8");
