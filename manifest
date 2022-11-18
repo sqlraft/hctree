@@ -1,5 +1,5 @@
-C Fixes\sfor\ssome\sasan\swarnings.
-D 2022-11-17T19:31:49.765
+C Add\sthe\s-sqlconfig\sswitch\sto\stest_mtperf.c.
+D 2022-11-18T15:16:45.633
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -695,7 +695,7 @@ F src/test_journal.c a0b9709b2f12b1ec819eea8a1176f283bca6d688a6d4a502bd6fd79786f
 F src/test_loadext.c 337056bae59f80b9eb00ba82088b39d0f4fe6dfd
 F src/test_malloc.c 21121ea85b49ec0bdb69995847cef9036ef9beca3ce63bbb776e4ea2ecc44b97
 F src/test_md5.c 7268e1e8c399d4a5e181b64ac20e1e6f3bc4dd9fc87abac02db145a3d951fa8c
-F src/test_mtperf.c cef849b1f394d7f67eefafaabed5ac6a649c33105f8748a588554fcc28389142
+F src/test_mtperf.c a5d2d1bd06cdd6bd7e526097d320328d2bcda334c7ec97685e5b3c095ef649e7
 F src/test_multiplex.c d8bc260a57c2028946a9bce9918d24e69e44cebd71ac6be240aa5b6b75e2b369
 F src/test_multiplex.h 5436d03f2d0501d04f3ed50a75819e190495b635
 F src/test_mutex.c abf486e91bd65e2448027d4bb505e7cce6ba110e1afb9bd348d1996961cadf0d
@@ -2110,8 +2110,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P cca263f8920567cb93455b44b8bf3dd090f3d311f801df8bbba416f776d22b90
-R ac7885560619cea0e45463738c824682
+P d37b6bca450636b616dd1f6da7901be7540701682de80205cd4950606d4a4ebe
+R 0dfbfbf6bffb80c52986c56622ecd3e7
 U dan
-Z 35937ba271e8133dd5814a0a2a9b7bd3
+Z d869718792956d52f15171ae2998b90a
 # Remove this line to create a well-formed Fossil manifest.

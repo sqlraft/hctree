@@ -81,6 +81,7 @@ struct TT_Test {
   int nTrans;                     /* At least this many transactions */
   int nSecond;                    /* Number of seconds to run for */
   int nThread;                    /* Number of entries in aThread[] */
+  Tcl_Obj *pSqlConfig;            /* SQL script to configure db handles */
   TT_Thread *aThread;
 };
 
@@ -101,6 +102,14 @@ static void frandomFunc(sqlite3_context *ctx, int nArg, sqlite3_value **aArg){
   sqlite3_int64 ret;
   ttFastRandomness(p, sizeof(ret), &ret);
   sqlite3_result_int64(ctx, ret);
+}
+
+static void frandomIdFunc(sqlite3_context *ctx, int nArg, sqlite3_value **aArg){
+  FastPrng *p = (FastPrng*)sqlite3_user_data(ctx);
+  int ret;
+  ttFastRandomness(p, sizeof(ret), &ret);
+  ret = (ret & 0x7FFFFFFF) % sqlite3_value_int(aArg[0]);
+  sqlite3_result_int(ctx, ret);
 }
 
 static void frandomBlobFunc(
@@ -153,6 +162,20 @@ static int ttAddThread(TT_Test *p, Tcl_Obj *pName, Tcl_Obj *pSql){
     return TCL_ERROR;
   }
 
+  if( p->pSqlConfig ){
+    rc = sqlite3_exec(pNew->db, Tcl_GetString(p->pSqlConfig), 0, 0, 0);
+    if( rc!=SQLITE_OK ){
+      Tcl_ResetResult(p->interp);
+      Tcl_AppendResult(
+          p->interp, "error in sqlconfig: ", sqlite3_errmsg(pNew->db), (char*)0
+      );
+      return TCL_ERROR;
+    }
+  }
+
+  sqlite3_create_function(pNew->db, "frandomid", 
+      1, SQLITE_ANY, (void*)&pNew->prng, frandomIdFunc, 0, 0
+  );
   sqlite3_create_function(pNew->db, "frandom", 
       0, SQLITE_ANY, (void*)&pNew->prng, frandomFunc, 0, 0
   );
@@ -322,7 +345,7 @@ static int tt_cmd(
         return TCL_ERROR;
       }else{
         const char *azOpt[] = {
-          "-nsecond", "-ntransaction", 0
+          "-nsecond", "-ntransaction", "-sqlconfig", 0
         };
         int iOpt = 0;
         rc = Tcl_GetIndexFromObj(interp, objv[2], azOpt, "option", 0, &iOpt);
@@ -347,6 +370,19 @@ static int tt_cmd(
               p->nTrans = nTrans;
             }
             Tcl_SetObjResult(interp, Tcl_NewIntObj(p->nTrans));
+            break;
+          }
+          case 2: assert( 0==strcmp(azOpt[iOpt], "-sqlconfig") ); {
+            if( objc==4 ){
+              if( p->pSqlConfig ) Tcl_DecrRefCount(p->pSqlConfig);
+              p->pSqlConfig = objv[3];
+              Tcl_IncrRefCount(p->pSqlConfig);
+            }
+            if( p->pSqlConfig ){
+              Tcl_SetObjResult(interp, p->pSqlConfig);
+            }else{
+              Tcl_ResetResult(interp);
+            }
             break;
           }
           default:
@@ -419,6 +455,7 @@ static void tt_del(ClientData clientData){
       sqlite3_close(pThread->db);
     }
     if( p->pDatabase ) Tcl_DecrRefCount(p->pDatabase);
+    if( p->pSqlConfig ) Tcl_DecrRefCount(p->pSqlConfig);
     ckfree(p->aThread);
     ckfree(p);
   }
