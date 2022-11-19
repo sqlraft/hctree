@@ -30,7 +30,8 @@
 #include <fcntl.h>
 #include <errno.h>
 
-#define TT_DEFAULT_NSECOND 10
+#define TT_DEFAULT_NSECOND  10
+#define TT_DEFAULT_NWALPAGE 4096
 
 typedef struct TT_Step TT_Step;
 typedef struct TT_Thread TT_Thread;
@@ -61,6 +62,8 @@ struct TT_Thread {
   Tcl_Obj *pName;                 /* Name of thread */
 
   FastPrng prng;
+  int bDoCheckpoint;
+  int bCheckpointer;
 
   int nStep;
   TT_Step *aStep;
@@ -81,6 +84,7 @@ struct TT_Test {
   int nTrans;                     /* At least this many transactions */
   int nSecond;                    /* Number of seconds to run for */
   int nThread;                    /* Number of entries in aThread[] */
+  int nWalPage;                   /* Target size of wal files in pages */
   Tcl_Obj *pSqlConfig;            /* SQL script to configure db handles */
   TT_Thread *aThread;
 };
@@ -127,6 +131,15 @@ static void frandomBlobFunc(
   sqlite3_free(aBlob);
 }
 
+static int ttWalHook(void *pCtx, sqlite3 *db, const char *z, int nPg){
+  TT_Thread *pThread = (TT_Thread*)pCtx;
+  TT_Test *pTest = pThread->pTest;
+  if( pThread==&pTest->aThread[0] || nPg>(pTest->nWalPage*2) ){
+    pThread->bDoCheckpoint = 1;
+  }
+  return SQLITE_OK;
+}
+
 /*
 ** Add a new thread to test object p.
 */
@@ -134,6 +147,7 @@ static int ttAddThread(TT_Test *p, Tcl_Obj *pName, Tcl_Obj *pSql){
   int nNew = p->nThread+1;
   TT_Thread *pNew = 0;
   const char *zSql = Tcl_GetString(pSql);
+  char *zPragma = 0;
   int rc = SQLITE_OK;
 
   /* Extend the aThread[] array. */
@@ -152,7 +166,7 @@ static int ttAddThread(TT_Test *p, Tcl_Obj *pName, Tcl_Obj *pSql){
   /* Open the database handle for this thread */
   rc = sqlite3_open_v2(Tcl_GetString(p->pDatabase), &pNew->db, 
       SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE |
-      SQLITE_OPEN_URI |SQLITE_OPEN_NOMUTEX, 0
+      SQLITE_OPEN_URI |SQLITE_OPEN_NOMUTEX, "unix-excl"
   );
   if( rc!=SQLITE_OK ){
     Tcl_ResetResult(p->interp);
@@ -161,6 +175,7 @@ static int ttAddThread(TT_Test *p, Tcl_Obj *pName, Tcl_Obj *pSql){
     );
     return TCL_ERROR;
   }
+  sqlite3_wal_hook(pNew->db, ttWalHook, (void*)pNew);
 
   if( p->pSqlConfig ){
     rc = sqlite3_exec(pNew->db, Tcl_GetString(p->pSqlConfig), 0, 0, 0);
@@ -172,6 +187,11 @@ static int ttAddThread(TT_Test *p, Tcl_Obj *pName, Tcl_Obj *pSql){
       return TCL_ERROR;
     }
   }
+  zPragma = sqlite3_mprintf(
+      "PRAGMA journal_size_limit = %lld", (sqlite3_int64)p->nWalPage*4096
+  );
+  sqlite3_exec(pNew->db, zPragma, 0, 0, 0);
+  sqlite3_free(zPragma);
 
   sqlite3_create_function(pNew->db, "frandomid", 
       1, SQLITE_ANY, (void*)&pNew->prng, frandomIdFunc, 0, 0
@@ -184,9 +204,23 @@ static int ttAddThread(TT_Test *p, Tcl_Obj *pName, Tcl_Obj *pSql){
   );
 
   while( zSql ){
+    int eType = STEP_SQL;
     sqlite3_stmt *pStmt = 0;
     int nByte = (pNew->nStep+1)*sizeof(TT_Step);
-    rc = sqlite3_prepare_v2(pNew->db, zSql, -1, &pStmt, &zSql);
+
+    /* Skip past any whitespace */
+    while( zSql[0]==' ' || zSql[0]=='\n' || zSql[0]=='\r' || zSql[0]=='\t' ){
+      zSql++;
+    }
+
+    if( sqlite3_strnicmp(".mutexcommit", zSql, 12)==0 ){
+      zSql += 12;
+      rc = sqlite3_prepare_v2(pNew->db, "COMMIT", -1, &pStmt, &zSql);
+      eType = STEP_MUTEX_COMMIT;
+    }else{
+      rc = sqlite3_prepare_v2(pNew->db, zSql, -1, &pStmt, &zSql);
+    }
+
     if( rc!=SQLITE_OK ){
       Tcl_ResetResult(p->interp);
       Tcl_AppendResult(
@@ -199,7 +233,7 @@ static int ttAddThread(TT_Test *p, Tcl_Obj *pName, Tcl_Obj *pSql){
     /* Extend the aStep[] array */
     pNew->aStep = (TT_Step*)ckrealloc(pNew->aStep, nByte);
     pNew->aStep[pNew->nStep].pStmt = pStmt;
-    pNew->aStep[pNew->nStep].eType = STEP_SQL;
+    pNew->aStep[pNew->nStep].eType = eType;
     pNew->nStep++;
   }
 
@@ -229,8 +263,24 @@ static void *ttThreadMain(void *pArg){
 
     for(ii=0; ii<pThread->nStep; ii++){
       TT_Step *pStep = &pThread->aStep[ii];
+
+      if( pStep->eType==STEP_MUTEX_COMMIT ){
+        pThread->bDoCheckpoint = 0;
+        sqlite3_mutex_enter( sqlite3_mutex_alloc(SQLITE_MUTEX_STATIC_APP3) );
+      }
+
       while( sqlite3_step(pStep->pStmt)==SQLITE_ROW );
       rc = sqlite3_reset(pStep->pStmt);
+
+      if( pStep->eType==STEP_MUTEX_COMMIT ){
+        sqlite3_mutex_leave( sqlite3_mutex_alloc(SQLITE_MUTEX_STATIC_APP3) );
+
+        if( rc==SQLITE_OK ){
+          if( pThread->bDoCheckpoint ){
+            sqlite3_exec(pThread->db, "PRAGMA wal_checkpoint", 0, 0, 0);
+          }
+        }
+      }
       if( rc!=SQLITE_OK ) break;
     }
 
@@ -251,6 +301,12 @@ static void *ttThreadMain(void *pArg){
   }
 
   return 0;
+}
+
+static int ttObjEqual(Tcl_Obj *p1, Tcl_Obj *p2){
+  const char *z1 = Tcl_GetString(p1);
+  const char *z2 = Tcl_GetString(p2);
+  return 0==strcmp(z1, z2);
 }
 
 static int ttRunTest(TT_Test *p){
@@ -345,7 +401,7 @@ static int tt_cmd(
         return TCL_ERROR;
       }else{
         const char *azOpt[] = {
-          "-nsecond", "-ntransaction", "-sqlconfig", 0
+          "-nsecond", "-ntransaction", "-sqlconfig", "-nwalpage", 0
         };
         int iOpt = 0;
         rc = Tcl_GetIndexFromObj(interp, objv[2], azOpt, "option", 0, &iOpt);
@@ -383,6 +439,16 @@ static int tt_cmd(
             }else{
               Tcl_ResetResult(interp);
             }
+            break;
+          }
+          case 3: assert( 0==strcmp(azOpt[iOpt], "-nwalpage") ); {
+            if( objc==4 ){
+              int nWalPage = 0;
+              rc = Tcl_GetIntFromObj(interp, objv[3], &nWalPage);
+              if( rc!=TCL_OK ) return TCL_ERROR;
+              p->nWalPage = nWalPage;
+            }
+            Tcl_SetObjResult(interp, Tcl_NewIntObj(p->nWalPage));
             break;
           }
           default:
@@ -481,6 +547,7 @@ static int sqlite_thread_test(
   p = ckalloc(sizeof(TT_Test));
   memset(p, 0, sizeof(TT_Test));
   p->nSecond = TT_DEFAULT_NSECOND;
+  p->nWalPage = TT_DEFAULT_NWALPAGE;
   p->pDatabase = objv[2];
   p->interp = interp;
   Tcl_IncrRefCount(p->pDatabase);
