@@ -204,6 +204,11 @@ Additionally:
 
 <h1 id=results>Test Results</h1>
 
+All tests were run on a 16-core AMD 5950X processor with 32G of memory
+using tmpfs for a file-system. Advanced BIOS CPU frequency management features
+like "Core Boost", "AMD Cool & Quiet" and "Simultaneous Multi-Threading" are
+all disabled.
+
 <h2>Test case update1 - nUpdate=1, nScan=0</h2>
 [make_chart update1]
 
