@@ -268,6 +268,12 @@ struct HctDatabase {
   HctDatabaseStats stats;
 };
 
+#define HCT_MODE_NORMAL    0
+#define HCT_MODE_ROLLBACK  1
+#define HCT_MODE_RECOVER   2
+#define HCT_MODE_VALIDATE  3
+
+
 /* 
 ** 8-byte database page header. Described in fileformat.wiki.
 */
@@ -1906,8 +1912,10 @@ static int hctDbFollowRangeOld(HctDatabase *pDb, u64 iRangeTid, int *pbMerge){
   ** transaction. When writing or validating, old-ranges created by this
   ** transaction should not be merge in, even if they are followed. But, when
   ** doing rollback, they must be merged in (to find the old data).  */
-  i64 iDoNotMergeTid = ((pDb->bRollback==0 && pDb->bRecover==0) ? pDb->iTid : 0);
-  if( pDb->bValidate ) iDoNotMergeTid = 0;
+
+  i64 iDoNotMergeTid = pDb->bValidate ? 0 : pDb->iTid;
+  assert( pDb->bRecover==0 );
+  assert( pDb->bRollback==0 );
 
   if( iRangeTidValue>pDb->iLocalMinTid ){
     bRet = 1;
@@ -2237,27 +2245,36 @@ static int hctDbCsrRollbackDescend(
   HctDbCsr *pCsr,                 /* Cursor to seek */
   UnpackedRecord *pRec,           /* Key for index/without rowid tables */
   i64 iKey,                       /* Key for intkey tables */
-  int *pbExact,
-  u64 *piParentTid
+  int *pbExact
 ){
   HctDatabase *pDb = pCsr->pDb;
-  u64 iRangeTid = 0;
-  u32 iRangeOld = 0;
   int bExact = 0;
   int rc = SQLITE_OK;
 
-  assert( pDb->bRecover );
+  assert( pDb->bRecover || pDb->bRollback );
 
   while( 1 ){
+    u64 iRangeTid = 0;
+    u32 iRangeOld = 0;
+    HctDbRangeCsr *p = 0;
+
     hctDbCsrGetRange(pCsr, &iRangeTid, &iRangeOld);
+    iRangeTid = (iRangeTid & HCT_TID_MASK);
     if( iRangeTid<pCsr->pDb->iTid ) break;
-    hctDbCsrDescendRange(&rc, pCsr, iRangeTid, iRangeOld, 0);
+
+    rc = hctDbCsrExtendRange(pCsr);
     if( rc==SQLITE_OK ){
-      HctDbRangeCsr *p = &pCsr->aRange[pCsr->nRange-1];
-      if( p->eRange==HCT_RANGE_FAN ){
+      p = &pCsr->aRange[pCsr->nRange-1];
+      rc = sqlite3HctFilePageGetPhysical(pDb->pFile, iRangeOld, &p->pg);
+    }
+    if( rc==SQLITE_OK ){
+      p->iRangeTid = iRangeTid;
+      if( hctPagetype(p->pg.aOld)==HCT_PAGETYPE_HISTORY ){
+        p->eRange = HCT_RANGE_FAN;
         p->iCell = hctDbFanSearch(&rc, pCsr->pDb, p->pg.aOld, pRec, iKey);
         bExact = 0;
       }else{
+        p->eRange = HCT_RANGE_MERGE;
         rc = hctDbLeafSearch(
             pCsr->pDb, p->pg.aOld, iKey, pRec, &p->iCell, &bExact
         );
@@ -2268,7 +2285,6 @@ static int hctDbCsrRollbackDescend(
     }
   }
 
-  *piParentTid = iRangeTid;
   *pbExact = bExact;
   return rc;
 }
@@ -2367,7 +2383,9 @@ int sqlite3HctDbCsrSeek(
   /* Should not be called while committing or validating. But this is
   ** used when doing rollback.  */
   assert( pCsr->pDb->bValidate==0 );
-  assert( pCsr->pDb->iTid==0 || pCsr->pDb->bRollback );
+  assert( pCsr->pDb->bRollback==0 );
+  assert( pCsr->pDb->bRecover==0 );
+  assert( pCsr->pDb->iTid==0 );
 
   rc = hctDbCsrScanFinish(pCsr);
   hctDbCsrReset(pCsr);
@@ -2429,11 +2447,10 @@ int sqlite3HctDbCsrRollbackSeek(
   int rc = SQLITE_OK;
   int bExact = 0;
   int op = 0;
-  u64 iParentTid = 0;
 
   hctDbCsrReset(pCsr);
 
-  /* At this point pDb->bRollback is set and pDb->iTid is set to the TID
+  /* At this point pDb->bRecover is set and pDb->iTid is set to the TID
   ** of the transaction being rolled back. There are three possibilities:
   **
   **   1) The key was written by transaction pDb->iTid and there was no 
@@ -2446,9 +2463,10 @@ int sqlite3HctDbCsrRollbackSeek(
   **
   **   4) None of the above. No rollback required.
   */
+
   rc = hctDbCsrSeek(pCsr, 0, 0, pRec, iKey, &bExact);
   if( rc==SQLITE_OK && bExact==0 ){
-    rc = hctDbCsrRollbackDescend(pCsr, pRec, iKey, &bExact, &iParentTid);
+    rc = hctDbCsrRollbackDescend(pCsr, pRec, iKey, &bExact);
   }
 
   if( rc==SQLITE_OK && bExact ){
@@ -2460,10 +2478,13 @@ int sqlite3HctDbCsrRollbackSeek(
     hctDbCellGetByIdx(pDb, aPg, iCell, &cell);
     if( cell.iTid==pDb->iTid ){
       op = -1;
-      rc = hctDbCsrRollbackDescend(pCsr, pRec, iKey, &bExact, &iParentTid);
+      rc = hctDbCsrRollbackDescend(pCsr, pRec, iKey, &bExact);
     }
 
-    if( rc==SQLITE_OK && bExact && iParentTid==pDb->iTid ){
+    if( rc==SQLITE_OK 
+     && bExact 
+     && pCsr->nRange && pDb->iTid==pCsr->aRange[pCsr->nRange-1].iRangeTid
+    ){
       op = +1;
     }
   }
@@ -4528,7 +4549,7 @@ static int hctDbWriteWriteConflict(
   int rc = SQLITE_OK;
   const u8 *aTarget = p->writepg.aPg[pOp->iPg].aNew;
 
-  assert( p->iHeight==0 && pDb->bRollback==0 );
+  assert( p->iHeight==0 && pDb->bRollback==0 && pDb->bRecover==0 );
 
   if( bClobber ){
     HctDbIndexEntry *pE;
@@ -4909,6 +4930,7 @@ int sqlite3HctDbInsert(
 #endif
 
   if( pDb->bRollback ){
+    int op = 0;
     int res = 0;
 
     if( pDb->rbackcsr.iRoot!=iRoot ){
@@ -4920,6 +4942,20 @@ int sqlite3HctDbInsert(
       hctDbCsrReset(&pDb->rbackcsr);
     }
 
+#if 1
+    rc = sqlite3HctDbCsrRollbackSeek(&pDb->rbackcsr, pRec, iKey, &op);
+    if( rc==SQLITE_OK ){
+      assert( op!=0 );
+      if( op<0 ){
+        bDel = 1;
+        aData = 0;
+        nData = 0;
+      }else{
+        rc = sqlite3HctDbCsrData(&pDb->rbackcsr, &nData, &aData);
+        bDel = 0;
+      }
+    }
+#else
     rc = sqlite3HctDbCsrSeek(&pDb->rbackcsr, pRec, iKey, &res);
     assert( bDel==0 || res==0 );
     if( rc==SQLITE_OK ){
@@ -4931,6 +4967,8 @@ int sqlite3HctDbInsert(
         rc = sqlite3HctDbCsrData(&pDb->rbackcsr, &nData, &aData);
         bDel = 0;
       }
+    }
+#endif
 
 #if 0
       {
@@ -4943,12 +4981,11 @@ int sqlite3HctDbInsert(
 #endif
 
 
-    }else{
-      return rc;
-    }
   }
 
-  rc = hctDbInsert(pDb, &pDb->pa, iRoot, pRec, iKey, 0, bDel, nData, aData);
+  if( rc==SQLITE_OK ){
+    rc = hctDbInsert(pDb, &pDb->pa, iRoot, pRec, iKey, 0, bDel, nData, aData);
+  }
 #if 0
   printf("%p: hctDbInsert() -> %d\n", pDb, rc);
   fflush(stdout);

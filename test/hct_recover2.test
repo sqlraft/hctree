@@ -13,7 +13,7 @@
 
 set testdir [file dirname $argv0]
 source $testdir/tester.tcl
-set testprefix hct_recover1
+set testprefix hct_recover2
 
 proc write_script {txt} {
   set fd [open script.tcl w]
