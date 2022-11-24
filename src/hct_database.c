@@ -261,16 +261,13 @@ struct HctDatabase {
   HctDbCsr rbackcsr;              /* Used to find old values during rollback */
   u64 iTid;                       /* Transaction id for writing */
 
-  int bRollback;                  /* True when in rollback mode */
-  int bRecover;                   /* True when in recover mode */
-  int bValidate;                  /* True when in validate mode */
+  int eMode;                      /* HCT_MODE_XXX constant */
 
   HctDatabaseStats stats;
 };
 
 #define HCT_MODE_NORMAL    0
 #define HCT_MODE_ROLLBACK  1
-#define HCT_MODE_RECOVER   2
 #define HCT_MODE_VALIDATE  3
 
 
@@ -1913,14 +1910,13 @@ static int hctDbFollowRangeOld(HctDatabase *pDb, u64 iRangeTid, int *pbMerge){
   ** transaction should not be merge in, even if they are followed. But, when
   ** doing rollback, they must be merged in (to find the old data).  */
 
-  i64 iDoNotMergeTid = pDb->bValidate ? 0 : pDb->iTid;
-  assert( pDb->bRecover==0 );
-  assert( pDb->bRollback==0 );
+  i64 iDoNotMergeTid = (pDb->eMode==HCT_MODE_VALIDATE) ? 0 : pDb->iTid;
+  assert( pDb->eMode!=HCT_MODE_ROLLBACK );
 
   if( iRangeTidValue>pDb->iLocalMinTid ){
     bRet = 1;
     if( iDoNotMergeTid!=iRangeTid ){
-      bMerge = (pDb->bRecover || 0==hctDbTidIsVisible(pDb, iRangeTid));
+      bMerge = (0==hctDbTidIsVisible(pDb, iRangeTid));
     }
   }
 
@@ -2204,7 +2200,7 @@ static int hctDbCurrentIsVisible(HctDbCsr *pCsr){
   }
   if( (p->flags & HCTDB_HAS_TID)==0 ) return 1;
   memcpy(&iTid, &aPg[p->iOff], sizeof(u64));
-  if( pCsr->pDb->iTid==iTid && pCsr->pDb->bValidate ) return 1;
+  if( pCsr->pDb->iTid==iTid && pCsr->pDb->eMode==HCT_MODE_VALIDATE ) return 1;
 
   return hctDbTidIsVisible(pCsr->pDb, iTid);
 }
@@ -2251,8 +2247,7 @@ static int hctDbCsrRollbackDescend(
   int bExact = 0;
   int rc = SQLITE_OK;
 
-  assert( pDb->bRecover || pDb->bRollback );
-
+  assert( pDb->eMode==HCT_MODE_ROLLBACK );
   while( 1 ){
     u64 iRangeTid = 0;
     u32 iRangeOld = 0;
@@ -2300,12 +2295,10 @@ static int hctDbCsrSeekAndDescend(
   int rc = SQLITE_OK;
   int bExact = 0;
 
-  /* This function is never called when writing to the database. But it is
-  ** called during transaction preparation (iTid==0), validation (bValidate)
-  ** and rollback (bRollback).  */
-  assert( pCsr->pDb->iTid==0 || pCsr->pDb->bRollback 
-      || pCsr->pDb->bValidate || pCsr->pDb->bRecover
-  );
+  /* This function is never called when writing to the database. Or while
+  ** doing rollback. But it is called during transaction preparation (iTid==0),
+  ** and validation (eMode==HCT_MODE_VALIDATE). */
+  assert( pCsr->pDb->eMode==HCT_MODE_VALIDATE || pCsr->pDb->iTid==0 );
 
   rc = hctDbCsrSeek(pCsr, 0, 0, pRec, iKey, &bExact);
 
@@ -2380,11 +2373,8 @@ int sqlite3HctDbCsrSeek(
   int rc = SQLITE_OK;
   int bExact;
 
-  /* Should not be called while committing or validating. But this is
-  ** used when doing rollback.  */
-  assert( pCsr->pDb->bValidate==0 );
-  assert( pCsr->pDb->bRollback==0 );
-  assert( pCsr->pDb->bRecover==0 );
+  /* Should not be called while committing, validating or during rollback. */
+  assert( pCsr->pDb->eMode==HCT_MODE_NORMAL );
   assert( pCsr->pDb->iTid==0 );
 
   rc = hctDbCsrScanFinish(pCsr);
@@ -2450,7 +2440,7 @@ int sqlite3HctDbCsrRollbackSeek(
 
   hctDbCsrReset(pCsr);
 
-  /* At this point pDb->bRecover is set and pDb->iTid is set to the TID
+  /* At this point pDb->bRollback is set and pDb->iTid is set to the TID
   ** of the transaction being rolled back. There are three possibilities:
   **
   **   1) The key was written by transaction pDb->iTid and there was no 
@@ -2931,10 +2921,10 @@ static int hctDbInsertFlushWrite(HctDatabase *pDb, HctDbWriter *p){
 
 void sqlite3HctDbRollbackMode(HctDatabase *pDb, int bRollback){
   assert( bRollback==0 || bRollback==1 );
-  assert( pDb->bRollback==0 || pDb->bRollback==1 );
-  assert( pDb->bRollback==0 || bRollback==0 );
+  assert( bRollback==0 || pDb->eMode==HCT_MODE_ROLLBACK );
+  assert( bRollback==1 || pDb->eMode==HCT_MODE_NORMAL );
   pDb->pa.nWriteKey = 0;
-  pDb->bRollback = bRollback;
+  pDb->eMode = bRollback ? HCT_MODE_ROLLBACK : HCT_MODE_NORMAL;
 }
 
 i64 sqlite3HctDbNCasFail(HctDatabase *pDb){
@@ -4303,8 +4293,9 @@ static int hctDbDelete(
   UnpackedRecord *pRec,
   HctDbInsertOp *pOp
 ){
+  u64 iTidOr = (pDb->eMode==HCT_MODE_ROLLBACK ? HCT_TID_ROLLBACK_OVERRIDE : 0);
   u64 iSafeTid = sqlite3HctFileSafeTID(pDb->pFile);
-  u64 iTidValue = pDb->iTid | (pDb->bRollback ? HCT_TID_ROLLBACK_OVERRIDE : 0);
+  u64 iTidValue = pDb->iTid | iTidOr;
   int rc = SQLITE_OK;
 
   int prevFlags = 0;
@@ -4450,7 +4441,7 @@ static int hctDbDelete(
   }
 
   if( rc==SQLITE_OK && pOp->bFullDel==0 ){
-    if( pDb->bRollback ) prev.iRangeTid |= HCT_TID_ROLLBACK_OVERRIDE;
+    prev.iRangeTid |= iTidOr;
     pOp->aEntry = pDb->aTmp;
     pOp->nEntry = hctDbCellPut(pOp->aEntry, &prev, nLocalSz);
     pOp->entryFlags = prevFlags | HCTDB_HAS_RANGETID | HCTDB_HAS_RANGEOLD;
@@ -4549,7 +4540,7 @@ static int hctDbWriteWriteConflict(
   int rc = SQLITE_OK;
   const u8 *aTarget = p->writepg.aPg[pOp->iPg].aNew;
 
-  assert( p->iHeight==0 && pDb->bRollback==0 && pDb->bRecover==0 );
+  assert( p->iHeight==0 && pDb->eMode==HCT_MODE_NORMAL );
 
   if( bClobber ){
     HctDbIndexEntry *pE;
@@ -4668,8 +4659,7 @@ static int hctDbInsert(
   /* If this is a write to a leaf page, and not part of a rollback, check
   ** for a write-write conflict here. */
   if( 0==p->iHeight 
-   && 0==pDb->bRollback 
-   && 0==pDb->bRecover 
+   && pDb->eMode==HCT_MODE_NORMAL
    && SQLITE_OK!=(rc=hctDbWriteWriteConflict(pDb, p, &op, pRec, iKey, bClobber))
   ){
     hctDbWriterCleanup(pDb, p, 1);
@@ -4776,7 +4766,9 @@ static int hctDbInsert(
 
       if( p->iHeight==0 ){
         cell.iTid = pDb->iTid;
-        if( pDb->bRollback ) cell.iTid |= HCT_TID_ROLLBACK_OVERRIDE;
+        if( pDb->eMode==HCT_MODE_ROLLBACK ){
+          cell.iTid |= HCT_TID_ROLLBACK_OVERRIDE;
+        }
 
         /* TODO: Using p->iOldPgno is correct for now, but will need to
         ** be fixed when bulk deletes are properly implemented.  */
@@ -4913,7 +4905,6 @@ int sqlite3HctDbInsert(
   int rc = SQLITE_OK;
   int nRecField = pRec ? pRec->nField : 0;
 
-
   /* If this operation is inserting an index entry, figure out how many of
   ** the record fields to consider when determining if a potential write
   ** collision is found in the data structure.  */
@@ -4929,9 +4920,9 @@ int sqlite3HctDbInsert(
   }
 #endif
 
-  if( pDb->bRollback ){
+  assert( pDb->eMode==HCT_MODE_NORMAL || pDb->eMode==HCT_MODE_ROLLBACK );
+  if( pDb->eMode==HCT_MODE_ROLLBACK ){
     int op = 0;
-    int res = 0;
 
     if( pDb->rbackcsr.iRoot!=iRoot ){
       hctDbCsrInit(pDb, iRoot, 0, &pDb->rbackcsr);
@@ -4942,7 +4933,6 @@ int sqlite3HctDbInsert(
       hctDbCsrReset(&pDb->rbackcsr);
     }
 
-#if 1
     rc = sqlite3HctDbCsrRollbackSeek(&pDb->rbackcsr, pRec, iKey, &op);
     if( rc==SQLITE_OK ){
       assert( op!=0 );
@@ -4955,41 +4945,11 @@ int sqlite3HctDbInsert(
         bDel = 0;
       }
     }
-#else
-    rc = sqlite3HctDbCsrSeek(&pDb->rbackcsr, pRec, iKey, &res);
-    assert( bDel==0 || res==0 );
-    if( rc==SQLITE_OK ){
-      if( res!=0 ){
-        bDel = 1;
-        aData = 0;
-        nData = 0;
-      }else{
-        rc = sqlite3HctDbCsrData(&pDb->rbackcsr, &nData, &aData);
-        bDel = 0;
-      }
-    }
-#endif
-
-#if 0
-      {
-        char *zText = sqlite3HctDbRecordToText(0, aData, nData);
-        printf("%p: ROLLBACKTO(bDel=%d, iKey=%lld, aData={%s})\n", 
-            pDb, bDel, iKey, zText
-        );
-        fflush(stdout);
-      }
-#endif
-
-
   }
 
   if( rc==SQLITE_OK ){
     rc = hctDbInsert(pDb, &pDb->pa, iRoot, pRec, iKey, 0, bDel, nData, aData);
   }
-#if 0
-  printf("%p: hctDbInsert() -> %d\n", pDb, rc);
-  fflush(stdout);
-#endif
   if( rc==SQLITE_LOCKED || rc==SQLITE_BUSY ){
     if( rc==SQLITE_LOCKED ){
       rc = SQLITE_OK;
@@ -5013,7 +4973,7 @@ int sqlite3HctDbStartWrite(HctDatabase *p, u64 *piTid){
   HctTMapClient *pTMapClient = sqlite3HctFileTMapClient(p->pFile);
 
   assert( p->iTid==0 );
-  assert( p->bRollback==0 );
+  assert( p->eMode==HCT_MODE_NORMAL );
   memset(&p->pa, 0, sizeof(p->pa));
   hctDbPageArrayReset(&p->pa.writepg);
   hctDbPageArrayReset(&p->pa.discardpg);
@@ -5045,7 +5005,7 @@ int sqlite3HctDbEndWrite(HctDatabase *p, u64 iCid, int bRollback){
   int rc = SQLITE_OK;
   u64 *pEntry = hctDbFindTMapEntry(p->pTmap, p->iTid);
 
-  assert( p->bRollback==0 );
+  assert( p->eMode==HCT_MODE_NORMAL );
   assert( p->pa.writepg.nPg==0 );
   assert( p->pa.aWriteFpKey==0 );
 
@@ -5084,14 +5044,14 @@ int sqlite3HctDbEndRead(HctDatabase *pDb){
 */
 int sqlite3HctDbStartRecovery(HctDatabase *pDb, int iStage){
   assert( iStage==0 || iStage==1 );
-  assert( pDb->bRollback==0 );
+  assert( pDb->eMode==HCT_MODE_NORMAL );
   if( sqlite3HctFileStartRecovery(pDb->pFile, iStage) ){
     memset(&pDb->pa, 0, sizeof(pDb->pa));
     hctDbPageArrayReset(&pDb->pa.writepg);
     hctDbPageArrayReset(&pDb->pa.discardpg);
-    pDb->bRecover = 1;
+    pDb->eMode = HCT_MODE_ROLLBACK;
   }
-  return pDb->bRecover;
+  return (pDb->eMode==HCT_MODE_ROLLBACK);
 }
 
 void sqlite3HctDbRecoverTid(HctDatabase *pDb, u64 iTid){
@@ -5178,9 +5138,11 @@ static int hctDbRootPagelist(HctDatabase *pDb, int *pnRoot, u32 **paRoot){
 }
 
 int sqlite3HctDbFinishRecovery(HctDatabase *pDb, int iStage, int rc){
-  pDb->iTid = 0;
-  pDb->bRecover = 0;
+  assert( pDb->eMode==HCT_MODE_ROLLBACK );
   assert( iStage==0 || iStage==1 );
+
+  pDb->iTid = 0;
+  pDb->eMode = HCT_MODE_NORMAL;
   if( rc==SQLITE_OK && iStage==1 ){
     /* This is the second FinishRecovery() call. All log files have been
     ** rolled back and deleted. The lower layer will now scan the 
@@ -5570,8 +5532,8 @@ static int hctDbCsrPrev(HctDbCsr *pCsr){
 int sqlite3HctDbCsrNext(HctDbCsr *pCsr){
   int rc = SQLITE_OK;
 
-  /* Should not be called while committing */
-  assert( pCsr->pDb->iTid==0 && pCsr->pDb->bValidate==0 );
+  /* Should not be called while committing, validating or doing rollback. */
+  assert( pCsr->pDb->iTid==0 && pCsr->pDb->eMode==HCT_MODE_NORMAL );
 
   do {
     rc = hctDbCsrNext(pCsr);
@@ -5582,8 +5544,8 @@ int sqlite3HctDbCsrNext(HctDbCsr *pCsr){
 int sqlite3HctDbCsrPrev(HctDbCsr *pCsr){
   int rc = SQLITE_OK;
 
-  /* Should not be called while committing */
-  assert( pCsr->pDb->iTid==0 && pCsr->pDb->bValidate==0 );
+  /* Should not be called while committing, validating or doing rollback. */
+  assert( pCsr->pDb->iTid==0 && pCsr->pDb->eMode==HCT_MODE_NORMAL );
 
   do {
     rc = hctDbCsrPrev(pCsr);
@@ -5787,13 +5749,13 @@ sqlite3HctDbValidate(HctDatabase *pDb, u64 *piCid){
   iCid = sqlite3HctFileAllocateCID(pDb->pFile);
   HctAtomicStore(pEntry, HCT_TMAP_VALIDATING | iCid);
 
+  assert( pDb->eMode==HCT_MODE_NORMAL );
+
   /* If iCid is one more than pDb->iSnapshotId, then this transaction is
   ** being applied against the snapshot that it was run against. In this
   ** case we can skip validation entirely. */
   if( iCid!=pDb->iSnapshotId+1 ){
-    assert( pDb->bValidate==0 );
-    pDb->bValidate = 1;
-
+    pDb->eMode = HCT_MODE_VALIDATE;
     if( hctDbValidateMeta(pDb) ){
       rc = HCT_SQLITE_BUSY;
     }else{
@@ -5806,8 +5768,7 @@ sqlite3HctDbValidate(HctDatabase *pDb, u64 *piCid){
         if( rc ) break;
       }
     }
-
-    pDb->bValidate = 0;
+    pDb->eMode = HCT_MODE_NORMAL;
   }
 
   *piCid = iCid;

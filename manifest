@@ -1,5 +1,5 @@
-C Consolidate\srecovery\sand\srollback.
-D 2022-11-24T16:56:22.683
+C Further\sconsolidation\sof\srecovery\sand\srollback.
+D 2022-11-24T17:18:32.830
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -610,7 +610,7 @@ F src/hash.h 3340ab6e1d13e725571d7cee6d3e3135f0779a7d8e76a9ce0a85971fa3953c51
 F src/hctInt.h 8700bbfee1a47cece0195ef9dcd985f44b43ad326f85b17f9952d3b05683fa5f
 F src/hctPManInt.h 44e63f39e3da54ca47f5582127a12a2f33002d1f3ddcd0fc23120731dfe70b5d
 F src/hctTMapInt.h 1a0060f3cc29f5f3f13914bd34d27eb98975f980c75301697dee49cda0da21bc
-F src/hct_database.c 6f3f07e134db0df7a668044490a48aac027a5e6af015531cbc906c829817f552
+F src/hct_database.c 565cc1681bbdd9c0a98f8048ca6dcce4d505e194a5ae24a7475ee8903153ae93
 F src/hct_file.c 49d6714ab2b321289636f712efc4a205d95f7dfced4619421c4acfffe379a68a
 F src/hct_pman.c 9e94164042d56311983153af877f2355e85be5d7c74d731ceb2bb33e38cddadf
 F src/hct_record.c 54b0d564be580ca29a54312f9a9abdba193b234ac56ec65a7e40109107041b25
@@ -2116,8 +2116,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P b1f22ddfa72f32fa83b7cc657749c38dd976ee4d00af1c400613fe5a9a895cd0
-R ae83c59a14bc12b2088fa0b07d551d82
+P 4b865ecd67c079213ff99c34c1a3a2fd3ca7c0e06f6799e8a712d19c98f8f3e0
+R 549df84b20e8e1ecd7689d559373b7db
 U dan
-Z 25b4ab5c3c90b06d8be9f0b44865112b
+Z 673a9828565be97ee52527189fc9662c
 # Remove this line to create a well-formed Fossil manifest.
