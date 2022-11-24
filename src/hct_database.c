@@ -2642,7 +2642,7 @@ static void hctDbWriterCleanup(HctDatabase *pDb, HctDbWriter *p, int bRevert){
   memset(&p->delOvfl, 0, sizeof(p->delOvfl));
   memset(&p->insOvfl, 0, sizeof(p->insOvfl));
 
- for(ii=0; ii<p->writepg.nPg; ii++){
+  for(ii=0; ii<p->writepg.nPg; ii++){
     HctFilePage *pPg = &p->writepg.aPg[ii];
     if( bRevert ){
       if( pPg->aNew ){
@@ -2843,13 +2843,18 @@ static int hctDbInsertFlushWrite(HctDatabase *pDb, HctDbWriter *p){
   }
 
   if( (p->writepg.nPg>1 || p->discardpg.nPg>0) && rc==SQLITE_OK ){
+    HctDbWriter wr;
+
+    memset(&wr, 0, sizeof(wr));
+    hctDbPageArrayReset(&wr.writepg);
+    hctDbPageArrayReset(&wr.discardpg);
+
     do {
       const u32 iRoot = p->writecsr.iRoot;
       const int nOrig = p->discardpg.nPg + p->writepg.nPg - 1;
       HctDbWriterOrigin aStatic[6];
       HctDbWriterOrigin *aDyn = 0;
       HctDbWriterOrigin *aOrig = aStatic;
-      HctDbWriter wr;
       HctBuffer buf;
 
       assert( rc==SQLITE_OK || rc==SQLITE_LOCKED );
@@ -2861,10 +2866,7 @@ static int hctDbInsertFlushWrite(HctDatabase *pDb, HctDbWriter *p){
       }
 
       if( rc==SQLITE_OK ){
-        memset(&wr, 0, sizeof(wr));
         memset(&buf, 0, sizeof(buf));
-        hctDbPageArrayReset(&wr.writepg);
-        hctDbPageArrayReset(&wr.discardpg);
         wr.iHeight = p->iHeight + 1;
         rc = hctDbCsrAllocateUnpacked(&p->writecsr);
       }
@@ -2899,13 +2901,12 @@ static int hctDbInsertFlushWrite(HctDatabase *pDb, HctDbWriter *p){
 
       if( rc==SQLITE_OK ){
         rc = hctDbInsertFlushWrite(pDb, &wr);
-      }else{
-        hctDbWriterCleanup(pDb, &wr, 1);
       }
       if( rc==SQLITE_LOCKED ){
         pDb->nCasFail++;
       }
     }while( rc==SQLITE_LOCKED );
+    hctDbWriterCleanup(pDb, &wr, 1);
   }
 
   if( rc==SQLITE_OK ){
@@ -2921,8 +2922,8 @@ static int hctDbInsertFlushWrite(HctDatabase *pDb, HctDbWriter *p){
 
 void sqlite3HctDbRollbackMode(HctDatabase *pDb, int bRollback){
   assert( bRollback==0 || bRollback==1 );
-  assert( bRollback==0 || pDb->eMode==HCT_MODE_ROLLBACK );
-  assert( bRollback==1 || pDb->eMode==HCT_MODE_NORMAL );
+  /* assert( bRollback==1 || pDb->eMode==HCT_MODE_ROLLBACK ); */
+  assert( bRollback==0 || pDb->eMode==HCT_MODE_NORMAL );
   pDb->pa.nWriteKey = 0;
   pDb->eMode = bRollback ? HCT_MODE_ROLLBACK : HCT_MODE_NORMAL;
 }

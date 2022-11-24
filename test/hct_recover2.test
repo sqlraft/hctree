@@ -26,7 +26,9 @@ hct_reset_db
 do_execsql_test 1.0 {
   CREATE TABLE t1(x, y, p);
   CREATE INDEX i1 ON t1(p, x);
-  --CREATE INDEX i2 ON t1(p, y);
+  CREATE INDEX i2 ON t1(p, y);
+  CREATE INDEX i3 ON t1(p, y);
+  CREATE INDEX i4 ON t1(p, y);
 
   WITH s(i) AS (
     VALUES(1) UNION ALL SELECT i+1 FROM s WHERE i<100
@@ -50,13 +52,13 @@ proc do_recover_test {tn sql} {
     db_restore
     set rc [catch { exec [info nameofexec] script.tcl } msg]
 
+
     sqlite3 db test.db
     do_execsql_test "$tn.$ii..($rc $msg)" {
       PRAGMA integrity_check;
     } {ok}
     db close
     if {$rc==0} break
-    if {$ii==3} break
   }
 }
 

@@ -929,7 +929,7 @@ static int btreeLogOneToDisk(void *pCtx, u32 iRoot, KeyInfo *pKeyInfo){
 static int btreeFlushData(HBtree *p, int bRollback){
   int rc = SQLITE_OK;
 
-  sqlite3HctDbRollbackMode(p->pHctDb, bRollback);
+  if( bRollback ) sqlite3HctDbRollbackMode(p->pHctDb, 1);
   if( bRollback && p->nRollbackOp==0 ){
     rc = SQLITE_DONE;
   }else if( p->eMetaState==HCT_METASTATE_DIRTY ){
@@ -951,7 +951,7 @@ static int btreeFlushData(HBtree *p, int bRollback){
     ctx.bRollback = bRollback;
     rc = sqlite3HctTreeForeach(p->pHctTree, (void*)&ctx, btreeFlushOneToDisk);
   }
-  sqlite3HctDbRollbackMode(p->pHctDb, 0);
+  if( bRollback ) sqlite3HctDbRollbackMode(p->pHctDb, 0);
   return rc;
 }
 
