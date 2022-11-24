@@ -174,6 +174,10 @@ i64 sqlite3HctDbNCasFail(HctDatabase*);
 char *sqlite3HctDbIntegrityCheck(HctDatabase*, u32 *aRoot, int nRoot, int*);
 i64 sqlite3HctDbStats(sqlite3 *db, int iStat, const char **pzStat);
 
+int sqlite3HctDbCsrRollbackSeek(HctDbCsr*, UnpackedRecord*, i64, int *pOp);
+
+char *sqlite3HctDbRecordToText(sqlite3 *db, const u8 *aRec, int nRec);
+
 /*************************************************************************
 ** Interface to code in hct_file.c
 */

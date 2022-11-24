@@ -610,7 +610,7 @@ u64 sqlite3HctTMapSafeTID(HctTMapClient *p){
   if( HctAtomicLoad(&p->pServer->nClient)==1 ){
   //  return p->iThisTid-1;
   }
-  return HctAtomicLoad(&p->pServer->iMinMinTid);
+  return HctAtomicLoad(&p->pServer->iMinMinTid) - 1;
 }
 
 static void hctTMapUnrefOldClients(HctTMapServer *pServer, u64 iTid){

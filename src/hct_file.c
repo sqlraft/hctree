@@ -15,6 +15,7 @@
 #include "hctInt.h"
 #include <string.h>
 #include <assert.h>
+#include <stdlib.h>
 
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -77,17 +78,27 @@ typedef struct HctMappingChunk HctMappingChunk;
 ** nCASFailCnt/nCASFailReset:
 **   These are used to inject CAS instruction failures for testing purposes.
 **   Set by the sqlite3_hct_cas_failure() API. They are not threadsafe.
+**
+** nProcFailCnt
+**   These are used to inject process failures (i.e. abort() calls) for
+**   testing purposes. Set by the sqlite3_hct_proc_failure() API. Not 
+**   threadsafe.
 */
 static struct HctFileGlobalVars {
   HctFileServer *pServerList;
 
   int nCASFailCnt;
   int nCASFailReset;
+
+  int nProcFailCnt;
 } g;
 
 void sqlite3_hct_cas_failure(int nCASFailCnt, int nCASFailReset){
   g.nCASFailCnt = nCASFailCnt;
   g.nCASFailReset = nCASFailReset;
+}
+void sqlite3_hct_proc_failure(int nProcFailCnt){
+  g.nProcFailCnt = nProcFailCnt;
 }
 
 /*
@@ -99,6 +110,11 @@ static int inject_cas_failure(void){
     if( (--g.nCASFailCnt)==0 ){
       g.nCASFailCnt = g.nCASFailReset;
       return 1;
+    }
+  }
+  if( g.nProcFailCnt>0 ){
+    if( (--g.nProcFailCnt)==0 ){
+      abort();
     }
   }
   return 0;
