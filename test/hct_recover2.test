@@ -50,8 +50,16 @@ proc do_recover_test {tn sql} {
     }]
 
     db_restore
+
     set rc [catch { exec [info nameofexec] script.tcl } msg]
 
+    #set rc [catch { 
+    #  set fd [open "|[info nameofexec] script.tcl"]
+    #  while {![eof $fd]} { gets $fd }
+    #  close $fd
+    #} msg]
+
+    # catch { close $fd }
 
     sqlite3 db test.db
     do_execsql_test "$tn.$ii..($rc $msg)" {
@@ -117,6 +125,13 @@ do_recover_test 8 {
   COMMIT;
 }
 
+
+}
+
+do_recover_test 9 {
+  BEGIN;
+    DELETE FROM t1;
+  COMMIT;
 }
 
 finish_test

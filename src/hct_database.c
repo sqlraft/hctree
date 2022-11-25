@@ -4941,9 +4941,11 @@ int sqlite3HctDbInsert(
         bDel = 1;
         aData = 0;
         nData = 0;
-      }else{
+      }else if( op>0 ){
         rc = sqlite3HctDbCsrData(&pDb->rbackcsr, &nData, &aData);
         bDel = 0;
+      }else{
+        goto insert_done;
       }
     }
   }
@@ -4962,6 +4964,7 @@ int sqlite3HctDbInsert(
     *pnRetry = 0;
   }
 
+ insert_done:
   if( pRec ) pRec->nField = nRecField;
   return rc;
 }

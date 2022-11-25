@@ -223,6 +223,38 @@ foreach {nm int without_rowid} {
   } {1 one 2 TWO 4 four}
 }
 
+#-------------------------------------------------------------------------
+hct_reset_db
+sqlite3 db2 test.db
+do_execsql_test 3.0 {
+  CREATE TABLE t1(a INTEGER PRIMARY KEY, b);
+  CREATE TABLE t2(a INTEGER PRIMARY KEY, b);
+
+  INSERT INTO t1 VALUES(1, 'one'), (2, 'two'), (3, 'three');
+  INSERT INTO t2 VALUES(1, 'one'), (2, 'two'), (3, 'three');
+}
+
+do_execsql_test 3.1 {
+  BEGIN;
+    DELETE FROM t1 WHERE a=2;
+    SELECT * FROM t2;
+} {
+  1 one 2 two 3 three
+}
+
+do_execsql_test -db db2 3.2 {
+  BEGIN;
+    DELETE FROM t1 WHERE a=2;
+    DELETE FROM t2 WHERE a=2;
+  COMMIT;
+} {
+}
+
+do_catchsql_test 3.3 {
+  COMMIT
+} {1 {database is locked}}
+db eval ROLLBACK
+
 finish_test
 
 

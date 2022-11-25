@@ -17,6 +17,10 @@ set testprefix hct_thread1
 
 hct_reset_db
 
+set NSECOND 5
+set NTHREAD 5
+
+
 do_execsql_test 1.0 { 
   CREATE TABLE t1(i INTEGER PRIMARY KEY, a, b);
   WITH s(i) AS (
@@ -28,7 +32,7 @@ do_execsql_test 1.0 {
 }
 
 sqlite_thread_test T test.db
-for {set tt 1} {$tt < 5} {incr tt} {
+for {set tt 1} {$tt < $NTHREAD} {incr tt} {
   T thread $tt {
     BEGIN;
     UPDATE t1 SET a = randomblob(32), b = randomblob(32) 
@@ -38,16 +42,15 @@ for {set tt 1} {$tt < 5} {incr tt} {
   }
 }
 
-puts "running for 5 seconds..."
+puts "running for $NSECOND seconds with $NTHREAD threads..."
 do_test 1.1 {
-  T configure -nsecond 5
+  T configure -nsecond $NSECOND
   T run
 } {}
 puts [T result]
 T destroy
 
 do_execsql_test 1.2 { PRAGMA integrity_check } {ok}
-
 
 finish_test
 

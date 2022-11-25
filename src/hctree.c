@@ -240,22 +240,15 @@ static void hctRecoverCursorClose(HBtree *p, RecoverCsr *pCsr){
   sqlite3HctDbCsrClose(pCsr->pCsr);
   sqlite3HctTreeCsrClose(pCsr->pTreeCsr);
   sqlite3DbFree(p->db, pCsr->pRec);
+  sqlite3KeyInfoUnref(pCsr->pKeyInfo);
   memset(pCsr, 0, sizeof(RecoverCsr));
 }
 
-/*
-** 
-*/
-static int hctRecoverCursorOpen(
-  HBtree *p,
-  u32 iRoot,
-  RecoverCsr *pCsr
-){
+static int hctFindKeyInfo(HBtree *p, u32 iRoot, KeyInfo **ppKeyInfo){
   Schema *pSchema = (Schema*)p->pSchema;
   int rc = SQLITE_OK;
   HashElem *pE = 0;
-
-  memset(pCsr, 0, sizeof(RecoverCsr));
+  KeyInfo *pKeyInfo = 0;
 
   /* Search the database schema for an index with root page iRoot. If
   ** one is found, extract a KeyInfo reference. */
@@ -268,18 +261,35 @@ static int hctRecoverCursorOpen(
         Parse sParse;
         memset(&sParse, 0, sizeof(sParse));
         sParse.db = p->db;
-        pCsr->pKeyInfo = sqlite3KeyInfoOfIndex(&sParse, pIdx);
+        pKeyInfo = sqlite3KeyInfoOfIndex(&sParse, pIdx);
         rc = sParse.rc;
         sqlite3DbFree(sParse.db, sParse.zErrMsg);
-        if( rc==SQLITE_OK ){
-          pCsr->pRec = sqlite3VdbeAllocUnpackedRecord(pCsr->pKeyInfo);
-          if( pCsr->pRec==0 ) rc = SQLITE_NOMEM_BKPT;
-        }
         break;
       }
     }
   }
 
+  *ppKeyInfo = pKeyInfo;
+  return rc;
+}
+
+/*
+** 
+*/
+static int hctRecoverCursorOpen(
+  HBtree *p,
+  u32 iRoot,
+  RecoverCsr *pCsr
+){
+  int rc = SQLITE_OK;
+  memset(pCsr, 0, sizeof(RecoverCsr));
+
+  rc = hctFindKeyInfo(p, iRoot, &pCsr->pKeyInfo);
+  assert( rc==SQLITE_OK || pCsr->pKeyInfo==0 );
+  if( pCsr->pKeyInfo ){
+    pCsr->pRec = sqlite3VdbeAllocUnpackedRecord(pCsr->pKeyInfo);
+    if( pCsr->pRec==0 ) rc = SQLITE_NOMEM_BKPT;
+  }
   if( rc==SQLITE_OK ){
     rc = sqlite3HctDbCsrOpen(p->pHctDb, pCsr->pKeyInfo, iRoot, &pCsr->pCsr);
   }
@@ -316,6 +326,7 @@ static int hctRecoverOne(void *pCtx, const char *zFile){
   u8 *aFile = 0;
   int nFile = 0;
   int iFile = 0;
+  int nRead = 0;
 
   HBtree *p = ((RecoverCtx*)pCtx)->pBt;
   int iStage = ((RecoverCtx*)pCtx)->iStage;
@@ -335,9 +346,15 @@ static int hctRecoverOne(void *pCtx, const char *zFile){
   fstat(fd, &sStat);
   nFile = (int)sStat.st_size;
 
-  if( nFile<8 ) return SQLITE_OK;
+  if( nFile<8 ){
+    goto recover_one_done;
+  }
   aFile = (u8*)sqlite3_malloc(nFile);
-  if( read(fd, aFile, nFile)!=nFile ) return SQLITE_IOERR_READ;
+  nRead = read(fd, aFile, nFile);
+  if( nRead!=nFile ){
+    rc = SQLITE_IOERR_READ;
+    goto recover_one_done;
+  }
   memcpy(&iTid, aFile, sizeof(iTid));
   iFile = (int)sizeof(iTid);
 
@@ -404,6 +421,10 @@ static int hctRecoverOne(void *pCtx, const char *zFile){
     /* TODO!!! */
     unlink(zFile);
   }
+
+ recover_one_done:
+  if( fd>=0 ) close(fd);
+  sqlite3_free(aFile);
   return rc;
 }
 
@@ -2104,22 +2125,53 @@ int sqlite3HctBtreeCreateTable(Btree *pBt, Pgno *piTable, int flags){
 */
 int sqlite3HctBtreeClearTable(Btree *pBt, int iTable, i64 *pnChange){
   HBtree *const p = (HBtree*)pBt;
-  int rc = sqlite3HctTreeClearOne(p->pHctTree, iTable, pnChange);
-  if( rc==SQLITE_OK && p->pHctDb ){
-    int ii;
-    int bIndex = -1;
-    for(ii=0; ii<p->nSchemaOp; ii++){
-      if( p->aSchemaOp[ii].pgnoRoot==iTable ){
-        bIndex = (p->aSchemaOp[ii].eSchemaOp==HCT_SCHEMAOP_CREATE_INDEX);
-        break;
-      }
+  int rc = SQLITE_OK;
+  KeyInfo  *pKeyInfo = 0;
+
+  rc = hctFindKeyInfo(p, iTable, &pKeyInfo);
+  if( rc==SQLITE_OK ){
+    BtCursor *pCsr = 0;
+    HctTreeCsr *pTreeCsr = 0;
+    UnpackedRecord *pRec = 0;
+
+    if( pKeyInfo ){
+      pRec = sqlite3VdbeAllocUnpackedRecord(pKeyInfo);
+      if( pRec==0 ) rc = SQLITE_NOMEM_BKPT;
     }
-    if( bIndex<0 ){
-      rc = sqlite3HctDbIsIndex(p->pHctDb, iTable, &bIndex);
+    pCsr = (BtCursor*)sqlite3HctMalloc(&rc, sizeof(HBtCursor));
+    if( rc==SQLITE_OK ){
+      rc = sqlite3HctBtreeCursor(pBt, iTable, 0, pKeyInfo, pCsr);
     }
     if( rc==SQLITE_OK ){
-      rc = hctreeAddNewRoot(p, iTable, bIndex);
+      rc = sqlite3HctTreeCsrOpen(p->pHctTree, iTable, &pTreeCsr);
     }
+
+    if( rc==SQLITE_OK ){
+      int res = 0;
+      rc = sqlite3HctBtreeFirst(pCsr, &res);
+      if( res==0 ){
+        while( rc==SQLITE_OK ){
+          if( pKeyInfo ){
+            const u8 *aData = 0;
+            u32 nData = 0;
+            aData = (const u8*)sqlite3HctBtreePayloadFetch(pCsr, &nData);
+            sqlite3VdbeRecordUnpack(pKeyInfo, nData, aData, pRec);
+            rc = sqlite3HctTreeDeleteKey(pTreeCsr, pRec, 0, nData, aData);
+          }else{
+            i64 iKey = sqlite3HctBtreeIntegerKey((BtCursor*)pCsr);
+            rc = sqlite3HctTreeDeleteKey(pTreeCsr, 0, iKey, 0, 0);
+          }
+          rc = sqlite3HctBtreeNext(pCsr, 0);
+        }
+        if( rc==SQLITE_DONE ) rc = SQLITE_OK;
+      }
+    }
+
+    sqlite3KeyInfoUnref(pKeyInfo);
+    sqlite3HctBtreeCloseCursor(pCsr);
+    sqlite3HctTreeCsrClose(pTreeCsr);
+    sqlite3DbFree(p->db, pRec);
+    sqlite3_free(pCsr);
   }
   return rc;
 }
