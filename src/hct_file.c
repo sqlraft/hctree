@@ -908,13 +908,13 @@ void sqlite3HctFileClose(HctFile *pFile){
     HctFile **pp;
     HctFileServer *pServer = pFile->pServer;
 
-    /* Release the transaction map client */
-    sqlite3HctTMapClientFree(pFile->pTMapClient);
-    pFile->pTMapClient = 0;
-
     /* Release the page-manager client */
     sqlite3HctPManClientFree(pFile->pPManClient);
     pFile->pPManClient = 0;
+
+    /* Release the transaction map client */
+    sqlite3HctTMapClientFree(pFile->pTMapClient);
+    pFile->pTMapClient = 0;
 
     /* Release the reference to the HctMapping object, if any */
     hctMappingUnref(pFile->pMapping);

@@ -19,6 +19,25 @@ typedef struct HctPManTree HctPManTree;
 
 #define PAGESET_INIT_SIZE 1000
 
+typedef struct HctPManFreePg HctPManFreePg;
+typedef struct HctPManFreePgSet HctPManFreePgSet;
+
+struct HctPManFreePg {
+  i64 pgno;                       /* The free page number */
+  i64 iTid;                       /* TID of transaction that freed page */
+};
+
+struct HctPManFreePgSet {
+  HctPManFreePg *aPg;             /* Page buffer */
+  int nAlloc;                     /* Allocated size of aPg[] */
+  int iFirst;                     /* Index of first entry in aPg[] */
+  int nPg;                        /* Number of valid pages in aPg[] */ 
+};
+
+
+
+
+/****************************************************************/
 
 /*
 ** A basket of free page ids - a pageset - is represented by an instance 
@@ -70,7 +89,8 @@ struct HctPManTree {
 ** aList[]:
 **   aList[0].pHead is a pointer to the first element of a singly-linked
 **   list of pagesets containing free physical page ids. aList[0].pTail
-**   always points to the last element of this list.
+**   always points to the last element of this list. The list is sorted
+**   in order of HctPManPageset.iMaxTid values.
 **
 **   aList[1] is similar, but for logical page ids.
 **
@@ -113,8 +133,12 @@ struct HctPManClient {
   HctConfig *pConfig;
   HctPManServer *pServer;
   HctFile *pFile;
+#if 0
   HctPManPageset *apAcc[2];       /* Accumulating physical, logical sets */
   HctPManPageset *apUse[2];       /* Physical, logical sets for using */
+#endif
+
+  HctPManFreePgSet aPgSet[2];     /* Free physical and logical pages */
 
   HctPManStats stats;
 };
@@ -133,7 +157,7 @@ static void hctPManMutexEnter(HctPManClient *pClient){
 #define LEAVE_PMAN_MUTEX(pClient) sqlite3_mutex_leave(pClient->pServer->pMutex)
 
 /*
-** Utility malloc function for hct.
+** Utility malloc function for hct. Allocate nByte bytes of zeroed memory.
 */
 void *sqlite3HctMalloc(int *pRc, i64 nByte){
   void *pRet = 0;
@@ -292,23 +316,70 @@ static void hctPManServerHandoff(
 }
 
 /*
+**
+*/
+static int hctPManHandback(
+  HctPManClient *pClient,         /* Client to hand pages back from */
+  int bLogical,                   /* True for logical pages, false for phys. */
+  int nPg                         /* Number of pages to hand back */
+){
+  u64 iSafeTid = sqlite3HctFileSafeTID(pClient->pFile);
+  const int nPageSet = pClient->pConfig->nPageSet;
+  HctPManFreePgSet *pSet = &pClient->aPgSet[bLogical];
+  int nRem = nPg;
+  int rc = SQLITE_OK;
+
+  HctPManPageset *pList = 0;
+
+  assert( bLogical==0 || bLogical==1 );
+  assert( nPg<=pSet->nPg );
+
+  while( nRem>0 ){
+    int ii = 0;
+    HctPManPageset *pNew = 0;
+    int nCopy = MIN(nRem, nPageSet);
+
+    nRem -= nCopy;
+    pNew = hctPManPagesetNew(&rc, nCopy);
+    if( !pNew ) break;
+    for(ii=0; ii<nCopy; ii++){
+      int iPg = (pSet->iFirst + ii) % pSet->nAlloc;
+      pNew->aPg[pNew->nPg++] = (u32)(pSet->aPg[iPg].pgno);
+      pNew->iMaxTid = pSet->aPg[iPg].iTid;
+    }
+    pSet->iFirst = (pSet->iFirst+nCopy) % pSet->nAlloc;
+    pSet->nPg -= nCopy;
+
+    pNew->pNext = pList;
+    pList = pNew;
+  }
+  assert( pList || nPg==0 || rc!=SQLITE_OK );
+
+  ENTER_PMAN_MUTEX(pClient);
+  while( pList ){
+    int bSafe = (pList->iMaxTid<=iSafeTid);
+    HctPManPageset *pNext = pList->pNext;
+    pList->pNext = 0;
+    hctPManServerHandoff(pClient->pServer, pList, bLogical, bSafe);
+    pList = pNext;
+  }
+  LEAVE_PMAN_MUTEX(pClient);
+
+  return rc;
+}
+
+/*
 ** Free a page-manager client.
 */
 void sqlite3HctPManClientFree(HctPManClient *pClient){
   if( pClient ){
-    HctPManServer *p = pClient->pServer;
+    /* Return all pages to the server object */
+    hctPManHandback(pClient, 0, pClient->aPgSet[0].nPg);
+    hctPManHandback(pClient, 1, pClient->aPgSet[1].nPg);
 
-    /* Return all 4 pagesets to the server object under protection of the
-    ** server mutex. The two apUse[] pagesets go to the front of the lists - 
-    ** so that they can be reused immediately. The two apAcc[] pagesets go on
-    ** the end of the lists. */
-    ENTER_PMAN_MUTEX(pClient);
-    hctPManServerHandoff(p, pClient->apUse[0], 0, 1);
-    hctPManServerHandoff(p, pClient->apUse[1], 1, 1);
-    hctPManServerHandoff(p, pClient->apAcc[0], 0, 0);
-    hctPManServerHandoff(p, pClient->apAcc[1], 1, 0);
-    LEAVE_PMAN_MUTEX(pClient);
-
+    /* Free allocations */
+    sqlite3_free(pClient->aPgSet[0].aPg);
+    sqlite3_free(pClient->aPgSet[1].aPg);
     sqlite3_free(pClient);
   }
 }
@@ -385,6 +456,69 @@ static void pman_debug_new_pageset(
 
 #endif
 
+/* 
+** Ensure that the circular buffer identified by bLogical has at least
+** nPg free slots in it.  
+*/
+static int hctPManMakeSpace(
+  HctPManClient *pClient,
+  int bLogical,
+  int nPg
+){
+  int rc = SQLITE_OK;
+  HctPManFreePgSet *pSet = &pClient->aPgSet[bLogical];
+
+  if( (pSet->nAlloc-pSet->nPg)<nPg ){
+    int nNew = pSet->nPg + nPg;
+    int nByte = nNew * sizeof(HctPManFreePg);
+    HctPManFreePg *aNew = (HctPManFreePg*)sqlite3_realloc(pSet->aPg, nByte);
+
+    if( aNew==0 ){
+      rc = SQLITE_NOMEM;
+    }else{
+      pSet->aPg = aNew;
+      if( (pSet->iFirst + pSet->nPg)>pSet->nAlloc ){
+        int nExtra = nNew - pSet->nAlloc;
+        int nStart = pSet->nPg - (pSet->nAlloc - pSet->iFirst);
+
+        if( nExtra>=nStart ){
+          memcpy(&aNew[pSet->nAlloc], aNew, nStart*sizeof(HctPManFreePg));
+        }else{
+          memcpy(&aNew[pSet->nAlloc], aNew, nExtra*sizeof(HctPManFreePg));
+          memmove(aNew, &aNew[nExtra], (nStart-nExtra)*sizeof(HctPManFreePg));
+        }
+      }
+      pSet->nAlloc = nNew;
+    }
+  }
+
+  return rc;
+}
+
+static void hctPManAddFree(
+  HctPManClient *pClient,
+  int bLogical,
+  i64 iPg,
+  i64 iTid
+){
+  HctPManFreePgSet *pSet = &pClient->aPgSet[bLogical];
+  int iIdx = 0;
+
+  assert( pSet->nPg<pSet->nAlloc );
+  if( iTid==0 ){
+    if( pSet->iFirst==0 ) pSet->iFirst = pSet->nAlloc;
+    pSet->iFirst--;
+    iIdx = pSet->iFirst;
+  }else{
+    iIdx = (pSet->iFirst + pSet->nPg) % pSet->nAlloc;
+  }
+
+  pSet->nPg++;
+  pSet->aPg[iIdx].pgno = iPg;
+  pSet->aPg[iIdx].iTid = iTid;
+}
+
+
 /*
 ** Allocate a new logical or physical page.
 */
@@ -394,70 +528,79 @@ u32 sqlite3HctPManAllocPg(
   HctFile *pFile,
   int bLogical
 ){
-  HctPManPageset *pUse = pClient->apUse[bLogical];
-  u32 iRet = 0;
+  HctPManServer *p = pClient->pServer;
+  u64 iSafeTid = sqlite3HctFileSafeTID(pFile);
+  HctPManFreePgSet *pSet = &pClient->aPgSet[bLogical];
+  u32 iRoot = 0;
+  HctPManPageset *pPgset = 0;
+  int rc = SQLITE_OK;
 
-  if( pUse==0 ){
-    const int nPageSet = pClient->pConfig->nPageSet;
-    HctPManServer *p = pClient->pServer;
-    struct HctPManServerList *pList = &p->aList[bLogical];
-    u64 iSafeTid = sqlite3HctFileSafeTID(pClient->pFile);
-    u64 iServerTid = 0;
-    u32 iRoot = 0;
+  /* Check if the client has a usable page already. If so, return early. */
+  if( pSet->nPg>0 && pSet->aPg[pSet->iFirst].iTid<=iSafeTid ){
+    u32 pgno = pSet->aPg[pSet->iFirst].pgno;
+    pSet->iFirst = (pSet->iFirst+1) % pSet->nAlloc;
+    pSet->nPg--;
+    return pgno;
+  }
 
-    /* First try to obtain a new pageset object from the server */
+  do{
+    iRoot = 0;
+
+    /* Attempt to allocate a page from the page-manager server. */
     ENTER_PMAN_MUTEX(pClient);
     if( p->nTree>0 && p->aTree[0].iTid<=iSafeTid ){
+      /* A tree structure that can be traversed to find free pages. */
       iRoot = p->aTree[0].iRoot;
       p->nTree--;
       memmove(&p->aTree[0], &p->aTree[1], (p->nTree)*sizeof(HctPManTree));
-    }else if( pList->pHead ){
-      iServerTid = pList->pHead->iMaxTid;
-      if( iServerTid<=iSafeTid ){
-        pUse = pList->pHead;
-        pList->pHead = pUse->pNext;
+    }else{
+      struct HctPManServerList *pList = &p->aList[bLogical];
+      if( pList->pHead && pList->pHead->iMaxTid<=iSafeTid ){
+        /* A page-set object full of usable pages */
+        pPgset = pList->pHead;
+        pList->pHead = pList->pHead->pNext;
         if( pList->pHead==0 ) pList->pTail = 0;
       }
     }
     LEAVE_PMAN_MUTEX(pClient);
 
-    if( iRoot && *pRc==SQLITE_OK ){
-      *pRc = hctPManFreeTreeNow(pClient, pFile, iRoot);
-      pUse = pClient->apUse[bLogical];
+    /* If a free tree structure was found, iterate through it, returning
+    ** all physical and logical pages to the server. Then retry the above.
+    */
+    if( iRoot ){
+      rc = hctPManFreeTreeNow(pClient, pFile, iRoot);
     }
-
-    /* If there is still no new pageset, allocate a new one at the end 
-    ** of the current domain. */
-    if( pUse==0 ){
-      pUse = hctPManPagesetNew(pRc, nPageSet); 
-      if( pUse ){
-        HctFile *pFile = pClient->pFile;
-        int ii;
-        u32 iPg = sqlite3HctFilePageRangeAlloc(pFile, bLogical, nPageSet);
-        for(ii=0; ii<nPageSet; ii++){
-          pUse->aPg[ii] = iPg + (nPageSet - 1 - ii);
+  }while( iRoot );
+  
+  if( rc==SQLITE_OK ){
+    int ii;
+    if( pPgset ){
+      rc = hctPManMakeSpace(pClient, bLogical, pPgset->nPg);
+      if( rc==SQLITE_OK ){
+        for(ii=pPgset->nPg-1; ii>=0; ii--){
+          hctPManAddFree(pClient, bLogical, pPgset->aPg[ii], 0);
         }
-        pUse->nPg = nPageSet;
+      }
+    }else{
+      const int nPageSet = pClient->pConfig->nPageSet;
+      rc = hctPManMakeSpace(pClient, bLogical, nPageSet);
+      if( rc==SQLITE_OK ){
+        u32 iPg = sqlite3HctFilePageRangeAlloc(pFile, bLogical, nPageSet);
+        for(ii=nPageSet-1; ii>=0; ii--){
+          hctPManAddFree(pClient, bLogical, iPg+ii, 0);
+        }
       }
     }
-    pman_debug_new_pageset(pUse, bLogical, iSafeTid, iServerTid);
-
-    pClient->apUse[bLogical] = pUse;
   }
 
-  assert( pUse || *pRc!=SQLITE_OK );
-  if( pUse ){
-    assert( pUse->nPg>0 );
-    iRet = pUse->aPg[pUse->nPg-1];
-    pman_debug(pClient, "using", bLogical, iRet, pUse->iMaxTid);
-    pUse->nPg--;
-    if( pUse->nPg==0 ){
-      sqlite3_free(pUse);
-      pClient->apUse[bLogical] = 0;
-    }
+  if( rc==SQLITE_OK ){
+    assert( pSet->nPg>0 && pSet->aPg[pSet->iFirst].iTid<=iSafeTid );
+    return sqlite3HctPManAllocPg(pRc, pClient, pFile, bLogical);
   }
 
-  return iRet;
+  /* An error has occurred. Return 0. */
+  *pRc = rc;
+  return 0;
 }
 
 /*
@@ -470,50 +613,16 @@ void sqlite3HctPManFreePg(
   u32 iPg,                        /* Page number */
   int bLogical                    /* True for logical, false for physical */
 ){
-  const int nPageSet = pClient->pConfig->nPageSet;
-  HctPManPageset *pAcc = pClient->apAcc[bLogical];
-  HctPManPageset *pUse = pClient->apUse[bLogical];
-
-  pman_debug(pClient, "freeing", bLogical, iPg, iTid);
-
-  if( iTid==0 && pUse && pUse->nPg<pUse->nAlloc ){
-    pUse->aPg[pUse->nPg++] = iPg;
-    return;
-  }
-
-  if( pAcc && (pAcc->nPg==pAcc->nAlloc || pAcc->nPg>=nPageSet) ){
-    HctPManServer *p = pClient->pServer;
-
-    /* Hand pAcc off to the server. */
-    ENTER_PMAN_MUTEX(pClient);
-    hctPManServerHandoff(p, pAcc, bLogical, 0);
-    LEAVE_PMAN_MUTEX(pClient);
-
-    pAcc = 0;
-  }
-
-  if( pAcc==0 ){
-    pAcc = hctPManPagesetNew(pRc, nPageSet);
-    pClient->apAcc[bLogical] = pAcc;
-  }
-
-  if( pAcc ){
-    assert( pAcc->nPg<pAcc->nAlloc );
-    pAcc->aPg[pAcc->nPg++] = iPg;
-    if( iTid>pAcc->iMaxTid ) pAcc->iMaxTid = iTid;
+  int rc = SQLITE_OK;
+  rc = hctPManMakeSpace(pClient, bLogical, 1);
+  if( rc==SQLITE_OK ){
+    hctPManAddFree(pClient, bLogical, iPg, iTid);
   }
 }
 
 void sqlite3HctPManClientHandoff(HctPManClient *pClient){
-  hctPManServerHandoff(pClient->pServer, pClient->apUse[0], 0, 1);
-  hctPManServerHandoff(pClient->pServer, pClient->apUse[1], 1, 1);
-  hctPManServerHandoff(pClient->pServer, pClient->apAcc[0], 0, 1);
-  hctPManServerHandoff(pClient->pServer, pClient->apAcc[1], 1, 1);
-
-  pClient->apUse[0] = 0;
-  pClient->apUse[1] = 0;
-  pClient->apAcc[0] = 0;
-  pClient->apAcc[1] = 0;
+  hctPManHandback(pClient, 0, pClient->aPgSet[0].nPg);
+  hctPManHandback(pClient, 1, pClient->aPgSet[1].nPg);
 }
 
 int sqlite3HctPManFreeTree(
@@ -803,8 +912,7 @@ static int pmanFilter(
 
   ENTER_PMAN_MUTEX(pClient);
   for(ii=0; ii<2; ii++){
-    nRow += hctPagesetSize(pClient->apAcc[ii]);
-    nRow += hctPagesetSize(pClient->apUse[ii]);
+    nRow += pClient->aPgSet[ii].nPg;
     for(pSet=pClient->pServer->aList[ii].pHead; pSet; pSet=pSet->pNext){
       nRow += hctPagesetSize(pSet);
     }
@@ -812,8 +920,16 @@ static int pmanFilter(
   pCur->aRow = sqlite3HctMalloc(&rc, sizeof(HctPmanRow) * nRow);
   if( pCur->aRow ){
     for(ii=0; ii<2; ii++){
-      hctPagesetRows(pCur, pClient->apAcc[ii], ii, HCT_PMAN_LOC_ACC);
-      hctPagesetRows(pCur, pClient->apUse[ii], ii, HCT_PMAN_LOC_USE);
+      int i2;
+      HctPManFreePgSet *pPgSet = &pClient->aPgSet[ii];
+      for(i2=0; i2<pPgSet->nPg; i2++){
+        HctPmanRow *pRow = &pCur->aRow[pCur->nRow++];
+        int idx = (pPgSet->iFirst + i2) % pPgSet->nAlloc;
+        pRow->eType = ii;
+        pRow->eLoc = HCT_PMAN_LOC_USE;
+        pRow->pgno = pPgSet->aPg[idx].pgno;
+        pRow->iTid = pPgSet->aPg[idx].iTid;
+      }
       for(pSet=pClient->pServer->aList[ii].pHead; pSet; pSet=pSet->pNext){
         hctPagesetRows(pCur, pSet, ii, HCT_PMAN_LOC_SERVER);
       }

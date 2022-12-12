@@ -2274,6 +2274,17 @@ int sqlite3HctBtreePragma(Btree *pBt, char **aFnctl){
     rc = SQLITE_OK;
     zRet = hctDbMPrintf(&rc, "%d", p->config.nTryBeforeUnevict);
   }
+  else if( 0==sqlite3_stricmp("hct_npageset", zLeft) ){
+    int iVal = 0;
+    if( zRight ){
+      iVal = sqlite3Atoi(zRight);
+    }
+    if( iVal>0 ){
+      p->config.nPageSet = iVal;
+    }
+    rc = SQLITE_OK;
+    zRet = hctDbMPrintf(&rc, "%d", p->config.nPageSet);
+  }
   else if( 0==sqlite3_stricmp("hct_ncasfail", zLeft) ){
     rc = SQLITE_OK;
     zRet = hctDbMPrintf(&rc, "%lld", sqlite3HctDbNCasFail(p->pHctDb));
