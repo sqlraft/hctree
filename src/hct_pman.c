@@ -538,6 +538,9 @@ u32 sqlite3HctPManAllocPg(
   /* Check if the client has a usable page already. If so, return early. */
   if( pSet->nPg>0 && pSet->aPg[pSet->iFirst].iTid<=iSafeTid ){
     u32 pgno = pSet->aPg[pSet->iFirst].pgno;
+
+    pman_debug(pClient, "alloc", bLogical, pgno, pSet->aPg[pSet->iFirst].iTid);
+
     pSet->iFirst = (pSet->iFirst+1) % pSet->nAlloc;
     pSet->nPg--;
     return pgno;
@@ -575,6 +578,7 @@ u32 sqlite3HctPManAllocPg(
   if( rc==SQLITE_OK ){
     int ii;
     if( pPgset ){
+      pman_debug_new_pageset(pPgset, bLogical, iSafeTid, pPgset->iMaxTid);
       rc = hctPManMakeSpace(pClient, bLogical, pPgset->nPg);
       if( rc==SQLITE_OK ){
         for(ii=pPgset->nPg-1; ii>=0; ii--){
@@ -586,6 +590,7 @@ u32 sqlite3HctPManAllocPg(
       rc = hctPManMakeSpace(pClient, bLogical, nPageSet);
       if( rc==SQLITE_OK ){
         u32 iPg = sqlite3HctFilePageRangeAlloc(pFile, bLogical, nPageSet);
+        pman_debug_new_pageset(0, bLogical, iSafeTid, -1);
         for(ii=nPageSet-1; ii>=0; ii--){
           hctPManAddFree(pClient, bLogical, iPg+ii, 0);
         }
@@ -614,6 +619,7 @@ void sqlite3HctPManFreePg(
   int bLogical                    /* True for logical, false for physical */
 ){
   int rc = SQLITE_OK;
+  pman_debug(pClient, "free", bLogical, iPg, iTid);
   rc = hctPManMakeSpace(pClient, bLogical, 1);
   if( rc==SQLITE_OK ){
     hctPManAddFree(pClient, bLogical, iPg, iTid);

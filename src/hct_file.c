@@ -612,7 +612,11 @@ static int hctFileServerInitUnlinkLog(void *pDummy, const char *zFile){
 }
 
 
-static int hctFileServerInit(HctFileServer *p, const char *zFile){
+static int hctFileServerInit(
+  HctFileServer *p, 
+  HctConfig *pConfig, 
+  const char *zFile
+){
   int rc = SQLITE_OK;
   assert( sqlite3_mutex_held(p->pMutex) );
   if( p->pMapping==0 ){
@@ -703,15 +707,17 @@ static int hctFileServerInit(HctFileServer *p, const char *zFile){
     **      to indicate no snapshot). We set it to 5.
     */
     if( rc==SQLITE_OK && hctFilePagemapGet(pMapping, 1)==0 ){
+      const int nPageSet = pConfig->nPageSet;
       const u64 f = HCT_PMF_PHYSICAL_IN_USE
                   | HCT_PMF_LOGICAL_IN_USE 
                   | HCT_PMF_LOGICAL_IS_ROOT;
       u8 *a1 = (u8*)hctPagePtr(pMapping, HCT_ROOTPAGE_SCHEMA);
       u8 *a2 = (u8*)hctPagePtr(pMapping, HCT_ROOTPAGE_META);
       hctFilePagemapSetDirect(
-          pMapping, HCT_PAGEMAP_LOGICAL_EOF, HCT_FIRST_LOGICAL-1
+          pMapping, HCT_PAGEMAP_LOGICAL_EOF, nPageSet
       );
-      hctFilePagemapSetDirect(pMapping, HCT_PAGEMAP_PHYSICAL_EOF, 2);
+      hctFilePagemapSetDirect(pMapping, HCT_PAGEMAP_PHYSICAL_EOF, nPageSet);
+
       hctFilePagemapSetDirect(pMapping, HCT_PAGEMAP_COMMITID, 5);
       hctFilePagemapSetDirect(pMapping, 1, 1 | f);
       hctFilePagemapSetDirect(pMapping, 2, 2 | f);
@@ -862,7 +868,7 @@ HctFile *sqlite3HctFileOpen(int *pRc, const char *zFile, HctConfig *pConfig){
     if( rc==SQLITE_OK ){
       HctFileServer *pServer = pNew->pServer;
       sqlite3_mutex_enter(pServer->pMutex);
-      rc = hctFileServerInit(pServer, zFile);
+      rc = hctFileServerInit(pServer, pConfig, zFile);
       if( rc==SQLITE_OK ){
         pNew->szPage = pServer->szPage;
         pNew->pMapping = pServer->pMapping;
