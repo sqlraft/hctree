@@ -17,6 +17,7 @@ typedef unsigned int u32;
 typedef struct HctConfig HctConfig;
 struct HctConfig {
   int nPageSet;                   /* Used by hct_pman.c */
+  int nTidStep;                   /* Used by hct_pman.c */
   int nTryBeforeUnevict;
   int bQuiescentIntegrityCheck;   /* PRAGMA hct_quiescent_integrity_check */
 };
@@ -25,8 +26,9 @@ struct HctConfig {
 #define HCT_PGNO_MASK ((u64)0xFFFFFFFF)
 
 #define HCT_DEFAULT_NPAGESET          256
-
 #define HCT_DEFAULT_NTRYBEFOREUNEVICT 100
+#define HCT_DEFAULT_NTIDSTEP          128
+
 
 #include <hctTMapInt.h>
 
@@ -282,7 +284,7 @@ int sqlite3HctFilePageGetPhysical(HctFile *pFile, u32 iPg, HctFilePage *pPg);
 int sqlite3HctFilePageNewPhysical(HctFile *pFile, HctFilePage *pPg);
 
 u64 sqlite3HctFileAllocateTransid(HctFile *pFile);
-u64 sqlite3HctFileAllocateCID(HctFile *pFile);
+u64 sqlite3HctFileAllocateCID(HctFile *pFile, int);
 u64 sqlite3HctFileGetSnapshotid(HctFile *pFile);
 
 HctTMapClient *sqlite3HctFileTMapClient(HctFile*);
@@ -310,8 +312,6 @@ const char *sqlite3HctFileName(HctFile *pFile);
 int sqlite3HctFileFindLogs(HctFile*, void*, int(*)(void*, const char*));
 
 u32 sqlite3HctFilePageMapping(HctFile *pFile, u32 iLogical, int *pbEvicted);
-
-int sqlite3HctFilePragmaTidStep(HctFile *pFile, int iVal);
 
 void sqlite3HctFileICArrays(HctFile*, u8**, u32*, u8**, u32*);
 int sqlite3HctFileTreeFree(HctFile *, u32, int);

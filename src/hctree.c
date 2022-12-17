@@ -485,6 +485,7 @@ int sqlite3HctBtreeOpen(
     pNew->openFlags = flags;
     pNew->config.nPageSet = HCT_DEFAULT_NPAGESET;
     pNew->config.nTryBeforeUnevict = HCT_DEFAULT_NTRYBEFOREUNEVICT;
+    pNew->config.nTidStep = HCT_DEFAULT_NTIDSTEP;
     rc = sqlite3HctTreeNew(&pNew->pHctTree);
     pNew->pFakePager = (Pager*)sqlite3HctMalloc(&rc, 4096);
   }else{
@@ -2294,8 +2295,10 @@ int sqlite3HctBtreePragma(Btree *pBt, char **aFnctl){
     if( zRight ){
       iVal = sqlite3Atoi(zRight);
     }
-    iVal = sqlite3HctFilePragmaTidStep(sqlite3HctDbFile(p->pHctDb), iVal);
-    zRet = hctDbMPrintf(&rc, "%d", iVal);
+    if( iVal>0 ){
+      p->config.nTidStep = iVal;
+    }
+    zRet = hctDbMPrintf(&rc, "%d", p->config.nTidStep);
   }
   else if( 0==sqlite3_stricmp("hct_quiescent_integrity_check", zLeft) ){
     int iVal = 0;

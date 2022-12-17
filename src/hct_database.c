@@ -260,6 +260,7 @@ struct HctDatabase {
   HctDbWriter pa;
   HctDbCsr rbackcsr;              /* Used to find old values during rollback */
   u64 iTid;                       /* Transaction id for writing */
+  u64 nWriteCount;                /* Write-count at start of commit */
 
   int eMode;                      /* HCT_MODE_XXX constant */
 
@@ -4982,6 +4983,7 @@ int sqlite3HctDbStartWrite(HctDatabase *p, u64 *piTid){
   hctDbPageArrayReset(&p->pa.writepg);
   hctDbPageArrayReset(&p->pa.discardpg);
 
+  p->nWriteCount = sqlite3HctFileWriteCount(p->pFile);
   p->iTid = sqlite3HctFileAllocateTransid(p->pFile);
   rc = sqlite3HctTMapNewTID(pTMapClient, p->iSnapshotId, p->iTid, &p->pTmap);
   *piTid = p->iTid;
@@ -5748,9 +5750,13 @@ sqlite3HctDbValidate(HctDatabase *pDb, u64 *piCid){
   u64 iCid = 0;
   int rc = SQLITE_OK;
 
+  int nWrite = sqlite3HctFileWriteCount(pDb->pFile) - pDb->nWriteCount;
+  assert( nWrite>=0 );
+  if( nWrite==0 ) nWrite = 1;
+
   assert( *pEntry==0 );
   HctAtomicStore(pEntry, HCT_TMAP_VALIDATING);
-  iCid = sqlite3HctFileAllocateCID(pDb->pFile);
+  iCid = sqlite3HctFileAllocateCID(pDb->pFile, nWrite);
   HctAtomicStore(pEntry, HCT_TMAP_VALIDATING | iCid);
 
   assert( pDb->eMode==HCT_MODE_NORMAL );
@@ -5758,7 +5764,7 @@ sqlite3HctDbValidate(HctDatabase *pDb, u64 *piCid){
   /* If iCid is one more than pDb->iSnapshotId, then this transaction is
   ** being applied against the snapshot that it was run against. In this
   ** case we can skip validation entirely. */
-  if( iCid!=pDb->iSnapshotId+1 ){
+  if( iCid!=pDb->iSnapshotId+nWrite ){
     pDb->eMode = HCT_MODE_VALIDATE;
     if( hctDbValidateMeta(pDb) ){
       rc = HCT_SQLITE_BUSY;
