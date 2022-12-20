@@ -42,7 +42,7 @@
 #define HCT_TMAP_COMMITTED   (((u64)0x03) << 56)
 
 #define HCT_TMAP_STATE_MASK  (((u64)0x07) << 56)
-#define HCT_TMAP_CID_MASK   ~(((u64)0x07) << 56)
+#define HCT_TMAP_CID_MASK   ~(((u64)0xFF) << 56)
 
 /*
 ** There is a single object of this type for each distinct database 
@@ -66,12 +66,22 @@ typedef struct HctTMapClient HctTMapClient;
 typedef struct HctTMap HctTMap;
 
 /*
+** A transaction-map object.
 **
+** iMinTid:
+**   This, and all smaller TID values have been finalized (fully committed
+**   or rolled back). The client may not query the map for any TID values
+**   less than or equal to this one.
+**
+** iMinCid:
+**   This an all smaller CID values were committed
 */
 struct HctTMap {
   /* Snapshot locking values */
+#if 0
   u64 iMinCid;                    /* This + all smaller CIDs fully committed */
   u64 iMinTid;                    /* This + all smaller TIDs fully committed */
+#endif
 
   /* Transaction map */
   u64 iFirstTid;                  /* TID corresponding to aaMap[0][0] */
@@ -88,7 +98,7 @@ void sqlite3HctTMapServerFree(HctTMapServer *p);
 /*
 ** Connect/disconnect a tmap client object.
 */
-int sqlite3HctTMapClientNew(HctTMapServer *p, HctTMapClient **ppClient);
+int sqlite3HctTMapClientNew(HctTMapServer*, HctConfig*, HctTMapClient**);
 void sqlite3HctTMapClientFree(HctTMapClient *pClient);
 
 /*
@@ -101,12 +111,12 @@ int sqlite3HctTMapEnd(HctTMapClient *p, u64 iCID);
 /*
 ** Return a TID value for which:
 **
-**    * the transactions associated with it and all smaller TID values
-**      have been completely committed, and
+**    1. the transactions associated with it and all smaller TID values
+**       have been finalized (marked as committed or rolled back), and
 **
-**    * the transactions associated with it and all smaller TID values
-**      are included in the snapshots accessed by all current and future
-**      readers.
+**    2. the transactions associated with it and all smaller TID values
+**       are included in the snapshots accessed by all current and future
+**       readers.
 **
 ** All physical and logical pages freed by transactions with TIDs equal to 
 ** or smaller than the returned value may now be reused without disturbing
@@ -114,9 +124,7 @@ int sqlite3HctTMapEnd(HctTMapClient *p, u64 iCID);
 */
 u64 sqlite3HctTMapSafeTID(HctTMapClient*);
 
-int sqlite3HctTMapNewTID(HctTMapClient *p, u64 iCid, u64 iTid, HctTMap **ppMap);
-
-int sqlite3HctTMapClientPragmaTidStep(HctTMapClient *p, int iVal);
+int sqlite3HctTMapNewTID(HctTMapClient *p, u64 iTid, HctTMap **ppMap);
 
 /*
 ** Return TID value T for all transactions with tid values less than or
@@ -126,4 +134,6 @@ int sqlite3HctTMapClientPragmaTidStep(HctTMapClient *p, int iVal);
 u64 sqlite3HctTMapCommitedTID(HctTMapClient*);
 
 i64 sqlite3HctTMapStats(sqlite3 *db, int iStat, const char **pzStat);
+
+void sqlite3HctTMapScan(HctTMapClient*);
 

@@ -43,6 +43,8 @@
 **
 ** A new HctTMap object is created by a writer after it is allocated
 ** its TID iff:
+** 
+** TODO: This all needs updating!!!
 **
 **   *  The expression (iNewTid % HctTMapServer.nTidStep)==0 is true, or
 **   *  The existing transaction map is too small to contain an entry
@@ -136,16 +138,30 @@ struct HctTMapStats {
 };
 
 
+/*
+** iLockValue:
+**   This field contains two things - a flag and a safe-tid value. The flag
+**   is set whenever a read transaction is active, and clear otherwise.
+**   The safe-tid value is set to a TID value for which itself an all smaller
+**   TID values are included in the connections transactions - current and
+**   future.
+**
+**   Pages freed by the transaction with the safe-tid value may be reused
+**   without disturbing this client.
+**
+** pNextClient:
+**   Linked list of all clients associated with pServer.
+*/
 struct HctTMapClient {
   HctTMapServer *pServer;
-  int eState;
-  u64 iDerefCID;                  /* Drop all references at/after this CID */
-  int iRef;                       /* Current entry in aRef[2], or -1 for none */
-  u64 iThisTid;                   /* TID of current/last transaction */
-  u64 iLocalMinTid;
-  HctTMapRef aRef[2];             /* Pair of tmap references */
+  HctConfig *pConfig;
+  u64 iLockValue;
+  HctTMapClient *pNextClient;
+  HctTMapFull *pMap;
   HctTMapStats stats;
 };
+
+#define HCT_LOCKVALUE_ACTIVE (((u64)0x01) << 56)
 
 /*
 ** Values for HctTMapClient.eState
@@ -161,21 +177,28 @@ struct HctTMapClient {
 */
 struct HctTMapServer {
   sqlite3_mutex *pMutex;          /* Mutex to protect this object */
-  int nTidStep;
   int nClient;                    /* Number of connected clients */
   u64 iMinMinTid;                 /* Smallest iMinTid value in pList */
   HctTMapFull *pList;             /* List of tmaps. Newest first */
+  HctTMapClient *pClientList;     /* List of clients */
 };
 
-#define HCT_TMAP_NTIDSTEP 128
-// #define HCT_TMAP_NTIDSTEP 1024
-
+/*
+** nRef:
+**   Number of clients that hold a pointer to this object.
+*/
 struct HctTMapFull {
   HctTMap m;
-  HctTMapRef *pRefList;
+  int nRef;                       /* Number of pointers to this object */
   HctTMapFull *pNext;             /* Next entry in HctTMapServer.pList */
 };
 
+/*
+** ENTER_TMAP_MUTEX(pClient) implementation.
+**
+** Grab the server mutex. And update client-stats as required at the same
+** time.
+*/
 static void hctTMapMutexEnter(HctTMapClient *pClient){
   sqlite3_mutex *pMutex = pClient->pServer->pMutex;
   pClient->stats.nMutex++;
@@ -184,7 +207,6 @@ static void hctTMapMutexEnter(HctTMapClient *pClient){
     sqlite3_mutex_enter(pMutex);
   }
 }
-
 
 #if 0
 #define ENTER_TMAP_MUTEX(pClient) sqlite3_mutex_enter(pClient->pServer->pMutex)
@@ -201,39 +223,39 @@ static void hctTMapMutexEnter(HctTMapClient *pClient){
 **   *pPtr = iNew;
 **   return 1;
 */
+#if 0
 static int hctTMapBoolCAS32(u32 *pPtr, u32 iOld, u32 iNew){
+  return HctCASBool(pPtr, iOld, iNew);
+}
+#endif
+static int hctTMapBoolCAS64(u64 *pPtr, u64 iOld, u64 iNew){
   return HctCASBool(pPtr, iOld, iNew);
 }
 
 /*
 ** Allocate the initial HctTMapFull object for the server passed as the
-** only argument.
+** only argument. This is called as part of sqlite3HctTMapServerNew().
 */
 static int hctTMapInit(HctTMapServer *p, u64 iFirstTid){
   int rc = SQLITE_OK;
-  HctTMapFull *pNew;
+  int nMap = 3;
+  int nByte = 0;
+  u64 iFirst = (iFirstTid / HCT_TMAP_PAGESIZE) * HCT_TMAP_PAGESIZE;
+  HctTMapFull *pNew = 0;
 
   assert( p->pList==0 );
-  assert( (iFirstTid & HCT_TID_MASK)==iFirstTid );
+  assert( (iFirstTid & HCT_TMAP_CID_MASK)==iFirstTid );
 
-  pNew = (HctTMapFull*)sqlite3MallocZero(sizeof(HctTMapFull) * sizeof(u64*)*3);
-  if( pNew==0 ){
-    rc = SQLITE_NOMEM_BKPT;
-  }else{
+  nByte = sizeof(HctTMapFull) + sizeof(u64*)*3;
+  pNew = (HctTMapFull*)sqlite3HctMalloc(&rc, nByte);
+  if( pNew ){
     int i;
-    pNew->m.iMinCid = 1;
-    pNew->m.iMinTid = iFirstTid-1;
-    pNew->m.iFirstTid = iFirstTid;
-    pNew->m.nMap = 3;
+    pNew->m.iFirstTid = iFirst;
+    pNew->m.nMap = nMap;
     pNew->m.aaMap = (u64**)&pNew[1];
     for(i=0; i<pNew->m.nMap; i++){
-      u64 *a = (u64*)sqlite3MallocZero(sizeof(u64)*HCT_TMAP_PAGESIZE);
-      if( a==0 ){
-        rc = SQLITE_NOMEM_BKPT;
-        break;
-      }else{
-        pNew->m.aaMap[i] = a;
-      }
+      u64 *a = (u64*)sqlite3HctMalloc(&rc, sizeof(u64)*HCT_TMAP_PAGESIZE);
+      pNew->m.aaMap[i] = a;
     }
 
     if( rc!=SQLITE_OK ){
@@ -244,6 +266,7 @@ static int hctTMapInit(HctTMapServer *p, u64 iFirstTid){
       sqlite3_free(pNew);
     }else{
       p->pList = pNew;
+      pNew->nRef = 1;             /* Server reference */
     }
   }
 
@@ -263,7 +286,6 @@ int sqlite3HctTMapServerNew(u64 iFirstTid, HctTMapServer **pp){
       rc = SQLITE_NOMEM_BKPT;
     }else{
       pNew->iMinMinTid = iFirstTid;
-      pNew->nTidStep = HCT_TMAP_NTIDSTEP;
       rc = hctTMapInit(pNew, iFirstTid);
     }
   }
@@ -277,139 +299,106 @@ int sqlite3HctTMapServerNew(u64 iFirstTid, HctTMapServer **pp){
   return rc;
 }
 
-void sqlite3HctTMapServerFree(HctTMapServer *p){
-  if( p ){
-    sqlite3_mutex_free(p->pMutex);
-    if( p->pList ){
-      int i;
-      HctTMapFull *pIter;
-      HctTMapFull *pNext;
-      for(i=0; i<p->pList->m.nMap; i++){
-        sqlite3_free(p->pList->m.aaMap[i]);
-      }
-      for(pIter=p->pList; pIter; pIter=pNext){
-        pNext = pIter->pNext;
-        assert( pIter->pRefList==0 );
-        sqlite3_free(pIter);
+/*
+** Argument pMap is an HctTMapFull object that is currently linked
+** into the list at HctTMapServer.pList. This function removes pMap
+** from that list and frees all associated allocations.
+*/
+static void hctTMapFreeMap(HctTMapServer *p, HctTMapFull *pMap){
+  int nFree = 0;
+  int ii;
+
+  assert( pMap && pMap->nRef==0 );
+  if( pMap==p->pList ){
+    if( pMap->pNext==0 ) nFree = pMap->m.nMap;
+    p->pList = pMap->pNext;
+  }else{
+    HctTMapFull *pPrev;
+    for(pPrev=p->pList; pPrev->pNext!=pMap; pPrev=pPrev->pNext);
+    if( pMap->pNext==0 ){
+      for(nFree=0; nFree<pMap->m.nMap; nFree++){
+        if( pMap->m.aaMap[nFree]==pPrev->m.aaMap[0] ) break;
       }
     }
+    pPrev->pNext = pMap->pNext;
+  }
+
+  for(ii=0; ii<nFree; ii++){
+    sqlite3_free(pMap->m.aaMap[ii]);
+  }
+  sqlite3_free(pMap);
+
+}
+
+/*
+** Free a tmap-server object.
+*/
+void sqlite3HctTMapServerFree(HctTMapServer *p){
+  if( p ){
+    assert( p->pClientList==0 );
+    sqlite3_mutex_free(p->pMutex);
+
+    assert( p->pList==0 || p->pList->nRef==1 );
+    if( p->pList ) p->pList->nRef--;
+    while( p->pList ){
+      HctTMapFull *pMap = p->pList;
+      while( pMap->pNext ) pMap = pMap->pNext;
+      hctTMapFreeMap(p, pMap);
+    }
+
     sqlite3_free(p);
   }
 }
 
-int sqlite3HctTMapClientNew(HctTMapServer *p, HctTMapClient **ppClient){
+int sqlite3HctTMapClientNew(
+  HctTMapServer *p, 
+  HctConfig *pConfig,
+  HctTMapClient **ppClient
+){
   int rc = SQLITE_OK;
   HctTMapClient *pNew;
-  pNew = (HctTMapClient*)sqlite3MallocZero(sizeof(HctTMapClient));
-  if( pNew==0 ){
-    rc = SQLITE_NOMEM_BKPT;
-  }else{
+
+  pNew = (HctTMapClient*)sqlite3HctMalloc(&rc, sizeof(HctTMapClient));
+  if( pNew ){
     pNew->pServer = p;
+    pNew->pConfig = pConfig;
     ENTER_TMAP_MUTEX(pNew);
-    HctAtomicStore(&p->nClient, p->nClient+1);
+    /* Under cover of the server mutex, link this new client into the 
+    ** list of clients associated with the server. The minimum TID value
+    ** for the client is set to the current global minimum. */
+    pNew->iLockValue = p->iMinMinTid;
+    pNew->pNextClient = p->pClientList;
+    pNew->pMap = p->pList;
+    pNew->pMap->nRef++;
+    p->pClientList = pNew;
     LEAVE_TMAP_MUTEX(pNew);
   }
   *ppClient = pNew;
   return rc;
 }
 
-static void hctTMapGetRef(HctTMapServer *p, HctTMapRef *pRef){
-  HctTMapFull *pMap;
+void sqlite3HctTMapClientFree(HctTMapClient *pClient){
+  if( pClient ){
+    HctTMapClient **pp;
+    ENTER_TMAP_MUTEX(pClient);
 
-  assert( sqlite3_mutex_held(p->pMutex) );
-  assert( pRef->pMap==0 );
-  assert( pRef->refMask==0 );
-  assert( pRef->pRefNext==0 );
-  assert( pRef->pRefPrev==0 );
-
-  pMap = p->pList;
-  pRef->pRefNext = pMap->pRefList;
-  pMap->pRefList = pRef;
-  if( pRef->pRefNext ){
-    assert( pRef->pRefNext->pRefPrev==0 );
-    pRef->pRefNext->pRefPrev = pRef;
-  }
-  pRef->refMask = HCT_TMAPREF_SERVER;
-  pRef->pMap = pMap;
-}
-
-static void hctTMapDropMap(HctTMapServer *p, HctTMapFull *pMap){
-  HctTMapFull *pPrev;
-
-  assert( sqlite3_mutex_held(p->pMutex) );
-  assert( pMap->pRefList==0 && pMap!=p->pList );
-
-  for(pPrev=p->pList; pPrev->pNext!=pMap; pPrev=pPrev->pNext){
-    assert( pPrev->m.iMinTid>=pPrev->pNext->m.iMinTid );
-    assert( pPrev->m.iMinTid>=p->iMinMinTid );
-  }
-  pPrev->pNext = pMap->pNext;
-
-#if 0
-  printf("dropping tmap object - iVal = %lld, last=%s\n", (i64)iVal,
-      pMap->pNext ? "no" : "yes"
-  );
-#endif
-
-  if( pMap->pNext==0 ){
-    int nDel = 0;
-    int ii;
-    HctAtomicStore(&p->iMinMinTid, pPrev->m.iMinTid);
-    assert( pPrev->m.iFirstTid>=pMap->m.iFirstTid );
-    assert( ((pPrev->m.iFirstTid-pMap->m.iFirstTid) % HCT_TMAP_PAGESIZE)==0 );
-
-    nDel = (pPrev->m.iFirstTid-pMap->m.iFirstTid) / HCT_TMAP_PAGESIZE;
-    for(ii=0; ii<nDel; ii++){
-      sqlite3_free(pMap->m.aaMap[ii]);
+    pClient->pMap->nRef--;
+    if( pClient->pMap->nRef==0 ){
+      hctTMapFreeMap(pClient->pServer, pClient->pMap);
     }
-    assert( pPrev->m.aaMap[0]==pMap->m.aaMap[nDel] );
+
+    /* Remove this client from the HctTMapServer.pClientList list */
+    for(pp=&pClient->pServer->pClientList;*pp!=pClient;pp=&(*pp)->pNextClient);
+    *pp = pClient->pNextClient;
+
+    LEAVE_TMAP_MUTEX(pClient);
+    sqlite3_free(pClient);
   }
-  sqlite3_free(pMap);
 }
 
 /*
-** Called to drop the reference held by object pRef, if any. The server 
-** mutex must be held to call this function.
+** Return a pointer to the slot in pMap associated with TID iTid.
 */
-static void hctTMapDropRef(HctTMapServer *p, HctTMapRef *pRef){
-  HctTMapFull *pMap = pRef->pMap;
-  assert( sqlite3_mutex_held(p->pMutex) );
-  if( pMap ){
-
-    /* Check list pointers look Ok */
-    assert( pRef->pRefNext==0 || pRef->pRefNext->pRefPrev==pRef );
-    assert( pRef->pRefPrev==0 || pRef->pRefPrev->pRefNext==pRef );
-    assert( pRef->pRefPrev!=0 || pRef==pMap->pRefList );
-
-    /* Unlink the reference from the linked-list at HctTMapFull.pList */
-    if( pRef->pRefNext ){
-      pRef->pRefNext->pRefPrev = pRef->pRefPrev;
-    }
-    if( pRef->pRefPrev ){
-      pRef->pRefPrev->pRefNext = pRef->pRefNext;
-    }else{
-      pMap->pRefList = pRef->pRefNext;
-    }
-
-    /* Zero the reference object */
-    memset(pRef, 0, sizeof(HctTMapRef));
-
-    /* If the HctTMapFull object is no longer required: 
-    **
-    **   1. remove it from the HctTMapServer.pList list,
-    **   2. update HctTMapServer.iMinMinTid if possible, and
-    **   3. free the object itself.
-    */
-    if( pMap->pRefList==0 && pMap!=p->pList ){
-      hctTMapDropMap(p, pMap);
-    }
-  }
-  assert( pRef->refMask==0 );
-  assert( pRef->pRefNext==0 );
-  assert( pRef->pRefPrev==0 );
-  assert( pRef->pMap==0 );
-}
-
 static u64 *hctTMapFind(HctTMapFull *pMap, u64 iTid){
   int iOff = iTid - pMap->m.iFirstTid;
   int iMap = iOff / HCT_TMAP_PAGESIZE;
@@ -419,58 +408,53 @@ static u64 *hctTMapFind(HctTMapFull *pMap, u64 iTid){
 
 
 int sqlite3HctTMapBegin(HctTMapClient *pClient, HctTMap **ppMap){
-  HctTMapRef *pRef;
-  HctTMapFull *pMap = 0;
-  assert( pClient->eState==HCT_CLIENT_NONE );
+  HctTMapFull *pMap = pClient->pMap;
+  u64 iEof = pMap->m.iFirstTid + pMap->m.nMap*HCT_TMAP_PAGESIZE;
 
-  pRef = &pClient->aRef[pClient->iRef];
   while( 1 ){
-    if( hctTMapBoolCAS32(&pRef->refMask, HCT_TMAPREF_SERVER,HCT_TMAPREF_BOTH) ){
-      break;
-    }else{
-      assert( HctAtomicLoad(&pRef->refMask)==0 );
-      ENTER_TMAP_MUTEX(pClient);
-      hctTMapGetRef(pClient->pServer, pRef);
-      LEAVE_TMAP_MUTEX(pClient);
+    u64 iOrigLockValue = pClient->iLockValue;
+    u64 iLockValue;
+
+    /* Find the new "safe-tid" value */
+    u64 iSafe = (iOrigLockValue & HCT_TMAP_CID_MASK);
+    if( iSafe<pClient->pServer->iMinMinTid ){
+      iSafe = pClient->pServer->iMinMinTid;
     }
-  }
 
-  pMap = pRef->pMap;
-  *ppMap = &pMap->m;
-  pClient->eState = HCT_CLIENT_OPEN;
-
-  if( 1 ){
-    u64 iEof = pMap->m.iFirstTid + pMap->m.nMap*HCT_TMAP_PAGESIZE;
-    u64 iLocalMin = pClient->iLocalMinTid;
-    if( pMap->m.iMinTid>iLocalMin ) iLocalMin = pMap->m.iMinTid;
-    for( ; iLocalMin<(iEof-1); iLocalMin++){
-      u64 iVal = HctAtomicLoad( hctTMapFind(pMap, iLocalMin+1) );
+    while( iSafe<(iEof-1) ){
+      u64 iVal = HctAtomicLoad( hctTMapFind(pMap, iSafe+1) );
       u64 eState = (iVal & HCT_TMAP_STATE_MASK);
       if( eState!=HCT_TMAP_COMMITTED && eState!=HCT_TMAP_ROLLBACK ) break;
+      iSafe++;
     }
-    pClient->iLocalMinTid = iLocalMin;
+
+    /* Set the lock-value. If this fails, it means some writer process
+    ** has increased the safe-tid value for us. */
+    assert( (iOrigLockValue & HCT_LOCKVALUE_ACTIVE)==0 );
+    iLockValue = iSafe | HCT_LOCKVALUE_ACTIVE;
+    if( hctTMapBoolCAS64(&pClient->iLockValue, iOrigLockValue, iLockValue) ){
+      break;
+    }
   }
 
+  *ppMap = (HctTMap*)pMap;
   return SQLITE_OK;
 }
 
 u64 sqlite3HctTMapCommitedTID(HctTMapClient *pClient){
-  return pClient->iLocalMinTid;
+  return (pClient->iLockValue & HCT_TMAP_CID_MASK);
 }
 
 static void hctTMapUpdateSafe(HctTMapClient *pClient){
   assert( sqlite3_mutex_held(pClient->pServer->pMutex) );
-  if( pClient->eState==HCT_CLIENT_UP ){
-    hctTMapDropRef(pClient->pServer, &pClient->aRef[pClient->iRef]);
-  }else{
-    assert( pClient->eState==HCT_CLIENT_OPEN );
-    assert( pClient->aRef[!pClient->iRef].refMask==0 );
-    pClient->iRef = !pClient->iRef;
-    pClient->eState = HCT_CLIENT_UP;
+  if( pClient->pMap!=pClient->pServer->pList ){
+    pClient->pMap->nRef--;
+    if( pClient->pMap->nRef==0 ){
+      hctTMapFreeMap(pClient->pServer, pClient->pMap);
+    }
+    pClient->pMap = pClient->pServer->pList;
+    pClient->pMap->nRef++;
   }
-
-  hctTMapGetRef(pClient->pServer, &pClient->aRef[pClient->iRef]);
-  pClient->aRef[pClient->iRef].refMask = HCT_TMAPREF_BOTH;
 }
 
 /*
@@ -482,11 +466,10 @@ static void hctTMapUpdateSafe(HctTMapClient *pClient){
 ** SQLITE_OK is returned if successful.
 */
 int sqlite3HctTMapUpdate(HctTMapClient *pClient, HctTMap **ppMap){
-  assert( pClient->eState==HCT_CLIENT_OPEN || pClient->eState==HCT_CLIENT_UP );
   ENTER_TMAP_MUTEX(pClient);
   hctTMapUpdateSafe(pClient);
   LEAVE_TMAP_MUTEX(pClient);
-  *ppMap = &pClient->aRef[pClient->iRef].pMap->m;
+  *ppMap = (HctTMap*)pClient->pMap;
   return SQLITE_OK;
 }
 
@@ -496,219 +479,133 @@ int sqlite3HctTMapUpdate(HctTMapClient *pClient, HctTMap **ppMap){
 ** based.
 */
 int sqlite3HctTMapEnd(HctTMapClient *pClient, u64 iCID){
-  HctTMapRef *pRef;
-  assert( pClient->eState==HCT_CLIENT_OPEN || pClient->eState==HCT_CLIENT_UP );
+  while( 1 ){
+    u64 iOrigLockValue = pClient->iLockValue;
+    u64 iLockValue;
 
-  if( pClient->iDerefCID==0 ){
-    pClient->iDerefCID = iCID + pClient->pServer->nTidStep;
+    assert( (iOrigLockValue & HCT_LOCKVALUE_ACTIVE)!=0 );
+    iLockValue = (iOrigLockValue & ~HCT_LOCKVALUE_ACTIVE);
+    if( hctTMapBoolCAS64(&pClient->iLockValue, iOrigLockValue, iLockValue) ){
+      break;
+    }
   }
-
-  /* If the client currently holds two references, drop the older of the two */
-  if( pClient->eState==HCT_CLIENT_UP ){
-    pRef = &pClient->aRef[!pClient->iRef];
-    assert( HctAtomicLoad(&pRef->refMask) & HCT_TMAPREF_CLIENT );
-    ENTER_TMAP_MUTEX(pClient);
-    hctTMapDropRef(pClient->pServer, pRef);
-    LEAVE_TMAP_MUTEX(pClient);
-  }
-
-  /* Check if the current reference also needs to be dropped. It needs to
-  ** dropped if either:
-  **
-  **   * The CID value passed as the second argument to this function
-  **     indicates it is time to do so, or
-  **   * The HCT_TMAPREF_SERVER flag has been cleared on the reference.
-  */
-  pRef = &pClient->aRef[pClient->iRef];
-  if( iCID>=pClient->iDerefCID
-   || 0==hctTMapBoolCAS32(&pRef->refMask, HCT_TMAPREF_BOTH, HCT_TMAPREF_SERVER)
-  ){
-    ENTER_TMAP_MUTEX(pClient);
-    hctTMapDropRef(pClient->pServer, pRef);
-    LEAVE_TMAP_MUTEX(pClient);
-    pClient->iDerefCID = 0;
-  }
-
-  pClient->eState = HCT_CLIENT_NONE;
   return SQLITE_OK;
 }
 
-void sqlite3HctTMapClientFree(HctTMapClient *pClient){
-  if( pClient ){
-    assert( pClient->eState==HCT_CLIENT_NONE );
-    ENTER_TMAP_MUTEX(pClient);
-    hctTMapDropRef(pClient->pServer, &pClient->aRef[0]);
-    hctTMapDropRef(pClient->pServer, &pClient->aRef[1]);
-    HctAtomicStore(&pClient->pServer->nClient, pClient->pServer->nClient-1);
-    LEAVE_TMAP_MUTEX(pClient);
-    sqlite3_free(pClient);
-  }
-}
+/*
+** Allocate a new HctTMapFull object and link it into the list 
+** belonging to server pServer. The new map object is based on
+** the server's current newest - pServer->pList. Relative to this
+** object, the new map:
+**
+**   * appends one mapping page to the end of the map, and
+**
+**   * may remove one or more mapping pages from the start of the
+**     map, based on the current value of HctTMapServer.iMinMinTid.
+**
+** The server mutex must be held to call this function.
+*/
+static int hctTMapNewObject(HctTMapServer *pServer){
+  u64 iFirst = (pServer->iMinMinTid / HCT_TMAP_PAGESIZE) * HCT_TMAP_PAGESIZE;
+  HctTMapFull *pOld = pServer->pList;
+  HctTMapFull *pNew = 0;
+  int nMap = 0;
+  int nDiscard = 0;
+  int nByte = 0;
+  int rc = SQLITE_OK;
 
-static HctTMapFull *hctTMapNewObject(
-  HctTMapServer *pServer,
-  HctTMapFull *pPrev, 
-  u64 iCid,
-  int nMapReq
-){
-  HctTMapFull *pNew;
-  int nMap = MAX(nMapReq, pPrev->m.nMap);
+  assert( sqlite3_mutex_held(pServer->pMutex) );
+  assert( (iFirst % HCT_TMAP_PAGESIZE)==0 );
+  assert( (pOld->m.iFirstTid % HCT_TMAP_PAGESIZE)==0 );
+  assert( (pServer->iMinMinTid & HCT_TMAP_CID_MASK)==pServer->iMinMinTid );
+  assert( (iFirst & HCT_TMAP_CID_MASK)==iFirst );
 
-  pNew = (HctTMapFull*)sqlite3MallocZero(sizeof(HctTMapFull)+nMap*sizeof(u64*));
+  nDiscard = (iFirst - pOld->m.iFirstTid) / HCT_TMAP_PAGESIZE;
+  nMap = pOld->m.nMap + 1 - nDiscard;
+  nByte = sizeof(HctTMapFull) + nMap*sizeof(u64*);
+  pNew = (HctTMapFull*)sqlite3HctMalloc(&rc, nByte);
+
   if( pNew ){
-    int i;
-    u64 iMinTid;
-    u64 iEof = pPrev->m.iFirstTid + pPrev->m.nMap*HCT_TMAP_PAGESIZE;
-    int nSkip;
-    assert( (pPrev->m.iMinTid+1)>=pPrev->m.iFirstTid );
-    for(iMinTid=pPrev->m.iMinTid; iMinTid<(iEof-1); iMinTid++){
-      u64 iVal = HctAtomicLoad( hctTMapFind(pPrev, iMinTid+1) );
-      u64 eState = (iVal & HCT_TMAP_STATE_MASK);
-      if( (eState!=HCT_TMAP_COMMITTED && eState!=HCT_TMAP_ROLLBACK)
-       || (iVal & HCT_TMAP_CID_MASK)>iCid
-      ){
-        break;
-      }
-    }
-    pNew->m.iFirstTid = pPrev->m.iFirstTid;
-    pNew->m.iMinCid = MAX(pPrev->m.iMinCid, iCid);
-    pNew->m.iMinTid = iMinTid;
-
-    nSkip = (pServer->iMinMinTid - pNew->m.iFirstTid) / HCT_TMAP_PAGESIZE;
-    if( nSkip<0 ) nSkip = 0;
-    pNew->m.iFirstTid += (nSkip * HCT_TMAP_PAGESIZE);
-
-    pNew->m.nMap = nMap-nSkip;
+    int ii;
+    pNew->m.iFirstTid = iFirst;
+    pNew->m.nMap = nMap;
     pNew->m.aaMap = (u64**)&pNew[1];
-    for(i=nSkip; i<nMap; i++){
-      if( i<pPrev->m.nMap ){
-        pNew->m.aaMap[i-nSkip] = pPrev->m.aaMap[i];
-      }else{
-        int sz = sizeof(u64) * HCT_TMAP_PAGESIZE;
-        pNew->m.aaMap[i-nSkip] = (u64*)sqlite3MallocZero(sz);
-        if( pNew->m.aaMap[i-nSkip]==0 ){
-          assert( 0 );  /* OOM is unlikely... */
-          for(i=pPrev->m.nMap; i<nMap; i++){
-            sqlite3_free(pNew->m.aaMap[i-nSkip]);
-          }
-          sqlite3_free(pNew);
-          pNew = 0;
-          break;
-        }
-      }
+    pNew->nRef = 1;
+    for(ii=0; ii<(nMap-1); ii++){
+      pNew->m.aaMap[ii] = pOld->m.aaMap[ii+nDiscard];
     }
+    pNew->m.aaMap[ii] = (u64*)sqlite3HctMalloc(
+        &rc, sizeof(u64)*HCT_TMAP_PAGESIZE
+    );
 
+    pServer->pList->nRef--;
+    if( pServer->pList->nRef==0 ){
+      hctTMapFreeMap(pServer, pServer->pList);
+    }
+    pNew->pNext = pServer->pList;
+    pServer->pList = pNew;
   }
 
-  return pNew;
+  return rc;
 }
 
 /*
 ** Return the largest TID for which it is safe to reuse freed pages.
 */
 u64 sqlite3HctTMapSafeTID(HctTMapClient *p){
-  if( HctAtomicLoad(&p->pServer->nClient)==1 ){
-  //  return p->iThisTid-1;
-  }
+  /* TODO: -1? */
   return HctAtomicLoad(&p->pServer->iMinMinTid) - 1;
-}
-
-static void hctTMapUnrefOldClients(HctTMapServer *pServer, u64 iTid){
-  const int nTidMul = 25;
-
-  assert( sqlite3_mutex_held(pServer->pMutex) );
-  if( (pServer->iMinMinTid + (nTidMul * pServer->nTidStep) < iTid) ){
-    HctTMapFull *pMap = pServer->pList->pNext->pNext;
-    while( pMap ){
-      HctTMapFull *pNext = pMap->pNext;
-      HctTMapRef *pRef;
-      HctTMapRef *pNextRef = 0;
-      for(pRef=pMap->pRefList; pRef; pRef=pNextRef){
-        pNextRef = pRef->pRefNext;
-        u32 v1, v2; 
-
-        do {
-          v1 = AtomicLoad(&pRef->refMask);
-          v2 = v1 & ~HCT_TMAPREF_SERVER;
-          if( (v1 & HCT_TMAPREF_SERVER)==0 ){
-            /* Server reference has already been revoked */
-            v2 = 1;
-            break;
-          }
-        }while( 0==hctTMapBoolCAS32(&pRef->refMask, v1, v2) );
-
-        if( v2==0 ){
-          hctTMapDropRef(pServer, pRef);
-        }
-      }
-
-      pMap = pNext;
-    }
-  }
 }
 
 /*
 ** This is called by write transactions immediately after obtaining
 ** the transactions TID value (at the start of the commit process).
-** A new HctTMapFull object is created if either:
-**
-**     *  (iTid % nTidStep)==0 is true, or
-**     *  the current HctTMapFull object is too small to fit the new TID.
-**
-** A pointer to the new HctTMap object is returned to the user via
-** output parameter *ppMap.
 */
 int sqlite3HctTMapNewTID(
   HctTMapClient *p,               /* Transaction map client */
-  u64 iCid,                       /* Snapshot transaction was based on */
   u64 iTid,                       /* TID for write transaction */
   HctTMap **ppMap                 /* OUT: (possibly) new transaction map */
 ){
   int rc = SQLITE_OK;
-  HctTMapFull *pMap = p->aRef[p->iRef].pMap;
-  int nTidStep = p->pServer->nTidStep;
-  int nMapReq = (
-      (iTid - pMap->m.iFirstTid + HCT_TMAP_PAGESIZE) / HCT_TMAP_PAGESIZE
-  );
+  HctTMapFull *pMap = p->pMap;
+  u64 iEof = pMap->m.iFirstTid + ((u64)pMap->m.nMap*HCT_TMAP_PAGESIZE);
 
-  assert( p->eState!=HCT_CLIENT_NONE );
-  assert( (p->aRef[p->iRef].refMask & HCT_TMAPREF_CLIENT) );
-
-  p->iThisTid = iTid;
-  if( (iTid % nTidStep)==0 || nMapReq>pMap->m.nMap ){
+  /* If it is time to do so, allocate a new transaction-map */
+  if( iTid>=iEof || iTid==(iEof - HCT_TMAP_PAGESIZE/2) ){
     ENTER_TMAP_MUTEX(p);
-    pMap = p->pServer->pList;
-    if( (iTid % nTidStep)==0 || nMapReq>pMap->m.nMap ){
-      /* Create a new HctTMapFull object! */
-      HctTMapFull *pNew = hctTMapNewObject(p->pServer, pMap, iCid, nMapReq);
-      if( pNew==0 ){
-        rc = SQLITE_NOMEM_BKPT;
-      }else{
-        HctTMapFull *pOld = pNew->pNext = p->pServer->pList;
-        p->pServer->pList = pNew;
-        if( pOld->pRefList==0 ){
-          hctTMapDropMap(p->pServer, pOld);
-        }
-        hctTMapUnrefOldClients(p->pServer, iTid);
-      }
-    }
     hctTMapUpdateSafe(p);
+    pMap = p->pMap;
+    iEof = pMap->m.iFirstTid + ((u64)pMap->m.nMap*HCT_TMAP_PAGESIZE);
+    if( iTid>=iEof || iTid==(iEof - HCT_TMAP_PAGESIZE/2) ){
+      hctTMapNewObject(p->pServer);
+      hctTMapUpdateSafe(p);
+    }
     LEAVE_TMAP_MUTEX(p);
   }
 
-  *ppMap = &p->aRef[p->iRef].pMap->m;
+  *ppMap = (HctTMap*)p->pMap;
   return rc;
 }
 
-int sqlite3HctTMapClientPragmaTidStep(HctTMapClient *p, int iVal){
-  int iRet;
+void sqlite3HctTMapScan(HctTMapClient *p){
+  HctTMapClient *pClient = 0;
+  u64 iSafe = p->iLockValue & HCT_TMAP_CID_MASK;
+
   ENTER_TMAP_MUTEX(p);
-  if( iVal>1 && p->pServer->nClient==1 ){
-    p->pServer->nTidStep = iVal;
+  for(pClient=p->pServer->pClientList; pClient; pClient=pClient->pNextClient){
+    u64 iVal = HctAtomicLoad(&pClient->iLockValue);
+    u64 iTid = (iVal & HCT_TMAP_CID_MASK);
+
+    if( (iVal & HCT_LOCKVALUE_ACTIVE)==0 && iTid<iSafe ){
+      hctTMapBoolCAS64(&pClient->iLockValue, iVal, iSafe);
+      iVal = HctAtomicLoad(&pClient->iLockValue);
+      iTid = (iVal & HCT_TMAP_CID_MASK);
+    }
+
+    iSafe = MIN(iSafe, iTid);
   }
-  iRet = p->pServer->nTidStep;
+  p->pServer->iMinMinTid = iSafe;
   LEAVE_TMAP_MUTEX(p);
-  return iRet;
 }
 
 i64 sqlite3HctTMapStats(sqlite3 *db, int iStat, const char **pzStat){

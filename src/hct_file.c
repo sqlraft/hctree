@@ -48,8 +48,6 @@
 
 #define HCT_PAGEMAP_TRANSID_EOF      16
 
-#define HCT_PAGEMAP_COMMITID         24
-
 #define HCT_PMF_LOGICAL_EVICTED    (((u64)0x00000001)<<56)
 #define HCT_PMF_LOGICAL_IRREVICTED (((u64)0x00000002)<<56)
 #define HCT_PMF_PHYSICAL_IN_USE    (((u64)0x00000004)<<56)
@@ -150,13 +148,19 @@ struct HctMapping {
 ** eInitState:
 **   Set to one of the HCT_INIT_XXX constants defined below. See comments
 **   above those constants for details.
+**
+** iNextFileId:
+**   Used to allocate unique ids to each HctFile associated with this
+**   HctFileServer object. These ids are used for debugging, and also
+**   to generate log file names.
 */
 struct HctFileServer {
   sqlite3_mutex *pMutex;          /* Mutex to protect this object */
   HctFile *pFileList;
 
-  int iNextFileId;
+  u64 iCommitId;                  /* CID value */
 
+  int iNextFileId;
   char *zPath;                    /* Path to database (fdDb) */
   char *zDir;                     /* Directory component of zPath */
   int fdDb;                       /* Read/write file descriptor */
@@ -214,6 +218,10 @@ struct HctFileStats {
 **   is the current TID while the upper layer is writing the database, and
 **   meaningless at other times. Used by this object as the "current TID"
 **   when freeing a page.
+**
+** nPageAlloc:
+**   The total number of physical page allocations requested by the upper
+**   layer in the lifetime of this object.
 */
 struct HctFile {
   HctConfig *pConfig;             /* Connection configuration object */
@@ -226,6 +234,7 @@ struct HctFile {
   HctPManClient *pPManClient;     /* Transaction map client object */
 
   u64 iCurrentTid;
+  u64 nPageAlloc;
 
   /* Copies of HctFileServer variables */
   int szPage;
@@ -342,6 +351,16 @@ static u64 hctFilePagemapGetSafe(HctMapping *p, u32 iSlot){
     return 0;
   }
   return hctFilePagemapGet(p, iSlot);
+}
+
+static u64 hctFileAtomicIncr(HctFile *pFile, u64 *pPtr, int nIncr){
+  u64 iOld;
+  while( 1 ){
+    iOld = *pPtr;
+    pFile->stats.nIncrAttempt++;
+    if( hctBoolCompareAndSwap64(pPtr, iOld, iOld+nIncr) ) return iOld+nIncr;
+    pFile->stats.nIncrFail++;
+  }
 }
 
 /*
@@ -718,12 +737,14 @@ static int hctFileServerInit(
       );
       hctFilePagemapSetDirect(pMapping, HCT_PAGEMAP_PHYSICAL_EOF, nPageSet);
 
-      hctFilePagemapSetDirect(pMapping, HCT_PAGEMAP_COMMITID, 5);
       hctFilePagemapSetDirect(pMapping, 1, 1 | f);
       hctFilePagemapSetDirect(pMapping, 2, 2 | f);
       sqlite3HctDbRootPageInit(0, a1, p->szPage);
       sqlite3HctDbRootPageInit(0, a2, p->szPage);
     }
+
+    /* Initialize CID value */
+    p->iCommitId = 5;
 
     /* Allocate a transaction map server */
     if( rc==SQLITE_OK ){
@@ -879,7 +900,9 @@ HctFile *sqlite3HctFileOpen(int *pRc, const char *zFile, HctConfig *pConfig){
       sqlite3_mutex_leave(pServer->pMutex);
 
       if( rc==SQLITE_OK ){
-        sqlite3HctTMapClientNew(pServer->pTMapServer, &pNew->pTMapClient);
+        sqlite3HctTMapClientNew(
+            pServer->pTMapServer, pConfig, &pNew->pTMapClient
+        );
       }
       if( rc==SQLITE_OK ){
         pNew->pPManClient = sqlite3HctPManClientNew(
@@ -1103,7 +1126,8 @@ int sqlite3HctFilePageGetPhysical(HctFile *pFile, u32 iPg, HctFilePage *pPg){
 static u32 hctFileAllocPg(int *pRc, HctFile *pFile, int bLogical){
   int rc = *pRc;
   u32 iRet = 0;
-  
+
+  if( bLogical==0 ) pFile->nPageAlloc++;
   iRet = sqlite3HctPManAllocPg(&rc, pFile->pPManClient, pFile, bLogical);
   if( rc==SQLITE_OK ){
     rc = hctFileGrowMappingForSlot(pFile, iRet);
@@ -1385,14 +1409,13 @@ u64 sqlite3HctFileAllocateTransid(HctFile *pFile){
   pFile->iCurrentTid = (iVal & HCT_TID_MASK);
   return pFile->iCurrentTid;
 }
-u64 sqlite3HctFileAllocateCID(HctFile *pFile){
-  u64 iVal = hctFilePagemapIncr(pFile, HCT_PAGEMAP_COMMITID, 1);
-  return iVal & HCT_TID_MASK;
+u64 sqlite3HctFileAllocateCID(HctFile *pFile, int nWrite){
+  assert( nWrite>0 );
+  return hctFileAtomicIncr(pFile, &pFile->pServer->iCommitId, nWrite);
 }
 
 u64 sqlite3HctFileGetSnapshotid(HctFile *pFile){
-  HctMapping *pMap = pFile->pMapping;
-  return hctFilePagemapGet(pMap, HCT_PAGEMAP_COMMITID) & HCT_TID_MASK;
+  return HctAtomicLoad( &pFile->pServer->iCommitId );
 }
 
 int sqlite3HctFilePgsz(HctFile *pFile){
@@ -1564,10 +1587,6 @@ int sqlite3HctFileFindLogs(
   return hctFileFindLogs(pFile->pServer, pCtx, xLog);
 }
 
-int sqlite3HctFilePragmaTidStep(HctFile *pFile, int iVal){
-  return sqlite3HctTMapClientPragmaTidStep(pFile->pTMapClient, iVal);
-}
-
 int sqlite3HctFileRootArray(
   HctFile *pFile, 
   u32 **paiRoot, 
@@ -1610,6 +1629,10 @@ int sqlite3HctFileRootArray(
   *paiRoot = aRoot;
   *pnRoot = nRoot;
   return rc;
+}
+
+u64 sqlite3HctFileWriteCount(HctFile *pFile){
+  return pFile->nPageAlloc;
 }
 
 void sqlite3HctFileICArrays(
