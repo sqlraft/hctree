@@ -485,7 +485,7 @@ int sqlite3HctBtreeOpen(
     pNew->openFlags = flags;
     pNew->config.nPageSet = HCT_DEFAULT_NPAGESET;
     pNew->config.nTryBeforeUnevict = HCT_DEFAULT_NTRYBEFOREUNEVICT;
-    pNew->config.nTidStep = HCT_DEFAULT_NTIDSTEP;
+    pNew->config.nPageScan = HCT_DEFAULT_NPAGESCAN;
     rc = sqlite3HctTreeNew(&pNew->pHctTree);
     pNew->pFakePager = (Pager*)sqlite3HctMalloc(&rc, 4096);
   }else{
@@ -1026,6 +1026,7 @@ static int btreeFlushToDisk(HBtree *p){
   int rcok = SQLITE_OK;
   u64 iTid = 0;
   u64 iCid = 0;
+  int bTmapScan = 0;
 
   /* Write a log file for this transaction. The TID field is still set
   ** to zero at this point.  */
@@ -1071,7 +1072,7 @@ static int btreeFlushToDisk(HBtree *p){
   /* Assuming the data has been flushed to disk without error or a
   ** write/write conflict, allocate a CID and validate the transaction. */
   if( rc==SQLITE_OK ){
-    rc = sqlite3HctDbValidate(p->pHctDb, &iCid);
+    rc = sqlite3HctDbValidate(p->pHctDb, &iCid, &bTmapScan);
   }
 
   /* If conflicts have been detected, roll back the transaction */
@@ -1100,6 +1101,9 @@ static int btreeFlushToDisk(HBtree *p){
     rc = sqlite3HctDbEndWrite(p->pHctDb, iCid, rcok!=SQLITE_OK);
   }
   assert( rc==SQLITE_OK );
+  if( bTmapScan ){
+    sqlite3HctDbTMapScan(p->pHctDb);
+  }
 
   return (rc==SQLITE_OK ? rcok : rc);
 }
@@ -2259,7 +2263,7 @@ static char *hctDbMPrintf(int *pRc, const char *zFormat, ...){
 
 int sqlite3HctBtreePragma(Btree *pBt, char **aFnctl){
   HBtree *const p = (HBtree*)pBt;
-  int rc = SQLITE_NOTFOUND;
+  int rc = SQLITE_OK;
   const char *zLeft = aFnctl[1];
   const char *zRight = aFnctl[2];
   char *zRet = 0;
@@ -2272,7 +2276,6 @@ int sqlite3HctBtreePragma(Btree *pBt, char **aFnctl){
     if( iVal>0 ){
       p->config.nTryBeforeUnevict = iVal;
     }
-    rc = SQLITE_OK;
     zRet = hctDbMPrintf(&rc, "%d", p->config.nTryBeforeUnevict);
   }
   else if( 0==sqlite3_stricmp("hct_npageset", zLeft) ){
@@ -2283,22 +2286,20 @@ int sqlite3HctBtreePragma(Btree *pBt, char **aFnctl){
     if( iVal>0 ){
       p->config.nPageSet = iVal;
     }
-    rc = SQLITE_OK;
     zRet = hctDbMPrintf(&rc, "%d", p->config.nPageSet);
   }
   else if( 0==sqlite3_stricmp("hct_ncasfail", zLeft) ){
-    rc = SQLITE_OK;
     zRet = hctDbMPrintf(&rc, "%lld", sqlite3HctDbNCasFail(p->pHctDb));
   }
-  else if( p->pHctDb && 0==sqlite3_stricmp("hct_ntidstep", zLeft) ){
+  else if( p->pHctDb && 0==sqlite3_stricmp("hct_npagescan", zLeft) ){
     int iVal = 0;
     if( zRight ){
       iVal = sqlite3Atoi(zRight);
     }
     if( iVal>0 ){
-      p->config.nTidStep = iVal;
+      p->config.nPageScan = iVal;
     }
-    zRet = hctDbMPrintf(&rc, "%d", p->config.nTidStep);
+    zRet = hctDbMPrintf(&rc, "%d", p->config.nPageScan);
   }
   else if( 0==sqlite3_stricmp("hct_quiescent_integrity_check", zLeft) ){
     int iVal = 0;
@@ -2308,8 +2309,9 @@ int sqlite3HctBtreePragma(Btree *pBt, char **aFnctl){
     if( iVal>0 ){
       p->config.bQuiescentIntegrityCheck = (iVal==0 ? 0 : 1);
     }
-    rc = SQLITE_OK;
     zRet = hctDbMPrintf(&rc, "%d", p->config.bQuiescentIntegrityCheck);
+  }else{
+    rc = SQLITE_NOTFOUND;
   }
 
   aFnctl[0] = zRet;

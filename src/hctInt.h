@@ -17,7 +17,7 @@ typedef unsigned int u32;
 typedef struct HctConfig HctConfig;
 struct HctConfig {
   int nPageSet;                   /* Used by hct_pman.c */
-  int nTidStep;                   /* Used by hct_pman.c */
+  int nPageScan;                  /* Used by hct_pman.c */
   int nTryBeforeUnevict;
   int bQuiescentIntegrityCheck;   /* PRAGMA hct_quiescent_integrity_check */
 };
@@ -25,9 +25,9 @@ struct HctConfig {
 #define HCT_TID_MASK  ((((u64)0x00FFFFFF) << 32)|0xFFFFFFFF)
 #define HCT_PGNO_MASK ((u64)0xFFFFFFFF)
 
-#define HCT_DEFAULT_NPAGESET          256
-#define HCT_DEFAULT_NTRYBEFOREUNEVICT 100
-#define HCT_DEFAULT_NTIDSTEP          128
+#define HCT_DEFAULT_NPAGESET           256
+#define HCT_DEFAULT_NTRYBEFOREUNEVICT  100
+#define HCT_DEFAULT_NPAGESCAN         1024
 
 
 #include <hctTMapInt.h>
@@ -143,7 +143,7 @@ int sqlite3HctDbInsertFlush(HctDatabase *pDb, int *pnRetry);
 int sqlite3HctDbStartWrite(HctDatabase*, u64*);
 int sqlite3HctDbEndWrite(HctDatabase*, u64, int);
 int sqlite3HctDbEndRead(HctDatabase*);
-int sqlite3HctDbValidate(HctDatabase*, u64 *piCid);
+int sqlite3HctDbValidate(HctDatabase*, u64 *piCid, int*);
 
 void sqlite3HctDbRollbackMode(HctDatabase*,int);
 
@@ -179,6 +179,8 @@ i64 sqlite3HctDbStats(sqlite3 *db, int iStat, const char **pzStat);
 int sqlite3HctDbCsrRollbackSeek(HctDbCsr*, UnpackedRecord*, i64, int *pOp);
 
 char *sqlite3HctDbRecordToText(sqlite3 *db, const u8 *aRec, int nRec);
+
+void sqlite3HctDbTMapScan(HctDatabase *pDb);
 
 /*************************************************************************
 ** Interface to code in hct_file.c
@@ -332,6 +334,8 @@ int sqlite3HctFileRootArray(HctFile*, u32**, int*);
 
 /* Interface used by hct_stats virtual table */
 i64 sqlite3HctFileStats(sqlite3*, int, const char**);
+
+u64 sqlite3HctFileWriteCount(HctFile *pFile);
 
 /*************************************************************************
 ** Interface to code in hct_record.c

@@ -4985,7 +4985,7 @@ int sqlite3HctDbStartWrite(HctDatabase *p, u64 *piTid){
 
   p->nWriteCount = sqlite3HctFileWriteCount(p->pFile);
   p->iTid = sqlite3HctFileAllocateTransid(p->pFile);
-  rc = sqlite3HctTMapNewTID(pTMapClient, p->iSnapshotId, p->iTid, &p->pTmap);
+  rc = sqlite3HctTMapNewTID(pTMapClient, p->iTid, &p->pTmap);
   *piTid = p->iTid;
   return rc;
 }
@@ -5741,14 +5741,18 @@ static int hctDbValidateIndex(HctDatabase *pDb, HctDbCsr *pCsr){
   return rc;
 }
 
+void sqlite3HctDbTMapScan(HctDatabase *pDb){
+  sqlite3HctTMapScan(sqlite3HctFileTMapClient(pDb->pFile));
+}
 
 int 
 __attribute__ ((noinline)) 
-sqlite3HctDbValidate(HctDatabase *pDb, u64 *piCid){
+sqlite3HctDbValidate(HctDatabase *pDb, u64 *piCid, int *pbTmapscan){
   HctDbCsr *pCsr = 0;
   u64 *pEntry = hctDbFindTMapEntry(pDb->pTmap, pDb->iTid);
   u64 iCid = 0;
   int rc = SQLITE_OK;
+  int nPageScan = pDb->pConfig->nPageScan;
 
   int nWrite = sqlite3HctFileWriteCount(pDb->pFile) - pDb->nWriteCount;
   assert( nWrite>=0 );
@@ -5758,6 +5762,8 @@ sqlite3HctDbValidate(HctDatabase *pDb, u64 *piCid){
   HctAtomicStore(pEntry, HCT_TMAP_VALIDATING);
   iCid = sqlite3HctFileAllocateCID(pDb->pFile, nWrite);
   HctAtomicStore(pEntry, HCT_TMAP_VALIDATING | iCid);
+
+  if( (iCid / nPageScan)!=((iCid-nWrite) / nPageScan) ) *pbTmapscan = 1;
 
   assert( pDb->eMode==HCT_MODE_NORMAL );
 
