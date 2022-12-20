@@ -1,5 +1,5 @@
-C Rework\sthe\sway\sthe\spresence\sof\sreaders\sis\scommunicated\sto\swriter\sclients.
-D 2022-12-20T16:29:05.528
+C Add\stest\sscripts.
+D 2022-12-20T16:48:31.191
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -1205,6 +1205,8 @@ F test/hct_delete2.test 50a6727d40024e90cb584d03e4348e3f15074a4935b6c0c255b0243c
 F test/hct_delete3.test 119077b0f6b02a2f9ef445df1707fc1c84a1bb63286acfd3d88c4fc11b372a39
 F test/hct_delete4.test a7f765707580b11ec1b7b892380ecf8c3d6157e314f1ccf70b40b9be5dff2890
 F test/hct_fk.test bd55d24ff7567c78e4b7c3da7b23692d0ba90fc782883cb4fbebc2b3d750501d
+F test/hct_growth1.test 80928cdcdf0e0128856d367400b432e6895a51a9a828c066f10680805910db17
+F test/hct_growth2.test 4bd9f76b0021599a0524e8531244fe30dfe8bf444ff67f344a8c1e941e8c3447
 F test/hct_hst1.test 00892878bb403619ba4a9e58e1aa8320b85f43d760b86226b12467f0e4787acb
 F test/hct_hst2.test 5aba1ac528af98e9d5d60861246e8654955d9d2ebfd0549f5c7ffbf6017ff395
 F test/hct_misc1.test 2dde2223d0e8c4ca55b911c452e2809c5eefc46c9506d39bfc156f96600193b4
@@ -2116,8 +2118,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P 769811eb46c7f08612c78b3a5fc9c7359168b6a1bf133929b0dd24cc16148d8d
-R f0aea022b19009880e7c388a6b57aaee
+P 6394bf82979d1d91ee4f4886d706257867d5683384ee75b7dba3bd7ab9fec1c6
+R ff4190b86f57a2b5c63208bbde1abe27
 U dan
-Z b81563175732fcbb92175dc12c88ab13
+Z 6cab260ef5501bdf278045d42b8bfad6
 # Remove this line to create a well-formed Fossil manifest.
