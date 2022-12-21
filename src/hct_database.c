@@ -388,6 +388,7 @@ struct HctDbHistoryFan {
   HctDbPageHdr pg;
 
   u64 iRangeTid0;
+  u64 iFollowTid0;
   u32 pgOld0;
 
   int iSplit0;
@@ -1124,6 +1125,10 @@ static int hctDbFanSearch(
     int iTest = (i1+i2)/2;
 
     rc = sqlite3HctFilePageGetPhysical(pDb->pFile, pFan->aPgOld1[iTest], &pg);
+    while( rc==SQLITE_OK && hctPagetype(pg.aOld)==HCT_PAGETYPE_HISTORY ){
+      HctDbHistoryFan *pFan = (HctDbHistoryFan*)pg.aOld;
+      rc = sqlite3HctFilePageGetPhysical(pDb->pFile, pFan->pgOld0, &pg);
+    }
     if( rc==SQLITE_OK ){
       int iCell = (iTest==0 ? pFan->iSplit0 : 0);
 
@@ -1256,8 +1261,15 @@ static void hctDbGetKeyFromPage(
 
   if( rc==SQLITE_OK ){
     HctFilePage pg;
-    rc = (bLogical ? sqlite3HctFilePageGet : sqlite3HctFilePageGetPhysical)
-         (pDb->pFile, iPg, &pg);
+    if( bLogical ){
+      rc = sqlite3HctFilePageGet(pDb->pFile, iPg, &pg);
+    }else{
+      rc = sqlite3HctFilePageGetPhysical(pDb->pFile, iPg, &pg);
+      while( rc==SQLITE_OK && hctPagetype(pg.aOld)==HCT_PAGETYPE_HISTORY ){
+        HctDbHistoryFan *pFan = (HctDbHistoryFan*)pg.aOld;
+        rc = sqlite3HctFilePageGetPhysical(pDb->pFile, pFan->pgOld0, &pg);
+      }
+    }
     if( rc==SQLITE_OK ){
       hctDbGetKey(&rc, pDb, pKeyInfo, 1, pg.aOld, iCell, pKey);
       sqlite3HctFilePageRelease(&pg);
@@ -1887,6 +1899,13 @@ static u8 hctDbCellToFlags(HctDbCell *pCell){
   return flags;
 }
 
+typedef struct HctRangePtr HctRangePtr;
+struct HctRangePtr {
+  u64 iRangeTid;
+  u64 iFollowTid;
+  u32 iOld;
+};
+
 /*
 ** This function is called when a reader encounters an old-range pointer
 ** with associated TID value iRangeTid. It returns true if the pointer
@@ -1901,10 +1920,14 @@ static u8 hctDbCellToFlags(HctDbCell *pCell){
 ** there exists one or more transactions with TID values smaller than iRangeTid
 ** that are not.
 */
-static int hctDbFollowRangeOld(HctDatabase *pDb, u64 iRangeTid, int *pbMerge){
+static int hctDbFollowRangeOld(
+  HctDatabase *pDb, 
+  HctRangePtr *pPtr, 
+  int *pbMerge
+){
   int bRet = 0;
   int bMerge = 0;
-  u64 iRangeTidValue = (iRangeTid & HCT_TID_MASK);
+  u64 iRangeTidValue = (pPtr->iRangeTid & HCT_TID_MASK);
 
   /* HctDatabase.iTid is set when writing, validating or rolling back a
   ** transaction. When writing or validating, old-ranges created by this
@@ -1916,13 +1939,16 @@ static int hctDbFollowRangeOld(HctDatabase *pDb, u64 iRangeTid, int *pbMerge){
 
   if( iRangeTidValue>pDb->iLocalMinTid ){
     bRet = 1;
-    if( iDoNotMergeTid!=iRangeTid ){
-      bMerge = (0==hctDbTidIsVisible(pDb, iRangeTid));
+    if( iDoNotMergeTid!=iRangeTidValue ){
+      bMerge = (0==hctDbTidIsVisible(pDb, pPtr->iRangeTid));
     }
+  }else if( (pPtr->iFollowTid & HCT_TID_MASK)>pDb->iLocalMinTid ){
+    bRet = 1;
+    assert( bMerge==0 );
   }
 
   *pbMerge = bMerge;
-  assert( bRet==0 || iRangeTid>0 );
+  assert( bRet==0 || iRangeTidValue>0 );
   return bRet;
 }
 
@@ -2148,40 +2174,40 @@ static void hctDbCsrDescendRange(
 static void hctDbGetRange(
   const u8 *aPg,
   int iCell,
-  u64 *piRangeTid,
-  u32 *piRangeOld
+  HctRangePtr *pPtr
 ){
   if( iCell<0 ){
-    *piRangeTid = 0;
-    *piRangeOld = 0;
+    memset(pPtr, 0, sizeof(*pPtr));
   }else if( hctPagetype(aPg)==HCT_PAGETYPE_HISTORY ){
     HctDbHistoryFan *pFan = (HctDbHistoryFan*)aPg;
     if( iCell==0 ){
-      *piRangeTid = pFan->iRangeTid0;
-      *piRangeOld = pFan->pgOld0;
+      pPtr->iRangeTid = pFan->iRangeTid0;
+      pPtr->iFollowTid = pFan->iFollowTid0;
+      pPtr->iOld = pFan->pgOld0;
     }else{
-      *piRangeTid = pFan->iRangeTid1;
-      *piRangeOld = pFan->aPgOld1[iCell-1];
+      pPtr->iFollowTid = pPtr->iRangeTid = pFan->iRangeTid1;
+      pPtr->iOld = pFan->aPgOld1[iCell-1];
     }
   }else{
     HctDbCell cell;
     hctDbCellGetByIdx(0, aPg, iCell, &cell);
-    *piRangeTid = cell.iRangeTid;
-    *piRangeOld = cell.iRangeOld;
+    pPtr->iFollowTid = pPtr->iRangeTid = cell.iRangeTid;
+    pPtr->iOld = cell.iRangeOld;
   }
+
+  assert( (pPtr->iFollowTid & HCT_TID_MASK)>=(pPtr->iRangeTid & HCT_TID_MASK) );
 }
 
 static void hctDbCsrGetRange(
   HctDbCsr *pCsr,
-  u64 *piRangeTid,
-  u32 *piRangeOld
+  HctRangePtr *pPtr
 ){
   const u8 *aPg = 0;
   int iCell = 0;
   aPg = hctDbCsrPageAndCell(pCsr, &iCell);
   assert( ((HctDbPageHdr*)aPg)->nEntry>iCell );
   assert( ((HctDbPageHdr*)aPg)->nHeight==0 );
-  hctDbGetRange(aPg, iCell, piRangeTid, piRangeOld);
+  hctDbGetRange(aPg, iCell, pPtr);
 }
 
 /*
@@ -2250,21 +2276,20 @@ static int hctDbCsrRollbackDescend(
 
   assert( pDb->eMode==HCT_MODE_ROLLBACK );
   while( 1 ){
-    u64 iRangeTid = 0;
-    u32 iRangeOld = 0;
+    HctRangePtr ptr;
     HctDbRangeCsr *p = 0;
 
-    hctDbCsrGetRange(pCsr, &iRangeTid, &iRangeOld);
-    iRangeTid = (iRangeTid & HCT_TID_MASK);
-    if( iRangeTid<pCsr->pDb->iTid ) break;
+    hctDbCsrGetRange(pCsr, &ptr);
+
+    if( (ptr.iFollowTid & HCT_TID_MASK)<pCsr->pDb->iTid ) break;
 
     rc = hctDbCsrExtendRange(pCsr);
     if( rc==SQLITE_OK ){
       p = &pCsr->aRange[pCsr->nRange-1];
-      rc = sqlite3HctFilePageGetPhysical(pDb->pFile, iRangeOld, &p->pg);
+      rc = sqlite3HctFilePageGetPhysical(pDb->pFile, ptr.iOld, &p->pg);
     }
     if( rc==SQLITE_OK ){
-      p->iRangeTid = iRangeTid;
+      p->iRangeTid = ptr.iRangeTid & HCT_TID_MASK;
       if( hctPagetype(p->pg.aOld)==HCT_PAGETYPE_HISTORY ){
         p->eRange = HCT_RANGE_FAN;
         p->iCell = hctDbFanSearch(&rc, pCsr->pDb, p->pg.aOld, pRec, iKey);
@@ -2304,14 +2329,13 @@ static int hctDbCsrSeekAndDescend(
   rc = hctDbCsrSeek(pCsr, 0, 0, pRec, iKey, &bExact);
 
   while( rc==SQLITE_OK && (0==bExact || 0==hctDbCurrentIsVisible(pCsr)) ){
-    u64 iRangeTid = 0;
-    u32 iRangeOld = 0;
+    HctRangePtr ptr;
     int bMerge = 0;
 
     /* Check if there is a range pointer that we should follow */
-    hctDbCsrGetRange(pCsr, &iRangeTid, &iRangeOld);
-    if( hctDbFollowRangeOld(pCsr->pDb, iRangeTid, &bMerge) ){
-      hctDbCsrDescendRange(&rc, pCsr, iRangeTid, iRangeOld, bMerge);
+    hctDbCsrGetRange(pCsr, &ptr);
+    if( hctDbFollowRangeOld(pCsr->pDb, &ptr, &bMerge) ){
+      hctDbCsrDescendRange(&rc, pCsr, ptr.iRangeTid, ptr.iOld, bMerge);
       if( rc==SQLITE_OK ){
         HctDbRangeCsr *p = &pCsr->aRange[pCsr->nRange-1];
 
@@ -2950,6 +2974,15 @@ int sqlite3HctDbInsertFlush(HctDatabase *pDb, int *pnRetry){
     }else{
       *pnRetry = 0;
     }
+#if 0
+  {
+    printf("%p: %s sqlite3HctDbInsertFlush() -> %d (nRetry=%d)\n",
+          pDb, 
+          (pDb->eMode==HCT_MODE_ROLLBACK ? "RB" : "  "), rc, *pnRetry
+    );
+    fflush(stdout);
+  }
+#endif
     pDb->pa.nWriteKey = 0;
   }
   return rc;
@@ -3330,6 +3363,7 @@ static int hctDbFindLhsPeer(
   int rc = SQLITE_OK;
 
   hctDbCsrInit(pDb, p->writecsr.iRoot, 0, &csr);
+  csr.pKeyInfo = p->writecsr.pKeyInfo;
   if( hctPagetype(aLeft)==HCT_PAGETYPE_INTKEY ){
     i64 iKey = hctDbIntkeyFPKey(aLeft);
     assert( iKey!=SMALLEST_INT64 );
@@ -4289,6 +4323,41 @@ static int hctDbFindOldPage(
   return rc;
 }
 
+static u64 hctDbGetRangeTidByIdx(HctDatabase *pDb, u8 *aTarget, int iIdx){
+  HctDbCell cell;
+  hctDbCellGetByIdx(pDb, aTarget, iIdx, &cell);
+  return cell.iRangeTid;
+}
+
+static u32 hctDbMakeFollowPtr(
+  int *pRc, 
+  HctDatabase *pDb, 
+  u64 iFollowTid, 
+  u32 iPg
+){
+  int rc = *pRc;
+  HctFilePage pg;
+
+  memset(&pg, 0, sizeof(pg));
+  if( rc==SQLITE_OK ){
+    rc = sqlite3HctFilePageNewPhysical(pDb->pFile, &pg);
+  }
+  if( rc==SQLITE_OK ){
+    rc = sqlite3HctFileClearPhysInUse(pDb->pFile, pg.iNewPg, 0);
+  }
+  if( rc==SQLITE_OK ){
+    HctDbHistoryFan *pFan = (HctDbHistoryFan*)pg.aNew;
+    memset(pFan, 0, sizeof(*pFan));
+    pFan->pg.hdrFlags = HCT_PAGETYPE_HISTORY;
+    pFan->pg.nEntry = 1;
+    pFan->iRangeTid0 = pDb->iTid;
+    pFan->iFollowTid0 = iFollowTid;
+    pFan->pgOld0 = iPg;
+  }
+  *pRc = rc;
+  return pg.iNewPg;
+}
+
 static int hctDbDelete(
   HctDatabase *pDb,
   HctDbWriter *p,
@@ -4298,6 +4367,7 @@ static int hctDbDelete(
   u64 iTidOr = (pDb->eMode==HCT_MODE_ROLLBACK ? HCT_TID_ROLLBACK_OVERRIDE : 0);
   u64 iSafeTid = sqlite3HctFileSafeTID(pDb->pFile);
   u64 iTidValue = pDb->iTid | iTidOr;
+  u64 iDelRangeTid = 0;
   int rc = SQLITE_OK;
 
   int prevFlags = 0;
@@ -4324,12 +4394,17 @@ static int hctDbDelete(
   }
   assert_page_is_ok(aTarget, pDb->pgsz);
 
-  /* TODO: Deal with the case where the cell we are about to remove
-  ** (cell iInsert) has a range-tid greater than that of the current
-  ** transaction (iTid) */
+  /* Deal with the case where the cell we are about to remove (cell iInsert)
+  ** has a range-tid greater than that of the current transaction (iTid) */
+  iDelRangeTid = hctDbGetRangeTidByIdx(pDb, aTarget, pOp->iInsert);
+  if( (iDelRangeTid & HCT_TID_MASK)>pDb->iTid ){
+    iTidValue = iDelRangeTid;
+    pOp->iOldPg = hctDbMakeFollowPtr(&rc, pDb, iDelRangeTid, pOp->iOldPg);
+    sqlite3HctFilePageRelease(&p->fanpg);
+  }
 
   /* Remove the cell being deleted from the target page. This must be done
-  ** after hctDbLoadPeers() is called - if it is called. */
+  ** after hctDbLoadPeers() is called (if it is called). */
   assert_page_is_ok(aTarget, pDb->pgsz);
   hctDbRemoveCell(pDb, p, aTarget, pOp->iInsert);
   assert_page_is_ok(aTarget, pDb->pgsz);
@@ -4428,6 +4503,7 @@ static int hctDbDelete(
       pFan->pg.hdrFlags = HCT_PAGETYPE_HISTORY;
       pFan->pg.nEntry = 2;
       pFan->iRangeTid0 = prev.iRangeTid;
+      pFan->iFollowTid0 = prev.iRangeTid;
       pFan->pgOld0 = prev.iRangeOld;
       rc = hctDbLeafSearch(
           pDb, pOp->aOldPg, pOp->iIntkey, pRec, &pFan->iSplit0, &bDummy
@@ -4560,16 +4636,15 @@ static int hctDbWriteWriteConflict(
     }
   }else if( pOp->iInsert>0 ){
     int iCell = 0;
-    u64 iRangeTid = 0;
-    u32 iRangeOld = 0;
     int bMerge = 0;
+    HctRangePtr ptr;
 
     iCell = (pOp->iInsert - 1);
-    hctDbGetRange(aTarget, iCell, &iRangeTid, &iRangeOld);
-    while( hctDbFollowRangeOld(pDb, iRangeTid, &bMerge) ){
+    hctDbGetRange(aTarget, iCell, &ptr);
+    while( hctDbFollowRangeOld(pDb, &ptr, &bMerge) ){
       HctFilePage pg;
       /* assert( bMerge==0 || iRangeTid!=pDb->iTid ); */
-      rc = sqlite3HctFilePageGetPhysical(pDb->pFile, iRangeOld, &pg);
+      rc = sqlite3HctFilePageGetPhysical(pDb->pFile, ptr.iOld, &pg);
       if( rc==SQLITE_OK ){
         int iCell = 0;
         if( hctPagetype(pg.aOld)==HCT_PAGETYPE_HISTORY ){
@@ -4594,7 +4669,7 @@ static int hctDbWriteWriteConflict(
           }
         }
 
-        hctDbGetRange(pg.aOld, iCell, &iRangeTid, &iRangeOld);
+        hctDbGetRange(pg.aOld, iCell, &ptr);
         sqlite3HctFilePageRelease(&pg);
       }else{
         break;
@@ -4772,9 +4847,12 @@ static int hctDbInsert(
           cell.iTid |= HCT_TID_ROLLBACK_OVERRIDE;
         }
 
-        /* TODO: Using p->iOldPgno is correct for now, but will need to
-        ** be fixed when bulk deletes are properly implemented.  */
         if( bClobber ){
+
+          /* TODO: Fix this case! */
+          u64 iOldRangeTid = hctDbGetRangeTidByIdx(pDb, aTarget, op.iInsert);
+          assert( (iOldRangeTid & HCT_TID_MASK)<=pDb->iTid );
+
           cell.iRangeTid = pDb->iTid;
           cell.iRangeOld = op.iOldPg;
         }else{
@@ -4786,7 +4864,7 @@ static int hctDbInsert(
       }
       rc = hctDbInsertOverflow(
           pDb, p, aTarget, nData, aData, &nLocal, &cell.iOvfl
-          );
+      );
       cell.aPayload = aData;
 
       op.aEntry = pDb->aTmp;
@@ -4915,8 +4993,11 @@ int sqlite3HctDbInsert(
 #if 0
   {
     char *zText = sqlite3HctDbRecordToText(0, aData, nData);
-    printf("%p: sqlite3HctDbInsert(bDel=%d, iKey=%lld, aData={%s})\n", 
-          pDb, bDel, iKey, zText
+    printf("%p: %s sqlite3HctDbInsert(bDel=%d, iKey=%lld, aData={%s}) "
+           "iTid=%lld\n", 
+          pDb, 
+          (pDb->eMode==HCT_MODE_ROLLBACK ? "RB" : "  "),
+          bDel, iKey, zText, (i64)pDb->iTid
     );
     fflush(stdout);
   }
@@ -5378,13 +5459,11 @@ static int hctDbCsrNext(HctDbCsr *pCsr){
   if( pCsr->iCell>=0 ){
     do {
       int bMerge = 0;
+      HctRangePtr ptr;
 
-      u64 iRangeTid = 0;
-      u32 iRangeOld = 0;
-
-      hctDbCsrGetRange(pCsr, &iRangeTid, &iRangeOld);
-      if( hctDbFollowRangeOld(pDb, iRangeTid, &bMerge) ){
-        hctDbCsrDescendRange(&rc, pCsr, iRangeTid, iRangeOld, bMerge);
+      hctDbCsrGetRange(pCsr, &ptr);
+      if( hctDbFollowRangeOld(pDb, &ptr, &bMerge) ){
+        hctDbCsrDescendRange(&rc, pCsr, ptr.iRangeTid, ptr.iOld, bMerge);
         if( rc==SQLITE_OK ){
           HctDbRangeCsr *p = &pCsr->aRange[pCsr->nRange-1];
           if( p->eRange==HCT_RANGE_FAN ){
@@ -5486,15 +5565,14 @@ static int hctDbCsrPrev(HctDbCsr *pCsr){
 
   if( pCsr->iCell>=0 ){
     do {
-      u64 iRangeTid = 0;
-      u32 iRangeOld = 0;
+      HctRangePtr ptr;
       int bMerge = 0;
 
-      hctDbCsrGetRange(pCsr, &iRangeTid, &iRangeOld);
-      if( hctDbFollowRangeOld(pDb, iRangeTid, &bMerge) ){
+      hctDbCsrGetRange(pCsr, &ptr);
+      if( hctDbFollowRangeOld(pDb, &ptr, &bMerge) ){
         do {
-          hctDbCsrDescendRange(&rc, pCsr, iRangeTid, iRangeOld, bMerge);
-          iRangeTid = 0;
+          hctDbCsrDescendRange(&rc, pCsr, ptr.iRangeTid, ptr.iOld, bMerge);
+          memset(&ptr, 0, sizeof(ptr));
           if( rc==SQLITE_OK ){
             HctDbRangeCsr *p = &pCsr->aRange[pCsr->nRange-1];
             if( p->eRange==HCT_RANGE_FAN ){
@@ -5508,10 +5586,10 @@ static int hctDbCsrPrev(HctDbCsr *pCsr){
             }
 
             if( p->iCell>=0 ){
-              hctDbCsrGetRange(pCsr, &iRangeTid, &iRangeOld);
+              hctDbCsrGetRange(pCsr, &ptr);
             }
           }
-        }while( hctDbFollowRangeOld(pDb, iRangeTid, &bMerge) );
+        }while( hctDbFollowRangeOld(pDb, &ptr, &bMerge) );
       }
 
       while( pCsr->nRange>0 ){
