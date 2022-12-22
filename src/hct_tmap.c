@@ -233,6 +233,16 @@ static int hctTMapBoolCAS64(u64 *pPtr, u64 iOld, u64 iNew){
 }
 
 /*
+** Return a pointer to the slot in pMap associated with TID iTid.
+*/
+static u64 *hctTMapFind(HctTMapFull *pMap, u64 iTid){
+  int iOff = iTid - pMap->m.iFirstTid;
+  int iMap = iOff / HCT_TMAP_PAGESIZE;
+  iOff = HCT_TMAP_ENTRYSLOT( (iOff % HCT_TMAP_PAGESIZE) );
+  return &pMap->m.aaMap[iMap][iOff % HCT_TMAP_PAGESIZE];
+}
+
+/*
 ** Allocate the initial HctTMapFull object for the server passed as the
 ** only argument. This is called as part of sqlite3HctTMapServerNew().
 */
@@ -265,6 +275,11 @@ static int hctTMapInit(HctTMapServer *p, u64 iFirstTid){
       }
       sqlite3_free(pNew);
     }else{
+      u64 t;
+      for(t=iFirst; t<iFirstTid; t++){
+        u64 *pEntry = hctTMapFind(pNew, t);
+        *pEntry = (u64)1 | HCT_TMAP_COMMITTED;
+      }
       p->pList = pNew;
       pNew->nRef = 1;             /* Server reference */
     }
@@ -273,7 +288,7 @@ static int hctTMapInit(HctTMapServer *p, u64 iFirstTid){
   return rc;
 }
 
-int sqlite3HctTMapServerNew(u64 iFirstTid, HctTMapServer **pp){
+int sqlite3HctTMapServerNew(u64 iLargestTid, HctTMapServer **pp){
   int rc = SQLITE_OK;
   HctTMapServer *pNew;
 
@@ -285,8 +300,8 @@ int sqlite3HctTMapServerNew(u64 iFirstTid, HctTMapServer **pp){
     if( pNew->pMutex==0 ){
       rc = SQLITE_NOMEM_BKPT;
     }else{
-      pNew->iMinMinTid = iFirstTid;
-      rc = hctTMapInit(pNew, iFirstTid);
+      pNew->iMinMinTid = iLargestTid;
+      rc = hctTMapInit(pNew, iLargestTid+1);
     }
   }
 
@@ -394,16 +409,6 @@ void sqlite3HctTMapClientFree(HctTMapClient *pClient){
     LEAVE_TMAP_MUTEX(pClient);
     sqlite3_free(pClient);
   }
-}
-
-/*
-** Return a pointer to the slot in pMap associated with TID iTid.
-*/
-static u64 *hctTMapFind(HctTMapFull *pMap, u64 iTid){
-  int iOff = iTid - pMap->m.iFirstTid;
-  int iMap = iOff / HCT_TMAP_PAGESIZE;
-  iOff = HCT_TMAP_ENTRYSLOT( (iOff % HCT_TMAP_PAGESIZE) );
-  return &pMap->m.aaMap[iMap][iOff % HCT_TMAP_PAGESIZE];
 }
 
 

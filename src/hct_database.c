@@ -2976,9 +2976,9 @@ int sqlite3HctDbInsertFlush(HctDatabase *pDb, int *pnRetry){
     }
 #if 0
   {
-    printf("%p: %s sqlite3HctDbInsertFlush() -> %d (nRetry=%d)\n",
-          pDb, 
-          (pDb->eMode==HCT_MODE_ROLLBACK ? "RB" : "  "), rc, *pnRetry
+    sqlite3HctFileDebugPrint(pDb->pFile, 
+        "%p: %s sqlite3HctDbInsertFlush() -> %d (nRetry=%d)\n",
+        pDb, (pDb->eMode==HCT_MODE_ROLLBACK ? "RB" : "  "), rc, *pnRetry
     );
     fflush(stdout);
   }
@@ -4848,13 +4848,14 @@ static int hctDbInsert(
         }
 
         if( bClobber ){
-
-          /* TODO: Fix this case! */
           u64 iOldRangeTid = hctDbGetRangeTidByIdx(pDb, aTarget, op.iInsert);
-          assert( (iOldRangeTid & HCT_TID_MASK)<=pDb->iTid );
-
-          cell.iRangeTid = pDb->iTid;
-          cell.iRangeOld = op.iOldPg;
+          if( (iOldRangeTid & HCT_TID_MASK)>pDb->iTid ){
+            cell.iRangeOld = hctDbMakeFollowPtr(&rc,pDb,iOldRangeTid,op.iOldPg);
+            cell.iRangeTid = iOldRangeTid;
+          }else{
+            cell.iRangeTid = pDb->iTid;
+            cell.iRangeOld = op.iOldPg;
+          }
         }else{
           HctDbCell prev;
           hctDbCellGetByIdx(pDb, aTarget, op.iInsert - (bClobber?0:1), &prev);
@@ -4993,8 +4994,8 @@ int sqlite3HctDbInsert(
 #if 0
   {
     char *zText = sqlite3HctDbRecordToText(0, aData, nData);
-    printf("%p: %s sqlite3HctDbInsert(bDel=%d, iKey=%lld, aData={%s}) "
-           "iTid=%lld\n", 
+    sqlite3HctFileDebugPrint(pDb->pFile, 
+        "%p: %s sqlite3HctDbInsert(bDel=%d, iKey=%lld, aData={%s}) iTid=%lld\n",
           pDb, 
           (pDb->eMode==HCT_MODE_ROLLBACK ? "RB" : "  "),
           bDel, iKey, zText, (i64)pDb->iTid

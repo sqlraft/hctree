@@ -749,7 +749,7 @@ static int hctFileServerInit(
     /* Allocate a transaction map server */
     if( rc==SQLITE_OK ){
       u64 iFirst = hctFilePagemapGet(p->pMapping, HCT_PAGEMAP_TRANSID_EOF);
-      rc = sqlite3HctTMapServerNew((iFirst & HCT_TID_MASK)+1, &p->pTMapServer);
+      rc = sqlite3HctTMapServerNew((iFirst & HCT_TID_MASK), &p->pTMapServer);
     }
 
     /* Initialize the page-manager */
@@ -1224,7 +1224,7 @@ static int hctFilePageFlush(HctFilePage *pPg){
     DEBUG_PAGE_MUTEX_ENTER(pPg);
     DEBUG_PRINTF("f=%d: Flushing page %d orig=", pPg->pFile->iFileId, pPg->iPg);
     DEBUG_SLOT_VALUE(pPg->pFile, pPg->iPg);
-    DEBUG_PRINTF(" (ioldpg=%d)", pPg->iOldPg);
+    DEBUG_PRINTF(" (ioldpg=%d) (inewpg=%d)", pPg->iOldPg, pPg->iNewPg);
 
     DEBUG_PRINTF("\n");
     DEBUG_PAGE_MUTEX_LEAVE(pPg);
