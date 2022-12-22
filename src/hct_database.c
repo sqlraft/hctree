@@ -5019,7 +5019,6 @@ int sqlite3HctDbInsert(
 
     rc = sqlite3HctDbCsrRollbackSeek(&pDb->rbackcsr, pRec, iKey, &op);
     if( rc==SQLITE_OK ){
-      assert( op!=0 );
       if( op<0 ){
         bDel = 1;
         aData = 0;
@@ -5028,6 +5027,11 @@ int sqlite3HctDbInsert(
         rc = sqlite3HctDbCsrData(&pDb->rbackcsr, &nData, &aData);
         bDel = 0;
       }else{
+        /* TODO: It would be nice to assert( op!=0 ) here, but this fails
+        ** if the original op being rolled back was a no-op delete. If
+        ** we could note these as they occur, we could bring a form
+        ** of this assert() back.  */
+        /* assert( op!=0 ); */
         goto insert_done;
       }
     }
