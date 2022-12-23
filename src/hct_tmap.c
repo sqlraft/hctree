@@ -559,7 +559,7 @@ static int hctTMapNewObject(HctTMapServer *pServer){
 */
 u64 sqlite3HctTMapSafeTID(HctTMapClient *p){
   /* TODO: -1? */
-  return HctAtomicLoad(&p->pServer->iMinMinTid) - 1;
+  return HctAtomicLoad(&p->pServer->iMinMinTid);
 }
 
 /*

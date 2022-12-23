@@ -63,7 +63,7 @@ foreach {tn keytype} {
     WITH s(i) AS (
       VALUES(1) UNION ALL SELECT i+1 FROM s WHERE i<20
     )
-    INSERT INTO t1 SELECT i, hex(randomblob(250)) FROM s;
+    INSERT INTO t1 SELECT i, hex(randomblob(2)) FROM s;
   }
 
   do_execsql_test -db db2 1.$tn.2 {
@@ -99,9 +99,11 @@ foreach {tn keytype} {
     END;
   } {1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20}
 
+  #execsql_pp { SELECT * FROM hctpgmap }
+  #execsql_pp { SELECT * FROM hctentry }
 
   db2 close
-  break
+  # break
 }
 
 finish_test
