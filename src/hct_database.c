@@ -179,6 +179,13 @@ struct HctDbOverflowArray {
   HctDbOverflow *aOvfl;
 };
 
+typedef struct HctDbFPKey HctDbFPKey;
+struct HctDbFPKey {
+  i64 iKey;
+  u8 *aKey;
+  HctBuffer buf;
+};
+
 /*
 **
 ** iHeight:
@@ -210,9 +217,9 @@ struct HctDbOverflowArray {
 struct HctDbWriter {
   int iHeight;                    /* Height to write at (0==leaves) */
   HctDbPageArray writepg;
-  int nWriteKey;                  /* Number of new keys in aWritePg[] array */
-  i64 iWriteFpKey;
-  u8 *aWriteFpKey;
+  int nWriteKey;                  /* Number of new keys in writepg array */
+
+  HctDbFPKey fp;                  /* Fence-Post key. */
 
   HctDbCsr writecsr;              /* Used to find target page while writing */
   HctDbPageArray discardpg;
@@ -420,6 +427,31 @@ struct HctDbCell {
 #define HCTDB_HAS_RANGETID 0x08
 #define HCTDB_HAS_RANGEOLD 0x10
 
+static int hctBufferGrow(HctBuffer *pBuf, int nSize){
+  int rc = SQLITE_OK;
+  if( nSize>pBuf->nAlloc ){
+    u8 *aNew = sqlite3_realloc(pBuf->aBuf, nSize);
+    if( aNew==0 ){
+      rc = SQLITE_NOMEM_BKPT;
+    }else{
+      pBuf->aBuf = aNew;
+      pBuf->nAlloc = nSize;
+    }
+  }
+  return rc;
+}
+static void hctBufferFree(HctBuffer *pBuf){
+  sqlite3_free(pBuf->aBuf);
+  memset(pBuf, 0, sizeof(HctBuffer));
+}
+static int hctBufferSet(HctBuffer *pBuf, const u8 *aData, int nData){
+  int rc = hctBufferGrow(pBuf, nData);
+  if( rc==SQLITE_OK ){
+    memcpy(pBuf->aBuf, aData, nData);
+  }
+  return rc;
+}
+
 
 #ifdef SQLITE_DEBUG
 static int hctSqliteBusy(void){
@@ -551,7 +583,7 @@ HctDatabase *sqlite3HctDbOpen(
 
 void sqlite3HctDbClose(HctDatabase *p){
   if( p ){
-    assert( p->pa.aWriteFpKey==0 );
+    hctBufferFree(&p->pa.fp.buf);
     sqlite3_free(p->aTmp);
     sqlite3HctFileClose(p->pFile);
     p->pFile = 0;
@@ -1012,31 +1044,6 @@ static HctDbIndexEntry *hctDbEntryEntry(const void *aPg, int iEntry){
   return (HctDbIndexEntry*)&((u8*)aPg)[iOff];
 }
 
-static int hctBufferGrow(HctBuffer *pBuf, int nSize){
-  int rc = SQLITE_OK;
-  if( nSize>pBuf->nAlloc ){
-    u8 *aNew = sqlite3_realloc(pBuf->aBuf, nSize);
-    if( aNew==0 ){
-      rc = SQLITE_NOMEM_BKPT;
-    }else{
-      pBuf->aBuf = aNew;
-      pBuf->nAlloc = nSize;
-    }
-  }
-  return rc;
-}
-static void hctBufferFree(HctBuffer *pBuf){
-  sqlite3_free(pBuf->aBuf);
-  memset(pBuf, 0, sizeof(HctBuffer));
-}
-static int hctBufferSet(HctBuffer *pBuf, const u8 *aData, int nData){
-  int rc = hctBufferGrow(pBuf, nData);
-  if( rc==SQLITE_OK ){
-    memcpy(pBuf->aBuf, aData, nData);
-  }
-  return rc;
-}
-
 /*
 ** Argument aPg[] is a buffer containing either an index tree page, or an 
 ** intkey leaf page. This function locates the record associated with
@@ -1093,6 +1100,39 @@ static int hctDbLoadRecord(
       int iOff = hctDbOffset(p->iOff, p->flags);
       *paData = &aPg[iOff];
     }
+  }
+
+  return rc;
+}
+
+/*
+** Buffer aPg[] contains either an index page or an intkey leaf (i.e. a page
+** that contains variable length records). This function loads the record
+** associated with cell iCell on the page, and populates output object
+** pFP with the results.
+**
+** SQLITE_OK is returned if successful, or an SQLite error code otherwise.
+*/
+static int hctDbLoadRecordFP(
+  HctDatabase *pDb,               /* Database handle */
+  const u8 *aPg,                  /* Page to load record from */
+  int iCell,                      /* Cell to load */
+  HctDbFPKey *pFP                 /* Populate this structure with record */
+){
+  const u8 *aKey = 0;
+  int nKey = 0;
+  int rc = SQLITE_OK;
+
+  rc = hctDbLoadRecord(pDb, &pFP->buf, aPg, iCell, &nKey, &aKey);
+  if( rc==SQLITE_OK ){
+    if( aKey!=pFP->buf.aBuf ){
+      rc = hctBufferGrow(&pFP->buf, nKey);
+      if( rc==SQLITE_OK ){
+        memcpy(pFP->buf.aBuf, aKey, nKey);
+      }
+    }
+    pFP->iKey = nKey;
+    pFP->aKey = pFP->buf.aBuf;
   }
 
   return rc;
@@ -1404,6 +1444,7 @@ static int hctDbCsrGoLeft(HctDbCsr*);
 
 int hctDbCsrSeek(
   HctDbCsr *pCsr,                 /* Cursor to seek */
+  HctDbFPKey *pFP,
   int iHeight,                    /* Height to seek at (0==leaf, 1==parent) */
   RecordCompare xCompare,
   UnpackedRecord *pRec,           /* Key for index/without rowid tables */
@@ -1413,6 +1454,10 @@ int hctDbCsrSeek(
   HctFile *pFile = pCsr->pDb->pFile;
   u32 iPg = pCsr->iRoot;
   int rc = SQLITE_OK;
+
+  HctFilePage par;
+  memset(&par, 0, sizeof(par));
+  int iPar = 0;
 
   if( pRec ) xCompare = find_record_compare(pRec, xCompare);
   while( rc==SQLITE_OK ){
@@ -1496,18 +1541,47 @@ int hctDbCsrSeek(
         }
       }
 
-
       if( pHdr->nHeight==iHeight ){
         pCsr->iCell = i2;
         if( pbExact ) *pbExact = bExact;
+
+        /* If parameter pFP was not NULL and there is a parent page stored
+        ** in variable par, try to load the FP key from that page. This
+        ** is used when seeking a cursor for writing.  */
+        if( pFP && par.aOld ){
+          i64 iPeer = ((HctDbPageHdr*)pCsr->pg.aOld)->iPeerPg;
+          if( pRec ){
+            HctDbIndexNode *pPar = (HctDbIndexNode*)par.aOld;
+            if( (iPar+1)<pPar->pg.nEntry 
+             && pPar->aEntry[iPar+1].iChildPg==iPeer
+            ){
+              rc = hctDbLoadRecordFP(pCsr->pDb, par.aOld, iPar+1, pFP);
+            }
+          }else{
+            HctDbIntkeyNode *pPar = (HctDbIntkeyNode*)par.aOld;
+            if( (iPar+1)<pPar->pg.nEntry 
+             && pPar->aEntry[iPar+1].iChildPg==iPeer
+            ){
+              pFP->iKey = pPar->aEntry[iPar+1].iKey;
+            }
+          }
+        }
+
         break;
       }
 
-      sqlite3HctFilePageRelease(&pCsr->pg);
+      if( pFP && pHdr->nHeight+1==iHeight ){
+        par = pCsr->pg;
+        iPar = i2;
+        memset(&pCsr->pg, 0, sizeof(HctFilePage));
+      }else{
+        sqlite3HctFilePageRelease(&pCsr->pg);
+      }
       assert( rc!=SQLITE_OK || iPg!=0 );
     }
   }
 
+  if( pFP ) sqlite3HctFilePageRelease(&par);
   return rc;
 }
 
@@ -2326,7 +2400,7 @@ static int hctDbCsrSeekAndDescend(
   ** and validation (eMode==HCT_MODE_VALIDATE). */
   assert( pCsr->pDb->eMode==HCT_MODE_VALIDATE || pCsr->pDb->iTid==0 );
 
-  rc = hctDbCsrSeek(pCsr, 0, 0, pRec, iKey, &bExact);
+  rc = hctDbCsrSeek(pCsr, 0, 0, 0, pRec, iKey, &bExact);
 
   while( rc==SQLITE_OK && (0==bExact || 0==hctDbCurrentIsVisible(pCsr)) ){
     HctRangePtr ptr;
@@ -2479,7 +2553,7 @@ int sqlite3HctDbCsrRollbackSeek(
   **   4) None of the above. No rollback required.
   */
 
-  rc = hctDbCsrSeek(pCsr, 0, 0, pRec, iKey, &bExact);
+  rc = hctDbCsrSeek(pCsr, 0, 0, 0, pRec, iKey, &bExact);
   if( rc==SQLITE_OK && bExact==0 ){
     rc = hctDbCsrRollbackDescend(pCsr, pRec, iKey, &bExact);
   }
@@ -2688,8 +2762,8 @@ static void hctDbWriterCleanup(HctDatabase *pDb, HctDbWriter *p, int bRevert){
   }
 
   hctDbPageArrayReset(&p->discardpg);
-  sqlite3_free(p->aWriteFpKey);
-  p->aWriteFpKey = 0;
+  p->fp.iKey = 0;
+  p->fp.aKey = 0;
 
   if( p->iEvictLockedPgno ){
     assert( p->writecsr.iRoot );
@@ -3004,27 +3078,26 @@ static int hctDbTestWriteFpKey(
 ){
   if( pRec ){
     int r;
-    if( p->aWriteFpKey==0 ){
+    if( p->fp.aKey==0 ){
       r = 1;
     }else{
-      r = xCompare(p->iWriteFpKey, p->aWriteFpKey, pRec);
+      r = xCompare(p->fp.iKey, p->fp.aKey, pRec);
     }
     return (r <= 0);
   }
-  return iKey>=p->iWriteFpKey;
+  return iKey>=p->fp.iKey;
 }
 
 static int hctDbSetWriteFpKey(HctDatabase *pDb, HctDbWriter *p){
   int rc = SQLITE_OK;
   HctDbPageHdr *pHdr = (HctDbPageHdr*)p->writepg.aPg[p->writepg.nPg-1].aNew;
 
-  sqlite3_free(p->aWriteFpKey);
-  p->aWriteFpKey = 0;
-  p->iWriteFpKey = 0;
+  p->fp.aKey = 0;
+  p->fp.iKey = 0;
 
   if( pHdr->iPeerPg==0 ){
     if( hctPagetype(pHdr)==HCT_PAGETYPE_INTKEY ){
-      p->iWriteFpKey = LARGEST_INT64;
+      p->fp.iKey = LARGEST_INT64;
     }
   }else{
     HctFilePage pg;
@@ -3032,25 +3105,9 @@ static int hctDbSetWriteFpKey(HctDatabase *pDb, HctDbWriter *p){
     rc = sqlite3HctFilePageGet(pDb->pFile, pHdr->iPeerPg, &pg);
     if( rc==SQLITE_OK ){
       if( hctPagetype(pHdr)==HCT_PAGETYPE_INTKEY ){
-        p->iWriteFpKey = hctDbIntkeyFPKey(pg.aOld);
+        p->fp.iKey = hctDbIntkeyFPKey(pg.aOld);
       }else{
-        const u8 *aData = 0;
-        int nData = 0;
-        HctBuffer buf;
-        memset(&buf, 0, sizeof(buf));
-        rc = hctDbLoadRecord(pDb, &buf, pg.aOld, 0, &nData, &aData);
-        if( rc==SQLITE_OK && buf.aBuf==0 ){
-          rc = hctBufferGrow(&buf, nData);
-          if( rc==SQLITE_OK ){
-            memcpy(buf.aBuf, aData, nData);
-          }
-        }
-        if( rc==SQLITE_OK ){
-          p->aWriteFpKey = buf.aBuf;
-          p->iWriteFpKey = nData;
-          memset(&buf, 0, sizeof(buf));
-        }
-        hctBufferFree(&buf);
+        rc = hctDbLoadRecordFP(pDb, pg.aOld, 0, pFP);
       }
       sqlite3HctFilePageRelease(&pg);
     }
@@ -3367,7 +3424,7 @@ static int hctDbFindLhsPeer(
   if( hctPagetype(aLeft)==HCT_PAGETYPE_INTKEY ){
     i64 iKey = hctDbIntkeyFPKey(aLeft);
     assert( iKey!=SMALLEST_INT64 );
-    rc = hctDbCsrSeek(&csr, p->iHeight, 0, 0, iKey-1, 0);
+    rc = hctDbCsrSeek(&csr, 0, p->iHeight, 0, 0, iKey-1, 0);
   }else{
     UnpackedRecord *pRec = 0;
     HctBuffer buf;
@@ -3383,7 +3440,7 @@ static int hctDbFindLhsPeer(
       sqlite3VdbeRecordUnpack(p->writecsr.pKeyInfo, nData, aData, pRec);
       hctDbRecordTrim(pRec);
       pRec->default_rc = 1;
-      rc = hctDbCsrSeek(&csr, p->iHeight, 0, pRec, 0, 0);
+      rc = hctDbCsrSeek(&csr, 0, p->iHeight, 0, pRec, 0, 0);
       pRec->default_rc = 0;
 
       assert( csr.pg.iPg!=pPg->iPg );
@@ -4555,7 +4612,7 @@ static int hctDbInsertFindPosition(
       p->writecsr.pKeyInfo = sqlite3KeyInfoRef(pRec->pKeyInfo);
     }
     rc = hctDbCsrSeek(
-        &p->writecsr, p->iHeight, xCompare, pRec, iKey, pbClobber
+        &p->writecsr, &p->fp, p->iHeight, xCompare, pRec, iKey, pbClobber
     );
     if( rc ) return rc;
     pOp->iInsert = p->writecsr.iCell;
@@ -4568,7 +4625,9 @@ static int hctDbInsertFindPosition(
     rc = sqlite3HctFilePageWrite(&p->writepg.aPg[0]);
     if( rc ) return rc;
     memcpy(p->writepg.aPg[0].aNew, p->writepg.aPg[0].aOld, pDb->pgsz);
-    rc = hctDbSetWriteFpKey(pDb, p);
+    if( p->fp.iKey==0 ){
+      rc = hctDbSetWriteFpKey(pDb, p);
+    }
     if( rc ) return rc;
   }else if( pRec ){
     HctBuffer buf = {0,0,0};
@@ -5099,10 +5158,8 @@ int sqlite3HctDbEndWrite(HctDatabase *p, u64 iCid, int bRollback){
 
   assert( p->eMode==HCT_MODE_NORMAL );
   assert( p->pa.writepg.nPg==0 );
-  assert( p->pa.aWriteFpKey==0 );
 
   HctAtomicStore(pEntry, iCid|(bRollback?HCT_TMAP_ROLLBACK:HCT_TMAP_COMMITTED));
-
   p->iTid = 0;
   return rc;
 }
@@ -5540,14 +5597,14 @@ static int hctDbCsrGoLeft(HctDbCsr *pCsr){
       HctFilePage pg = pCsr->pg;
       memset(&pCsr->pg, 0, sizeof(HctFilePage));
       pRec->default_rc = 1;
-      hctDbCsrSeek(pCsr, nHeight, 0, pRec, 0, &bDummy);
+      hctDbCsrSeek(pCsr, 0, nHeight, 0, pRec, 0, &bDummy);
       pRec->default_rc = 0;
       sqlite3HctFilePageRelease(&pg);
     }
   }else if( hctIsLeftmost(pCsr->pg.aOld)==0 ){
     i64 iKey = hctDbIntkeyFPKey(pCsr->pg.aOld);
     sqlite3HctFilePageRelease(&pCsr->pg);
-    rc = hctDbCsrSeek(pCsr, nHeight, 0, 0, iKey-1, 0);
+    rc = hctDbCsrSeek(pCsr, 0, nHeight, 0, 0, iKey-1, 0);
   }
 
   return rc;
@@ -5785,7 +5842,7 @@ static int hctDbValidateIndex(HctDatabase *pDb, HctDbCsr *pCsr){
     }else{
       int bExact = 0;
       sqlite3VdbeRecordUnpack(pCsr->pKeyInfo, pOp->nFirst, pOp->pFirst, pRec);
-      rc = hctDbCsrSeek(pCsr, 0, 0, pRec, 0, &bExact);
+      rc = hctDbCsrSeek(pCsr, 0, 0, 0, pRec, 0, &bExact);
       if( rc==SQLITE_OK && bExact==0 ){
         rc = hctDbCsrNext(pCsr);
       }
