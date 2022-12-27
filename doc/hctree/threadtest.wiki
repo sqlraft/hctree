@@ -96,100 +96,100 @@ all disabled.
 boxwid=0.18
 movewid=0.1
 box color none fill none width 35%
-box color lightgreen fill lightgreen height 0.09142393761106989 with sw at last box.se
-text "44K" small small with s at last box.n fill grey
-box color orange fill orange height 0.1152421539364033 with sw at last box.se
-text "55K" small small with s at last box.n fill grey
+box color lightgreen fill lightgreen height 0.0912933847281855 with sw at last box.se
+text "46K" small small with s at last box.n fill grey
+box color orange fill orange height 0.11281939564986254 with sw at last box.se
+text "57K" small small with s at last box.n fill grey
 text "1" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.1273893614451595 with sw at last box.se
-text "61K" small small with s at last box.n fill grey
-box color orange fill orange height 0.2127407305163995 with sw at last box.se
-text "102K" small small with s at last box.n fill grey
+box color lightgreen fill lightgreen height 0.11834623894704499 with sw at last box.se
+text "60K" small small with s at last box.n fill grey
+box color orange fill orange height 0.21113985046504105 with sw at last box.se
+text "108K" small small with s at last box.n fill grey
 text "2" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.14438965475594814 with sw at last box.se
-text "69K" small small with s at last box.n fill grey
-box color orange fill orange height 0.3110198588657499 with sw at last box.se
-text "150K" small small with s at last box.n fill grey
+box color lightgreen fill lightgreen height 0.13235941063912457 with sw at last box.se
+text "67K" small small with s at last box.n fill grey
+box color orange fill orange height 0.31363128691430925 with sw at last box.se
+text "160K" small small with s at last box.n fill grey
 text "3" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.1428927345192291 with sw at last box.se
-text "69K" small small with s at last box.n fill grey
-box color orange fill orange height 0.4085267171621318 with sw at last box.se
-text "197K" small small with s at last box.n fill grey
+box color lightgreen fill lightgreen height 0.1334636087705066 with sw at last box.se
+text "68K" small small with s at last box.n fill grey
+box color orange fill orange height 0.41187955916612884 with sw at last box.se
+text "211K" small small with s at last box.n fill grey
 text "4" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.141900998982039 with sw at last box.se
+box color lightgreen fill lightgreen height 0.13368991086103718 with sw at last box.se
 text "68K" small small with s at last box.n fill grey
-box color orange fill orange height 0.5028119877844682 with sw at last box.se
-text "242K" small small with s at last box.n fill grey
+box color orange fill orange height 0.5038186852043628 with sw at last box.se
+text "258K" small small with s at last box.n fill grey
 text "5" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.13766283062164633 with sw at last box.se
+box color lightgreen fill lightgreen height 0.12928677449614456 with sw at last box.se
 text "66K" small small with s at last box.n fill grey
-box color orange fill orange height 0.5977101054193481 with sw at last box.se
-text "288K" small small with s at last box.n fill grey
+box color orange fill orange height 0.5927827191041559 with sw at last box.se
+text "303K" small small with s at last box.n fill grey
 text "6" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.134793215893994 with sw at last box.se
+box color lightgreen fill lightgreen height 0.12692230782611805 with sw at last box.se
 text "65K" small small with s at last box.n fill grey
-box color orange fill orange height 0.6849600579720146 with sw at last box.se
-text "330K" small small with s at last box.n fill grey
+box color orange fill orange height 0.6757634037655237 with sw at last box.se
+text "346K" small small with s at last box.n fill grey
 text "7" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.13537293604099448 with sw at last box.se
-text "65K" small small with s at last box.n fill grey
-box color orange fill orange height 0.7719097983056987 with sw at last box.se
-text "372K" small small with s at last box.n fill grey
+box color lightgreen fill lightgreen height 0.12563472696620262 with sw at last box.se
+text "64K" small small with s at last box.n fill grey
+box color orange fill orange height 0.7523686122902195 with sw at last box.se
+text "385K" small small with s at last box.n fill grey
 text "8" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.1348470470505012 with sw at last box.se
+box color lightgreen fill lightgreen height 0.12750952273344313 with sw at last box.se
 text "65K" small small with s at last box.n fill grey
-box color orange fill orange height 0.843186390379406 with sw at last box.se
-text "407K" small small with s at last box.n fill grey
+box color orange fill orange height 0.8255032051334158 with sw at last box.se
+text "423K" small small with s at last box.n fill grey
 text "9" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.1345116375368795 with sw at last box.se
+box color lightgreen fill lightgreen height 0.12531478263131454 with sw at last box.se
 text "64K" small small with s at last box.n fill grey
-box color orange fill orange height 0.9214693145154332 with sw at last box.se
-text "445K" small small with s at last box.n fill grey
+box color orange fill orange height 0.891657549011798 with sw at last box.se
+text "457K" small small with s at last box.n fill grey
 text "10" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.1312796977173519 with sw at last box.se
-text "63K" small small with s at last box.n fill grey
-box color orange fill orange height 0.9856153487810347 with sw at last box.se
-text "476K" small small with s at last box.n fill grey
+box color lightgreen fill lightgreen height 0.1255859549639331 with sw at last box.se
+text "64K" small small with s at last box.n fill grey
+box color orange fill orange height 0.9581845109875192 with sw at last box.se
+text "491K" small small with s at last box.n fill grey
 text "11" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.13041425835504405 with sw at last box.se
+box color lightgreen fill lightgreen height 0.12153202613529028 with sw at last box.se
 text "62K" small small with s at last box.n fill grey
-box color orange fill orange height 1.0287775841543159 with sw at last box.se
-text "496K" small small with s at last box.n fill grey
+box color orange fill orange height 1.0121595104591559 with sw at last box.se
+text "518K" small small with s at last box.n fill grey
 text "12" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.13043910350420124 with sw at last box.se
-text "63K" small small with s at last box.n fill grey
-box color orange fill orange height 1.0810476371227935 with sw at last box.se
-text "522K" small small with s at last box.n fill grey
+box color lightgreen fill lightgreen height 0.1213252328456675 with sw at last box.se
+text "62K" small small with s at last box.n fill grey
+box color orange fill orange height 1.066370566421777 with sw at last box.se
+text "546K" small small with s at last box.n fill grey
 text "13" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.12985938335720076 with sw at last box.se
-text "62K" small small with s at last box.n fill grey
-box color orange fill orange height 1.1351044704014905 with sw at last box.se
-text "548K" small small with s at last box.n fill grey
+box color lightgreen fill lightgreen height 0.12085702162388008 with sw at last box.se
+text "61K" small small with s at last box.n fill grey
+box color orange fill orange height 1.1147894593948695 with sw at last box.se
+text "571K" small small with s at last box.n fill grey
 text "14" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.12880760537621422 with sw at last box.se
+box color lightgreen fill lightgreen height 0.12161786485928465 with sw at last box.se
 text "62K" small small with s at last box.n fill grey
-box color orange fill orange height 1.1739105229558824 with sw at last box.se
-text "566K" small small with s at last box.n fill grey
+box color orange fill orange height 1.1723950467154496 with sw at last box.se
+text "600K" small small with s at last box.n fill grey
 text "15" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.128205110509153 with sw at last box.se
+box color lightgreen fill lightgreen height 0.11962601628659729 with sw at last box.se
 text "61K" small small with s at last box.n fill grey
-box color orange fill orange height 1.1999192532652392 with sw at last box.se
-text "579K" small small with s at last box.n fill grey
+box color orange fill orange height 1.1999278174366412 with sw at last box.se
+text "615K" small small with s at last box.n fill grey
 text "16" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
 line color grey from first box.sw to last box.se
@@ -199,17 +199,19 @@ box width 0.5 height 0.2 color orange fill orange with nw at VERT.n + (0.1,0.0)
 text "hctree" with n at previous.n
 box width 0.5 height 0.2 color lightgreen fill lightgreen with n at last box.s + (0.0,-0.1)
 text "bcw2" with n at previous.n
-line color grey from first line.w + (0.0,0.2070429096430235) left 0.1
+line color grey from first line.w + (0.0,0.19508800907809537) left 0.1
 PEG1: text "100K" with e at last line.w
-line color grey from first line.w + (0.0,0.414085819286047) left 0.1
+line color grey from first line.w + (0.0,0.39017601815619074) left 0.1
 PEG2: text "200K" with e at last line.w
-line color grey from first line.w + (0.0,0.6211287289290705) left 0.1
+line color grey from first line.w + (0.0,0.585264027234286) left 0.1
 PEG3: text "300K" with e at last line.w
-line color grey from first line.w + (0.0,0.828171638572094) left 0.1
+line color grey from first line.w + (0.0,0.7803520363123815) left 0.1
 PEG4: text "400K" with e at last line.w
-line color grey from first line.w + (0.0,1.0352145482151174) left 0.1
+line color grey from first line.w + (0.0,0.9754400453904768) left 0.1
 PEG5: text "500K" with e at last line.w
-line invis from (PEG5.w - (0.1,0.0), PEG1.w) up until even with PEG5.w "transactions/second" aligned
+line color grey from first line.w + (0.0,1.170528054468572) left 0.1
+PEG6: text "600K" with e at last line.w
+line invis from (PEG6.w - (0.1,0.0), PEG1.w) up until even with PEG6.w "transactions/second" aligned
 </verbatim></center>
 
 
@@ -218,100 +220,100 @@ line invis from (PEG5.w - (0.1,0.0), PEG1.w) up until even with PEG5.w "transact
 boxwid=0.18
 movewid=0.1
 box color none fill none width 35%
-box color lightgreen fill lightgreen height 0.09012379642365888 with sw at last box.se
+box color lightgreen fill lightgreen height 0.08581995253798502 with sw at last box.se
 text "4641" small small with s at last box.n fill grey
-box color orange fill orange height 0.11919410955578931 with sw at last box.se
-text "6138" small small with s at last box.n fill grey
+box color orange fill orange height 0.11903103522667734 with sw at last box.se
+text "6437" small small with s at last box.n fill grey
 text "1" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.11901933813415325 with sw at last box.se
+box color lightgreen fill lightgreen height 0.11333559342928468 with sw at last box.se
 text "6129" small small with s at last box.n fill grey
-box color orange fill orange height 0.22368800064730157 with sw at last box.se
-text "11K" small small with s at last box.n fill grey
+box color orange fill orange height 0.22643079483465342 with sw at last box.se
+text "12K" small small with s at last box.n fill grey
 text "2" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.13177765191358523 with sw at last box.se
+box color lightgreen fill lightgreen height 0.12548463648411254 with sw at last box.se
 text "6786" small small with s at last box.n fill grey
-box color orange fill orange height 0.3304345011732341 with sw at last box.se
+box color orange fill orange height 0.3274509199617838 with sw at last box.se
 text "17K" small small with s at last box.n fill grey
 text "3" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.09606602475928473 with sw at last box.se
+box color lightgreen fill lightgreen height 0.09147841094708294 with sw at last box.se
 text "4947" small small with s at last box.n fill grey
-box color orange fill orange height 0.43547212557650294 with sw at last box.se
-text "22K" small small with s at last box.n fill grey
+box color orange fill orange height 0.4364964403488766 with sw at last box.se
+text "23K" small small with s at last box.n fill grey
 text "4" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.09010437737681042 with sw at last box.se
+box color lightgreen fill lightgreen height 0.08580146084383763 with sw at last box.se
 text "4640" small small with s at last box.n fill grey
-box color orange fill orange height 0.5330722550368153 with sw at last box.se
-text "27K" small small with s at last box.n fill grey
+box color orange fill orange height 0.5350016950719635 with sw at last box.se
+text "28K" small small with s at last box.n fill grey
 text "5" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.08084149203009952 with sw at last box.se
+box color lightgreen fill lightgreen height 0.07698092273553794 with sw at last box.se
 text "4163" small small with s at last box.n fill grey
-box color orange fill orange height 0.6220114896027187 with sw at last box.se
-text "32K" small small with s at last box.n fill grey
+box color orange fill orange height 0.6214503652109594 with sw at last box.se
+text "33K" small small with s at last box.n fill grey
 text "6" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.07293793996278015 with sw at last box.se
+box color lightgreen fill lightgreen height 0.06945480321755478 with sw at last box.se
 text "3756" small small with s at last box.n fill grey
-box color orange fill orange height 0.7145820859292823 with sw at last box.se
-text "36K" small small with s at last box.n fill grey
+box color orange fill orange height 0.7046444971800166 with sw at last box.se
+text "38K" small small with s at last box.n fill grey
 text "7" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.06441297839631038 with sw at last box.se
+box color lightgreen fill lightgreen height 0.06133694948685548 with sw at last box.se
 text "3317" small small with s at last box.n fill grey
-box color orange fill orange height 0.7841605307872805 with sw at last box.se
-text "40K" small small with s at last box.n fill grey
+box color orange fill orange height 0.784380682343514 with sw at last box.se
+text "42K" small small with s at last box.n fill grey
 text "8" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.05903390241928959 with sw at last box.se
+box color lightgreen fill lightgreen height 0.05621475020803156 with sw at last box.se
 text "3040" small small with s at last box.n fill grey
-box color orange fill orange height 0.8615260134315074 with sw at last box.se
-text "44K" small small with s at last box.n fill grey
+box color orange fill orange height 0.8551299041513852 with sw at last box.se
+text "46K" small small with s at last box.n fill grey
 text "9" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.057053159640747635 with sw at last box.se
+box color lightgreen fill lightgreen height 0.054328597404998916 with sw at last box.se
 text "2938" small small with s at last box.n fill grey
-box color orange fill orange height 0.929997572619144 with sw at last box.se
-text "47K" small small with s at last box.n fill grey
+box color orange fill orange height 0.9199987672203901 with sw at last box.se
+text "49K" small small with s at last box.n fill grey
 text "10" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.057985273889473256 with sw at last box.se
+box color lightgreen fill lightgreen height 0.0552161987240731 with sw at last box.se
 text "2986" small small with s at last box.n fill grey
-box color orange fill orange height 0.9879051703212234 with sw at last box.se
-text "50K" small small with s at last box.n fill grey
+box color orange fill orange height 0.9842204209942367 with sw at last box.se
+text "53K" small small with s at last box.n fill grey
 text "11" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.054198559754025405 with sw at last box.se
+box color lightgreen fill lightgreen height 0.05161031836533424 with sw at last box.se
 text "2791" small small with s at last box.n fill grey
-box color orange fill orange height 1.040686139655312 with sw at last box.se
-text "53K" small small with s at last box.n fill grey
+box color orange fill orange height 1.0337226862267697 with sw at last box.se
+text "55K" small small with s at last box.n fill grey
 text "12" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.04984869325997249 with sw at last box.se
+box color lightgreen fill lightgreen height 0.04746817887632138 with sw at last box.se
 text "2567" small small with s at last box.n fill grey
-box color orange fill orange height 1.0861849664212315 with sw at last box.se
-text "55K" small small with s at last box.n fill grey
+box color orange fill orange height 1.0713532838166857 with sw at last box.se
+text "57K" small small with s at last box.n fill grey
 text "13" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.04988753135366939 with sw at last box.se
+box color lightgreen fill lightgreen height 0.04750516226461614 with sw at last box.se
 text "2569" small small with s at last box.n fill grey
-box color orange fill orange height 1.1320915931709685 with sw at last box.se
-text "58K" small small with s at last box.n fill grey
+box color orange fill orange height 1.10920578173637 with sw at last box.se
+text "59K" small small with s at last box.n fill grey
 text "14" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.04726596002912857 with sw at last box.se
+box color lightgreen fill lightgreen height 0.04500878355472 with sw at last box.se
 text "2434" small small with s at last box.n fill grey
-box color orange fill orange height 1.16879359171454 with sw at last box.se
-text "60K" small small with s at last box.n fill grey
+box color orange fill orange height 1.1376460073350385 with sw at last box.se
+text "61K" small small with s at last box.n fill grey
 text "15" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.04697467432640181 with sw at last box.se
+box color lightgreen fill lightgreen height 0.04473140814250932 with sw at last box.se
 text "2419" small small with s at last box.n fill grey
-box color orange fill orange height 1.1902322194352295 with sw at last box.se
-text "61K" small small with s at last box.n fill grey
+box color orange fill orange height 1.1882022991339722 with sw at last box.se
+text "64K" small small with s at last box.n fill grey
 text "16" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
 line color grey from first box.sw to last box.se
@@ -321,17 +323,17 @@ box width 0.5 height 0.2 color orange fill orange with nw at VERT.n + (0.1,0.0)
 text "hctree" with n at previous.n
 box width 0.5 height 0.2 color lightgreen fill lightgreen with n at last box.s + (0.0,-0.1)
 text "bcw2" with n at previous.n
-line color grey from first line.w + (0.0,0.19419046848450522) left 0.1
+line color grey from first line.w + (0.0,0.184916941473788) left 0.1
 PEG1: text "10K" with e at last line.w
-line color grey from first line.w + (0.0,0.38838093696901044) left 0.1
+line color grey from first line.w + (0.0,0.369833882947576) left 0.1
 PEG2: text "20K" with e at last line.w
-line color grey from first line.w + (0.0,0.5825714054535157) left 0.1
+line color grey from first line.w + (0.0,0.554750824421364) left 0.1
 PEG3: text "30K" with e at last line.w
-line color grey from first line.w + (0.0,0.7767618739380209) left 0.1
+line color grey from first line.w + (0.0,0.739667765895152) left 0.1
 PEG4: text "40K" with e at last line.w
-line color grey from first line.w + (0.0,0.9709523424225261) left 0.1
+line color grey from first line.w + (0.0,0.92458470736894) left 0.1
 PEG5: text "50K" with e at last line.w
-line color grey from first line.w + (0.0,1.1651428109070314) left 0.1
+line color grey from first line.w + (0.0,1.109501648842728) left 0.1
 PEG6: text "60K" with e at last line.w
 line invis from (PEG6.w - (0.1,0.0), PEG1.w) up until even with PEG6.w "transactions/second" aligned
 </verbatim></center>
@@ -342,100 +344,100 @@ line invis from (PEG6.w - (0.1,0.0), PEG1.w) up until even with PEG6.w "transact
 boxwid=0.18
 movewid=0.1
 box color none fill none width 35%
-box color lightgreen fill lightgreen height 0.07930780044893553 with sw at last box.se
+box color lightgreen fill lightgreen height 0.0768214511420747 with sw at last box.se
 text "8509" small small with s at last box.n fill grey
-box color orange fill orange height 0.08654047798429503 with sw at last box.se
-text "9285" small small with s at last box.n fill grey
+box color orange fill orange height 0.08561497487134732 with sw at last box.se
+text "9483" small small with s at last box.n fill grey
 text "1" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.11399855532858508 with sw at last box.se
+box color lightgreen fill lightgreen height 0.11042462908904872 with sw at last box.se
 text "12K" small small with s at last box.n fill grey
-box color orange fill orange height 0.1647484640657403 with sw at last box.se
-text "17K" small small with s at last box.n fill grey
+box color orange fill orange height 0.16491016882843298 with sw at last box.se
+text "18K" small small with s at last box.n fill grey
 text "2" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.13815718957040443 with sw at last box.se
+box color lightgreen fill lightgreen height 0.13382587498871468 with sw at last box.se
 text "14K" small small with s at last box.n fill grey
-box color orange fill orange height 0.24510947657845888 with sw at last box.se
-text "26K" small small with s at last box.n fill grey
+box color orange fill orange height 0.24582142104787988 with sw at last box.se
+text "27K" small small with s at last box.n fill grey
 text "3" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.14923921739197976 with sw at last box.se
+box color lightgreen fill lightgreen height 0.14456047428451052 with sw at last box.se
 text "16K" small small with s at last box.n fill grey
-box color orange fill orange height 0.3268685582023938 with sw at last box.se
-text "35K" small small with s at last box.n fill grey
+box color orange fill orange height 0.32715700141442716 with sw at last box.se
+text "36K" small small with s at last box.n fill grey
 text "4" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.1490714490986338 with sw at last box.se
+box color lightgreen fill lightgreen height 0.14439796563242951 with sw at last box.se
 text "15K" small small with s at last box.n fill grey
-box color orange fill orange height 0.406232281415778 with sw at last box.se
-text "43K" small small with s at last box.n fill grey
+box color orange fill orange height 0.4069397213277559 with sw at last box.se
+text "45K" small small with s at last box.n fill grey
 text "5" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.144485782413844 with sw at last box.se
+box color lightgreen fill lightgreen height 0.13995606247554848 with sw at last box.se
 text "15K" small small with s at last box.n fill grey
-box color orange fill orange height 0.4855028000217478 with sw at last box.se
-text "52K" small small with s at last box.n fill grey
+box color orange fill orange height 0.48348129645791327 with sw at last box.se
+text "53K" small small with s at last box.n fill grey
 text "6" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.13739291178960614 with sw at last box.se
+box color lightgreen fill lightgreen height 0.13308555779590117 with sw at last box.se
 text "14K" small small with s at last box.n fill grey
-box color orange fill orange height 0.5666560516974889 with sw at last box.se
-text "60K" small small with s at last box.n fill grey
+box color orange fill orange height 0.5607812452977821 with sw at last box.se
+text "62K" small small with s at last box.n fill grey
 text "7" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.13289112925148933 with sw at last box.se
+box color lightgreen fill lightgreen height 0.12872490896506064 with sw at last box.se
 text "14K" small small with s at last box.n fill grey
-box color orange fill orange height 0.6405486644556463 with sw at last box.se
-text "68K" small small with s at last box.n fill grey
+box color orange fill orange height 0.6411688585271901 with sw at last box.se
+text "71K" small small with s at last box.n fill grey
 text "8" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.12489417393533155 with sw at last box.se
+box color lightgreen fill lightgreen height 0.12097866321586566 with sw at last box.se
 text "13K" small small with s at last box.n fill grey
-box color orange fill orange height 0.7194836464749241 with sw at last box.se
-text "77K" small small with s at last box.n fill grey
+box color orange fill orange height 0.7122663938126336 with sw at last box.se
+text "78K" small small with s at last box.n fill grey
 text "9" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.1206254029157508 with sw at last box.se
+box color lightgreen fill lightgreen height 0.11684372084624876 with sw at last box.se
 text "12K" small small with s at last box.n fill grey
-box color orange fill orange height 0.7941964597783284 with sw at last box.se
-text "85K" small small with s at last box.n fill grey
+box color orange fill orange height 0.7879231996147943 with sw at last box.se
+text "87K" small small with s at last box.n fill grey
 text "10" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.1149399218634708 with sw at last box.se
+box color lightgreen fill lightgreen height 0.11133648319239219 with sw at last box.se
 text "12K" small small with s at last box.n fill grey
-box color orange fill orange height 0.8679772270075884 with sw at last box.se
-text "93K" small small with s at last box.n fill grey
+box color orange fill orange height 0.8598603629359897 with sw at last box.se
+text "95K" small small with s at last box.n fill grey
 text "11" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.10847152210890959 with sw at last box.se
+box color lightgreen fill lightgreen height 0.10507087182882423 with sw at last box.se
 text "11K" small small with s at last box.n fill grey
-box color orange fill orange height 0.9404251683508221 with sw at last box.se
-text "100K" small small with s at last box.n fill grey
+box color orange fill orange height 0.8665141894128623 with sw at last box.se
+text "95K" small small with s at last box.n fill grey
 text "12" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.10525596315311188 with sw at last box.se
+box color lightgreen fill lightgreen height 0.10195612266393812 with sw at last box.se
 text "11K" small small with s at last box.n fill grey
-box color orange fill orange height 1.0120249477665846 with sw at last box.se
-text "108K" small small with s at last box.n fill grey
+box color orange fill orange height 1.0015317945168378 with sw at last box.se
+text "110K" small small with s at last box.n fill grey
 text "13" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.09853591095853172 with sw at last box.se
+box color lightgreen fill lightgreen height 0.09544674832224864 with sw at last box.se
 text "10K" small small with s at last box.n fill grey
-box color orange fill orange height 1.0803998477658079 with sw at last box.se
-text "115K" small small with s at last box.n fill grey
+box color orange fill orange height 1.0638899756237021 with sw at last box.se
+text "117K" small small with s at last box.n fill grey
 text "14" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.0948822903478862 with sw at last box.se
+box color lightgreen fill lightgreen height 0.09190767101026212 with sw at last box.se
 text "10K" small small with s at last box.n fill grey
-box color orange fill orange height 1.1529782755594218 with sw at last box.se
-text "123K" small small with s at last box.n fill grey
+box color orange fill orange height 1.1353215564717567 with sw at last box.se
+text "125K" small small with s at last box.n fill grey
 text "15" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.09391296243077617 with sw at last box.se
+box color lightgreen fill lightgreen height 0.09096873213157182 with sw at last box.se
 text "10K" small small with s at last box.n fill grey
-box color orange fill orange height 1.1989281470147342 with sw at last box.se
-text "128K" small small with s at last box.n fill grey
+box color orange fill orange height 1.1989256372445756 with sw at last box.se
+text "132K" small small with s at last box.n fill grey
 text "16" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
 line color grey from first box.sw to last box.se
@@ -445,15 +447,15 @@ box width 0.5 height 0.2 color orange fill orange with nw at VERT.n + (0.1,0.0)
 text "hctree" with n at previous.n
 box width 0.5 height 0.2 color lightgreen fill lightgreen with n at last box.s + (0.0,-0.1)
 text "bcw2" with n at previous.n
-line color grey from first line.w + (0.0,0.2330115185360663) left 0.1
+line color grey from first line.w + (0.0,0.22570646122362997) left 0.1
 PEG1: text "25K" with e at last line.w
-line color grey from first line.w + (0.0,0.4660230370721326) left 0.1
+line color grey from first line.w + (0.0,0.45141292244725995) left 0.1
 PEG2: text "50K" with e at last line.w
-line color grey from first line.w + (0.0,0.6990345556081989) left 0.1
+line color grey from first line.w + (0.0,0.6771193836708899) left 0.1
 PEG3: text "75K" with e at last line.w
-line color grey from first line.w + (0.0,0.9320460741442652) left 0.1
+line color grey from first line.w + (0.0,0.9028258448945199) left 0.1
 PEG4: text "100K" with e at last line.w
-line color grey from first line.w + (0.0,1.1650575926803315) left 0.1
+line color grey from first line.w + (0.0,1.1285323061181498) left 0.1
 PEG5: text "125K" with e at last line.w
 line invis from (PEG5.w - (0.1,0.0), PEG1.w) up until even with PEG5.w "transactions/second" aligned
 </verbatim></center>
@@ -464,100 +466,100 @@ line invis from (PEG5.w - (0.1,0.0), PEG1.w) up until even with PEG5.w "transact
 boxwid=0.18
 movewid=0.1
 box color none fill none width 35%
-box color lightgreen fill lightgreen height 0.08511971358245693 with sw at last box.se
+box color lightgreen fill lightgreen height 0.08192272903475901 with sw at last box.se
 text "3170" small small with s at last box.n fill grey
-box color orange fill orange height 0.10332512866413068 with sw at last box.se
-text "3848" small small with s at last box.n fill grey
+box color orange fill orange height 0.102933195503295 with sw at last box.se
+text "3983" small small with s at last box.n fill grey
 text "1" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.06065786529424927 with sw at last box.se
+box color lightgreen fill lightgreen height 0.05837963561183615 with sw at last box.se
 text "2259" small small with s at last box.n fill grey
-box color orange fill orange height 0.1907809353322891 with sw at last box.se
-text "7105" small small with s at last box.n fill grey
+box color orange fill orange height 0.1947538441659129 with sw at last box.se
+text "7536" small small with s at last box.n fill grey
 text "2" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.05676437681808011 with sw at last box.se
+box color lightgreen fill lightgreen height 0.05463238144463109 with sw at last box.se
 text "2114" small small with s at last box.n fill grey
-box color orange fill orange height 0.28669501006936676 with sw at last box.se
-text "10K" small small with s at last box.n fill grey
+box color orange fill orange height 0.28592841452384027 with sw at last box.se
+text "11K" small small with s at last box.n fill grey
 text "3" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.052763481763258 with sw at last box.se
+box color lightgreen fill lightgreen height 0.05078175474867554 with sw at last box.se
 text "1965" small small with s at last box.n fill grey
-box color orange fill orange height 0.3792526292235399 with sw at last box.se
+box color orange fill orange height 0.3786277296808373 with sw at last box.se
 text "14K" small small with s at last box.n fill grey
 text "4" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.05109867979413739 with sw at last box.se
+box color lightgreen fill lightgreen height 0.049179480553043026 with sw at last box.se
 text "1903" small small with s at last box.n fill grey
-box color orange fill orange height 0.4726157977176102 with sw at last box.se
-text "17K" small small with s at last box.n fill grey
+box color orange fill orange height 0.46714045742343974 with sw at last box.se
+text "18K" small small with s at last box.n fill grey
 text "5" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.04682926829268293 with sw at last box.se
+box color lightgreen fill lightgreen height 0.04507042253521127 with sw at last box.se
 text "1744" small small with s at last box.n fill grey
-box color orange fill orange height 0.5525531438800626 with sw at last box.se
-text "20K" small small with s at last box.n fill grey
+box color orange fill orange height 0.5530947150794676 with sw at last box.se
+text "21K" small small with s at last box.n fill grey
 text "6" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.040223763705526966 with sw at last box.se
+box color lightgreen fill lightgreen height 0.038713012017056465 with sw at last box.se
 text "1498" small small with s at last box.n fill grey
-box color orange fill orange height 0.6370015663459386 with sw at last box.se
-text "23K" small small with s at last box.n fill grey
+box color orange fill orange height 0.632329758366714 with sw at last box.se
+text "24K" small small with s at last box.n fill grey
 text "7" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.0398746923249049 with sw at last box.se
+box color lightgreen fill lightgreen height 0.03837705129861739 with sw at last box.se
 text "1485" small small with s at last box.n fill grey
-box color orange fill orange height 0.7184963078988588 with sw at last box.se
-text "26K" small small with s at last box.n fill grey
+box color orange fill orange height 0.7113838997286471 with sw at last box.se
+text "27K" small small with s at last box.n fill grey
 text "8" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.03684045647795928 with sw at last box.se
+box color lightgreen fill lightgreen height 0.035456777361416204 with sw at last box.se
 text "1372" small small with s at last box.n fill grey
-box color orange fill orange height 0.7957216379503245 with sw at last box.se
-text "29K" small small with s at last box.n fill grey
+box color orange fill orange height 0.7819356506008528 with sw at last box.se
+text "30K" small small with s at last box.n fill grey
 text "9" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.03592750055940926 with sw at last box.se
+box color lightgreen fill lightgreen height 0.03457811086703708 with sw at last box.se
 text "1338" small small with s at last box.n fill grey
-box color orange fill orange height 0.8685701499216827 with sw at last box.se
+box color orange fill orange height 0.847887323943662 with sw at last box.se
 text "32K" small small with s at last box.n fill grey
 text "10" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.03404788543298277 with sw at last box.se
+box color lightgreen fill lightgreen height 0.0327690916139036 with sw at last box.se
 text "1268" small small with s at last box.n fill grey
-box color orange fill orange height 0.9347594540165585 with sw at last box.se
-text "34K" small small with s at last box.n fill grey
+box color orange fill orange height 0.9103760175733299 with sw at last box.se
+text "35K" small small with s at last box.n fill grey
 text "11" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.03313492951443276 with sw at last box.se
+box color lightgreen fill lightgreen height 0.03189042511952449 with sw at last box.se
 text "1234" small small with s at last box.n fill grey
-box color orange fill orange height 0.9983172969344373 with sw at last box.se
+box color orange fill orange height 0.9635611836154542 with sw at last box.se
 text "37K" small small with s at last box.n fill grey
 text "12" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.03061087491608861 with sw at last box.se
+box color lightgreen fill lightgreen height 0.029461170693888098 with sw at last box.se
 text "1140" small small with s at last box.n fill grey
-box color orange fill orange height 1.0490937569926158 with sw at last box.se
+box color orange fill orange height 1.008450704225352 with sw at last box.se
 text "39K" small small with s at last box.n fill grey
 text "13" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.02999328708883419 with sw at last box.se
+box color lightgreen fill lightgreen height 0.028866778653572813 with sw at last box.se
 text "1117" small small with s at last box.n fill grey
-box color orange fill orange height 1.1039785186842694 with sw at last box.se
-text "41K" small small with s at last box.n fill grey
+box color orange fill orange height 1.0487143041736657 with sw at last box.se
+text "40K" small small with s at last box.n fill grey
 text "14" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.030718281494741553 with sw at last box.se
+box color lightgreen fill lightgreen height 0.029564543222638583 with sw at last box.se
 text "1144" small small with s at last box.n fill grey
-box color orange fill orange height 1.1363884537927949 with sw at last box.se
+box color orange fill orange height 1.0872722573975966 with sw at last box.se
 text "42K" small small with s at last box.n fill grey
 text "15" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
-box color lightgreen fill lightgreen height 0.029187737748937122 with sw at last box.se
+box color lightgreen fill lightgreen height 0.028091484687944177 with sw at last box.se
 text "1087" small small with s at last box.n fill grey
-box color orange fill orange height 1.1773640635488924 with sw at last box.se
-text "43K" small small with s at last box.n fill grey
+box color orange fill orange height 1.177283886807081 with sw at last box.se
+text "45K" small small with s at last box.n fill grey
 text "16" with n at last box.sw
 box color none fill none width 35% with sw at last box.se
 line color grey from first box.sw to last box.se
@@ -567,23 +569,25 @@ box width 0.5 height 0.2 color orange fill orange with nw at VERT.n + (0.1,0.0)
 text "hctree" with n at previous.n
 box width 0.5 height 0.2 color lightgreen fill lightgreen with n at last box.s + (0.0,-0.1)
 text "bcw2" with n at previous.n
-line color grey from first line.w + (0.0,0.13425822331617812) left 0.1
+line color grey from first line.w + (0.0,0.1292156609381057) left 0.1
 PEG1: text "5K" with e at last line.w
-line color grey from first line.w + (0.0,0.26851644663235624) left 0.1
+line color grey from first line.w + (0.0,0.2584313218762114) left 0.1
 PEG2: text "10K" with e at last line.w
-line color grey from first line.w + (0.0,0.40277466994853434) left 0.1
+line color grey from first line.w + (0.0,0.3876469828143171) left 0.1
 PEG3: text "15K" with e at last line.w
-line color grey from first line.w + (0.0,0.5370328932647125) left 0.1
+line color grey from first line.w + (0.0,0.5168626437524227) left 0.1
 PEG4: text "20K" with e at last line.w
-line color grey from first line.w + (0.0,0.6712911165808906) left 0.1
+line color grey from first line.w + (0.0,0.6460783046905285) left 0.1
 PEG5: text "25K" with e at last line.w
-line color grey from first line.w + (0.0,0.8055493398970687) left 0.1
+line color grey from first line.w + (0.0,0.7752939656286342) left 0.1
 PEG6: text "30K" with e at last line.w
-line color grey from first line.w + (0.0,0.9398075632132468) left 0.1
+line color grey from first line.w + (0.0,0.9045096265667398) left 0.1
 PEG7: text "35K" with e at last line.w
-line color grey from first line.w + (0.0,1.074065786529425) left 0.1
+line color grey from first line.w + (0.0,1.0337252875048455) left 0.1
 PEG8: text "40K" with e at last line.w
-line invis from (PEG8.w - (0.1,0.0), PEG1.w) up until even with PEG8.w "transactions/second" aligned
+line color grey from first line.w + (0.0,1.1629409484429514) left 0.1
+PEG9: text "45K" with e at last line.w
+line invis from (PEG9.w - (0.1,0.0), PEG1.w) up until even with PEG9.w "transactions/second" aligned
 </verbatim></center>
 
 

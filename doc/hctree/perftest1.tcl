@@ -101,17 +101,18 @@ proc setup_database {} {
 puts "-- setup database..."
 setup_database
 
-foreach testname {
-  update10_scan10
-  update1
-  update10
-  update1_scan10
-} {
-  foreach nThread {1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16} {
+foreach nThread {16 15 14 13 12 11 10 9 8 7 6 5 4 3 2 1} {
+  foreach testname {
+    update10_scan10
+    update1
+    update10
+    update1_scan10
+  } {
     sqlite_thread_test T $G(filename)
     T config -sqlconf {
       PRAGMA mmap_size = 1000000000;
       PRAGMA synchronous = off;
+      -- PRAGMA hct_npagescan = 16;
     }
   
     for {set ii 0 } {$ii<$nThread} {incr ii} {
@@ -128,6 +129,12 @@ foreach testname {
     catch { array unset A }
     set data [T result]
     T destroy
+
+    set nTotal 0
+    foreach {k v} $data {
+      if {[string match *ok $k]} { incr nTotal $v }
+    }
+    puts "-- $testname, $nThread threads: [expr $nTotal/$G(nSecond)] per second"
   
     puts "INSERT INTO result(system, test, nthread, nsecond, data) VALUES('$G(system)', '$testname', $nThread, $G(nSecond), '$data');"
   }
