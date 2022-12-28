@@ -3107,7 +3107,7 @@ static int hctDbSetWriteFpKey(HctDatabase *pDb, HctDbWriter *p){
       if( hctPagetype(pHdr)==HCT_PAGETYPE_INTKEY ){
         p->fp.iKey = hctDbIntkeyFPKey(pg.aOld);
       }else{
-        rc = hctDbLoadRecordFP(pDb, pg.aOld, 0, pFP);
+        rc = hctDbLoadRecordFP(pDb, pg.aOld, 0, &p->fp);
       }
       sqlite3HctFilePageRelease(&pg);
     }
@@ -5268,9 +5268,12 @@ static int hctDbRootPagelist(HctDatabase *pDb, int *pnRoot, u32 **paRoot){
         }
       }
 
-      assert( iRoot>2 );
-      aRoot[nRoot] = iRoot;
-      nRoot++;
+      /* iRoot might be zero for a virtual table or view. */
+      if( iRoot!=0 ){
+        assert( iRoot>2 );
+        aRoot[nRoot] = iRoot;
+        nRoot++;
+      }
     }
   }
 

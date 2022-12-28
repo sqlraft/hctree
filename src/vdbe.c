@@ -2858,7 +2858,9 @@ op_column_restart:
       pC->payloadSize = sqlite3BtreePayloadSize(pCrsr);
       pC->aRow = sqlite3BtreePayloadFetch(pCrsr, &pC->szRow);
       assert( pC->szRow<=pC->payloadSize );
+#if 0
       assert( pC->szRow<=65536 );  /* Maximum page size is 64KiB */
+#endif
     }
     pC->cacheStatus = p->cacheCtr;
     if( (aOffset[0] = pC->aRow[0])<0x80 ){

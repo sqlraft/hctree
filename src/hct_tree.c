@@ -978,7 +978,7 @@ int sqlite3HctTreeCsrClose(HctTreeCsr *pCsr){
 ** *pRes is as follows:
 **
 **     *pRes<0      The cursor is left pointing at an entry that
-**                  is smaller than intKey/pIdxKey or if the table is empty
+**                  is smaller than intKey/pIdxKey. Or, the table is empty
 **                  and the cursor is therefore left point to nothing.
 **
 **     *pRes==0     The cursor is left pointing at an entry that
@@ -1119,11 +1119,13 @@ int sqlite3HctTreeCsrData(HctTreeCsr *pCsr, int *pnData, const u8 **paData){
   return SQLITE_OK;
 }
 
+/*
+** Return non-zero if the cursor is pointing to a delete key. Return zero 
+** if it is pointing to an insert or to EOF.
+*/
 int sqlite3HctTreeCsrIsDelete(HctTreeCsr *pCsr){
-  HctTreeNode *pNode = pCsr->apNode[pCsr->iNode];
   assert( pCsr->pReseek==0 );
-  assert( pCsr->iNode>=0 );
-  return pNode->bDelete;
+  return (pCsr->iNode>=0 && pCsr->apNode[pCsr->iNode]->bDelete);
 }
 
 void sqlite3HctTreeCsrPin(HctTreeCsr *pCsr){

@@ -2555,7 +2555,6 @@ int sqlite3HctBtreeCursorHasHint(BtCursor *pCsr, unsigned int mask){
 ** Return true if the given Btree is read-only.
 */
 int sqlite3HctBtreeIsReadonly(Btree *p){
-  assert( 0 );
   return 0;
 }
 
