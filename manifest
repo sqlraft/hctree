@@ -1,5 +1,5 @@
-C Load\sFP\skeys\sfrom\sparent\spages\swhere\spossible.
-D 2022-12-27T20:04:50.923
+C Minor\schanges\sto\sperftest1.tcl\sscript.
+D 2022-12-28T10:41:43.164
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -41,7 +41,7 @@ F doc/hctree/design.wiki 5e7a5eab1d0c7082e7c1c6aa3c2943422a3a1a328e2b0c9fd6eddc0
 F doc/hctree/fileformat.wiki 1292b7e0135ccaa0fb3c5ecfd7df184410764bf732c0920f02f62da24dfa44e6
 F doc/hctree/index.html f5d4e7fb1a32130a1086a6a60d9d070f5a06681acca80cd768d8648249b69003
 F doc/hctree/mkthreadtest.tcl 9b9937514165d88cd0e2bc003be5a8c3c12573f91e150da501b41e6412e9b63c
-F doc/hctree/perftest1.tcl 74d5382cfc31d432c0f7e3b05715a61a168987ffd24bf9923edc960a9f48994d
+F doc/hctree/perftest1.tcl 9a7bc3b38d8e41ee96107d0be7b3e71230183d3c4b84232223e5599bf3e7c4f7
 F doc/hctree/slides.wiki 4151889c5485fecd8a71d5d0089645998a2db5ebc3360b570f763e59effed60c
 F doc/hctree/threadtest.data 8b3aa71d3c3a02627ff2de9eff80a78a888d6de64ea6cff6586c5cb5e22adb5d
 F doc/hctree/threadtest.html 2e27b4ca5e708780a2b5c8c72302ff95f6283d7e1f86429ea7291946f0d5f59e
@@ -2120,8 +2120,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P aba288a3bca7aceabd1cd6ea3222e9489d4a4b556de491036796534e12a156f8
-R 175c5c9fb83f5f7805097edf292da3f7
+P 05c575696a80f9e5e8fb1897540f4e3aca7126e9930ccc2bfd08202fd0491766
+R ccc26855a5ebbe2a82d353a6cf83e6e4
 U dan
-Z 9c761580c5e14f08f0b3c680888fece3
+Z 71d33d90ad54441ac6eb30915daacdbe
 # Remove this line to create a well-formed Fossil manifest.

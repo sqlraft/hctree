@@ -103,16 +103,15 @@ setup_database
 
 foreach nThread {16 15 14 13 12 11 10 9 8 7 6 5 4 3 2 1} {
   foreach testname {
-    update10_scan10
     update1
     update10
     update1_scan10
+    update10_scan10
   } {
     sqlite_thread_test T $G(filename)
     T config -sqlconf {
       PRAGMA mmap_size = 1000000000;
       PRAGMA synchronous = off;
-      -- PRAGMA hct_npagescan = 16;
     }
   
     for {set ii 0 } {$ii<$nThread} {incr ii} {
