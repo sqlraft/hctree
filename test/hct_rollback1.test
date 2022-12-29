@@ -29,7 +29,7 @@ do_execsql_test 1.0 {
 sqlite3 db2 test.db
 
 do_execsql_test 1.1 {
-  BEGIN;
+  BEGIN CONCURRENT;
     INSERT INTO t1 VALUES(7, 'seven');
     DELETE FROM t1 WHERE a=7;
     INSERT INTO t1 VALUES(8, 'eight');
@@ -50,7 +50,7 @@ do_execsql_test -db db2 1.4 {
 } {1 one 2 two 3 three 4 four 5 five 6 six}
 
 do_execsql_test 1.5 {
-  BEGIN;
+  BEGIN CONCURRENT;
     INSERT INTO t1 VALUES(9, 'nine');
 }
 
@@ -77,11 +77,11 @@ do_execsql_test 2.0 {
 }
 
 do_execsql_test -db db   2.1.1 {
-  BEGIN;
+  BEGIN CONCURRENT;
     DELETE FROM t1 WHERE a=3;
 }
 do_execsql_test -db db2  2.1.2 {
-  BEGIN;
+  BEGIN CONCURRENT;
     DELETE FROM t1 WHERE a=4;
     SELECT * FROM t1
 } {1 one 2 two 3 three 5 five}
@@ -119,11 +119,11 @@ do_execsql_test 2.2.0 {
 }
 
 do_execsql_test -db db   2.2.1 {
-  BEGIN;
+  BEGIN CONCURRENT;
     UPDATE t1 SET b='thirteen' WHERE a=3;
 }
 do_execsql_test -db db2  2.2.2 {
-  BEGIN;
+  BEGIN CONCURRENT;
     DELETE FROM t1 WHERE a=4;
     SELECT * FROM t1
 } {1 one 2 two 3 three 5 five}

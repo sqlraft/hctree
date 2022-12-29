@@ -194,6 +194,7 @@ static Keyword aKeywordTable[] = {
   { "COLLATE",          "TK_COLLATE",      ALWAYS,           1      },
   { "COLUMN",           "TK_COLUMNKW",     ALTER,            1      },
   { "COMMIT",           "TK_COMMIT",       ALWAYS,           1      },
+  { "CONCURRENT",       "TK_CONCURRENT",   ALWAYS,           0      },
   { "CONFLICT",         "TK_CONFLICT",     CONFLICT,         0      },
   { "CONSTRAINT",       "TK_CONSTRAINT",   ALWAYS,           1      },
   { "CREATE",           "TK_CREATE",       ALWAYS,           2      },

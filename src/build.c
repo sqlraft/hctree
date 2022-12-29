@@ -5121,7 +5121,7 @@ void sqlite3BeginTransaction(Parse *pParse, int type){
   }
   v = sqlite3GetVdbe(pParse);
   if( !v ) return;
-  if( type!=TK_DEFERRED ){
+  if( type!=TK_DEFERRED && type!=TK_CONCURRENT ){
     for(i=0; i<db->nDb; i++){
       int eTxnType;
       Btree *pBt = db->aDb[i].pBt;
