@@ -303,12 +303,6 @@ static void *ttThreadMain(void *pArg){
   return 0;
 }
 
-static int ttObjEqual(Tcl_Obj *p1, Tcl_Obj *p2){
-  const char *z1 = Tcl_GetString(p1);
-  const char *z2 = Tcl_GetString(p2);
-  return 0==strcmp(z1, z2);
-}
-
 static int ttRunTest(TT_Test *p){
   int ii = 0;
 

@@ -5890,7 +5890,12 @@ void sqlite3HctDbTMapScan(HctDatabase *pDb){
 
 int 
 __attribute__ ((noinline)) 
-sqlite3HctDbValidate(HctDatabase *pDb, u64 *piCid, int *pbTmapscan){
+sqlite3HctDbValidate(
+  sqlite3 *db, 
+  HctDatabase *pDb, 
+  u64 *piCid, 
+  int *pbTmapscan
+){
   HctDbCsr *pCsr = 0;
   u64 *pEntry = hctDbFindTMapEntry(pDb->pTmap, pDb->iTid);
   u64 iCid = 0;
@@ -5909,6 +5914,9 @@ sqlite3HctDbValidate(HctDatabase *pDb, u64 *piCid, int *pbTmapscan){
   if( (iCid / nPageScan)!=((iCid-nWrite) / nPageScan) ) *pbTmapscan = 1;
 
   assert( pDb->eMode==HCT_MODE_NORMAL );
+
+  /* Invoke the SQLITE_TESTCTRL_HCT_MTCOMMIT hook, if applicable */
+  if( db->xMtCommit ) db->xMtCommit(db->pMtCommitCtx, 2);
 
   /* If iCid is one more than pDb->iSnapshotId, then this transaction is
   ** being applied against the snapshot that it was run against. In this

@@ -376,7 +376,8 @@ TESTSRC = \
   $(TOP)/src/test_windirent.c \
   $(TOP)/src/test_window.c \
   $(TOP)/src/test_wsd.c \
-  $(TOP)/src/test_mtperf.c
+  $(TOP)/src/test_mtperf.c \
+  $(TOP)/src/test_mtcommit.c
 
 # Extensions to be statically loaded.
 #

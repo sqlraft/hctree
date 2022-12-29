@@ -1681,6 +1681,10 @@ struct sqlite3 {
 #ifdef SQLITE_USER_AUTHENTICATION
   sqlite3_userauth auth;        /* User authentication information */
 #endif
+
+  /* Used as part of testing hctree commits */
+  void (*xMtCommit)(void*, int);
+  void *pMtCommitCtx;
 };
 
 /*

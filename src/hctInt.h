@@ -143,7 +143,7 @@ int sqlite3HctDbInsertFlush(HctDatabase *pDb, int *pnRetry);
 int sqlite3HctDbStartWrite(HctDatabase*, u64*);
 int sqlite3HctDbEndWrite(HctDatabase*, u64, int);
 int sqlite3HctDbEndRead(HctDatabase*);
-int sqlite3HctDbValidate(HctDatabase*, u64 *piCid, int*);
+int sqlite3HctDbValidate(sqlite3*, HctDatabase*, u64 *piCid, int*);
 
 void sqlite3HctDbRollbackMode(HctDatabase*,int);
 

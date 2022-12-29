@@ -1033,6 +1033,8 @@ static int btreeFlushToDisk(HBtree *p){
   rc = btreeWriteLog(p);
   if( rc==SQLITE_OK ){
     sqlite3HctDbStartWrite(p->pHctDb, &iTid);
+    /* Invoke the SQLITE_TESTCTRL_HCT_MTCOMMIT hook, if applicable */
+    if( p->db->xMtCommit ) p->db->xMtCommit(p->db->pMtCommitCtx, 0);
     assert( iTid>0 );
     rc = btreeWriteTid(p, iTid);
   }
@@ -1072,7 +1074,9 @@ static int btreeFlushToDisk(HBtree *p){
   /* Assuming the data has been flushed to disk without error or a
   ** write/write conflict, allocate a CID and validate the transaction. */
   if( rc==SQLITE_OK ){
-    rc = sqlite3HctDbValidate(p->pHctDb, &iCid, &bTmapScan);
+    /* Invoke the SQLITE_TESTCTRL_HCT_MTCOMMIT hook, if applicable */
+    if( p->db->xMtCommit ) p->db->xMtCommit(p->db->pMtCommitCtx, 1);
+    rc = sqlite3HctDbValidate(p->db, p->pHctDb, &iCid, &bTmapScan);
   }
 
   /* If conflicts have been detected, roll back the transaction */

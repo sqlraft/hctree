@@ -4442,6 +4442,22 @@ int sqlite3_test_control(int op, ...){
       *pI2 = sqlite3LogEst(*pU64);
       break;
     }
+
+    /* sqlite3_test_control(SQLITE_TESTCTRL_HCT_MTCOMMIT,
+    **     sqlite3 *db,
+    **     void(*xMtCommit)(void*, int),
+    **     void *pCtx
+    ** );
+    **
+    ** Install xMtCommit hook on "main" hct database.
+    */
+    case SQLITE_TESTCTRL_HCT_MTCOMMIT: {
+      typedef void (*mt_commit_hook)(void*,int);
+      sqlite3 *db = va_arg(ap, sqlite3*);
+      db->xMtCommit = va_arg(ap, mt_commit_hook);
+      db->pMtCommitCtx = va_arg(ap, void*);
+      break;
+    };
  
 
 #if defined(SQLITE_DEBUG) && !defined(SQLITE_OMIT_WSD)
