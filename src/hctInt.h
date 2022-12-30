@@ -18,6 +18,7 @@ typedef struct HctConfig HctConfig;
 struct HctConfig {
   int nPageSet;                   /* Used by hct_pman.c */
   int nPageScan;                  /* Used by hct_pman.c */
+  int szLogChunk;                 /* Used by hctree.c */
   int nTryBeforeUnevict;
   int bQuiescentIntegrityCheck;   /* PRAGMA hct_quiescent_integrity_check */
 };
@@ -28,6 +29,7 @@ struct HctConfig {
 #define HCT_DEFAULT_NPAGESET           256
 #define HCT_DEFAULT_NTRYBEFOREUNEVICT  100
 #define HCT_DEFAULT_NPAGESCAN         1024
+#define HCT_DEFAULT_SZLOGCHUNK       16384
 
 
 #include <hctTMapInt.h>

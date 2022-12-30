@@ -707,9 +707,15 @@ static int hctFileServerInit(
       pMapping->mapMask = (1<<pMapping->mapShift)-1;
       pMapping->szPage = p->szPage;
     }
-    for(i=0; rc==SQLITE_OK && i<nChunk; i++){
-      pMapping->aChunk[i].pData = hctFileMmap(&rc, p->fdDb, szChunkData, i);
-      pMapping->aChunk[i].aMap = hctFileMmap(&rc, p->fdMap, szChunkPagemap, i);
+
+    {
+      u8 *pData = (u8*)hctFileMmap(&rc, p->fdDb, nChunk*szChunkData, 0);
+      u8 *pMap = (u8*)hctFileMmap(&rc, p->fdMap, nChunk*szChunkPagemap, 0);
+
+      for(i=0; rc==SQLITE_OK && i<nChunk; i++){
+        pMapping->aChunk[i].pData = (void*)&pData[i * szChunkData];
+        pMapping->aChunk[i].aMap = (u64*)&pMap[i * szChunkPagemap];
+      }
     }
 
     /* If this is a new database: 
