@@ -27,7 +27,8 @@ proc make_chart {testcase} {
   global G
   set chart ""
 
-  db eval {SELECT system, test, nthread, nsecond, data FROM result WHERE test=$testcase} {
+  db eval {
+    SELECT system, test, nthread, nsecond, data FROM result WHERE test=$testcase} {
     set nOk 0
     set nBusy 0
   
@@ -38,13 +39,23 @@ proc make_chart {testcase} {
       if {$s=="ok"}   { incr nOk $A($k) }
       if {$s=="busy"} { incr nBusy $A($k) }
     }
+    if {$nthread==16 && $test=="update1" && $system=="hctree"} {
+      puts stderr "nOk=$nOk"
+    }
   
-    set nOk [expr $nOk / $nsecond]
-    set nBusy [expr $nBusy / $nsecond]
-  
-    set R($system,$nthread,ok) $nOk
-    set R($system,$nthread,busy) $nBusy
-    set R($system,$nthread,total) [expr $nOk + $nBusy]
+    incr R($system,$nthread,ok) $nOk
+    incr R($system,$nthread,busy) $nBusy
+    incr R($system,$nthread,total) [expr $nOk + $nBusy]
+    incr T($system,$nthread) $nsecond
+  }
+    if {$test=="update1"} {
+      puts stderr "update1: $R(hctree,16,ok)"
+      puts stderr "nsec: $T(hctree,16)"
+    }
+
+  foreach k [array name R] {
+    foreach {sys nt topic} [split $k ,] {}
+    set R($k) [expr $R($k) / $T($sys,$nt)]
   }
 
   set max $R(hctree,16,total)

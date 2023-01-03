@@ -7,9 +7,6 @@ set G(nRow)     1000000
 set G(nSleep)   10
 set G(nSecond)  30
 
-set G(nSleep)   10
-set G(nSecond)  30
-
 set G(system) [lindex $argv 0]
 if {[llength $argv]!=1 || [lsearch {hctree bcw2} $G(system)]<0 } {
   puts stderr "Usage $argv0 hctree|bcw2"
@@ -98,8 +95,41 @@ proc setup_database {} {
   db close
 }
 
+proc run_one_test {nThread testname} {
+  global G
+  sqlite_thread_test T $G(filename)
+  T config -sqlconf {
+    PRAGMA mmap_size = 1000000000;
+    PRAGMA synchronous = off;
+  }
+
+  for {set ii 0 } {$ii<$nThread} {incr ii} {
+    T thread $ii $G(sql.$G(system).$testname)
+  }
+
+  T configure -nsecond $G(nSecond)
+  T configure -nwalpage 4096
+
+  puts "-- launching $nThread threads for $G(nSecond)s - testcase \"$testname\"...."
+  T run
+  catch { array unset A }
+  set data [T result]
+  T destroy
+
+  set nTotal 0
+  foreach {k v} $data {
+    if {[string match *ok $k]} { incr nTotal $v }
+  }
+  puts "-- $testname, $nThread threads: [expr $nTotal/$G(nSecond)] per second"
+
+  puts "INSERT INTO result(system, test, nthread, nsecond, data) VALUES('$G(system)', '$testname', $nThread, $G(nSecond), '$data');"
+}
+
 puts "-- setup database..."
 setup_database
+
+#run_one_test 1 update1
+#exit
 
 foreach nThread {16 15 14 13 12 11 10 9 8 7 6 5 4 3 2 1} {
   foreach testname {
@@ -108,34 +138,9 @@ foreach nThread {16 15 14 13 12 11 10 9 8 7 6 5 4 3 2 1} {
     update1_scan10
     update10_scan10
   } {
-    sqlite_thread_test T $G(filename)
-    T config -sqlconf {
-      PRAGMA mmap_size = 1000000000;
-      PRAGMA synchronous = off;
-    }
-  
-    for {set ii 0 } {$ii<$nThread} {incr ii} {
-      T thread $ii $G(sql.$G(system).$testname)
-    }
-  
-    T configure -nsecond $G(nSecond)
-    T configure -nwalpage 4096
-  
     puts "-- sleeping $G(nSleep) seconds..."
     after [expr {$G(nSleep) * 1000}]
-    puts "-- launching $nThread threads for testcase \"$testname\"...."
-    T run
-    catch { array unset A }
-    set data [T result]
-    T destroy
-
-    set nTotal 0
-    foreach {k v} $data {
-      if {[string match *ok $k]} { incr nTotal $v }
-    }
-    puts "-- $testname, $nThread threads: [expr $nTotal/$G(nSecond)] per second"
-  
-    puts "INSERT INTO result(system, test, nthread, nsecond, data) VALUES('$G(system)', '$testname', $nThread, $G(nSecond), '$data');"
+    run_one_test $nThread $testname
   }
 }
 

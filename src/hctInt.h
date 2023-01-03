@@ -51,6 +51,7 @@ int sqlite3HctTreeNew(HctTree **ppTree);
 void sqlite3HctTreeFree(HctTree *pTree);
 
 int sqlite3HctTreeInsert(HctTreeCsr*, UnpackedRecord*, i64, int, const u8*,int);
+int sqlite3HctTreeAppend(HctTreeCsr*, KeyInfo*, i64, int, const u8*,int);
 int sqlite3HctTreeDelete(HctTreeCsr *pCsr);
 int sqlite3HctTreeDeleteKey(HctTreeCsr *, UnpackedRecord *, i64, int,const u8*);
 

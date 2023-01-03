@@ -564,7 +564,43 @@ static int treeInsertNode(
   return SQLITE_OK;
 }
 
-int treeInsert(
+
+/*
+** Allocate a new tree node. Link it into the rollback list.
+*/
+static HctTreeNode *treeNewNode(
+  HctTreeCsr *pCsr,
+  i64 iKey, 
+  int bDelete,
+  int nData, 
+  const u8 *aData,
+  int nZero
+){
+  HctTree *pTree = pCsr->pTree;
+  HctTreeNode *pNew;
+
+  pNew = (HctTreeNode*)hctMallocZero(sizeof(HctTreeNode) + nData + nZero);
+  if( pNew ){
+    pNew->iKey = iKey;
+    pNew->nData = nData + nZero;
+    pNew->iRoot = pCsr->pRoot->iRoot;
+    pNew->bDelete = bDelete;
+    if( (nData+nZero)>0 ){
+      pNew->aData = (u8*)&pNew[1];
+      memcpy(pNew->aData, aData, nData);
+    }
+
+    if( pTree->iStmt>0 ){
+      pNew->pPrev = pTree->pRollback;
+      pTree->pRollback = pNew;
+      pNew->nRef = 1;
+    }
+  }
+
+  return pNew;
+}
+
+static int treeInsert(
   HctTreeCsr *pCsr,
   UnpackedRecord *pKey,
   i64 iKey, 
@@ -578,26 +614,75 @@ int treeInsert(
 
   assert( bDelete==0 || pKey || (aData==0 && nData==0 && nZero==0) );
 
-  pNew = (HctTreeNode*)hctMallocZero(sizeof(HctTreeNode) + nData + nZero);
+  pNew = treeNewNode(pCsr, iKey, bDelete, nData, aData, nZero);
   if( pNew==0 ){
     return SQLITE_NOMEM;
   }
-  pNew->iKey = iKey;
-  pNew->nData = nData + nZero;
-  pNew->iRoot = pCsr->pRoot->iRoot;
-  pNew->bDelete = bDelete;
-  if( (nData+nZero)>0 ){
-    pNew->aData = (u8*)&pNew[1];
-    memcpy(pNew->aData, aData, nData);
-  }
-
-  if( pTree->iStmt>0 ){
-    pNew->pPrev = pTree->pRollback;
-    pTree->pRollback = pNew;
-    pNew->nRef = 1;
-  }
-
   return treeInsertNode(pTree, pTree->iStmt<=0, pKey, iKey, pNew);
+}
+
+/*
+** This function is like sqlite3HctTreeInsert(), except that:
+**
+**   1) the new key is always larger than any existing key in the
+**      tree, and
+**
+**   2) unless the tree is empty, cursor pCsr is guaranteed to point to the
+**      largest record in it, and
+**
+**   3) before returning, this function leaves cursor pCsr pointing to the 
+**      new entry.
+*/
+int sqlite3HctTreeAppend(
+  HctTreeCsr *pCsr,
+  KeyInfo *pKeyInfo,
+  i64 iKey, 
+  int nData, 
+  const u8 *aData,
+  int nZero
+){
+  HctTreeRoot *pRoot = pCsr->pRoot;
+  int rc = SQLITE_OK;
+
+  assert( pCsr->pTree->iStmt>0 );
+
+  if( pKeyInfo && pRoot->pKeyInfo==0 ){
+    pRoot->pKeyInfo = sqlite3KeyInfoRef(pKeyInfo);
+  }
+
+  rc = hctSaveCursors(pRoot, pCsr);
+  if( rc==SQLITE_OK ){
+    HctTreeNode *pNew = treeNewNode(pCsr, iKey, 0, nData, aData, nZero);
+    if( pNew==0 ){
+      rc = SQLITE_NOMEM_BKPT;
+    }else{
+      pNew->nRef++;
+      if( pRoot->pNode==0 ){
+        pRoot->pNode = pNew;
+        pCsr->apNode[0] = pNew;
+        pCsr->iNode = 0;
+      }else{
+        HctTreeNode *pParent = pCsr->apNode[pCsr->iNode];
+
+        assert( pCsr->iNode>=0 );
+        assert( pParent->pRight==0 );
+        pParent->pRight = pNew;
+
+        if( pParent->bBlack==0 ){
+          hctTreeFixInsert(pCsr->pTree, pCsr, pNew);
+          sqlite3HctTreeCsrLast(pCsr);
+        }else{
+          pCsr->apNode[++pCsr->iNode] = pNew;
+        }
+      }
+
+      /* Root node is always black */
+      pRoot->pNode->bBlack = 1;
+      assert( hct_tree_check(pRoot) );
+    }
+  }
+    
+  return rc;
 }
 
 int sqlite3HctTreeInsert(

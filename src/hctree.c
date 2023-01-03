@@ -116,6 +116,8 @@ struct HBtCursor {
   int bUseTree;                   /* 1 if tree-csr is current entry, else 0 */
   int eDir;                       /* One of BTREE_DIR_NONE, FORWARD, REVERSE */
 
+  int isLast;                     /* Csr has not moved since BtreeLast() */
+
   KeyInfo *pKeyInfo;              /* For non-intkey tables */
   int errCode;
   int wrFlag;                     /* Value of wrFlag when cursor opened */
@@ -1675,6 +1677,7 @@ static int btreeSetUseTree(HBtCursor *pCur){
   int bDbEof = sqlite3HctDbCsrEof(pCur->pHctDbCsr);
 
   assert( pCur->eDir==BTREE_DIR_FORWARD || pCur->eDir==BTREE_DIR_REVERSE );
+  assert( pCur->pHctTreeCsr );
 
   if( bTreeEof ){
     pCur->bUseTree = 0;
@@ -1745,26 +1748,29 @@ int sqlite3HctBtreeFirst(BtCursor *pCursor, int *pRes){
 ** or set *pRes to 1 if the table is empty.
 */
 int sqlite3HctBtreeLast(BtCursor *pCursor, int *pRes){
-  HBtCursor *const pCur = (HBtCursor*)pCursor;
   int rc = SQLITE_OK;
+  HBtCursor *const pCur = (HBtCursor*)pCursor;
 
-  sqlite3HctTreeCsrLast(pCur->pHctTreeCsr);
-  if( pCur->pHctDbCsr ){
-    rc = sqlite3HctDbCsrLast(pCur->pHctDbCsr);
-  }
-  if( rc==SQLITE_OK ){
-    int bTreeEof = sqlite3HctTreeCsrEof(pCur->pHctTreeCsr);
-    int bDbEof = sqlite3HctDbCsrEof(pCur->pHctDbCsr);
-    *pRes = (bTreeEof && bDbEof);
-    pCur->eDir = BTREE_DIR_REVERSE;
-    btreeSetUseTree(pCur);
-    if( pCur->bUseTree && sqlite3HctTreeCsrIsDelete(pCur->pHctTreeCsr) ){
-      rc = sqlite3HctBtreePrevious((BtCursor*)pCur, 0);
-      if( rc==SQLITE_DONE ){
-        *pRes = sqlite3HctBtreeEof((BtCursor*)pCur);
-        rc = SQLITE_OK;
+  if( pCur->isLast==0 ){
+    sqlite3HctTreeCsrLast(pCur->pHctTreeCsr);
+    if( pCur->pHctDbCsr ){
+      rc = sqlite3HctDbCsrLast(pCur->pHctDbCsr);
+    }
+    if( rc==SQLITE_OK ){
+      int bTreeEof = sqlite3HctTreeCsrEof(pCur->pHctTreeCsr);
+      int bDbEof = sqlite3HctDbCsrEof(pCur->pHctDbCsr);
+      *pRes = (bTreeEof && bDbEof);
+      pCur->eDir = BTREE_DIR_REVERSE;
+      btreeSetUseTree(pCur);
+      if( pCur->bUseTree && sqlite3HctTreeCsrIsDelete(pCur->pHctTreeCsr) ){
+        rc = sqlite3HctBtreePrevious((BtCursor*)pCur, 0);
+        if( rc==SQLITE_DONE ){
+          *pRes = sqlite3HctBtreeEof((BtCursor*)pCur);
+          rc = SQLITE_OK;
+        }
       }
     }
+    pCur->isLast = (pCur->bUseTree && (rc==SQLITE_OK));
   }
 
   return rc;
@@ -1811,6 +1817,7 @@ static int hctBtreeMovetoUnpacked(
   int res1 = 0;
   int res2 = 0;
 
+  pCur->isLast = 0;
   rc = sqlite3HctTreeCsrSeek(pCur->pHctTreeCsr, pIdxKey, intKey, &res1);
   if( rc==SQLITE_OK && pCur->pHctDbCsr ){
     rc = sqlite3HctDbCsrSeek(pCur->pHctDbCsr, pIdxKey, intKey, &res2);
@@ -1882,6 +1889,10 @@ int sqlite3HctBtreeTableMoveto(
   int *pRes                /* Write search results here */
 ){
   HBtCursor *const pCur = (HBtCursor*)pCursor;
+  if( pCur->isLast && sqlite3HctBtreeIntegerKey(pCursor)<intKey ){
+    *pRes = -1;
+    return SQLITE_OK;
+  }
   return hctBtreeMovetoUnpacked(pCur, 0, intKey, biasRight, pRes);
 }
 int sqlite3HctBtreeIndexMoveto(
@@ -1959,6 +1970,7 @@ int sqlite3HctBtreeNext(BtCursor *pCursor, int flags){
   int rc = SQLITE_OK;
   int bDummy;
   assert( pCur->eDir==BTREE_DIR_FORWARD );
+  assert( pCur->isLast==0 );
 
   rc = sqlite3HctBtreeCursorRestore((BtCursor*)pCur, &bDummy);
   if( rc!=SQLITE_OK ) return rc;
@@ -2013,6 +2025,7 @@ int sqlite3HctBtreePrevious(BtCursor *pCursor, int flags){
   int bDummy;
   assert( pCur->eDir==BTREE_DIR_REVERSE );
 
+  pCur->isLast = 0;
   rc = sqlite3HctBtreeCursorRestore((BtCursor*)pCur, &bDummy);
   if( rc!=SQLITE_OK ) return rc;
 
@@ -2034,6 +2047,13 @@ int sqlite3HctBtreePrevious(BtCursor *pCursor, int flags){
       && pCur->bUseTree && sqlite3HctTreeCsrIsDelete(pCur->pHctTreeCsr) 
   );
   return rc;
+}
+
+static void hctBtreeClearIsLast(HBtree *pBt, HBtCursor *pExcept){
+  HBtCursor *p;
+  for(p=pBt->pCsrList; p; p=p->pCsrNext){
+    if( p!=pExcept ) p->isLast = 0;
+  }
 }
 
 /*
@@ -2073,6 +2093,7 @@ int sqlite3HctBtreeInsert(
   int seekResult                 /* Result of prior MovetoUnpacked() call */
 ){
   HBtCursor *const pCur = (HBtCursor*)pCursor;
+  HctTreeCsr *pTreeCsr = pCur->pHctTreeCsr;
   int rc = SQLITE_OK;
   UnpackedRecord r;
   UnpackedRecord *pRec = 0;
@@ -2081,6 +2102,7 @@ int sqlite3HctBtreeInsert(
   int nZero;
   i64 iKey = 0;
 
+  hctBtreeClearIsLast(pCur->pBtree, pCur);
   if( pX->pKey ){
     aData = pX->pKey;
     nData = pX->nKey;
@@ -2103,7 +2125,15 @@ int sqlite3HctBtreeInsert(
     nZero = pX->nZero;
     iKey = pX->nKey;
   }
-  rc = sqlite3HctTreeInsert(pCur->pHctTreeCsr, pRec, iKey, nData, aData, nZero);
+
+  if( pCur->isLast && seekResult<0 ){
+    rc = sqlite3HctTreeAppend(
+        pTreeCsr, pCur->pKeyInfo, iKey, nData, aData, nZero
+    );
+  }else{
+    rc = sqlite3HctTreeInsert(pTreeCsr, pRec, iKey, nData, aData, nZero);
+    pCur->isLast = 0;
+  }
 
   if( pRec && pRec!=&r ){
     sqlite3DbFree(pCur->pKeyInfo->db, pRec);
@@ -2131,6 +2161,8 @@ int sqlite3HctBtreeInsert(
 int sqlite3HctBtreeDelete(BtCursor *pCursor, u8 flags){
   HBtCursor *const pCur = (HBtCursor*)pCursor;
   int rc = SQLITE_OK;
+
+  hctBtreeClearIsLast(pCur->pBtree, 0);
   if( pCur->pHctDbCsr==0 ){
     rc = sqlite3HctTreeDelete(pCur->pHctTreeCsr);
   }else if( pCur->pKeyInfo==0 ){
@@ -2155,6 +2187,8 @@ int sqlite3HctBtreeDelete(BtCursor *pCursor, u8 flags){
 int sqlite3HctBtreeIdxDelete(BtCursor *pCursor, UnpackedRecord *pKey){
   HBtCursor *const pCur = (HBtCursor*)pCursor;
   int rc = SQLITE_OK;
+
+  hctBtreeClearIsLast(pCur->pBtree, 0);
   if( pCur->pHctDbCsr ){
     u8 *aRec = 0;
     int nRec = 0;
