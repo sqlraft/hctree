@@ -1,5 +1,5 @@
-C Fixes\sfor\sloading\slarge\sdatabases.
-D 2023-01-03T18:37:32.125
+C Fixes\sfor\srecovery\sand\spage\seviction.
+D 2023-01-04T20:02:14.927
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -611,7 +611,7 @@ F src/hash.h 3340ab6e1d13e725571d7cee6d3e3135f0779a7d8e76a9ce0a85971fa3953c51
 F src/hctInt.h 8bc7e775e8fd896d366e612fc0d4b9c552f24aed57a2a45590a53f529efebc7c
 F src/hctPManInt.h 44e63f39e3da54ca47f5582127a12a2f33002d1f3ddcd0fc23120731dfe70b5d
 F src/hctTMapInt.h 4ac478747a6ecb607ba14a484cbf189b8d4ff090ed97c0a9704e7a2e727316c0
-F src/hct_database.c cd62a8e55b355367fb505f9ecded1d9c033070d66f3826b940cc408beefe9f60
+F src/hct_database.c c97c5de16a72da34578af6cc8821c8b493d8ee3d31b9e5d4b876d559dc0a4a8f
 F src/hct_file.c 8057bbff5f3d69bbf094a12b229e3332dd1f27ac1e70399ce9a59b0d4c4684cf
 F src/hct_pman.c 992650137547caae7f2158374d628c4ead3f8fc2990ea8b11c0a0d6903c5ccf0
 F src/hct_record.c 54b0d564be580ca29a54312f9a9abdba193b234ac56ec65a7e40109107041b25
@@ -2121,8 +2121,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P 29d97866f87d03b0ad45195a4127937ed8f239e975a80d596d319fd7ec33132c
-R 47ec4db9b4513434bd65f2d25d978ce0
+P 05ee1eb7540e7760114b9c4cbc946a26543cd18ab71b2bce99cca5c423dceb37
+R 5106a6c4af6e1b58d6de45d4135739ac
 U dan
-Z 8284617965816c288c83c62dff0130d3
+Z 56b6aa46083b45fdd270be98c08a5c7e
 # Remove this line to create a well-formed Fossil manifest.

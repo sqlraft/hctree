@@ -216,6 +216,10 @@ struct HctDbFPKey {
 **
 ** bAppend:
 **   True if the writer is in append mode.
+**
+** bDoCleanup:
+**   True if hctDbInsert() has been called since the most recent
+**   hctDbWriterCleanup().
 */
 struct HctDbWriter {
   int iHeight;                    /* Height to write at (0==leaves) */
@@ -229,6 +233,7 @@ struct HctDbWriter {
   HctDbPageArray discardpg;
   HctFilePage fanpg;
 
+  int bDoCleanup;
   int nEvictLocked;
   u32 iEvictLockedPgno;
 
@@ -2725,68 +2730,72 @@ static void assert_writer_is_ok(HctDatabase *pDb, HctDbWriter *p){
 ** Cleanup the writer object passed as the first argument.
 */
 static void hctDbWriterCleanup(HctDatabase *pDb, HctDbWriter *p, int bRevert){
-  int ii;
 
-  sqlite3HctFileDebugPrint(pDb->pFile, 
-      "writer cleanup height=%d bRevert=%d\n", p->iHeight, bRevert
-  );
+  if( p->bDoCleanup ){
+    int ii;
 
-  assert_writer_is_ok(pDb, p);
+    sqlite3HctFileDebugPrint(pDb->pFile, 
+        "writer cleanup height=%d bRevert=%d\n", p->iHeight, bRevert
+        );
 
-  sqlite3HctFilePageRelease(&p->fanpg);
+    assert_writer_is_ok(pDb, p);
 
-  /* If not reverting, mark the overflow chains in p->delOvfl as free */
-  if( bRevert==0 ){
-    hctDbOverflowArrayFree(pDb, &p->delOvfl);
-  }else{
-    hctDbOverflowArrayFree(pDb, &p->insOvfl);
-  }
-  sqlite3_free(p->delOvfl.aOvfl);
-  sqlite3_free(p->insOvfl.aOvfl);
-  memset(&p->delOvfl, 0, sizeof(p->delOvfl));
-  memset(&p->insOvfl, 0, sizeof(p->insOvfl));
+    sqlite3HctFilePageRelease(&p->fanpg);
 
-  for(ii=0; ii<p->writepg.nPg; ii++){
-    HctFilePage *pPg = &p->writepg.aPg[ii];
-    if( bRevert ){
-      if( pPg->aNew ){
-        sqlite3HctFilePageUnwrite(pPg);
-      }else if( ii>0 ){
-        sqlite3HctFileClearInUse(pPg, 1);
+    /* If not reverting, mark the overflow chains in p->delOvfl as free */
+    if( bRevert==0 ){
+      hctDbOverflowArrayFree(pDb, &p->delOvfl);
+    }else{
+      hctDbOverflowArrayFree(pDb, &p->insOvfl);
+    }
+    sqlite3_free(p->delOvfl.aOvfl);
+    sqlite3_free(p->insOvfl.aOvfl);
+    memset(&p->delOvfl, 0, sizeof(p->delOvfl));
+    memset(&p->insOvfl, 0, sizeof(p->insOvfl));
+
+    for(ii=0; ii<p->writepg.nPg; ii++){
+      HctFilePage *pPg = &p->writepg.aPg[ii];
+      if( bRevert ){
+        if( pPg->aNew ){
+          sqlite3HctFilePageUnwrite(pPg);
+        }else if( ii>0 ){
+          sqlite3HctFileClearInUse(pPg, 1);
+        }
       }
+      sqlite3HctFilePageRelease(pPg);
     }
-    sqlite3HctFilePageRelease(pPg);
-  }
-  hctDbPageArrayReset(&p->writepg);
+    hctDbPageArrayReset(&p->writepg);
 
-  for(ii=0; ii<p->discardpg.nPg; ii++){
-    if( bRevert && pDb->pConfig->nTryBeforeUnevict>1 ){
-      sqlite3HctFilePageUnevict(&p->discardpg.aPg[ii]);
+    for(ii=0; ii<p->discardpg.nPg; ii++){
+      if( bRevert && pDb->pConfig->nTryBeforeUnevict>1 ){
+        sqlite3HctFilePageUnevict(&p->discardpg.aPg[ii]);
+      }
+      sqlite3HctFilePageRelease(&p->discardpg.aPg[ii]);
     }
-    sqlite3HctFilePageRelease(&p->discardpg.aPg[ii]);
-  }
 
-  hctDbPageArrayReset(&p->discardpg);
-  p->fp.iKey = 0;
-  p->fp.aKey = 0;
+    hctDbPageArrayReset(&p->discardpg);
+    p->fp.iKey = 0;
+    p->fp.aKey = 0;
 
-  if( p->iEvictLockedPgno ){
-    assert( p->writecsr.iRoot );
-    p->nEvictLocked++;
-    if( p->nEvictLocked>=pDb->pConfig->nTryBeforeUnevict ){
-      p->nEvictLocked = -1;
-      hctDbIrrevocablyEvictPage(pDb, p);
+    if( p->iEvictLockedPgno ){
+      assert( p->writecsr.iRoot );
+      p->nEvictLocked++;
+      if( p->nEvictLocked>=pDb->pConfig->nTryBeforeUnevict ){
+        p->nEvictLocked = -1;
+        hctDbIrrevocablyEvictPage(pDb, p);
+        p->nEvictLocked = 0;
+      }
+    }else{
       p->nEvictLocked = 0;
     }
-  }else{
-    p->nEvictLocked = 0;
-  }
-  p->iEvictLockedPgno = 0;
-  p->bAppend = 0;
+    p->iEvictLockedPgno = 0;
+    p->bAppend = 0;
 
-  /* Free/zero various buffers and caches */
-  hctDbCsrCleanup(&p->writecsr);
-  hctDbCsrCleanup(&pDb->rbackcsr);
+    /* Free/zero various buffers and caches */
+    hctDbCsrCleanup(&p->writecsr);
+    hctDbCsrCleanup(&pDb->rbackcsr);
+    p->bDoCleanup = 0;
+  }
 }
 
 static int hctDbInsert(
@@ -3010,8 +3019,9 @@ static int hctDbInsertFlushWrite(HctDatabase *pDb, HctDbWriter *p){
       if( rc==SQLITE_LOCKED ){
         pDb->nCasFail++;
       }
+      hctDbWriterCleanup(pDb, &wr, 1);
+
     }while( rc==SQLITE_LOCKED );
-    hctDbWriterCleanup(pDb, &wr, 1);
   }
 
   if( rc==SQLITE_OK ){
@@ -3340,6 +3350,7 @@ static int hctDbExtendWriteArray(
 
   assert( iPg>0 );
   assert( (p->writepg.nPg+nPg)>0 );
+  assert( p->writepg.nPg>0 );
 
   /* Add any new pages required */
   for(ii=iPg; rc==SQLITE_OK && ii<iPg+nPg; ii++){
@@ -3517,6 +3528,7 @@ static void hctDbIrrevocablyEvictPage(HctDatabase *pDb, HctDbWriter *p){
         p->discardpg.nPg = 1;
       }
 
+      p->bDoCleanup = 1;
       if( rc==SQLITE_OK ){
         rc = hctDbInsertFlushWrite(pDb, p);
       }else{
@@ -4635,6 +4647,7 @@ static int hctDbInsertFindPosition(
     p->writepg.aPg[0] = p->writecsr.pg;
     memset(&p->writecsr.pg, 0, sizeof(HctFilePage));
 
+    assert( p->bDoCleanup );
     p->writepg.nPg = 1;
     rc = sqlite3HctFilePageWrite(&p->writepg.aPg[0]);
     if( rc ) return rc;
@@ -4777,6 +4790,7 @@ static int hctDbInsert(
   assert( p->writepg.nPg==0 || iRoot==p->writecsr.iRoot );
   assert( p->writepg.nPg>0 || p->bAppend==0 );
   if( p->writepg.nPg ){
+    assert( p->bDoCleanup );
     if( p->writepg.nPg>HCTDB_MAX_DIRTY 
      || p->discardpg.nPg>=HCTDB_MAX_DIRTY 
      || hctDbTestWriteFpKey(p, xCompare, pRec, iKey) 
@@ -4787,6 +4801,7 @@ static int hctDbInsert(
     }
   }
 
+  p->bDoCleanup = 1;
   rc = hctDbWriterGrow(p);
   if( rc ) return rc;
 
@@ -4816,10 +4831,9 @@ static int hctDbInsert(
     /* If this is a write to a leaf page, and not part of a rollback, check
     ** for a write-write conflict here. */
     if( 0==p->iHeight 
-        && pDb->eMode==HCT_MODE_NORMAL
-        && (rc=hctDbWriteWriteConflict(pDb, p, &op, pRec, iKey, bClobber))
+     && pDb->eMode==HCT_MODE_NORMAL
+     && (rc=hctDbWriteWriteConflict(pDb, p, &op, pRec, iKey, bClobber))
     ){
-      hctDbWriterCleanup(pDb, p, 1);
       return rc;
     }
   }
@@ -4882,8 +4896,6 @@ static int hctDbInsert(
   if( rc ){
     if( rc==SQLITE_DONE ){
       hctDbInsertFlushWrite(pDb, p);
-    }else{
-      hctDbWriterCleanup(pDb, p, 1);
     }
     return rc;
   }
@@ -5068,9 +5080,6 @@ static int hctDbInsert(
   }
 
  insert_out:
-  if( rc!=SQLITE_OK ){
-    hctDbWriterCleanup(pDb, p, 1);
-  }
   if( rc==SQLITE_OK ) assert_all_pages_ok(pDb, p);
   return rc;
 }
@@ -5109,6 +5118,7 @@ int sqlite3HctDbInsert(
   if( pDb->eMode==HCT_MODE_ROLLBACK ){
     int op = 0;
 
+    pDb->pa.bDoCleanup = 1;
     if( pDb->rbackcsr.iRoot!=iRoot ){
       hctDbCsrInit(pDb, iRoot, 0, &pDb->rbackcsr);
       if( pRec ){
@@ -5140,6 +5150,9 @@ int sqlite3HctDbInsert(
 
   if( rc==SQLITE_OK ){
     rc = hctDbInsert(pDb, &pDb->pa, iRoot, pRec, iKey, 0, bDel, nData, aData);
+    if( rc!=SQLITE_OK ){
+      hctDbWriterCleanup(pDb, &pDb->pa, 1);
+    }
   }
   if( rc==SQLITE_LOCKED || rc==SQLITE_BUSY ){
     if( rc==SQLITE_LOCKED ){
