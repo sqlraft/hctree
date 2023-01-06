@@ -95,7 +95,8 @@ for {set i 0} {$i < $nRep} {incr i} {
   }
 
   do_test $tn.$i.1 {
-    execsql BEGIN
+  breakpoint
+    execsql "BEGIN CONCURRENT"
     foreach k [array names a] {
       set v $a($k) 
       if {$v==""} {
@@ -117,7 +118,7 @@ execsql_pp { SELECT * FROM hctpgmap natural join hctentry }
 
 #if {$i==46} breakpoint
   do_test $tn.$i.2 {
-    execsql BEGIN db2
+    execsql "BEGIN CONCURRENT" db2
     foreach k [array names b] {
       set v $b($k) 
       if {$v==""} {
@@ -143,6 +144,7 @@ if 0 {
     } {1 {database is locked}}
     execsql ROLLBACK
   } else {
+  breakpoint
     do_catchsql_test $tn.$i.3b {
       COMMIT
     } {0 {}}

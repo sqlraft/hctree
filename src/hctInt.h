@@ -185,6 +185,8 @@ char *sqlite3HctDbRecordToText(sqlite3 *db, const u8 *aRec, int nRec);
 
 void sqlite3HctDbTMapScan(HctDatabase *pDb);
 
+void sqlite3HctDbTransIsConcurrent(HctDatabase *pDb, int bConcurrent);
+
 /*************************************************************************
 ** Interface to code in hct_file.c
 */

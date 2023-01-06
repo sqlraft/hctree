@@ -503,7 +503,7 @@ static char *test_thread(int iTid, void *pArg){
   htt_sqlite3_exec_printf(&err,
       db, "PRAGMA hct_try_before_unevict = %d", pTst->nTryBeforeUnevict
   );
-  pBegin = htt_sqlite3_prepare(&err, db, "BEGIN");
+  pBegin = htt_sqlite3_prepare(&err, db, "BEGIN CONCURRENT");
   pCommit = htt_sqlite3_prepare(&err, db, "COMMIT");
   pRollback = htt_sqlite3_prepare(&err, db, "ROLLBACK");
   if( pTst->bOverflow==0 ){

@@ -83,9 +83,9 @@ used in all the same ways as the stock SQLite library code.
 is incomplete. The current code has, at least, the following shortcomings:
 
 <ol>
-  <li><p> All transactions against hctree databases, implicit and explicit, are
-          processed as if they were opened using 
-          <a href=#transactiontypes>"BEGIN CONCURRENT"</a>.
+  <li><p> <a href=#transactiontypes>"BEGIN EXCLUSIVE"</a> is not implemented
+          for hctree databases. It is parsed, but behaves just as a regular
+          "BEGIN" does.
 
   <li><p> All hctree databases currently use 4096 byte pages and 32-bit page 
           numbers (maximum database size of 16TiB). It is not yet possible to
