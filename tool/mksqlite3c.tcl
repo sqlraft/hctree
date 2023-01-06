@@ -164,6 +164,7 @@ foreach hdr {
    whereInt.h
 
    hctInt.h
+   hctFileInt.h
    hctPManInt.h
    hctTMapInt.h
    btreeModules.h
