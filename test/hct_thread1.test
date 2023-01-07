@@ -34,7 +34,7 @@ do_execsql_test 1.0 {
 sqlite_thread_test T test.db
 for {set tt 1} {$tt < $NTHREAD} {incr tt} {
   T thread $tt {
-    BEGIN;
+    BEGIN CONCURRENT;
     UPDATE t1 SET a = randomblob(32), b = randomblob(32) 
       WHERE i=abs(random() % 10000)+1;
     SELECT * FROM t1 WHERE i>abs(random() % 10000) LIMIT 1000;

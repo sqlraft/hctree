@@ -72,8 +72,6 @@ proc do_recover_test {tn sql} {
 
 db_save_and_close
 
-if 1 {
-
 do_recover_test 1 {
   BEGIN;
     INSERT INTO t1 VALUES(101, 101, hex(randomblob(250)));
@@ -125,8 +123,6 @@ do_recover_test 8 {
   COMMIT;
 }
 
-
-}
 
 do_recover_test 9 {
   BEGIN;
