@@ -244,6 +244,38 @@ struct HctDbWriter {
 };
 
 /*
+** This is used by the rebalance operation implemented by hctDbBalance().
+** The first step of that operation is to assemble an array of these
+** structures - one for each cell that will be distributed between the
+** output pages.
+**
+** nByte:
+**   Total bytes of space required by cell on new page. This includes
+**   the header entry and the data stored in the cell area.
+**
+** iPg:
+**   Index of source page within array of input pages. Or -1 to indicate
+**   that the HctDbCellSz structure corresponds to a new cell being
+**   written (that is not on any input page).
+**
+** iEntry:
+**   Only valid if (iPg>=0). The index of the cell within input page iPg.
+*/
+typedef struct HctDbCellSz HctDbCellSz;
+struct HctDbCellSz {
+  int nByte;                      /* Size of cell in bytes */
+  i16 iPg;                        /* Index of input page */
+  u16 iEntry;                     /* Entry of cell on input page */
+};
+
+typedef struct HctBalance HctBalance;
+struct HctBalance {
+  u8 *aPg[5];
+  int nSzAlloc;                   /* Allocated size of aSz[] array */
+  HctDbCellSz *aSz;               /* aSz[] array */
+};
+
+/*
 ** This structure, an instance of which is part of each HctDatabase object,
 ** holds counters collected for the hctstats structure.
 */
@@ -267,7 +299,9 @@ struct HctDatabase {
   HctConfig *pConfig;
   i64 nCasFail;                   /* Number cas-collisions so far */
   int pgsz;                       /* Page size in bytes */
+
   u8 *aTmp;                       /* Temp buffer pgsz bytes in size */
+  HctBalance *pBalance;           /* Space for hctDbBalance() */
 
   HctDbCsr *pScannerList;
 
@@ -609,6 +643,7 @@ void sqlite3HctDbClose(HctDatabase *p){
     sqlite3_free(p->aTmp);
     sqlite3HctFileClose(p->pFile);
     p->pFile = 0;
+    sqlite3_free(p->pBalance);
     sqlite3_free(p);
   }
 }
@@ -3735,31 +3770,6 @@ static int hctDbRemoveOverflow(
   return rc;
 }
 
-/*
-** This is used by the rebalance operation implemented by hctDbBalance().
-** The first step of that operation is to assemble an array of these
-** structures - one for each cell that will be distributed between the
-** output pages.
-**
-** nByte:
-**   Total bytes of space required by cell on new page. This includes
-**   the header entry and the data stored in the cell area.
-**
-** iPg:
-**   Index of source page within array of input pages. Or -1 to indicate
-**   that the HctDbCellSz structure corresponds to a new cell being
-**   written (that is not on any input page).
-**
-** iEntry:
-**   Only valid if (iPg>=0). The index of the cell within input page iPg.
-*/
-typedef struct HctDbCellSz HctDbCellSz;
-struct HctDbCellSz {
-  int nByte;                      /* Size of cell in bytes */
-  i16 iPg;                        /* Index of input page */
-  u16 iEntry;                     /* Entry of cell on input page */
-};
-
 /* 
 ** Populate the aSz[] array with the sizes and locations of each cell
 **
@@ -3833,6 +3843,31 @@ static int hctDbBalanceAppend(HctDatabase *pDb, HctDbWriter *p){
   return rc;
 }
 
+static HctBalance *hctDbBalanceSpace(int *pRc, HctDatabase *pDb){
+  if( pDb->pBalance==0 ){
+    HctBalance *p = 0;
+    int nPg = ArraySize(p->aPg);
+    int nSzAlloc = nPg * pDb->pgsz / 8;
+
+    pDb->pBalance = p = (HctBalance*)sqlite3HctMalloc(pRc, 
+        sizeof(HctBalance) + 
+        nPg * pDb->pgsz + 
+        sizeof(HctDbCellSz) * nSzAlloc
+    );
+    if( p ){
+      u8 *aCsr = (u8*)&p[1];
+      int ii;
+      for(ii=0; ii<nPg; ii++){
+        p->aPg[ii] = aCsr;
+        aCsr += pDb->pgsz;
+      }
+      p->aSz = (HctDbCellSz*)aCsr;
+      p->nSzAlloc = nSzAlloc;
+    }
+  }
+  return pDb->pBalance;
+}
+
 /*
 ** Rebalance routine for pages with variably-sized records - intkey leaves,
 ** index leaves and index nodes.
@@ -3858,17 +3893,25 @@ static int hctDbBalance(
   int iEntry0 = 0;
 
   HctDbCellSz *aSz = 0;
-  int nSzAlloc = 0;
+  // int nSzAlloc = 0;
   int nSz = 0;
   int iSz = 0;
 
-  u8 *aPgCopy[5];
-  u8 *pFree = 0;
+  u8 **aPgCopy = 0;
+  // u8 *aPgCopy[3];
+  // u8 *pFree = 0;
 
   int nRem;
 
   int aPgRem[5];
   int aPgFirst[6];
+
+  /* Grab the temporary space used by balance operations.  */
+  HctBalance *pBal = 0;
+  pBal = hctDbBalanceSpace(&rc, pDb);
+  if( pBal==0 ) return rc;
+  aSz = pBal->aSz;
+  aPgCopy = pBal->aPg;
 
   if( p->writecsr.pKeyInfo==0 ){
     pDb->stats.nBalanceIntkey++;
@@ -3903,25 +3946,8 @@ static int hctDbBalance(
     iLeftPg--;
   }
 
-  /* Figure out an upper limit on how many cells there will be involved
-  ** in the rebalance. This is used to size the allocation of aSz[] only,
-  ** the actual number of cells is calculated by hctDbBalanceGetCellSz(). */
-  nSzAlloc = 1;
-  for(ii=iLeftPg; ii<iLeftPg+nIn; ii++){
-    HctDbPageHdr *pPg = (HctDbPageHdr*)p->writepg.aPg[ii].aNew;
-    nSzAlloc += pPg->nEntry;
-  }
-
-  /* Allocate enough space for the cell-size array and for a copy of 
-  ** each input page. */
-  // pFree = (u8*)sqlite3MallocZero(nIn*pDb->pgsz + nSzAlloc*sizeof(HctDbCellSz));
-  pFree = (u8*)sqlite3_malloc(nIn*pDb->pgsz + nSzAlloc*sizeof(HctDbCellSz));
-  if( pFree==0 ) return SQLITE_NOMEM;
-  aSz = (HctDbCellSz*)&pFree[pDb->pgsz * nIn];
-
   /* Make a copy of each input page */
   for(ii=0; ii<nIn; ii++){
-    aPgCopy[ii] = &pFree[pDb->pgsz * ii];
     hctMemcpy(aPgCopy[ii], p->writepg.aPg[iLeftPg+ii].aNew, pDb->pgsz);
     assert( hctIsVarRecords(aPgCopy[ii]) );
     assert_page_is_ok(aPgCopy[ii], pDb->pgsz);
@@ -4013,7 +4039,6 @@ static int hctDbBalance(
     pLeaf->hdr.nFreeGap = iOff - (iEntry0 + nNewEntry*szEntry);
   }
 
-  sqlite3_free(pFree);
   return rc;
 }
 
