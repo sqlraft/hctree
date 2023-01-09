@@ -215,6 +215,35 @@ line invis from (PEG6.w - (0.1,0.0), PEG1.w) up until even with PEG6.w "transact
 </verbatim></center>
 
 
+In fairness to bcw2, this is a tough test case: small, write-heavy,
+transactions using simple prepared statements on a database small enough to fit
+in main memory. This minimizes the time spent outside COMMIT processing, and
+bcw2 has to serialize commit processing. So adding extra threads doesn't
+improve transaction throughput as much as in other cases.
+
+On the test system, hctree experiences diminishing returns after around 12
+threads due to memory bus contention. Results with many threads are also
+somewhat variable - test runs that reported over 700,000 transactions per
+second have been observed.
+
+In hctree, each transaction writes to 5 leaf pages of this database - one to
+update the main table, two to delete the original index entries, and two to add
+the new index entries. We assume all internal nodes live permanently in the
+test system's 64MB L3 cache. In order to write to a page, hctree loads the page
+from its original location in the file, modifies it, then stores it at a new
+location. Each page is 4KiB in size. 700,000 transactions per second is
+3,500,000 pages per second, or 14GiB/s. Counting both reads and writes -
+28GiB/s.
+
+This <a href="pagetest.c">C program</a> creates a file and then uses multiple
+threads to perform this read/write cycle on 4KiB pages as fast as possible.
+With 4-5 threads sustained bursts of up to 3,800,000 read/write cycles have
+been observed, but 3,500,000. With more threads that drops slightly, which
+comports with the results above.
+
+Note: While running pagetest.c, the CPU executes just 0.02 instructions per
+clock cycle. Memory is slow.
+
 <h2>Test case update10 - nUpdate=10, nScan=0</h2>
 <center><verbatim type=pikchr>
 boxwid=0.18

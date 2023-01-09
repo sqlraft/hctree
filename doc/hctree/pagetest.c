@@ -1,3 +1,34 @@
+/*
+** 2023 January 10
+**
+** The author disclaims copyright to this source code.  In place of
+** a legal notice, here is a blessing:
+**
+**    May you do good and not evil.
+**    May you find forgiveness for yourself and forgive others.
+**    May you share freely, never taking more than you give.
+**
+*************************************************************************
+**
+** This file contains a standalone program to test the speed of reading
+** a page of data from one part of a file and immediately writing it
+** to another, using multiple threads. Compile with:
+**
+**    gcc -O2 pagetest.c -o pagetest
+**
+** Then:
+**
+**    ./pagetest
+**
+** Try:
+**
+**    ./pagetest -help
+**
+** For more information.
+**
+** If you're reading this code, the part you are interested in is the 
+** "do_test" function below and the "main" that launches it.
+*/ 
 
 #include <stdio.h>
 #include <sys/mman.h>
@@ -72,30 +103,6 @@ struct TestCtx {
   i64 nWrite;                     /* OUT: Number of pages written */
 
 };
-
-static void *do_test(void *pCtx){
-  TestCtx *p = (TestCtx*)pCtx;
-  
-
-  while( stime_now()<p->iEnd ){
-    int iPg1 = ttFastRandomInt(&p->prng) % p->nPg;
-    int iPg2 = ttFastRandomInt(&p->prng) % p->nPg;
-    int iOff = ttFastRandomInt(&p->prng) % (p->pgsz/2);
-    int iVal = ttFastRandomInt(&p->prng) % 256;
-
-    if( p->pBuf ){
-      memcpy(p->pBuf, &p->pMap[iPg1*p->pgsz], p->pgsz);
-      size_t res = pwrite(p->fd, p->pBuf, p->pgsz, iPg2*p->pgsz);
-      if( res!=p->pgsz ) break;
-    }else{
-      memcpy(&p->pMap[iPg2*p->pgsz], &p->pMap[iPg1*p->pgsz], p->pgsz);
-    }
-
-    p->nWrite++;
-  }
-
-  return 0;
-}
 
 static void print_count(int p){
   assert( p>=0 );
@@ -200,6 +207,29 @@ static void parse_options(int argc, char **argv, TestOptions *p){
         break;
     }
   }
+}
+
+static void *do_test(void *pCtx){
+  TestCtx *p = (TestCtx*)pCtx;
+  
+
+  while( stime_now()<p->iEnd ){
+    int iPg1 = ttFastRandomInt(&p->prng) % p->nPg;
+    int iPg2 = ttFastRandomInt(&p->prng) % p->nPg;
+
+    if( p->pBuf ){
+      /* This branch is taken if "-pwrite" was specified. */
+      memcpy(p->pBuf, &p->pMap[iPg1*p->pgsz], p->pgsz);
+      size_t res = pwrite(p->fd, p->pBuf, p->pgsz, iPg2*p->pgsz);
+      if( res!=p->pgsz ) break;
+    }else{
+      memcpy(&p->pMap[iPg2*p->pgsz], &p->pMap[iPg1*p->pgsz], p->pgsz);
+    }
+
+    p->nWrite++;
+  }
+
+  return 0;
 }
 
 int main(int argc, char **argv){
