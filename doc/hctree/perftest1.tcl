@@ -41,22 +41,11 @@ foreach {testname nUp nScan} {
   }]
 
   set G(sql.hctree.$testname) [subst {
-    BEGIN;
+    BEGIN CONCURRENT;
       $body
     COMMIT;
   }]
 }
-
-set G(sql.bcw2) [subst {
-  BEGIN CONCURRENT;
-    UPDATE tbl0 SET c=hex(frandomblob(32)) WHERE a=frandomid(${G(nRow)});
-  .mutexcommit
-}]
-set G(sql.hctree) [subst {
-  BEGIN;
-    UPDATE tbl0 SET c=hex(frandomblob(32)) WHERE a=frandomid(${G(nRow)});
-  COMMIT;
-}]
 
 puts "CREATE TABLE IF NOT EXISTS result(system, test, nthread, nsecond, data);"
 

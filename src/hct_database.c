@@ -270,7 +270,7 @@ struct HctDbCellSz {
 
 typedef struct HctBalance HctBalance;
 struct HctBalance {
-  u8 *aPg[5];
+  u8 *aPg[3];
   int nSzAlloc;                   /* Allocated size of aSz[] array */
   HctDbCellSz *aSz;               /* aSz[] array */
 };
@@ -5098,7 +5098,7 @@ static int hctDbInsert(
     }else if( hctDbFreegap(aTarget)<nReq && bUpdateInPlace==0 ){
       op.bBalance = 1;
       if( p->writepg.nPg==1 ){
-        bSingle = hctDbTestPageCapacity(pDb, aTarget, nReq);
+        bSingle = (nFree>=0);
         if( bSingle==0 
          && 0==hctPagePeer(aTarget) 
          && 0==p->iHeight
