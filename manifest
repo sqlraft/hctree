@@ -1,5 +1,5 @@
-C Update\sperformance\stest\sresults.\sFix\sa\scase\sin\shctDbInsert()\scausing\sexcessive\srebalance\soperations.
-D 2023-01-09T15:19:46.170
+C Add\snew\stest\sprogram\sdoc/hctree/pagetest.c,\sfor\stesting\sthe\sspeed\sof\spage\swrites\swithout\sany\sother\sprocessing.
+D 2023-01-09T16:29:05.664
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -41,6 +41,7 @@ F doc/hctree/design.wiki 5e7a5eab1d0c7082e7c1c6aa3c2943422a3a1a328e2b0c9fd6eddc0
 F doc/hctree/fileformat.wiki 1292b7e0135ccaa0fb3c5ecfd7df184410764bf732c0920f02f62da24dfa44e6
 F doc/hctree/index.html 994a988e84fb244ae711a28d029bdeeec63bbf91e984c9fc73a551e1f5648443
 F doc/hctree/mkthreadtest.tcl 62515542c8fb35fd58db45b8e6a90a9ced0b253814c4540cdaa267e5ca207c75
+F doc/hctree/pagetest.c 99a9808399744e95b013bb610207a00b9341b1db1f7943d41276ab4c248178b2
 F doc/hctree/perftest1.tcl 444f74fa23872a0f3788e4a7448573a8b6000c4f9bd7806b57b9e0f3818268d3
 F doc/hctree/slides.wiki 4151889c5485fecd8a71d5d0089645998a2db5ebc3360b570f763e59effed60c
 F doc/hctree/threadtest.data cc78e6855a76491dbb8042d5e9ed2e27c3e5c98f989c289583ddb9f50ce401ed
@@ -2124,8 +2125,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P ab9c613a9cb4ce87e9b8d621196d7de6ad3e56c8b36942c160338b3e640ef29a
-R afc207d76a843b02493dfb44ac93af00
+P 5633f9c4a92f6cc40e61aa718094db9046981f5ecf7f85af3c3d372c381cd6fb
+R 48f7a24e2b4a3de13fea9c1c7cf78385
 U dan
-Z c856b2d16f5ecced24cd40a954a58712
+Z ce59d482476de0f29b8e8bcb1dc40552
 # Remove this line to create a well-formed Fossil manifest.
