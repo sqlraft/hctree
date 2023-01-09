@@ -1,5 +1,5 @@
-C Add\sexplanation\sfor\sperformance\slimits\sin\stest\scases\supdate1\sand\supdate10.
-D 2023-01-09T18:36:03.099
+C Fix\stypo\sin\sthreadtest.wiki.
+D 2023-01-09T21:36:23.792
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -46,7 +46,7 @@ F doc/hctree/perftest1.tcl 444f74fa23872a0f3788e4a7448573a8b6000c4f9bd7806b57b9e
 F doc/hctree/slides.wiki 4151889c5485fecd8a71d5d0089645998a2db5ebc3360b570f763e59effed60c
 F doc/hctree/threadtest.data cc78e6855a76491dbb8042d5e9ed2e27c3e5c98f989c289583ddb9f50ce401ed
 F doc/hctree/threadtest.html 2e27b4ca5e708780a2b5c8c72302ff95f6283d7e1f86429ea7291946f0d5f59e
-F doc/hctree/threadtest.wiki 02b218cebe4cc28b85d87513edec4ebbf63abaedb07ba1206aeae2e73e1fcd97
+F doc/hctree/threadtest.wiki 10797a3af36517981d0f2a2391d548365fd05e8925751a30090804b4880b538a
 F doc/json-enhancements.md e356fc834781f1f1aa22ee300027a270b2c960122468499bf347bb123ce1ea4f
 F doc/lemon.html efc0cd2345d66905505d98f862e1c571512def0ceb5b016cb658fd4918eb76a3
 F doc/pager-invariants.txt 27fed9a70ddad2088750c4a2b493b63853da2710
@@ -2125,8 +2125,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P 914b0eb9aa96c4b69f0a49b34273717cf5659da05ea63bcbf937ddc8ec6c58b9
-R 23e315f778c5cea4abb801b892c77874
+P 7eb62396c0e4d77e2bb93008818b11ec183fdf354dc9b713b33ccf3374256566
+R 2e7f3c18b04820def4466b9cf054bb60
 U dan
-Z 8a00a0f9c9cf68c55f487e2ea2026cac
+Z f4f1847172d811545f763eeb2f6222eb
 # Remove this line to create a well-formed Fossil manifest.

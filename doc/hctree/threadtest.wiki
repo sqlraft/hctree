@@ -238,8 +238,8 @@ location. Each page is 4KiB in size. 700,000 transactions per second is
 This <a href="pagetest.c">C program</a> creates a file and then uses multiple
 threads to perform this read/write cycle on 4KiB pages as fast as possible.
 With 4-5 threads sustained bursts of up to 3,800,000 read/write cycles have
-been observed, but 3,500,000. With more threads that drops slightly, which
-comports with the results above.
+been observed, but 3,500,000 is more common. With more threads that drops
+slightly, which comports with the results above.
 
 Note: While running pagetest.c, the CPU executes just 0.02 instructions per
 clock cycle. Memory is slow.
