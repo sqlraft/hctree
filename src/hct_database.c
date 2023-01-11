@@ -618,24 +618,23 @@ HctDatabase *sqlite3HctDbOpen(
   pNew = (HctDatabase*)sqlite3HctMalloc(&rc, sizeof(*pNew));
   if( pNew ){
     pNew->pFile = sqlite3HctFileOpen(&rc, zFile, pConfig);
-  }
-
-  if( rc==SQLITE_OK ){
-    pNew->pgsz = sqlite3HctFilePgsz(pNew->pFile);
-    pNew->aTmp = (u8*)sqlite3HctMalloc(&rc, pNew->pgsz);
     pNew->pConfig = pConfig;
+    if( pNew->pFile ) pNew->pgsz = sqlite3HctFilePgsz(pNew->pFile);
   }
 
   if( rc!=SQLITE_OK ){
     sqlite3HctDbClose(pNew);
     pNew = 0;
-  }else{
-    pNew->pgsz = sqlite3HctFilePgsz(pNew->pFile);
   }
 
   *pRc = rc;
   return pNew;
 }
+
+int sqlite3HctDbPagesize(HctDatabase *pDb){
+  return pDb->pgsz;
+}
+
 
 void sqlite3HctDbClose(HctDatabase *p){
   if( p ){
@@ -711,17 +710,27 @@ static void hctDbRootPageInit(
   }
 }
 
-static void hctDbSnapshotOpen(HctDatabase *pDb){
+static int hctDbSnapshotOpen(HctDatabase *pDb){
+  int rc = SQLITE_OK;
+
   assert( (pDb->iSnapshotId==0)==(pDb->pTmap==0) );
   assert( pDb->iSnapshotId!=0 || pDb->bConcurrent==0 );
-  if( pDb->iSnapshotId==0 ){
-    HctTMapClient *pTMapClient = sqlite3HctFileTMapClient(pDb->pFile);
-    int rc = sqlite3HctTMapBegin(pTMapClient, &pDb->pTmap);
-    assert( rc==SQLITE_OK );  /* todo */
-    pDb->iSnapshotId = sqlite3HctFileGetSnapshotid(pDb->pFile);
-    pDb->iLocalMinTid = sqlite3HctTMapCommitedTID(pTMapClient);
-    assert( pDb->iSnapshotId>0 );
+  if( pDb->iSnapshotId==0 && SQLITE_OK==(rc=sqlite3HctFileNewDb(pDb->pFile)) ){
+    if( pDb->aTmp==0 ){
+      pDb->pgsz = sqlite3HctFilePgsz(pDb->pFile);
+      pDb->aTmp = (u8*)sqlite3HctMalloc(&rc, pDb->pgsz);
+    }
+    if( rc==SQLITE_OK ){
+      HctTMapClient *pTMapClient = sqlite3HctFileTMapClient(pDb->pFile);
+      rc = sqlite3HctTMapBegin(pTMapClient, &pDb->pTmap);
+      assert( rc==SQLITE_OK );  /* todo */
+      pDb->iSnapshotId = sqlite3HctFileGetSnapshotid(pDb->pFile);
+      pDb->iLocalMinTid = sqlite3HctTMapCommitedTID(pTMapClient);
+      assert( pDb->iSnapshotId>0 );
+    }
   }
+
+  return rc;
 }
 
 static u64 hctGetU64(const u8 *a){
@@ -845,8 +854,10 @@ int sqlite3HctDbGetMeta(HctDatabase *pDb, u8 *aBuf, int nBuf){
   int rc;
 
   memset(aBuf, 0, nBuf);
-  hctDbSnapshotOpen(pDb);
-  rc = sqlite3HctFilePageGet(pDb->pFile, 2, &pg);
+  rc = hctDbSnapshotOpen(pDb);
+  if( rc==SQLITE_OK ){
+    rc = sqlite3HctFilePageGet(pDb->pFile, 2, &pg);
+  }
   while( rc==SQLITE_OK ){
     HctDbIntkeyLeaf *pLeaf = (HctDbIntkeyLeaf*)pg.aOld;
     int iOff;
@@ -5493,7 +5504,7 @@ int sqlite3HctDbCsrOpen(
     p->iCell = -1;
     p->pKeyInfo = pKeyInfo;
     sqlite3KeyInfoRef(pKeyInfo);
-    hctDbSnapshotOpen(pDb);
+    rc = hctDbSnapshotOpen(pDb);
   }
   *ppCsr = p;
   return rc;

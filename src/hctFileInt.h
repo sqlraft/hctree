@@ -22,6 +22,8 @@ HctFile *sqlite3HctFileOpen(
 );
 void sqlite3HctFileClose(HctFile *pFile);
 
+int sqlite3HctFileNewDb(HctFile *pFile);
+
 u32 sqlite3HctFileMaxpage(HctFile *pFile);
 
 typedef struct HctFilePage HctFilePage;

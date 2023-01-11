@@ -21,6 +21,7 @@ struct HctConfig {
   int szLogChunk;                 /* Used by hctree.c */
   int nTryBeforeUnevict;
   int bQuiescentIntegrityCheck;   /* PRAGMA hct_quiescent_integrity_check */
+  int pgsz;
 };
 
 #define HCT_TID_MASK  ((((u64)0x00FFFFFF) << 32)|0xFFFFFFFF)
@@ -30,6 +31,7 @@ struct HctConfig {
 #define HCT_DEFAULT_NTRYBEFOREUNEVICT  100
 #define HCT_DEFAULT_NPAGESCAN         1024
 #define HCT_DEFAULT_SZLOGCHUNK       16384
+#define HCT_DEFAULT_PAGESIZE          4096
 
 
 #include <hctTMapInt.h>
@@ -196,6 +198,8 @@ int sqlite3HctDbWalkTree(
   int (*x)(void*, u32, u32),      /* Callback function */
   void *pCtx                      /* First argument to pass to x() */
 );
+
+int sqlite3HctDbPagesize(HctDatabase *pDb);
 
 
 /*************************************************************************

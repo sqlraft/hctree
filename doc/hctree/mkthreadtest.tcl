@@ -10,10 +10,12 @@ foreach a $argv {
 
 set G(width) 10.0
 set G(height) 1.2
-set G(border.bcw2)   lightgreen
-set G(border.hctree) orange
-set G(color.bcw2)    lightgreen
-set G(color.hctree)  orange
+set G(border.bcw2)    lightgreen
+set G(border.hctree)  lightsteelblue
+set G(border.hct1024) pink
+set G(color.bcw2)     lightgreen
+set G(color.hctree)   $G(border.hctree)
+set G(color.hct1024)  $G(border.hct1024)
 
 proc sputs {text} {
   upvar chart chart
@@ -28,7 +30,8 @@ proc make_chart {testcase} {
   set chart ""
 
   db eval {
-    SELECT system, test, nthread, nsecond, data FROM result WHERE test=$testcase} {
+    SELECT system, test, nthread, nsecond, data FROM result WHERE test=$testcase
+  } {
     set nOk 0
     set nBusy 0
   
@@ -39,71 +42,80 @@ proc make_chart {testcase} {
       if {$s=="ok"}   { incr nOk $A($k) }
       if {$s=="busy"} { incr nBusy $A($k) }
     }
-    if {$nthread==16 && $test=="update1" && $system=="hctree"} {
-      puts stderr "nOk=$nOk"
-    }
   
     incr R($system,$nthread,ok) $nOk
     incr R($system,$nthread,busy) $nBusy
     incr R($system,$nthread,total) [expr $nOk + $nBusy]
     incr T($system,$nthread) $nsecond
   }
-    if {$test=="update1"} {
-      puts stderr "update1: $R(hctree,16,ok)"
-      puts stderr "nsec: $T(hctree,16)"
-    }
 
+  # Scale all values in the R array so that they are per second. Also set
+  # local variable $max to the largest scaled value in the array.
+  #
+  set max 0
   foreach k [array name R] {
     foreach {sys nt topic} [split $k ,] {}
     set R($k) [expr $R($k) / $T($sys,$nt)]
+    if {$R($k)>$max} { set max $R($k) }
   }
 
-  set max $R(hctree,16,total)
   set scale [expr $G(height) / $max]
 
   sputs {
     <center><verbatim type=pikchr>
-    boxwid=0.18
+    boxwid=0.10
     movewid=0.1
   }
   
   sputs {
-    box color none fill none width 35%
+    FIRST: box color none fill none width 35%
   }
   for {set thread 1} {$thread <= 16} {incr thread} {
-    set nTrans $R(bcw2,$thread,ok)
-    set K1 "[expr int($nTrans/1000)]K"
-    if {$nTrans<10000} {set K1 $nTrans}
-    set S1 [expr $nTrans * $scale]
-    set nTrans $R(hctree,$thread,ok)
-    set K2 "[expr int($nTrans/1000)]K"
-    if {$nTrans<10000} {set K2 $nTrans}
-    set S2 [expr $nTrans * $scale]
-  
+    set sprev -100.0
+
+    foreach sys {bcw2 hctree hct1024} {
+      set nTrans $R($sys,$thread,ok)
+      set K1 "[expr int($nTrans/1000)]"
+      if {$nTrans<10000} { set K1 [expr ($nTrans/100)/10.0] }
+      set S1 [expr $nTrans * $scale]
+      set K1 ${K1}k
+
+      set adj 0.0
+      if {abs($S1-$sprev) < 0.06} { set adj [expr 0.12 - ($S1-$sprev)] }
+      set adjust "+ (0.0,$adj)"
+      set sprev [expr $S1+$adj]
+
+      sputs {
+        box color $G(border.$sys) fill $G(color.$sys) height $S1 behind FIRST with sw at last box.se + (0.025, 0.00)
+        text "$K1" small small with s at last box.n $adjust fill grey
+      }
+    }
+
     sputs {
-      box color $G(border.bcw2) fill $G(color.bcw2) height $S1 with sw at last box.se
-      text "$K1" small small with s at last box.n fill grey
-      box color $G(border.hctree) fill $G(color.hctree) height $S2 with sw at last box.se
-      text "$K2" small small with s at last box.n fill grey
-      text "$thread" with n at last box.sw
-      box color none fill none width 35% with sw at last box.se
+      text "$thread" with n at 2nd last box.s
+      box color none fill none width 30% with sw at last box.se
     }
   }
-  
+
   sputs {
     line color grey from first box.sw to last box.se
     text "Threads:" with ne at last line.w
     VERT: line color grey from last line.sw up $G(height)
-    box width 0.5 height 0.2 color $G(border.hctree) fill $G(color.hctree) with nw at VERT.n + (0.1,0.0)
-    text "hctree" with n at previous.n
-    box width 0.5 height 0.2 color $G(border.bcw2) fill $G(color.bcw2) with n at last box.s + (0.0,-0.1)
-    text "bcw2" with n at previous.n
   }
-  
+
+  set loc "with nw at VERT.n + (0.1,0.0)"
+  foreach sys {bcw2 hctree hct1024} {
+    sputs {
+      box width 0.5 height 0.2 color $G(border.$sys) fill $G(color.$sys) $loc
+      text "$sys" with n at previous.n
+    }
+    set loc "with w at last box.e + (0.1,0.0)"
+  }
+ 
   foreach peg {100000 50000 25000 10000 5000 1000} {
     if {($max / $peg)>=5} break
   }
-  
+ 
   set iPeg 0
   for {set p $peg} {$p < $max} {incr p $peg} {
     incr iPeg
@@ -114,7 +126,7 @@ proc make_chart {testcase} {
       PEG$iPeg: text "$tag" with e at last line.w
     }
   }
-  
+ 
   sputs {
     line invis from (PEG$iPeg.w - (0.1,0.0), PEG1.w) up until even with PEG$iPeg.w "transactions/second" aligned
   }
@@ -143,10 +155,44 @@ That is the goal of the tests on this page - to verify the extent that
 the database allows multiple clients in separate application threads to
 run concurrent read/write transactions.
 
-<p>Performance is compared to stock SQLite modified with the begin-concurrent
-and wal2 patches (system "bcw2"). This is to show that single-threaded
-performance is similar to stock SQLite, and that multi-threaded performance is,
-for some cases at least, already better than is possible with SQLite.
+<h1> Tested Configurations </h1>
+
+<p>Performance of hctree in two configurations is compared to stock SQLite
+modified with the begin-concurrent and wal2 patches. Each test is run with
+three systems:
+
+<ul>
+  <li> <p>System <b>hctree</b> - this is hctree with all default options,
+       including the default 4096 byte page-size.
+
+  <li> <p>System <b>hct1024</b> - hctree with 1024 byte pages.
+
+  <li> <p>System <b>bcw2</b> - this is stock SQLite with the begin-concurrent
+       and wal2 patches applied. Specifically, the 
+       <a href=../../../../timeline?r=begin-concurrent-pnu-wal2>
+       begin-concurrent-pnu-wal2</a> branch. 
+</ul>
+
+<p>The bcw2 system is configured as follows:
+
+<pre>
+      PRAGMA journal_mode = wal2;
+      PRAGMA mmap_size = 1000000000;
+      PRAGMA synchronous = off;
+      PRAGMA journal_size_limit = 16777216;
+</pre>
+
+Additionally:
+
+  *  All "COMMIT" operations are protected by an application mutex.
+
+  *  One thread is designated the checkpointer. Checkpoints are performed
+     outside the mutex when the system indicates that one is possible via
+     the wal-hook (i.e. when there is 16MB of checkpointable data in
+     one wal file).
+
+  *  The VFS is "unix-excl", so no system calls are made for locks, and the
+     mutex-free locking patch has been applied.
 
 <h1>Test Overview</h1>
 
@@ -191,28 +237,6 @@ separate tests are run, with different values for <i>nScan</i> and
 
 Prepared statements are used while testing - the SQL compiler is not run during the tests.
 
-<p>The SQLite/begin-concurrent/wal2 - bcw2 - tests use code from the
-begin-concurrent-pnu-wal2 branch. They are configured as follows:
-
-<pre>
-      PRAGMA journal_mode = wal2;
-      PRAGMA mmap_size = 1000000000;
-      PRAGMA synchronous = off;
-      PRAGMA journal_size_limit = 16777216;
-</pre>
-
-Additionally:
-
-  *  All "COMMIT" operations are protected by an application mutex.
-
-  *  One thread is designated the checkpointer. Checkpoints are performed
-     outside the mutex when the system indicates that one is possible via
-     the wal-hook (i.e. when there is 16MB of checkpointable data in
-     one wal file).
-
-  *  The VFS is "unix-excl", so no system calls are made for locks, and the
-     mutex-free locking patch has been applied.
-
 <h1 id=results>Test Results</h1>
 
 All tests were run on a 16-core AMD 5950X processor with 32G of memory
@@ -223,34 +247,27 @@ all disabled.
 <h2>Test case update1 - nUpdate=1, nScan=0</h2>
 [make_chart update1]
 
-In fairness to bcw2, this is a tough test case: small, write-heavy,
+<p>In fairness to bcw2, this is a tough test case: small, write-heavy,
 transactions using simple prepared statements on a database small enough to fit
 in main memory. This minimizes the time spent outside COMMIT processing, and
 bcw2 has to serialize commit processing. So adding extra threads doesn't
 improve transaction throughput as much as in other cases.
 
-On the test system, hctree experiences diminishing returns after around 12
-threads due to memory bus contention. Results with many threads are also
-somewhat variable - test runs that reported over 700,000 transactions per
-second have been observed.
+<p>For both hctree configurations, each transaction writes to 5 leaf pages of
+this database - one to update the main table, two to delete the original index
+entries, and two to add the new index entries. In order to write to a page,
+hctree loads the page from its original location in the file, modifies it, then
+stores it at a new location. With 4KiB pages (configuration "hctree"), this
+saturates the memory bus on the test system as throughput approaches 700,000
+transactions per second (which would be 14GiB/s in each direction on the 
+memory bus - 28GiB/s total), limiting performance.
 
-In hctree, each transaction writes to 5 leaf pages of this database - one to
-update the main table, two to delete the original index entries, and two to add
-the new index entries. We assume all internal nodes live permanently in the
-test system's 64MB L3 cache. In order to write to a page, hctree loads the page
-from its original location in the file, modifies it, then stores it at a new
-location. Each page is 4KiB in size. 700,000 transactions per second is
-3,500,000 pages per second, or 14GiB/s. Counting both reads and writes -
-28GiB/s.
+Configuration "hct1024", which uses 1KiB pages and so does not cause the 
+memory bus to become saturated, appears to be CPU limited. If the test system
+had more cores, it might scale further.
 
-This <a href="pagetest.c">C program</a> creates a file and then uses multiple
-threads to perform this read/write cycle on 4KiB pages as fast as possible.
-With 4-5 threads sustained bursts of up to 3,800,000 read/write cycles have
-been observed, but 3,500,000 is more common. With more threads that drops
-slightly, which comports with the results above.
-
-Note: While running pagetest.c, the CPU executes just 0.02 instructions per
-clock cycle. Memory is slow.
+This <a href="pagetest.c">C program</a> may be used to determine the maximum
+rate of page read/write cycles supported by a test system.
 
 <h2>Test case update10 - nUpdate=10, nScan=0</h2>
 [make_chart update10]

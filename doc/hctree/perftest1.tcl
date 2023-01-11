@@ -62,6 +62,7 @@ proc setup_database {} {
   }
 
   db eval {
+  PRAGMA page_size = 1024;
     CREATE TABLE tbl0(
         a INTEGER PRIMARY KEY,
         b BLOB,
@@ -114,11 +115,11 @@ proc run_one_test {nThread testname} {
   puts "INSERT INTO result(system, test, nthread, nsecond, data) VALUES('$G(system)', '$testname', $nThread, $G(nSecond), '$data');"
 }
 
-puts "-- setup database..."
-setup_database
+#puts "-- setup database..."
+#setup_database
 
-#run_one_test 1 update1
-#exit
+run_one_test 20 update1
+exit
 
 foreach nThread {16 15 14 13 12 11 10 9 8 7 6 5 4 3 2 1} {
   foreach testname {

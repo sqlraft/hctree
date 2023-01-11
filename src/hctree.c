@@ -614,6 +614,7 @@ int sqlite3HctBtreeOpen(
     pNew->config.nTryBeforeUnevict = HCT_DEFAULT_NTRYBEFOREUNEVICT;
     pNew->config.nPageScan = HCT_DEFAULT_NPAGESCAN;
     pNew->config.szLogChunk = HCT_DEFAULT_SZLOGCHUNK;
+    pNew->config.pgsz = HCT_DEFAULT_PAGESIZE;
     rc = sqlite3HctTreeNew(&pNew->pHctTree);
     pNew->pFakePager = (Pager*)sqlite3HctMalloc(&rc, 4096);
   }else{
@@ -732,16 +733,33 @@ int sqlite3HctBtreeSetPagerFlags(
 ** If the iFix!=0 then the BTS_PAGESIZE_FIXED flag is set so that the page size
 ** and autovacuum mode can no longer be changed.
 */
-int sqlite3HctBtreeSetPageSize(Btree *p, int pageSize, int nReserve, int iFix){
-  int rc = SQLITE_OK;
+int sqlite3HctBtreeSetPageSize(Btree *pBt, int pgsz, int nReserve, int iFix){
+  HBtree *const p = (HBtree*)pBt;
+  int rc = SQLITE_READONLY;
+  if( p->pHctDb && pgsz>=512 && pgsz<=32768 && 0==(pgsz & (pgsz-1)) ){
+    int orig = sqlite3HctDbPagesize(p->pHctDb);
+    if( orig==0 ){
+      p->config.pgsz = pgsz;
+      rc = SQLITE_OK;
+    }
+  }
   return rc;
 }
 
 /*
 ** Return the currently defined page size
 */
-int sqlite3HctBtreeGetPageSize(Btree *p){
-  return 4096;
+int sqlite3HctBtreeGetPageSize(Btree *pBt){
+  HBtree *const p = (HBtree*)pBt;
+  int pgsz = 1024;
+  if( p->pHctDb ){
+    pgsz = sqlite3HctDbPagesize(p->pHctDb);
+    if( pgsz==0 ){
+      pgsz = p->config.pgsz;
+    }
+  }
+  p->config.pgsz = pgsz;
+  return pgsz;
 }
 
 /*

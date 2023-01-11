@@ -605,7 +605,7 @@ static int btWrapperUseHct(
       if( zData==0 || zPagemap==0 ){
         rc = SQLITE_NOMEM_BKPT;
       }else if( bExists ){
-        rc = pVfs->xAccess(pVfs, zData, SQLITE_ACCESS_EXISTS, &bUseHct);
+        rc = pVfs->xAccess(pVfs, zPagemap, SQLITE_ACCESS_EXISTS, &bUseHct);
       }else{
         sqlite3OsDelete(pVfs, zData, 0);
         sqlite3OsDelete(pVfs, zPagemap, 0);
