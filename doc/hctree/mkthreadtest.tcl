@@ -275,8 +275,11 @@ rate of page read/write cycles supported by a test system.
 <h2>Test case update1_scan10 - nUpdate=1, nScan=10</h2>
 [make_chart update1_scan10]
 
-<h2>Test case update1 - nUpdate=10, nScan=10</h2>
+<h2>Test case update10_scan10 - nUpdate=10, nScan=10</h2>
 [make_chart update10_scan10]
+
+<h2>Test case scan10 - nScan=10</h2>
+[make_chart scan10]
 
 }]
 

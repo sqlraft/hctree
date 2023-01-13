@@ -8,7 +8,7 @@ set G(nSleep)   10
 set G(nSecond)  30
 
 set G(system) [lindex $argv 0]
-if {[llength $argv]!=1 || [lsearch {hctree bcw2} $G(system)]<0 } {
+if {[llength $argv]!=1 || [lsearch {hctree hct1024 bcw2} $G(system)]<0 } {
   puts stderr "Usage $argv0 hctree|bcw2"
   exit -1
 }
@@ -19,12 +19,14 @@ if {[llength $argv]!=1 || [lsearch {hctree bcw2} $G(system)]<0 } {
 #   update10:        10 updates per transaction.
 #   update1_scan10:  1 update, 10 scans per transaction.
 #   update10_scan10: 1 update, 10 scans per transaction.
+#   scan10         : 10 scans per transaction.
 #
 foreach {testname nUp nScan} {
   update1          1  0
   update10        10  0
   update1_scan10   1 10
   update10_scan10 10 10
+  scan10           0 10
 } {
   set update "UPDATE tbl0 SET c=hex(frandomblob(32)) WHERE a=frandomid(${G(nRow)});"
   set scan   "SELECT * FROM tbl0 WHERE substr(c, 1, 16)>=hex(frandomblob(8)) ORDER BY substr(c, 1, 16) LIMIT 10;"
@@ -34,17 +36,28 @@ foreach {testname nUp nScan} {
     [string repeat $scan   $nScan]
   "
 
-  set G(sql.bcw2.$testname) [subst {
-    BEGIN CONCURRENT;
-      $body
-    .mutexcommit
-  }]
+  if {$nUp==0} {
+    set BEGIN "BEGIN"
+  } else {
+    set BEGIN "BEGIN CONCURRENT"
+  }
+  if {$nUp==0} {
+    set mutexcommit "COMMIT;"
+  } else {
+    set mutexcommit ".mutexcommit"
+  }
 
+  set G(sql.bcw2.$testname) [subst {
+    $BEGIN;
+      $body
+    $mutexcommit
+  }]
   set G(sql.hctree.$testname) [subst {
-    BEGIN CONCURRENT;
+    $BEGIN;
       $body
     COMMIT;
   }]
+  set G(sql.hct1024.$testname) $G(sql.hctree.$testname)
 }
 
 puts "CREATE TABLE IF NOT EXISTS result(system, test, nthread, nsecond, data);"
@@ -57,12 +70,14 @@ proc setup_database {} {
   file delete -force $file ${file}-data ${file}-pagemap
   if {$G(system)=="hctree"} {
     sqlite3 db file:${file}?hctree=1 -uri 1
+  } elseif {$G(system)=="hct1024"} {
+    sqlite3 db file:${file}?hctree=1 -uri 1
+    db eval { PRAGMA page_size = 1024 }
   } else {
     sqlite3 db $file
   }
 
   db eval {
-  PRAGMA page_size = 1024;
     CREATE TABLE tbl0(
         a INTEGER PRIMARY KEY,
         b BLOB,
@@ -115,11 +130,11 @@ proc run_one_test {nThread testname} {
   puts "INSERT INTO result(system, test, nthread, nsecond, data) VALUES('$G(system)', '$testname', $nThread, $G(nSecond), '$data');"
 }
 
-#puts "-- setup database..."
-#setup_database
+puts "-- setup database..."
+setup_database
 
-run_one_test 20 update1
-exit
+#run_one_test 1 scan10
+#exit
 
 foreach nThread {16 15 14 13 12 11 10 9 8 7 6 5 4 3 2 1} {
   foreach testname {
@@ -127,6 +142,7 @@ foreach nThread {16 15 14 13 12 11 10 9 8 7 6 5 4 3 2 1} {
     update10
     update1_scan10
     update10_scan10
+    scan10
   } {
     puts "-- sleeping $G(nSleep) seconds..."
     after [expr {$G(nSleep) * 1000}]
