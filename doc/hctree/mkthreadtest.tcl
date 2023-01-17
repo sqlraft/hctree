@@ -192,7 +192,14 @@ Additionally:
      one wal file).
 
   *  The VFS is "unix-excl", so no system calls are made for locks, and the
-     mutex-free locking patch has been applied.
+     mutex-free locking patch has been applied. The library is built with
+     the following options:
+
+<pre>
+      -DSQLITE_SHARED_MAPPING=1
+      -DSQLITE_DEFAULT_MEMSTATUS=0
+      -DSQLITE_DISABLE_PAGECACHE_OVERFLOW_STATS=1
+</pre>
 
 <h1>Test Overview</h1>
 
@@ -247,11 +254,11 @@ all disabled.
 <h2>Test case update1 - nUpdate=1, nScan=0</h2>
 [make_chart update1]
 
-<p>In fairness to bcw2, this is a tough test case: small, write-heavy,
-transactions using simple prepared statements on a database small enough to fit
-in main memory. This minimizes the time spent outside COMMIT processing, and
-bcw2 has to serialize commit processing. So adding extra threads doesn't
-improve transaction throughput as much as in other cases.
+<p>This is a tough test case for bcw2: small, write-heavy, transactions using
+simple prepared statements on a database small enough to fit in main memory.
+This minimizes the time spent outside COMMIT processing, and bcw2 has to
+serialize commit processing. So adding extra threads doesn't improve
+transaction throughput as much as in other cases.
 
 <p>For both hctree configurations, each transaction writes to 5 leaf pages of
 this database - one to update the main table, two to delete the original index
@@ -272,14 +279,31 @@ rate of page read/write cycles supported by a test system.
 <h2>Test case update10 - nUpdate=10, nScan=0</h2>
 [make_chart update10]
 
+This chart is similar to update1. Each transaction does 10 times the work, 
+and seems to take roughly 10 times as long to run.
+
+Systems bcw2 and hct1024 benefit from lower transaction overhead to increase
+maximum updates-per-second when compared to update1. As does hctree at lower
+thread counts. At higher thread counts, hctree is subject to the same memory
+bus bandwidth limitation as it was in update1.
+
 <h2>Test case update1_scan10 - nUpdate=1, nScan=10</h2>
 [make_chart update1_scan10]
+
+This is a good test case for bcw2. That it is read-heavy means that the
+fraction of time spent by each transaction in the serialized "COMMIT" command
+is lower, and so the system scales better as threads are added. Peak
+transaction throughput is similar to update1.
+
+Both hctree and hct1024 scale fine for this test case too.
 
 <h2>Test case update10_scan10 - nUpdate=10, nScan=10</h2>
 [make_chart update10_scan10]
 
 <h2>Test case scan10 - nScan=10</h2>
 [make_chart scan10]
+
+All systems do well with this read-only test case.
 
 }]
 

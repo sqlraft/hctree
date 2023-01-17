@@ -87,9 +87,8 @@ is incomplete. The current code has, at least, the following shortcomings:
           for hctree databases. It is parsed, but behaves just as a regular
           "BEGIN" does.
 
-  <li><p> All hctree databases currently use 4096 byte pages and 32-bit page 
-          numbers (maximum database size of 16TiB). It is not yet possible to
-          change these.
+  <li><p> All hctree databases currently use 32-bit page numbers (maximum
+          database size of 16TiB with the default 4KiB byte page size).
 
   <li><p> The database is always accessed using mmap(). It is not possible
           to fallback to pread()/pwrite().
@@ -107,6 +106,29 @@ is incomplete. The current code has, at least, the following shortcomings:
   <li><p> There is no support for recovering from a power failure or operating
           system crash. Such an event may corrupt the database.
 </ol>
+
+<h1> Obtaining and Building the Prototype </h1>
+
+The prototype is on the "hctree" branch (not trunk!) of the fossil repository
+at <a href=https://sqlite.org/hctree>https://sqlite.org/hctree</a>. To obtain
+the latest development snapshot, download:
+
+<ul>
+  <li>  <a href=https://www.sqlite.org/hctree/tarball/hctree.tar.gz?r=hctree download=hctree-latest.tar.gz>
+             https://www.sqlite.org/hctree/tarball/hctree.tar.gz?r=hctree</a>
+</ul>
+
+or check the code out using fossil:
+
+<pre>
+    fossil clone https://www.sqlite.org/hctree hctree.fossil
+    mkdir hctree
+    cd hctree
+    fossil open ../hctree.fossil
+    fossil up hctree
+</pre>
+
+The sources may be built and deployed in the same ways as stock SQLite.
 
 <h1> Application Programming </h1>
 
