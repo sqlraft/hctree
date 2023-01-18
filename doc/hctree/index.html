@@ -192,7 +192,7 @@ ways for an hctree transaction to be validated:
 <p>For example, considering the following database:
 
 <pre>
-    CREATE TABLE t1(INTEGER PRIMARY KEY, b TEXT, c TEXT);
+    CREATE TABLE t1(a INTEGER PRIMARY KEY, b TEXT, c TEXT);
     CREATE INDEX i1 ON t1(b);
     INSERT INTO t1 VALUES(1, 'a', 'A');
     INSERT INTO t1 VALUES(2, 'b', 'B');
@@ -210,7 +210,7 @@ ways for an hctree transaction to be validated:
     COMMIT;
 </pre>
 
-<p>Then during transaction execution, hct records that the following were
+<p>Then during transaction execution, hctree records that the following were
 accessed:
 
 <ul>
@@ -219,7 +219,7 @@ accessed:
   <li> Keys 1, 2, 4 and 6 of the table b-tree.
 </ul>
 
-<p>If, when the attempt to commit is made, the hctree clients finds that
+<p>If, when the attempt to commit is made, the hctree client finds that
 either the contents of the index b-tree range or one of the table b-tree
 keys has been modified since the writer's snapshot was opened, validation
 does not succeed and the transaction is not committed.

@@ -1,5 +1,5 @@
-C Combine\sthe\sheader\sand\sdatabase\sfiles\sinto\sone.
-D 2023-01-18T06:57:13.649
+C Fix\stypos\son\sindex.html.
+D 2023-01-18T19:14:09.795
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -39,7 +39,7 @@ F contrib/sqlitecon.tcl 210a913ad63f9f991070821e599d600bd913e0ad
 F doc/F2FS.txt c1d4a0ae9711cfe0e1d8b019d154f1c29e0d3abfe820787ba1e9ed7691160fcd
 F doc/hctree/design.wiki 5e7a5eab1d0c7082e7c1c6aa3c2943422a3a1a328e2b0c9fd6eddc0b4f99602e
 F doc/hctree/fileformat.wiki 75d2923c1ab4953cafc50a6829ea6e857334b76a64b4a910a17a04710b73cccd
-F doc/hctree/index.html 6a4673557195a7b0446148b531e20b584887b75c3f4a87874535611277e8ae89
+F doc/hctree/index.html 5cf85b7b04e6a1e72f3c7e831c1be095bc3cc37a9cbc467f37397b34edbc2e38
 F doc/hctree/mkthreadtest.tcl 58b1c401b35dcabd978f5a9663376a5beee441bdd9d1e49536772dbd68086876
 F doc/hctree/pagetest.c 12c7410dc7f5eb6ff52491c709eb64f68272be34e742bb5899c30eaeb5c8684f
 F doc/hctree/perftest1.tcl f7d629d072de58bf6e0c3b2b78be827caf8e397556632ee06af9eef0addb0a16
@@ -2125,8 +2125,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P b028eb3f1b66263c8aa7fd8c41c8367fee46a0abdc9e4f63a20c1c27cd8225e7
-R 20edecb189409a8b6aabce375fe3307e
+P 8d94f443419012d7b9d1c73f2f66b1c9bccf1ae24f99071d7f76e0176e81eb74
+R 0c59d2244fad56acc1bbb65dda7a9d53
 U dan
-Z 86836cdaafaf02418c61bc0a99d61b68
+Z 4dd5fe8b6868b0fdfc005dfe883ca025
 # Remove this line to create a well-formed Fossil manifest.
