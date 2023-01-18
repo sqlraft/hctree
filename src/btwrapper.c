@@ -580,7 +580,6 @@ static int btWrapperUseHct(
 ){
   int rc = SQLITE_OK;
   char *zFull = 0;
-  char *zData = 0;
   char *zPagemap = 0;
   int bUseHct = 0;
 
@@ -600,14 +599,12 @@ static int btWrapperUseHct(
       rc = pVfs->xAccess(pVfs, zFull, SQLITE_ACCESS_EXISTS, &bExists);
     }
     if( rc==SQLITE_OK ){
-      zData = sqlite3_mprintf("%s-data", zFull);
       zPagemap = sqlite3_mprintf("%s-pagemap", zFull);
-      if( zData==0 || zPagemap==0 ){
+      if( zPagemap==0 ){
         rc = SQLITE_NOMEM_BKPT;
       }else if( bExists ){
         rc = pVfs->xAccess(pVfs, zPagemap, SQLITE_ACCESS_EXISTS, &bUseHct);
       }else{
-        sqlite3OsDelete(pVfs, zData, 0);
         sqlite3OsDelete(pVfs, zPagemap, 0);
         bUseHct = sqlite3_uri_boolean(zFilename, "hctree", 0);
       }
@@ -615,7 +612,6 @@ static int btWrapperUseHct(
   }
 
   sqlite3_free(zFull);
-  sqlite3_free(zData);
   sqlite3_free(zPagemap);
   *pbUseHct = bUseHct;
   return rc;

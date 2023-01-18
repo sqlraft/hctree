@@ -17,15 +17,14 @@
 
 Each database consists of at least three files:
 
-  *  A database file, containing database file pages,
-  *  A page-map file, containing the page-map, and
-  *  A header file, containing the two header pages.
+  *  A database file, containing database file pages, and
+  *  A page-map file, containing the page-map.
 
 Additionally, there may be one or more client log files.
 
-<h1 id=header> 2. Header File Format </h1>
+<h1 id=header> 2. Header Page Format </h1>
 
-The header file consists of two pages using the same format.
+The database header consists of two pages using the same format.
 
 <table border=1 cellpadding=5 width=90%>
   <tr><th>Byte Offset <th>Size <th width=80%> Description

@@ -157,6 +157,9 @@ are:
   database. If it returns no rows, a legacy SQLite database.
 </ul>
 
+<p>Each database consists of two files - the database file itself and a second
+file name "&lt;database&gt;-pagemap".
+
 <h2 id=concurrency> Concurrency Model </h2>
 
 <p> Hctree offers similar MVCC based optimistic concurrency to SQLite with the
