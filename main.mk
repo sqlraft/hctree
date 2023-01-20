@@ -883,7 +883,8 @@ sqlite3rbu.o:	$(TOP)/ext/rbu/sqlite3rbu.c $(HDR) $(EXTHDR)
 #
 tclsqlite3:	$(TOP)/src/tclsqlite.c libsqlite3.a
 	$(TCCX) $(TCL_FLAGS) -DTCLSH -o tclsqlite3 \
-		$(TOP)/src/tclsqlite.c libsqlite3.a $(LIBTCL) $(THREADLIB)
+	-DTCLSQLITE3_EXTRA_INIT=SqliteThreadTest_Init $(TOP)/src/test_mtperf.c \
+	$(TOP)/src/tclsqlite.c libsqlite3.a $(LIBTCL) $(THREADLIB)
 
 sqlite3_analyzer.c: sqlite3.c $(TOP)/src/tclsqlite.c $(TOP)/tool/spaceanal.tcl $(TOP)/tool/sqlite3_analyzer.c.in $(TOP)/tool/mkccode.tcl
 	tclsh $(TOP)/tool/mkccode.tcl $(TOP)/tool/sqlite3_analyzer.c.in >sqlite3_analyzer.c

@@ -1081,9 +1081,12 @@ tclsqlite-shell.lo:	$(TOP)/src/tclsqlite.c $(HDR)
 tclsqlite-stubs.lo:	$(TOP)/src/tclsqlite.c $(HDR)
 	$(LTCOMPILE) -DUSE_TCL_STUBS=1 -o $@ -c $(TOP)/src/tclsqlite.c
 
-tclsqlite3$(TEXE):	tclsqlite-shell.lo libsqlite3.la
-	$(LTLINK) -o $@ tclsqlite-shell.lo \
-		 libsqlite3.la $(LIBTCL)
+#tclsqlite3$(TEXE):	tclsqlite-shell.lo libsqlite3.la
+	#$(LTLINK) -o $@ tclsqlite-shell.lo \
+		 #libsqlite3.la $(LIBTCL)
+
+tclsqlite3$(TEXE): $(TOP)/src/test_mtperf.c $(TOP)/src/tclsqlite.c sqlite3.lo
+	$(LTLINK) -DTCLSH -o $@ -DTCLSQLITE3_EXTRA_INIT=SqliteThreadTest_Init $(TOP)/src/test_mtperf.c $(TOP)/src/tclsqlite.c sqlite3.lo $(LIBTCL) $(TLIBS)
 
 # Rules to build opcodes.c and opcodes.h
 #

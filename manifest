@@ -1,9 +1,9 @@
-C Fix\sa\sstartup\srace\scondition\sthat\scould\soccur\sif\sa\swal\sfile\sgrows\sfrom\s0\sbytes\swhile\sa\sBEGIN\sCONCURRENT\stransaction\sis\srunning.
-D 2023-01-12T15:44:48.827
+C Performance\sand\sbuild\stweaks\sto\sbcw2.
+D 2023-01-20T20:57:44.126
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
-F Makefile.in bdc92f6e77a9503bfcdd110cbd2833aa8a780df9af4d192b035a5bbb16fac02b
+F Makefile.in 93a3d6ab7e1bdad6a399bf56724fc932be064cb22850c0221abfa9b142d1330f
 F Makefile.linux-gcc f609543700659711fbd230eced1f01353117621dccae7b9fb70daa64236c5241
 F Makefile.msc 01ec9533292aab4ca5b6222008e832ec5472e7bb40859199fa2c23c813a7e2f8
 F README.md 8b8df9ca852aeac4864eb1e400002633ee6db84065bd01b78c33817f97d31f5e
@@ -572,7 +572,7 @@ F ext/wasm/wasmfs.make cf9a68162d92ca2bcb0b9528b244cb36d5cc2d84ccc9c2d398461927d
 F install-sh 9d4de14ab9fb0facae2f48780b874848cbf2f895 x
 F ltmain.sh 3ff0879076df340d2e23ae905484d8c15d5fdea8
 F magic.txt 5ade0bc977aa135e79e3faaea894d5671b26107cc91e70783aa7dc83f22f3ba0
-F main.mk 5b34e6dbbf42c810a96a6aac50d802f2e2d5ff74f5996eda2f6dfaa4bbb47f72
+F main.mk eb3ded39adb5560e5b469051df1778322f0bc80fb19cc5bc3573e9a95f1358d3
 F mkso.sh fd21c06b063bb16a5d25deea1752c2da6ac3ed83
 F mptest/config01.test 3c6adcbc50b991866855f1977ff172eb6d901271
 F mptest/config02.test 4415dfe36c48785f751e16e32c20b077c28ae504
@@ -658,11 +658,11 @@ F src/shell.c.in 24e0c75947dd8a3426473d90dfc4887f42553c8b57dff02a6865f04c5efcf86
 F src/sqlite.h.in 6e33b6c208f01d746c2bd7fe8747dbe8469877c3b3abb601c0251e137105028a
 F src/sqlite3.rc 5121c9e10c3964d5755191c80dd1180c122fc3a8
 F src/sqlite3ext.h c4b9fa7a7e2bcdf850cfeb4b8a91d5ec47b7a00033bc996fd2ee96cbf2741f5f
-F src/sqliteInt.h 85914752405dbbbb978cff80f0697a4cc7ec4d45195d12caf462e255b14784bd
+F src/sqliteInt.h 21bc0c435c0099c8432a07b279ced17f24a4ac5009f25f55c218b03d2d3f966a
 F src/sqliteLimit.h d7323ffea5208c6af2734574bae933ca8ed2ab728083caa117c9738581a31657
 F src/status.c 160c445d7d28c984a0eae38c144f6419311ed3eace59b44ac6dafc20db4af749
 F src/table.c 0f141b58a16de7e2fbe81c308379e7279f4c6b50eb08efeec5892794a0ba30d1
-F src/tclsqlite.c 4e64ba300a5a26e0f1170e09032429faeb65e45e8f3d1a7833e8edb69fc2979e
+F src/tclsqlite.c a0ab386fb79f23547b50987f881365425eeffe0d925e46ae48e54a86503dd289
 F src/test1.c 741d7a904a01ded100ee021023886b12ad16f704481a470e5a5403013defef2f
 F src/test2.c 827446e259a3b7ab949da1542953edda7b5117982576d3e6f1c24a0dd20a5cef
 F src/test3.c 61798bb0d38b915067a8c8e03f5a534b431181f802659a6616f9b4ff7d872644
@@ -729,7 +729,7 @@ F src/vdbe.c 29630d69aef37c3ac6d3fb94043241aa195a816a955c600d044a8141017c8cf9
 F src/vdbe.h 73b904a6b3bb27f308c6cc287a5751ebc7f1f89456be0ed068a12b92844c6e8c
 F src/vdbeInt.h 8651e4c4e04d1860d0bdcf330cb8294e3778a9d4222be30ce4c490d9220af783
 F src/vdbeapi.c df3f73a4d0a487f2068e3c84776cd6e3fba5ae80ff612659dcfda4307686420b
-F src/vdbeaux.c 2eee24133b51fd721bbbd01b5a99bc76afc6d37f334d6c5bdb20bab2a077047e
+F src/vdbeaux.c a6ff7d4987ad732747212ce2451cb50522c14b3c0a078abc993103ebdfd65817
 F src/vdbeblob.c 5e61ce31aca17db8fb60395407457a8c1c7fb471dde405e0cd675974611dcfcd
 F src/vdbemem.c 6cfed43758d57b6e3b99d9cdedfeccd86e45a07e427b22d8487cbdbebb6c522a
 F src/vdbesort.c 43756031ca7430f7aec3ef904824a7883c4ede783e51f280d99b9b65c0796e35
@@ -2103,9 +2103,11 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P bcab19d21be42121f1ea3961aedbbe463c60d85d0a3dd8b9593040d217bac3a7
-Q +c1feca4ddaa93fa1cf75e8df061967995a18d726a23f4006d239d3e03c8570df
-R f7f153aa0f2932683653732f2072b6cf
+P 2c14f3832e0e21c4e68b556d5592860fcd79b6ca21db6c47f52a240b24559a9a
+R dcde04357a9e0c388c94aedeabde9965
+T *branch * bcw2
+T *sym-bcw2 *
+T -sym-begin-concurrent-pnu-wal2 *
 U dan
-Z bea728a05177d93a8ab6622f5da482dd
+Z 0bb558097308b4ec441db8ee76f8eda4
 # Remove this line to create a well-formed Fossil manifest.
