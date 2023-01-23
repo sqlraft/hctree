@@ -1,5 +1,5 @@
-C Fix\stypos\son\sindex.html.
-D 2023-01-18T19:14:09.795
+C Where\spossible,\sremove\sTID\sand\sRANGETID\sfields\swhen\sbalancing\spages.
+D 2023-01-23T21:27:43.831
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -613,7 +613,7 @@ F src/hctFileInt.h 9a6c62483b7923bc0b428832a3e3dbaa2364cd417bbc78698ca6bce75eb27
 F src/hctInt.h af598ea72481321645c52d3dd951c23f537644b6b1c663694d42183db5b7c592
 F src/hctPManInt.h 44e63f39e3da54ca47f5582127a12a2f33002d1f3ddcd0fc23120731dfe70b5d
 F src/hctTMapInt.h 4ac478747a6ecb607ba14a484cbf189b8d4ff090ed97c0a9704e7a2e727316c0
-F src/hct_database.c 78e38d8ec32e310acd44e7233651a6ee9f54266c466a9c7ff45bef53ba8b57ab
+F src/hct_database.c ba8d71300bb0849c04a1ec47a7893af0ebc6dede290b2b2a6b4185be9def4a94
 F src/hct_file.c 885365d5258cb607758b99bad964c7b2d6495424ca9c74cf8d49bc2e63355bd4
 F src/hct_pman.c 992650137547caae7f2158374d628c4ead3f8fc2990ea8b11c0a0d6903c5ccf0
 F src/hct_record.c 54b0d564be580ca29a54312f9a9abdba193b234ac56ec65a7e40109107041b25
@@ -2125,8 +2125,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P 8d94f443419012d7b9d1c73f2f66b1c9bccf1ae24f99071d7f76e0176e81eb74
-R 0c59d2244fad56acc1bbb65dda7a9d53
+P 10b2b51c0158e3fec6ffdbb77f8fa3790e70685f1c040bb09616a897e32e65fd
+R f4003f756390d87476e224543d13f436
 U dan
-Z 4dd5fe8b6868b0fdfc005dfe883ca025
+Z b480e3ba802e1bb6611956e52da75989
 # Remove this line to create a well-formed Fossil manifest.

@@ -3781,6 +3781,29 @@ static int hctDbRemoveOverflow(
   return rc;
 }
 
+static void hctDbRemoveTids(
+  HctDbIndexNodeEntry *p,
+  u8 *aPg,
+  u64 iSafeTid
+){
+  if( (p->flags & HCTDB_HAS_TID)==HCTDB_HAS_TID ){
+    u64 iTid;
+    memcpy(&iTid, &aPg[p->iOff], sizeof(u64));
+    if( (iTid & HCT_TID_MASK)<=iSafeTid ){
+      p->flags &= ~HCTDB_HAS_TID;
+      p->iOff += sizeof(u64);
+    }
+  }
+  if( (p->flags & (HCTDB_HAS_TID|HCTDB_HAS_RANGETID))==HCTDB_HAS_RANGETID ){
+    u64 iTid;
+    memcpy(&iTid, &aPg[p->iOff], sizeof(u64));
+    if( (iTid & HCT_TID_MASK)<=iSafeTid ){
+      p->flags &= ~HCTDB_HAS_RANGETID;
+      p->iOff += sizeof(u64);
+    }
+  }
+}
+
 /* 
 ** Populate the aSz[] array with the sizes and locations of each cell
 **
@@ -3800,10 +3823,14 @@ static void hctDbBalanceGetCellSz(
   HctDbCellSz *aSz,
   int *pnSz                         /* OUT: number of entries in aSz[] */
 ){
+  u64 iSafeTid = sqlite3HctFileSafeTID(pDb->pFile);
+  int szEntry;
+  int i0 = hctDbEntryArrayDim(aPgCopy[0], &szEntry);
+
   int ii;                           /* Current index in aPgCopy[] */
   int iCell;                        /* Current cell of aPgCopy[ii] */
   int iSz = 0;                      /* Current populated size of aSz[] */
-  int szEntry = hctDbPageEntrySize(aPgCopy[0]);
+
   int iIns = iInsert;
 
   ii = 0;
@@ -3827,6 +3854,10 @@ static void hctDbBalanceGetCellSz(
       }
       iIns = -1;
     }else{
+      u8 *aPg = aPgCopy[ii];
+      HctDbIndexNodeEntry *pE = (HctDbIndexNodeEntry*)&aPg[i0+iCell*szEntry];
+      hctDbRemoveTids(pE, aPg, iSafeTid);
+
       pSz->nByte = szEntry + hctDbPageRecordSize(pPg, pDb->pgsz, iCell);
       pSz->iPg = ii;
       pSz->iEntry = iCell;
