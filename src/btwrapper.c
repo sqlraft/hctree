@@ -143,7 +143,7 @@ struct BtreeMethods {
   int(*xBtreeSchemaLocked)(Btree*);
   int(*xBtreeIsReadonly)(Btree*);
   int(*xBtreeSetVersion)(Btree*, int);
-  char *(*xBtreeIntegrityCheck)(sqlite3*, Btree*, Pgno*, int, int, int*);
+  int(*xBtreeIntegrityCheck)(sqlite3*, Btree*, Pgno*, int, int, int*, char**);
 };
 int sqlite3BtreeNext(BtCursor *p, int a){
   return p->pMethods->xBtreeNext(p, a);
@@ -359,8 +359,8 @@ int sqlite3BtreeIsReadonly(Btree *p){
 int sqlite3BtreeSetVersion(Btree *p, int a){
   return p->pMethods->xBtreeSetVersion(p, a);
 }
-char * sqlite3BtreeIntegrityCheck(sqlite3 *a, Btree *p, Pgno *b, int c, int d, int *e){
-  return p->pMethods->xBtreeIntegrityCheck(a, p, b, c, d, e);
+int sqlite3BtreeIntegrityCheck(sqlite3 *a, Btree *p, Pgno *b, int c, int d, int *e, char* *f){
+  return p->pMethods->xBtreeIntegrityCheck(a, p, b, c, d, e, f);
 }
 static const BtCursorMethods hct_btcursor_methods = {
   xBtreeNext : sqlite3HctBtreeNext,

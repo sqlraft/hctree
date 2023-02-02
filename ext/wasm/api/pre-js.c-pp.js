@@ -6,10 +6,14 @@
 */
 
 // See notes in extern-post-js.js
-const sqlite3InitModuleState = self.sqlite3InitModuleState || Object.create(null);
+const sqlite3InitModuleState = self.sqlite3InitModuleState
+      || Object.assign(Object.create(null),{
+        debugModule: ()=>{}
+      });
 delete self.sqlite3InitModuleState;
 sqlite3InitModuleState.debugModule('self.location =',self.location);
 
+//#ifnot target=es6-bundler-friendly
 /**
    This custom locateFile() tries to figure out where to load `path`
    from. The intent is to provide a way for foo/bar/X.js loaded from a
@@ -29,6 +33,10 @@ sqlite3InitModuleState.debugModule('self.location =',self.location);
    4) If none of the above apply, (prefix+path) is returned.
 */
 Module['locateFile'] = function(path, prefix) {
+//#if target=es6-module
+  return new URL(path, import.meta.url).href;
+//#else
+  'use strict';
   let theFile;
   const up = this.urlParams;
   if(up.has(path)){
@@ -47,7 +55,9 @@ Module['locateFile'] = function(path, prefix) {
     "result =", theFile
   );
   return theFile;
+//#endif target=es6-module
 }.bind(sqlite3InitModuleState);
+//#endif ifnot target=es6-bundler-friendly
 
 /**
    Bug warning: a custom Module.instantiateWasm() does not work
@@ -57,7 +67,7 @@ Module['locateFile'] = function(path, prefix) {
 
    In such builds we must disable this.
 */
-const xNameOfInstantiateWasm = true
+const xNameOfInstantiateWasm = false
       ? 'instantiateWasm'
       : 'emscripten-bug-17951';
 Module[xNameOfInstantiateWasm] = function callee(imports,onSuccess){
@@ -65,7 +75,7 @@ Module[xNameOfInstantiateWasm] = function callee(imports,onSuccess){
   const uri = Module.locateFile(
     callee.uri, (
       ('undefined'===typeof scriptDirectory/*var defined by Emscripten glue*/)
-        ? '' : scriptDirectory)
+        ? "" : scriptDirectory)
   );
   sqlite3InitModuleState.debugModule(
     "instantiateWasm() uri =", uri

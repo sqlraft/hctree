@@ -2940,7 +2940,7 @@ end_playback:
     ** see if it is possible to delete the super-journal.
     */
     assert( zSuper==&pPager->pTmpSpace[4] );
-    memset(&zSuper[-4], 0, 4);
+    memset(pPager->pTmpSpace, 0, 4);
     rc = pager_delsuper(pPager, zSuper);
     testcase( rc!=SQLITE_OK );
   }
@@ -7015,7 +7015,11 @@ int sqlite3PagerSavepoint(Pager *pPager, int op, int iSavepoint){
 */
 const char *sqlite3PagerFilename(const Pager *pPager, int nullIfMemDb){
   static const char zFake[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
-  return (nullIfMemDb && pPager->memDb) ? &zFake[4] : pPager->zFilename;
+  if( nullIfMemDb && (pPager->memDb || sqlite3IsMemdb(pPager->pVfs)) ){
+    return &zFake[4];
+  }else{
+    return pPager->zFilename;
+  }
 }
 
 /*
