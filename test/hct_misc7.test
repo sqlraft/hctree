@@ -19,7 +19,7 @@ hct_reset_db
 
 set nRow 2000
 
-if 0 {
+if 1 {
 
 do_execsql_test 1.1.0 {
   CREATE TABLE t1(a INTEGER PRIMARY KEY, b TEXT);
@@ -43,9 +43,6 @@ do_test 1.1.2 {
   }
 } {}
 
-execsql_pp { SELECT * FROM hctpgmap NATURAL JOIN hctdb }
-exit
-
 hct_reset_db
 array unset A
 do_execsql_test 1.2.0 {
@@ -56,7 +53,7 @@ do_execsql_test 1.2.0 {
 do_test 1.2.1 {
   for {set i 1} {$i <= $nRow} {incr i} {
     set t [db one {SELECT hex(randomblob(5000))}]
-    set k [db one {SELECT random()}]
+    set k [db one {SELECT random()|random()}]
     db eval { INSERT INTO t1 VALUES($k, $t) }
     set A($k) $t
   }
@@ -108,7 +105,7 @@ do_test 2.2 {
   }
   for {set ii 1} {$ii <= $nRow} {incr ii} {
     set t [db one {SELECT hex(randomblob(50))}]
-    set i [db one {SELECT random()}]
+    set i [db one {SELECT random() | random()}]
     db eval { INSERT INTO x1 VALUES($i, $t) }
     set A($i) $t
   }

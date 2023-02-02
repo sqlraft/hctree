@@ -1,0 +1,687 @@
+# 2015 July 26
+#
+# The author disclaims copyright to this source code.  In place of
+# a legal notice, here is a blessing:
+#
+#    May you do good and not evil.
+#    May you find forgiveness for yourself and forgive others.
+#    May you share freely, never taking more than you give.
+#
+#***********************************************************************
+#
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+source $testdir/lock_common.tcl
+set ::testprefix concurrent
+
+ifcapable !concurrent {
+  finish_test
+  return
+}
+
+do_execsql_test 1.0 {
+  PRAGMA journal_mode = wal;
+} {wal}
+
+do_execsql_test 1.1 {
+  CREATE TABLE t1(k INTEGER PRIMARY KEY, v);
+  BEGIN CONCURRENT;
+    INSERT INTO t1 VALUES(1, 'abcd');
+  COMMIT;
+}
+
+do_execsql_test 1.2 {
+  SELECT * FROM t1;
+} {1 abcd}
+
+do_execsql_test 1.3 {
+  BEGIN CONCURRENT;
+    INSERT INTO t1 VALUES(2, 'efgh');
+  ROLLBACK;
+}
+
+do_execsql_test 1.4 {
+  SELECT * FROM t1;
+} {1 abcd}
+
+
+#-------------------------------------------------------------------------
+# CONCURRENT transactions cannot do cache spills.
+#
+foreach {tn trans spill} {
+  1 {BEGIN CONCURRENT}  0
+  2 {BEGIN}           1
+} {
+  do_test 1.5.$tn {
+    sqlite3 db2 test.db
+    set walsz [file size test.db-wal]
+
+    execsql { PRAGMA cache_size = 10 } db2
+    execsql $trans db2
+    execsql {
+      WITH cnt(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM cnt WHERE i<50)
+        INSERT INTO t1(v) SELECT randomblob(900) FROM cnt;
+    } db2
+
+    expr {[file size test.db-wal]==$walsz}
+  } [expr !$spill]
+
+  execsql ROLLBACK db2
+  db2 close
+}
+
+#-------------------------------------------------------------------------
+# CONCURRENT transactions man not be committed while there are active
+# readers.
+do_execsql_test 1.6.setup {
+  DROP TABLE t1;
+  CREATE TABLE t1(a, b);
+  INSERT INTO t1 VALUES(1, 2);
+  INSERT INTO t1 VALUES(3, 4);
+  INSERT INTO t1 VALUES(5, 6);
+}
+foreach {tn trans commit_ok} {
+  1 {BEGIN CONCURRENT}  0
+  2 {BEGIN}           1
+} {
+  do_test 1.6.$tn.1 {
+    set stmt [sqlite3_prepare db "SELECT * FROM t1" -1 dummy]
+    sqlite3_step $stmt
+  } SQLITE_ROW
+  do_test 1.6.$tn.2 {
+    execsql $trans
+    execsql { INSERT INTO t1 VALUES(7, 8) }
+  } {}
+
+  if { $commit_ok } {
+    do_test 1.6.$tn.3 { catchsql COMMIT } {0 {}}
+  } else {
+    do_test 1.6.$tn.4 { catchsql COMMIT } {/1 {cannot commit transaction .*}/}
+  }
+
+  sqlite3_finalize $stmt
+  catchsql ROLLBACK
+}
+
+#-------------------------------------------------------------------------
+# CONCURRENT transactions may not modify the db schema.
+#
+sqlite3 db2 test.db
+foreach {tn sql} {
+  1 { CREATE TABLE xx(a, b) }
+  2 { DROP TABLE t1 }
+  3 { CREATE INDEX i1 ON t1(a) }
+  4 { CREATE VIEW v1 AS SELECT * FROM t1 }
+} {
+  do_catchsql_test 1.7.0.$tn.1 "
+    BEGIN CONCURRENT;
+    $sql
+  " {0 {}}
+
+  db2 eval {INSERT INTO t1 DEFAULT VALUES}
+
+  do_catchsql_test 1.7.0.$tn.2 {
+    COMMIT
+  } {1 {database is locked}}
+
+  do_execsql_test 1.7.0.$tn.2 ROLLBACK
+
+  do_execsql_test 1.7.0.$tn.3 {
+    SELECT sql FROM sqlite_master;
+    SELECT sql FROM sqlite_temp_master;
+  } {{CREATE TABLE t1(a, b)}}
+
+  #do_execsql_test 1.7.0.$tn.3 COMMIT
+}
+
+# Except the temp db schema.
+foreach {tn sql} {
+  1 { CREATE TEMP TABLE xx(a, b) }
+  2 { DROP TABLE xx }
+  3 { CREATE TEMP TABLE yy(a, b) }
+  4 { CREATE VIEW temp.v1 AS SELECT * FROM t1 }
+  5 { CREATE INDEX yyi1 ON yy(a); }
+  6 { CREATE TABLE temp.zz(a, b) }
+} {
+  do_catchsql_test 1.7.1.$tn.1 "
+    BEGIN CONCURRENT;
+    $sql
+  " {0 {}}
+
+  do_execsql_test 1.7.1.$tn.2 COMMIT
+}
+
+
+do_execsql_test 1.7.1.x {
+  SELECT sql FROM sqlite_master;
+  SELECT sql FROM sqlite_temp_master;
+} {
+  {CREATE TABLE t1(a, b)}
+  {CREATE TABLE yy(a, b)} 
+  {CREATE VIEW v1 AS SELECT * FROM t1} 
+  {CREATE INDEX yyi1 ON yy(a)} 
+  {CREATE TABLE zz(a, b)}
+}
+
+#-------------------------------------------------------------------------
+# If an auto-vacuum database is written within an CONCURRENT transaction, it
+# is handled in the same way as for a non-CONCURRENT transaction.
+#
+reset_db
+do_execsql_test 1.8.1 {
+  PRAGMA auto_vacuum = 1;
+  PRAGMA journal_mode = wal;
+  CREATE TABLE t1(x, y);
+  INSERT INTO t1 VALUES('x', 'y');
+} {wal}
+
+do_execsql_test 1.8.2 {
+  BEGIN CONCURRENT;
+    SELECT * FROM t1;
+  COMMIT;
+} {x y}
+
+do_catchsql_test 1.8.3 {
+  BEGIN CONCURRENT;
+    INSERT INTO t1 VALUES('a', 'b');
+} {0 {}}
+
+do_test 1.8.4 {
+  sqlite3 db2 test.db
+  catchsql {
+    BEGIN CONCURRENT;
+      INSERT INTO t1 VALUES('c', 'd');
+  } db2
+} {1 {database is locked}}
+
+do_test 1.8.5 {
+  db eval COMMIT
+  db2 eval COMMIT
+} {}
+db close
+db2 close
+
+do_multiclient_test tn {
+
+  #-----------------------------------------------------------------------
+  # 1. Start an CONCURRENT transaction using [db1].
+  #
+  # 2. Start and then rollback a regular transaction using [db2]. This 
+  #    can be done as the ongoing [db1] transaction is CONCURRENT.
+  #
+  # 3. The [db1] transaction can now be committed, as [db2] has relinquished
+  #    the write lock.
+  #
+  do_test 2.$tn.1.1 {
+    sql1 { 
+      PRAGMA journal_mode = wal;
+      CREATE TABLE t1(k INTEGER PRIMARY KEY, v);
+      INSERT INTO t1 VALUES(1, 'one');
+    }
+    sql1 { 
+      BEGIN CONCURRENT;
+        INSERT INTO t1 VALUES(2, 'two');
+    }
+    code1 { sqlite3_get_autocommit db }
+  } 0
+
+  do_test 2.$tn.1.2 {
+    sql2 {
+      BEGIN;
+        INSERT INTO t1 VALUES(3, 'three');
+      ROLLBACK;
+    }
+  } {}
+
+  do_test 2.$tn.1.3 {
+    sql1 COMMIT
+    sql2 { SELECT * FROM t1 }
+  } {1 one 2 two}
+  
+  #-----------------------------------------------------------------------
+  # 1. Start an CONCURRENT transaction using [db1].
+  #
+  # 2. Commit a transaction using [db2].
+  #
+  # 3. Try to commit with [db1]. Check that SQLITE_BUSY_SNAPSHOT is returned,
+  #    and the transaction is not rolled back.
+  #
+  do_test 2.$tn.2.1 {
+    sql1 {
+      BEGIN CONCURRENT;
+        INSERT INTO t1 VALUES(-1, 'hello world');
+    }
+  } {}
+
+  do_test 2.$tn.2.2 {
+    sql2 {
+      INSERT INTO t1 VALUES(3, 'three');
+    }
+  } {}
+
+  do_test 2.$tn.2.3.1 {
+    set rc [catch { sql1 COMMIT } msg]
+    list $rc $msg
+  } {1 {database is locked}}
+
+  do_test 2.$tn.2.3.2 {
+    code1 { list [sqlite3_extended_errcode db] [sqlite3_get_autocommit db] }
+  } {SQLITE_BUSY_SNAPSHOT 0}
+
+  do_test 2.$tn.2.3.3 {
+    sql1 {
+      SELECT * FROM t1;
+      ROLLBACK;
+    }
+  } {-1 {hello world} 1 one 2 two}
+  
+  #-----------------------------------------------------------------------
+  # 1. Start an CONCURRENT transaction using [db1].
+  #
+  # 2. Open a transaction using [db2].
+  #
+  # 3. Try to commit with [db1]. Check that SQLITE_BUSY is returned,
+  #    and the transaction is not rolled back.
+  #
+  # 4. Have [db2] roll its transaction back. Then check that [db1] can
+  #    commit.
+  #
+  do_test 2.$tn.3.1 {
+    sql1 {
+      BEGIN CONCURRENT;
+        INSERT INTO t1 VALUES(4, 'four');
+    }
+  } {}
+
+  do_test 2.$tn.3.2 {
+    sql2 {
+      BEGIN;
+        INSERT INTO t1 VALUES(-1, 'xyz');
+    }
+  } {}
+
+  do_test 2.$tn.3.3.1 {
+    set rc [catch { sql1 COMMIT } msg]
+    list $rc $msg
+  } {1 {database is locked}}
+
+  do_test 2.$tn.3.3.2 {
+    code1 { list [sqlite3_extended_errcode db] [sqlite3_get_autocommit db] }
+  } {SQLITE_BUSY 0}
+
+  do_test 2.$tn.3.3.3 {
+    sql1 { SELECT * FROM t1; }
+  } {1 one 2 two 3 three 4 four}
+
+  do_test 2.$tn.3.4 {
+    sql2 ROLLBACK
+    sql1 COMMIT
+    sql1 { SELECT * FROM t1; }
+  } {1 one 2 two 3 three 4 four}
+
+  #-----------------------------------------------------------------------
+  # 1. Create a second table - t2.
+  #
+  # 2. Write to t1 with [db] and t2 with [db2].
+  #
+  # 3. See if it worked.
+  #
+  do_test 2.$tn.4.1 {
+    sql1 { CREATE TABLE t2(a, b) }
+  } {}
+  do_test 2.$tn.4.2 {
+    sql2 {
+      BEGIN CONCURRENT;
+        INSERT INTO t2 VALUES('i', 'n');
+    }
+
+    sql1 {
+      BEGIN CONCURRENT;
+        INSERT INTO t1 VALUES(5, 'five');
+      COMMIT;
+    }
+
+    sql2 COMMIT
+  } {}
+
+  do_test 2.$tn.4.3.1 {
+    sql2 {SELECT * FROM t1}
+  } {1 one 2 two 3 three 4 four 5 five}
+  do_test 2.$tn.4.3.2 {
+    sql1 {SELECT * FROM t1}
+  } {1 one 2 two 3 three 4 four 5 five}
+
+  do_test 2.$tn.4.3.3 { sql2 {SELECT * FROM t2} } {i n}
+  do_test 2.$tn.4.3.4 { sql1 {SELECT * FROM t2} } {i n}
+
+  #-----------------------------------------------------------------------
+  # The "schema cookie" issue.
+  #
+  # 1. Begin and CONCURRENT write to "t1" using [db]
+  #
+  # 2. Create an index on t1 using [db2].
+  #
+  # 3. Attempt to commit the CONCURRENT write. This is an SQLITE_BUSY_SNAPSHOT,
+  #    even though there is no page collision.
+  #
+  do_test 2.$tn.5.1 {
+    sql1 {
+      BEGIN CONCURRENT;
+        INSERT INTO t1 VALUES(6, 'six');
+    }
+  } {}
+
+  do_test 2.$tn.5.2 {
+    sql2 { CREATE INDEX i1 ON t1(v); }
+  } {}
+
+  do_test 2.$tn.5.3 {
+    list [catch { sql1 { COMMIT } } msg] $msg [sqlite3_errcode db]
+  } {1 {database is locked} SQLITE_BUSY_SNAPSHOT}
+
+  do_test 2.$tn.5.4 {
+    sql2 { PRAGMA integrity_check }
+  } {ok}
+  catch { sql1 ROLLBACK }
+
+  #-----------------------------------------------------------------------
+  #
+  # 1. Begin an CONCURRENT write to "t1" using [db]
+  #
+  # 2. Lots of inserts into t2. Enough to grow the db file and modify page 1.
+  #
+  # 3. Check that the CONCURRENT transaction can not be committed.
+  #
+  do_test 2.$tn.6.1 {
+    sql1 {
+      BEGIN CONCURRENT;
+        INSERT INTO t1 VALUES(6, 'six');
+    }
+  } {}
+
+  do_test 2.$tn.6.2 {
+    sql2 { 
+      WITH src(a,b) AS (
+        VALUES(1,1) UNION ALL SELECT a+1,b+1 FROM src WHERE a<10000
+      ) INSERT INTO t2 SELECT * FROM src;
+    }
+  } {}
+
+  do_test 2.$tn.6.3 {
+    sql1 { SELECT count(*) FROM t2 }
+    list [catch { sql1 { COMMIT } } msg] $msg [sqlite3_errcode db]
+  } {1 {database is locked} SQLITE_BUSY_SNAPSHOT}
+  sql1 ROLLBACK
+
+  do_test 2.$tn.6.4 {
+    sql1 {
+      SELECT count(*) FROM t1;
+      SELECT count(*) FROM t2;
+    }
+  } {5 10001}
+
+  #-----------------------------------------------------------------------
+  # 
+  # 1. Begin an big CONCURRENT write to "t1" using [db] - large enough to
+  #    grow the db file.
+  #
+  # 2. Lots of inserts into t2. Also enough to grow the db file.
+  #
+  # 3. Check that the CONCURRENT transaction cannot be committed (due to a clash
+  #    on page 1 - the db size field).
+  #
+  do_test 2.$tn.7.1 {
+    sql1 {
+      BEGIN CONCURRENT;
+        WITH src(a,b) AS (
+          VALUES(10000,10000) UNION ALL SELECT a+1,b+1 FROM src WHERE a<20000
+        ) INSERT INTO t1 SELECT * FROM src;
+    }
+  } {}
+
+  do_test 2.$tn.7.2 {
+    sql2 { 
+      WITH src(a,b) AS (
+        VALUES(1,1) UNION ALL SELECT a+1,b+1 FROM src WHERE a<10000
+      ) INSERT INTO t2 SELECT * FROM src;
+    }
+  } {}
+
+  do_test 2.$tn.7.3 {
+    list [catch { sql1 { COMMIT } } msg] $msg [sqlite3_errcode db]
+  } {0 {} SQLITE_OK}
+
+  do_test 2.$tn.7.4 { sql3 { PRAGMA integrity_check } } ok
+}
+
+#-------------------------------------------------------------------------
+# Concurrent transactions may not modify the user_version or application_id.
+#
+reset_db
+do_execsql_test 3.0 {
+  PRAGMA journal_mode = wal;
+  CREATE TABLE t1(x, y);
+  INSERT INTO t1 VALUES('a', 'b');
+  PRAGMA user_version = 10;
+} {wal}
+do_execsql_test 3.1 {
+  BEGIN CONCURRENT;
+    INSERT INTO t1 VALUES('c', 'd');
+    SELECT * FROM t1;
+} {a b c d}
+do_catchsql_test 3.2 {
+  PRAGMA user_version = 11;
+} {1 {cannot modify user_version within CONCURRENT transaction}}
+do_execsql_test 3.3 {
+  PRAGMA user_version;
+  SELECT * FROM t1;
+} {10 a b c d}
+do_catchsql_test 3.4 {
+  PRAGMA application_id = 11;
+} {1 {cannot modify application_id within CONCURRENT transaction}}
+do_execsql_test 3.5 {
+  COMMIT;
+  PRAGMA user_version;
+  PRAGMA application_id;
+  SELECT * FROM t1;
+} {10 0 a b c d}
+
+#-------------------------------------------------------------------------
+# However, another transaction modifying the user_version or application_id
+# should not cause a conflict. And committing a concurrent transaction does not
+# clobber the modification - even if the concurrent transaction allocates or
+# frees database pages.
+#
+do_multiclient_test tn {
+  do_test 4.$tn.1 {
+    sql1 {
+      PRAGMA journal_mode = wal;
+      CREATE TABLE ttt(y UNIQUE, z UNIQUE);
+      PRAGMA user_version = 14;
+      BEGIN CONCURRENT;
+        INSERT INTO ttt VALUES('y', 'z');
+    }
+  } {wal}
+  do_test 4.$tn.2 {
+    sql2 { PRAGMA user_version = 16 }
+    sql1 COMMIT
+    sql1 { PRAGMA user_version }
+  } {16}
+
+  do_test 4.$tn.3 {
+    sql1 {
+      BEGIN CONCURRENT;
+        INSERT INTO ttt VALUES(randomblob(10000), randomblob(4));
+        PRAGMA user_version;
+    }
+  } {16}
+  do_test 4.$tn.4 {
+    sql2 { PRAGMA user_version = 1234 }
+    sql1 {
+        PRAGMA user_version;
+      COMMIT;
+      PRAGMA user_version;
+      PRAGMA integrity_check;
+    }
+  } {16 1234 ok}
+
+  do_test 4.$tn.5 {
+    sql1 {
+      BEGIN CONCURRENT;
+        DELETE FROM ttt;
+        PRAGMA user_version;
+    }
+  } {1234}
+  do_test 4.$tn.4 {
+    sql2 { PRAGMA user_version = 5678 }
+    sql1 {
+        PRAGMA user_version;
+      COMMIT;
+      PRAGMA user_version;
+      PRAGMA integrity_check;
+    }
+  } {1234 5678 ok}
+}
+
+do_multiclient_test tn {
+  do_test 5.$tn.1 {
+    sql1 {
+      PRAGMA journal_mode = wal;
+      CREATE TABLE tt(a INTEGER PRIMARY KEY, b);
+      CREATE TABLE t2(a INTEGER PRIMARY KEY, b);
+      INSERT INTO tt VALUES(1, randomblob(400));
+      BEGIN CONCURRENT;
+    }
+  } {wal}
+
+  do_test 5.$tn.2 {
+    sql1 { UPDATE t2 SET b=5 WHERE a=3 }
+    sql2 { INSERT INTO tt VALUES(2, randomblob(6000)) }
+  } {}
+
+  do_test 5.$tn.3 {
+    sql1 { COMMIT }
+  } {}
+}
+
+do_multiclient_test tn {
+  do_test 6.$tn.1 {
+    sql1 {
+      PRAGMA journal_mode = wal;
+      CREATE TABLE t1(a INTEGER PRIMARY KEY, b);
+      CREATE TABLE t2(a INTEGER PRIMARY KEY, b);
+      INSERT INTO t1 VALUES(1, 'one');
+      INSERT INTO t2 VALUES(2, 'two');
+    }
+  } {wal}
+
+  do_test 6.$tn.2 {
+    sql2 {
+      BEGIN CONCURRENT;
+        SELECT * FROM t2;
+        INSERT INTO t1 VALUES(3, 'three');
+    }
+  } {2 two}
+
+  do_test 6.$tn.3 {
+    sql1 {
+      INSERT INTO t2 VALUES(3, 'three');
+    }
+  } {}
+
+  do_test 6.$tn.2 {
+    list [catch { sql2 { COMMIT } } msg] $msg
+  } {1 {database is locked}}
+}
+
+do_multiclient_test tn {
+  do_test 7.$tn.1 {
+    sql1 {
+      PRAGMA journal_mode = wal;
+      CREATE TABLE t1(a INTEGER PRIMARY KEY, b);
+      WITH s(i) AS ( VALUES(1) UNION ALL SELECT i+1 FROM s WHERE i<100) 
+      INSERT INTO t1 SELECT NULL, randomblob(400) FROM s;
+
+      CREATE TABLE t2(a INTEGER PRIMARY KEY, b);
+      WITH s(i) AS ( VALUES(1) UNION ALL SELECT i+1 FROM s WHERE i<50000) 
+      INSERT INTO t2 SELECT NULL, randomblob(400) FROM s;
+
+      CREATE TABLE t3(a INTEGER PRIMARY KEY, b);
+      WITH s(i) AS ( VALUES(1) UNION ALL SELECT i+1 FROM s WHERE i<100) 
+      INSERT INTO t3 SELECT NULL, randomblob(400) FROM s;
+
+      CREATE TABLE t4(a INTEGER PRIMARY KEY, b);
+
+    }
+    set {} {}
+  } {}
+
+  do_test 7.$tn.2 {
+    sql2 {
+      BEGIN CONCURRENT;
+        SELECT * FROM t1;
+        INSERT INTO t4 VALUES(1, 2);
+    }
+    set {} {}
+  } {}
+
+  do_test 7.$tn.3 {
+    sql3 {
+      BEGIN CONCURRENT;
+        SELECT * FROM t3;
+        INSERT INTO t4 VALUES(1, 2);
+    }
+    set {} {}
+  } {}
+
+  do_test 7.$tn.4 {
+    sql1 {
+      UPDATE t1 SET b=randomblob(400);
+      UPDATE t2 SET b=randomblob(400);
+      UPDATE t3 SET b=randomblob(400);
+    }
+  } {}
+
+  do_test 7.$tn.5 {
+    csql2 { COMMIT } 
+  } {1 {database is locked}}
+
+  do_test 7.$tn.6 {
+    csql3 { COMMIT } 
+  } {1 {database is locked}}
+
+
+  csql2 ROLLBACK
+  csql3 ROLLBACK
+
+  # The following test works with $tn==1 (sql2 and sql3 use separate 
+  # processes), but is quite slow. So only run it with $tn==2 (all
+  # connections in the same process).
+  #
+  if {$tn==2} {
+    do_test 7.$tn.7 {
+      for {set i 1} {$i < 10000} {incr i} {
+        sql3 { 
+          PRAGMA wal_checkpoint;
+          BEGIN CONCURRENT;
+          SELECT * FROM t3;
+          INSERT INTO t4 VALUES(1, 2);
+        }
+
+        sql1 {
+          UPDATE t2 SET b = randomblob(400) WHERE rowid <= $i;
+          UPDATE t3 SET b = randomblob(400) WHERE rowid = 1;
+        }
+
+        if {[csql3 COMMIT]!={1 {database is locked}}} {
+          error "Failed at i=$i"
+        }
+        csql3 ROLLBACK
+      }
+    } {}
+  }
+
+}
+
+finish_test

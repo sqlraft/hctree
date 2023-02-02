@@ -82,6 +82,23 @@ typedef struct PgHdr DbPage;
 #define PAGER_JOURNALMODE_TRUNCATE    3   /* Commit by truncating journal */
 #define PAGER_JOURNALMODE_MEMORY      4   /* In-memory journal file */
 #define PAGER_JOURNALMODE_WAL         5   /* Use write-ahead logging */
+#define PAGER_JOURNALMODE_WAL2        6   /* Use write-ahead logging mode 2 */
+
+#define isWalMode(x) ((x)==PAGER_JOURNALMODE_WAL || (x)==PAGER_JOURNALMODE_WAL2)
+
+/*
+** The argument to this macro is a file descriptor (type sqlite3_file*).
+** Return 0 if it is not open, or non-zero (but not 1) if it is.
+**
+** This is so that expressions can be written as:
+**
+**   if( isOpen(pPager->jfd) ){ ...
+**
+** instead of
+**
+**   if( pPager->jfd->pMethods ){ ...
+*/
+#define isOpen(pFd) ((pFd)->pMethods!=0)
 
 /*
 ** Flags that make up the mask passed to sqlite3PagerGet().
@@ -163,7 +180,7 @@ void *sqlite3PagerGetExtra(DbPage *);
 void sqlite3PagerPagecount(Pager*, int*);
 int sqlite3PagerBegin(Pager*, int exFlag, int);
 int sqlite3PagerCommitPhaseOne(Pager*,const char *zSuper, int);
-int sqlite3PagerExclusiveLock(Pager*);
+int sqlite3PagerExclusiveLock(Pager*, DbPage *pPage1, Pgno*);
 int sqlite3PagerSync(Pager *pPager, const char *zSuper);
 int sqlite3PagerCommitPhaseTwo(Pager*);
 int sqlite3PagerRollback(Pager*);
@@ -171,11 +188,12 @@ int sqlite3PagerOpenSavepoint(Pager *pPager, int n);
 int sqlite3PagerSavepoint(Pager *pPager, int op, int iSavepoint);
 int sqlite3PagerSharedLock(Pager *pPager);
 
+
 #ifndef SQLITE_OMIT_WAL
   int sqlite3PagerCheckpoint(Pager *pPager, sqlite3*, int, int*, int*);
   int sqlite3PagerWalSupported(Pager *pPager);
   int sqlite3PagerWalCallback(Pager *pPager);
-  int sqlite3PagerOpenWal(Pager *pPager, int *pisOpen);
+  int sqlite3PagerOpenWal(Pager *pPager, int, int *pisOpen);
   int sqlite3PagerCloseWal(Pager *pPager, sqlite3*);
 # ifdef SQLITE_ENABLE_SNAPSHOT
   int sqlite3PagerSnapshotGet(Pager*, sqlite3_snapshot **ppSnapshot);
@@ -225,10 +243,26 @@ void sqlite3PagerTruncateImage(Pager*,Pgno);
 
 void sqlite3PagerRekey(DbPage*, Pgno, u16);
 
+#ifndef SQLITE_OMIT_CONCURRENT
+void sqlite3PagerEndConcurrent(Pager*);
+int sqlite3PagerBeginConcurrent(Pager*);
+void sqlite3PagerDropExclusiveLock(Pager*);
+int sqlite3PagerUpgradeSnapshot(Pager *pPager, DbPage*);
+void sqlite3PagerSetDbsize(Pager *pPager, Pgno);
+int sqlite3PagerIsWal(Pager*);
+#else
+# define sqlite3PagerEndConcurrent(x)
+#endif
+
+#if defined(SQLITE_DEBUG) || !defined(SQLITE_OMIT_CONCURRENT)
+int sqlite3PagerIswriteable(DbPage*);
+#endif
+
+int sqlite3PagerWalInfo(Pager*, u32 *pnPrior, u32 *pnFrame);
+
 /* Functions to support testing and debugging. */
 #if !defined(NDEBUG) || defined(SQLITE_TEST)
   Pgno sqlite3PagerPagenumber(DbPage*);
-  int sqlite3PagerIswriteable(DbPage*);
 #endif
 #ifdef SQLITE_TEST
   int *sqlite3PagerStats(Pager*);

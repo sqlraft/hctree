@@ -3706,6 +3706,7 @@ case OP_Savepoint: {
       ** is committed. 
       */
       int isTransaction = pSavepoint->pNext==0 && db->isTransactionSavepoint;
+      assert( db->eConcurrent==0 || db->isTransactionSavepoint==0 );
       if( isTransaction && p1==SAVEPOINT_RELEASE ){
         if( (rc = sqlite3VdbeCheckFk(p, 1))!=SQLITE_OK ){
           goto vdbe_return;
@@ -3792,26 +3793,31 @@ case OP_Savepoint: {
   break;
 }
 
-/* Opcode: AutoCommit P1 P2 * * P5
+/* Opcode: AutoCommit P1 P2 P3 * *
 **
 ** Set the database auto-commit flag to P1 (1 or 0). If P2 is true, roll
 ** back any currently active btree transactions. If there are any active
 ** VMs (apart from this one), then a ROLLBACK fails.  A COMMIT fails if
 ** there are active writing VMs or active VMs that use shared cache.
 **
-** Parameter P5 is true for a "BEGIN CONCURRENT", and false in all other
-** cases.
+** If P3 is non-zero, then this instruction is being executed as part of
+** a "BEGIN CONCURRENT" command.
 **
 ** This instruction causes the VM to halt.
 */
 case OP_AutoCommit: {
   int desiredAutoCommit;
   int iRollback;
+  int bConcurrent;
+  int hrc;
 
   desiredAutoCommit = pOp->p1;
   iRollback = pOp->p2;
+  bConcurrent = pOp->p3;
   assert( desiredAutoCommit==1 || desiredAutoCommit==0 );
   assert( desiredAutoCommit==1 || iRollback==0 );
+  assert( desiredAutoCommit==0 || bConcurrent==0 );
+  assert( db->autoCommit==0 || db->eConcurrent==CONCURRENT_NONE );
   assert( db->nVdbeActive>0 );  /* At least this one VM is active */
   assert( p->bIsReader );
 
@@ -3820,10 +3826,17 @@ case OP_AutoCommit: {
       assert( desiredAutoCommit==1 );
       sqlite3RollbackAll(db, SQLITE_ABORT_ROLLBACK);
       db->autoCommit = 1;
-    }else if( desiredAutoCommit && db->nVdbeWrite>0 ){
-      /* If this instruction implements a COMMIT and other VMs are writing
-      ** return an error indicating that the other VMs must complete first. 
-      */
+      db->eConcurrent = CONCURRENT_NONE;
+    }else if( desiredAutoCommit
+            && (db->nVdbeWrite>0 || (db->eConcurrent && db->nVdbeActive>1)) ){
+      /* A transaction may only be committed if there are no other active
+      ** writer VMs. If the transaction is CONCURRENT, then it may only be
+      ** committed if there are no active VMs at all (readers or writers).
+      **
+      ** If this instruction is a COMMIT and the transaction may not be
+      ** committed due to one of the conditions above, return an error
+      ** indicating that other VMs must complete before the COMMIT can 
+      ** be processed.  */
       sqlite3VdbeError(p, "cannot commit transaction - "
                           "SQL statements in progress");
       rc = SQLITE_BUSY;
@@ -3832,14 +3845,17 @@ case OP_AutoCommit: {
       goto vdbe_return;
     }else{
       db->autoCommit = (u8)desiredAutoCommit;
-      db->bConcurrent = (u8)pOp->p5;
     }
-    if( sqlite3VdbeHalt(p)==SQLITE_BUSY ){
+    hrc = sqlite3VdbeHalt(p);
+    if( (hrc & 0xFF)==SQLITE_BUSY ){
       p->pc = (int)(pOp - aOp);
       db->autoCommit = (u8)(1-desiredAutoCommit);
-      p->rc = rc = SQLITE_BUSY;
+      p->rc = hrc;
+      rc = SQLITE_BUSY;
       goto vdbe_return;
     }
+    assert( bConcurrent==CONCURRENT_NONE || bConcurrent==CONCURRENT_OPEN );
+    db->eConcurrent = (u8)bConcurrent;
     sqlite3CloseSavepoints(db);
     if( p->rc==SQLITE_OK ){
       rc = SQLITE_DONE;
@@ -4052,6 +4068,17 @@ case OP_SetCookie: {
   pDb = &db->aDb[pOp->p1];
   assert( pDb->pBt!=0 );
   assert( sqlite3SchemaMutexHeld(db, pOp->p1, 0) );
+#ifndef SQLITE_OMIT_CONCURRENT
+  if( db->eConcurrent 
+   && (pOp->p2==BTREE_USER_VERSION || pOp->p2==BTREE_APPLICATION_ID)
+  ){
+    rc = SQLITE_ERROR;
+    sqlite3VdbeError(p, "cannot modify %s within CONCURRENT transaction",
+        pOp->p2==BTREE_USER_VERSION ? "user_version" : "application_id"
+    );
+    goto abort_due_to_error;
+  }
+#endif
   /* See note about index shifting on OP_ReadCookie */
   rc = sqlite3BtreeUpdateMeta(pDb->pBt, pOp->p2, pOp->p3);
   if( pOp->p2==BTREE_SCHEMA_VERSION ){
@@ -4201,6 +4228,11 @@ case OP_OpenWrite:
   pX = pDb->pBt;
   assert( pX!=0 );
   if( pOp->opcode==OP_OpenWrite ){
+#ifndef SQLITE_OMIT_CONCURRENT
+    if( db->eConcurrent==CONCURRENT_OPEN && p2==1 && iDb!=1 ){
+      db->eConcurrent = CONCURRENT_SCHEMA;
+    }
+#endif
     assert( OPFLAG_FORDELETE==BTREE_FORDELETE );
     wrFlag = BTREE_WRCSR | (pOp->p5 & OPFLAG_FORDELETE);
     assert( sqlite3SchemaMutexHeld(db, iDb, 0) );
@@ -7708,6 +7740,7 @@ case OP_JournalMode: {    /* out2 */
        || eNew==PAGER_JOURNALMODE_OFF
        || eNew==PAGER_JOURNALMODE_MEMORY
        || eNew==PAGER_JOURNALMODE_WAL
+       || eNew==PAGER_JOURNALMODE_WAL2
        || eNew==PAGER_JOURNALMODE_QUERY
   );
   assert( pOp->p1>=0 && pOp->p1<db->nDb );
@@ -7726,16 +7759,25 @@ case OP_JournalMode: {    /* out2 */
   /* Do not allow a transition to journal_mode=WAL for a database
   ** in temporary storage or if the VFS does not support shared memory 
   */
-  if( eNew==PAGER_JOURNALMODE_WAL
+  if( isWalMode(eNew)
    && (sqlite3Strlen30(zFilename)==0           /* Temp file */
        || !sqlite3PagerWalSupported(pPager))   /* No shared-memory support */
   ){
     eNew = eOld;
   }
 
-  if( (eNew!=eOld)
-   && (eOld==PAGER_JOURNALMODE_WAL || eNew==PAGER_JOURNALMODE_WAL)
-  ){
+  if( eNew!=eOld && (isWalMode(eNew) || isWalMode(eOld)) ){
+
+    /* Prevent changing directly to wal2 from wal mode. And vice versa. */
+    if( isWalMode(eNew) && isWalMode(eOld) ){
+      rc = SQLITE_ERROR;
+      sqlite3VdbeError(p, "cannot change from %s to %s mode",
+          sqlite3JournalModename(eOld), sqlite3JournalModename(eNew)
+      );
+      goto abort_due_to_error;
+    }
+
+    /* Prevent switching into or out of wal/wal2 mode mid-transaction */
     if( !db->autoCommit || db->nVdbeRead>1 ){
       rc = SQLITE_ERROR;
       sqlite3VdbeError(p,
@@ -7743,31 +7785,33 @@ case OP_JournalMode: {    /* out2 */
           (eNew==PAGER_JOURNALMODE_WAL ? "into" : "out of")
       );
       goto abort_due_to_error;
-    }else{
+    }
  
-      if( eOld==PAGER_JOURNALMODE_WAL ){
-        /* If leaving WAL mode, close the log file. If successful, the call
-        ** to PagerCloseWal() checkpoints and deletes the write-ahead-log 
-        ** file. An EXCLUSIVE lock may still be held on the database file 
-        ** after a successful return. 
-        */
-        rc = sqlite3PagerCloseWal(pPager, db);
-        if( rc==SQLITE_OK ){
-          sqlite3PagerSetJournalMode(pPager, eNew);
-        }
-      }else if( eOld==PAGER_JOURNALMODE_MEMORY ){
-        /* Cannot transition directly from MEMORY to WAL.  Use mode OFF
-        ** as an intermediate */
-        sqlite3PagerSetJournalMode(pPager, PAGER_JOURNALMODE_OFF);
-      }
-  
-      /* Open a transaction on the database file. Regardless of the journal
-      ** mode, this transaction always uses a rollback journal.
+    if( isWalMode(eOld) ){
+      /* If leaving WAL mode, close the log file. If successful, the call
+      ** to PagerCloseWal() checkpoints and deletes the write-ahead-log 
+      ** file. An EXCLUSIVE lock may still be held on the database file 
+      ** after a successful return. 
       */
-      assert( sqlite3BtreeTxnState(pBt)!=SQLITE_TXN_WRITE );
+      rc = sqlite3PagerCloseWal(pPager, db);
       if( rc==SQLITE_OK ){
-        rc = sqlite3BtreeSetVersion(pBt, (eNew==PAGER_JOURNALMODE_WAL ? 2 : 1));
+        sqlite3PagerSetJournalMode(pPager, eNew);
       }
+    }else if( eOld==PAGER_JOURNALMODE_MEMORY ){
+      /* Cannot transition directly from MEMORY to WAL.  Use mode OFF
+      ** as an intermediate */
+      sqlite3PagerSetJournalMode(pPager, PAGER_JOURNALMODE_OFF);
+    }
+
+    /* Open a transaction on the database file. Regardless of the journal
+    ** mode, this transaction always uses a rollback journal.
+    */
+    assert( sqlite3BtreeTxnState(pBt)!=SQLITE_TXN_WRITE );
+    if( rc==SQLITE_OK ){
+      /* 1==rollback, 2==wal, 3==wal2 */
+      rc = sqlite3BtreeSetVersion(pBt, 
+          1 + isWalMode(eNew) + (eNew==PAGER_JOURNALMODE_WAL2)
+      );
     }
   }
 #endif /* ifndef SQLITE_OMIT_WAL */
@@ -7903,6 +7947,11 @@ case OP_CursorUnlock: {
 */
 case OP_TableLock: {
   u8 isWriteLock = (u8)pOp->p3;
+#ifndef SQLITE_OMIT_CONCURRENT
+  if( isWriteLock && db->eConcurrent && pOp->p2==1 && pOp->p1!=1 ){
+    db->eConcurrent = CONCURRENT_SCHEMA;
+  }
+#endif
   if( isWriteLock || 0==(db->flags&SQLITE_ReadUncommit) ){
     int p1 = pOp->p1; 
     assert( p1>=0 && p1<db->nDb );

@@ -5132,7 +5132,7 @@ void sqlite3BeginTransaction(Parse *pParse, int type){
   }
   v = sqlite3GetVdbe(pParse);
   if( !v ) return;
-  if( type!=TK_DEFERRED && type!=TK_CONCURRENT ){
+  if( type==TK_IMMEDIATE || type==TK_EXCLUSIVE ){
     for(i=0; i<db->nDb; i++){
       int eTxnType;
       Btree *pBt = db->aDb[i].pBt;
@@ -5147,7 +5147,7 @@ void sqlite3BeginTransaction(Parse *pParse, int type){
       sqlite3VdbeUsesBtree(v, i);
     }
   }
-  sqlite3VdbeAddOp0(v, OP_AutoCommit);
+  sqlite3VdbeAddOp3(v, OP_AutoCommit, 0, 0, (type==TK_CONCURRENT));
   sqlite3VdbeChangeP5(v, type==TK_CONCURRENT);
 }
 

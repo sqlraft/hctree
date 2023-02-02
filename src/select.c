@@ -2264,7 +2264,7 @@ int sqlite3ColumnsFromExprList(
       zName = sqlite3MPrintf(db, "%.*z:%u", nName, zName, ++cnt);
       sqlite3ProgressCheck(pParse);
       if( cnt>3 ){
-        sqlite3_randomness(sizeof(cnt), &cnt);
+        sqlite3FastRandomness(&db->sPrng, sizeof(cnt), &cnt);
       }
     }
     pCol->zCnName = zName;

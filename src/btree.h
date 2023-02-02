@@ -361,6 +361,8 @@ sqlite3_uint64 sqlite3BtreeSeekCount(Btree*);
 # define sqlite3BtreeSeekCount(X) 0
 #endif
 
+int sqlite3BtreeExclusiveLock(Btree *pBt);
+
 #ifndef NDEBUG
 int sqlite3BtreeCursorIsValid(BtCursor*);
 #endif
@@ -420,7 +422,6 @@ void sqlite3BtreeClearCache(Btree*);
 # define sqlite3BtreeHoldsAllMutexes(X) 1
 # define sqlite3SchemaMutexHeld(X,Y,Z) 1
 #endif
-
 #define BTREE_DIR_NONE    0
 #define BTREE_DIR_FORWARD 1
 #define BTREE_DIR_REVERSE 2

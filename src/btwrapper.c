@@ -144,6 +144,7 @@ struct BtreeMethods {
   int(*xBtreeIsReadonly)(Btree*);
   int(*xBtreeSetVersion)(Btree*, int);
   int(*xBtreeIntegrityCheck)(sqlite3*, Btree*, Pgno*, int, int, int*, char**);
+  int(*xBtreeExclusiveLock)(Btree*);
 };
 int sqlite3BtreeNext(BtCursor *p, int a){
   return p->pMethods->xBtreeNext(p, a);
@@ -362,6 +363,9 @@ int sqlite3BtreeSetVersion(Btree *p, int a){
 int sqlite3BtreeIntegrityCheck(sqlite3 *a, Btree *p, Pgno *b, int c, int d, int *e, char* *f){
   return p->pMethods->xBtreeIntegrityCheck(a, p, b, c, d, e, f);
 }
+int sqlite3BtreeExclusiveLock(Btree *p){
+  return p->pMethods->xBtreeExclusiveLock(p);
+}
 static const BtCursorMethods hct_btcursor_methods = {
   xBtreeNext : sqlite3HctBtreeNext,
   xBtreeCursorHasMoved : sqlite3HctBtreeCursorHasMoved,
@@ -441,6 +445,7 @@ static const BtreeMethods hct_btree_methods = {
   xBtreeIsReadonly : sqlite3HctBtreeIsReadonly,
   xBtreeSetVersion : sqlite3HctBtreeSetVersion,
   xBtreeIntegrityCheck : sqlite3HctBtreeIntegrityCheck,
+  xBtreeExclusiveLock : sqlite3HctBtreeExclusiveLock,
 };
 
 static const BtCursorMethods stock_btcursor_methods = {
@@ -522,6 +527,7 @@ static const BtreeMethods stock_btree_methods = {
   xBtreeIsReadonly : sqlite3StockBtreeIsReadonly,
   xBtreeSetVersion : sqlite3StockBtreeSetVersion,
   xBtreeIntegrityCheck : sqlite3StockBtreeIntegrityCheck,
+  xBtreeExclusiveLock : sqlite3StockBtreeExclusiveLock,
 };
 
 /*
