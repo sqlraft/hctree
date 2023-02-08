@@ -1,5 +1,5 @@
-C Have\stest\scommand\s[reset_db]\sremove\s*-pagemap\sfiles.
-D 2023-02-02T14:11:54.890
+C Update\spagetest.c\sto\stest\sthe\seffect\sof\ssplitting\sa\sdatabase\sinto\smultiple\sfiles\son\sdisk.
+D 2023-02-08T18:59:16.929
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -41,7 +41,7 @@ F doc/hctree/design.wiki 5e7a5eab1d0c7082e7c1c6aa3c2943422a3a1a328e2b0c9fd6eddc0
 F doc/hctree/fileformat.wiki 75d2923c1ab4953cafc50a6829ea6e857334b76a64b4a910a17a04710b73cccd
 F doc/hctree/index.html 5cf85b7b04e6a1e72f3c7e831c1be095bc3cc37a9cbc467f37397b34edbc2e38
 F doc/hctree/mkthreadtest.tcl 58b1c401b35dcabd978f5a9663376a5beee441bdd9d1e49536772dbd68086876
-F doc/hctree/pagetest.c 12c7410dc7f5eb6ff52491c709eb64f68272be34e742bb5899c30eaeb5c8684f
+F doc/hctree/pagetest.c 023b04fc4ceb8e6cffad66c2221472f68dc69a88282109c8235f57ebf945ad25
 F doc/hctree/perftest1.tcl f7d629d072de58bf6e0c3b2b78be827caf8e397556632ee06af9eef0addb0a16
 F doc/hctree/slides.wiki 4151889c5485fecd8a71d5d0089645998a2db5ebc3360b570f763e59effed60c
 F doc/hctree/threadtest.data eb38fbd8a9742a2c6c0d3d7ec3b816476e546c909b5a40fce211e359cad175e7
@@ -2116,8 +2116,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P b872fa6e752e734d1563d49f5e2485bc88d75bc282bb709694df15f0e4dac7a7
-R 2f66d480dc2f610b300870711e430fc7
+P c7c56fbefba0b83759eccb936d76555eb604dfb5d624cd53e0045732d81c77f6
+R 40bc391c8f3e6dc99392f7bdb446811d
 U dan
-Z 6d08888c46269dc03819e2bb84235887
+Z 80fbe6813575be339c0d7e6f60d74dd6
 # Remove this line to create a well-formed Fossil manifest.

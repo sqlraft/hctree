@@ -74,7 +74,6 @@ static int ttFastRandomInt(FastPrng *pPrng){
 }
 
 static void error_out(const char *zFmt, ...){
-  char *zRet = 0;
   va_list ap;
   va_start(ap, zFmt);
   vfprintf(stderr, zFmt, ap);
@@ -89,20 +88,38 @@ static i64 stime_now(){
   return ((i64)tm.tv_sec * 1000000 + (i64)tm.tv_usec);
 }
 
+typedef struct TestFile TestFile;
+struct TestFile {
+  int fd;
+  u8 *pMap;
+};
+
 typedef struct TestCtx TestCtx;
 struct TestCtx {
   pthread_t tid;
   i64 iEnd;                       /* Time to finish */
   int pgsz;                       /* Page size */
-  int nPg;                        /* Number of pages in file */
-  u8 *pMap;                       /* Mapping of test file */
+  int nPg;                        /* Number of pages */
+  int nPgPerFile;                 /* Number of pages per file */
+  int nFile;
+  TestFile *aFile;
   FastPrng prng;
-  int fd;
   u8 *pBuf;
-
   i64 nWrite;                     /* OUT: Number of pages written */
-
 };
+
+
+typedef struct TestOptions TestOptions;
+struct TestOptions {
+  int nMB;                        /* Size of test file in MB */
+  int nSecond;                    /* Number of seconds to run for */
+  int nThread;                    /* Number of threads to run */
+  int pgsz;                       /* Page size to use */
+  int pwrite;                     /* Page size to use */
+  int nFile;                      /* Number of files nMB of data is split */
+};
+
+#define MAX_NFILE 32              /* Max value for -nfile */
 
 static void print_count(int p){
   assert( p>=0 );
@@ -123,22 +140,14 @@ static void print_count(int p){
   }
 }
 
-typedef struct TestOptions TestOptions;
-struct TestOptions {
-  int nMB;                        /* Size of test file in MB */
-  int nSecond;                    /* Number of seconds to run for */
-  int nThread;                    /* Number of threads to run */
-  int pgsz;                       /* Page size to use */
-  int pwrite;                     /* Page size to use */
-};
-
 static void parse_options(int argc, char **argv, TestOptions *p){
   const char *azOpt[] = {
     "-nthread",            /* 0 */
     "-size",               /* 1 */
     "-nsecond",            /* 2 */
     "-pagesize",           /* 3 */
-    "-pwrite"              /* 4 */
+    "-pwrite",             /* 4 */
+    "-nfile"               /* 5 */
   };
   int ii;
 
@@ -161,7 +170,8 @@ static void parse_options(int argc, char **argv, TestOptions *p){
     if( iOpt<0 ){
       fprintf(stderr, "unknown or ambiguous option - \"%s\"\n", zOpt);
       error_out(
-          "usage: %s ?-pwrite? ?-nthread N? ?-size MB? ?-nsecond N? ?-pagesize BYTES?", 
+          "usage: %s ?-pwrite? ?-nthread N? ?-size MB?"
+          " ?-nsecond N? ?-pagesize BYTES? ?-nfile N?", 
           argv[0]
       );
     }
@@ -205,6 +215,13 @@ static void parse_options(int argc, char **argv, TestOptions *p){
       case 4:
         p->pwrite = 1;
         break;
+
+      case 5:
+        if( iVal<1 || iVal>MAX_NFILE ){
+          error_out("-nfile parameter must be between 1 and 32");
+        }
+        p->nFile = iVal;
+        break;
     }
   }
 }
@@ -216,14 +233,21 @@ static void *do_test(void *pCtx){
   while( stime_now()<p->iEnd ){
     int iPg1 = ttFastRandomInt(&p->prng) % p->nPg;
     int iPg2 = ttFastRandomInt(&p->prng) % p->nPg;
+    int iFile1 = iPg1 / p->nPgPerFile;
+    int iFile2 = iPg2 / p->nPgPerFile;
+    int iFilePg1 = iPg1 % p->nPgPerFile;
+    int iFilePg2 = iPg2 % p->nPgPerFile;
+    const u8 *pFrom = &p->aFile[iFile1].pMap[iFilePg1*p->pgsz];
 
     if( p->pBuf ){
       /* This branch is taken if "-pwrite" was specified. */
-      memcpy(p->pBuf, &p->pMap[iPg1*p->pgsz], p->pgsz);
-      size_t res = pwrite(p->fd, p->pBuf, p->pgsz, iPg2*p->pgsz);
+      int fd = p->aFile[iFile2].fd;
+      memcpy(p->pBuf, pFrom, p->pgsz);
+      size_t res = pwrite(fd, p->pBuf, p->pgsz, iFilePg2*p->pgsz);
       if( res!=p->pgsz ) break;
     }else{
-      memcpy(&p->pMap[iPg2*p->pgsz], &p->pMap[iPg1*p->pgsz], p->pgsz);
+      u8 *pTo = &p->aFile[iFile2].pMap[iFilePg2*p->pgsz];
+      memcpy(pTo, pFrom, p->pgsz);
     }
 
     p->nWrite++;
@@ -235,44 +259,58 @@ static void *do_test(void *pCtx){
 int main(int argc, char **argv){
   TestOptions opt;
   TestCtx aCtx[16];
-  int fd = 0;
+  TestFile aFile[MAX_NFILE];
   int rc = 0;
   int ii = 0;
-  u8 *pMap = 0;
   i64 iEnd = 0;
   i64 nWrite = 0;
-  i64 szFile = 0;
+  int iFile = 0;
 
+  int nPg = 0;
+  int nPgPerFile = 0;
+
+  memset(aFile, 0, sizeof(aFile));
   memset(aCtx, 0, sizeof(aCtx));
   memset(&opt, 0, sizeof(opt));
   opt.nMB = 512;
   opt.nSecond = 10;
   opt.nThread = 8;
   opt.pgsz = 4096;
+  opt.nFile = 1;
   parse_options(argc, argv, &opt);
-  szFile = (i64)opt.nMB * 1024*1024;
 
-  /* Open the test file */
-  fd = open("pagetest.db", O_CREAT|O_RDWR, 0644);
-  if( fd<0 ){
-    error_out("open() failed...");
-  }
+  nPg = opt.nMB*(1024*1024)/opt.pgsz;
+  nPgPerFile = (nPg+opt.nFile-1) / opt.nFile;
 
-  /* Populate the file to its required size */
-  rc = ftruncate(fd, szFile);
-  if( rc<0 ){
-    error_out("ftruncate() failed...");
-  }
+  for(iFile=0; iFile<opt.nFile; iFile++){
+    i64 sz = nPgPerFile * opt.pgsz;
+    TestFile *f = &aFile[iFile];
 
-  /* Memory map the file */
-  pMap = mmap(0, szFile, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0);
-  if( pMap==MAP_FAILED ){
-    error_out("mmap() failed...");
-  }
+    char zFile[128];
+    sprintf(zFile, "pagetest%d.db", iFile);
 
-  /* Populate the file */
-  for(ii=0; ii<szFile; ii+=8){
-    *(i64*)&pMap[ii] = ii;
+    /* Open the test file */
+    f->fd = open(zFile, O_CREAT|O_RDWR, 0644);
+    if( f->fd<0 ){
+      error_out("open() failed...");
+    }
+
+    /* Populate the file to its required size */
+    rc = ftruncate(f->fd, sz);
+    if( rc<0 ){
+      error_out("ftruncate() failed...");
+    }
+
+    /* Memory map the file */
+    f->pMap = mmap(0, sz, PROT_READ|PROT_WRITE, MAP_SHARED, f->fd, 0);
+    if( f->pMap==MAP_FAILED ){
+      error_out("mmap() failed...");
+    }
+
+    /* Populate the file */
+    for(ii=0; ii<sz; ii+=8){
+      *(i64*)&f->pMap[ii] = ii;
+    }
   }
 
   /* Populate the context objects */
@@ -280,19 +318,21 @@ int main(int argc, char **argv){
   for(ii=0; ii<opt.nThread; ii++){
     aCtx[ii].iEnd = iEnd;
     aCtx[ii].pgsz = opt.pgsz;
-    aCtx[ii].nPg = szFile / opt.pgsz;
-    aCtx[ii].pMap = pMap;
+    aCtx[ii].nPg = nPg;
+    aCtx[ii].nPgPerFile = nPgPerFile;
     aCtx[ii].prng.x = 13+ii;
     aCtx[ii].prng.y = 123456789+ii;
+    aCtx[ii].aFile = aFile;
+    aCtx[ii].nFile = opt.nFile;
     if( opt.pwrite ){
-      aCtx[ii].fd = open("pagetest.db", O_CREAT|O_RDWR, 0644);
       aCtx[ii].pBuf = (u8*)malloc(opt.pgsz);
     }
   }
 
   /* Launch the threads */
-  printf("%d threads for %d seconds. dbfile=%dMB, pgsz=%d. %ssing pwrite().\n", 
-      opt.nThread, opt.nSecond, (int)szFile/(1024*1024), opt.pgsz,
+  printf("%d threads for %d seconds. db=%dMB, pgsz=%d, nfile=%d. "
+      "%ssing pwrite().\n", 
+      opt.nThread, opt.nSecond, (int)opt.nMB, opt.pgsz, opt.nFile,
       opt.pwrite ? "U" : "Not u"
   );
   for(ii=0; ii<opt.nThread; ii++){
