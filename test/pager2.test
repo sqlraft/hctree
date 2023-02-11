@@ -167,4 +167,6 @@ ifcapable shared_cache {
   } {1 {no such table: t1}}
 }
 
+db1 close
+
 finish_test

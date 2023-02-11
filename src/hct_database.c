@@ -276,6 +276,13 @@ struct HctBalance {
 };
 
 /*
+** Given the database page-size as an argument, the maximum number of cells
+** that may fit on any page with variable sized entries (an index leaf or node,
+** or intkey leaf page).
+*/
+#define MAX_CELLS_PER_PAGE(pgsz) ((pgsz) / 8)
+
+/*
 ** This structure, an instance of which is part of each HctDatabase object,
 ** holds counters collected for the hctstats structure.
 */
