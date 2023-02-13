@@ -1419,9 +1419,9 @@ void sqlite3HctFilePageUnevict(HctFilePage *pPg){
 }
 
 int sqlite3HctFilePageIsEvicted(HctFile *pFile, u32 iPgno){
-  return (
-      (hctFilePagemapGet(pFile->pMapping, iPgno) & HCT_PMF_LOGICAL_EVICTED)!=0
-  );
+  u64 val;
+  int rc = hctFilePagemapGetGrow(pFile, iPgno, &val);
+  return (rc || (val & HCT_PMF_LOGICAL_EVICTED)!=0);
 }
 
 int sqlite3HctFilePageIsFree(HctFile *pFile, u32 iPgno, int bLogical){

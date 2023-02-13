@@ -38,6 +38,7 @@ do_execsql_test 1.2 {
   INSERT INTO tbl SELECT i, randomblob(200), hex(randomblob(32)) FROM s;
 }
 
+
 #------------------------------------------------------------------------
 hct_reset_db
 do_execsql_test 2.0 {
