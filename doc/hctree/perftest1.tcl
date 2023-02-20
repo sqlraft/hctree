@@ -75,6 +75,7 @@ proc setup_database {} {
     db eval { PRAGMA page_size = 1024 }
   } else {
     sqlite3 db $file
+    db eval { PRAGMA page_size = 4096 }
   }
 
   db eval {
@@ -133,8 +134,8 @@ proc run_one_test {nThread testname} {
 puts "-- setup database..."
 setup_database
 
-#run_one_test 1 scan10
-#exit
+#run_one_test 14 update1
+exit
 
 foreach nThread {16 15 14 13 12 11 10 9 8 7 6 5 4 3 2 1} {
   foreach testname {

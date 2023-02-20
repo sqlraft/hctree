@@ -46,8 +46,6 @@
 #define HCT_PAGEMAP_LOGICAL_EOF      3
 #define HCT_PAGEMAP_PHYSICAL_EOF     4
 
-#define HCT_PAGEMAP_PAGESIZE         5
-
 #define HCT_PAGEMAP_TRANSID_EOF      16
 
 #define HCT_PMF_LOGICAL_EVICTED    (((u64)0x00000001)<<56)
@@ -1862,6 +1860,7 @@ i64 sqlite3HctFileStats(sqlite3 *db, int iStat, const char **pzStat){
 "  CREATE TABLE hct_pgmap("      \
 "    slot INTEGER,"              \
 "    value INTEGER,"             \
+"    comment TEXT,"              \
 "    physical_in_use BOOLEAN,"   \
 "    logical_in_use BOOLEAN,"    \
 "    logical_evicted BOOLEAN,"   \
@@ -1976,6 +1975,32 @@ static int pgmapNext(sqlite3_vtab_cursor *cur){
   return pgmapEof(cur) ? SQLITE_OK : pgmapLoadSlot(pCur);
 }
 
+static void pgmapGetComment(sqlite3_context *ctx, i64 iSlot){
+  const char *zText = 0;
+
+  switch( iSlot ){
+    case HCT_ROOTPAGE_SCHEMA:
+      zText = "ROOTPAGE_SCHEMA";
+      break;
+    case HCT_ROOTPAGE_META:
+      zText = "ROOTPAGE_META";
+      break;
+    case HCT_PAGEMAP_LOGICAL_EOF:
+      zText = "LOGICAL_EOF";
+      break;
+    case HCT_PAGEMAP_PHYSICAL_EOF:
+      zText = "PHYSICAL_EOF";
+      break;
+    case HCT_PAGEMAP_TRANSID_EOF:
+      zText = "TRANSID_EOF";
+      break;
+  }
+
+  if( zText ){
+    sqlite3_result_text(ctx, zText, -1, SQLITE_TRANSIENT);
+  }
+}
+
 /*
 ** Return values of columns for the row at which the pgmap_cursor
 ** is currently pointing.
@@ -1995,23 +2020,27 @@ static int pgmapColumn(
       sqlite3_result_int64(ctx, (pCur->iVal & 0xFFFFFFFF));
       break;
     }
-    case 2: {  /* physical_in_use */
+    case 2: {  /* pgno */
+      pgmapGetComment(ctx, pCur->slotno);
+      break;
+    }
+    case 3: {  /* physical_in_use */
       sqlite3_result_int64(ctx, (pCur->iVal & HCT_PMF_PHYSICAL_IN_USE)?1:0);
       break;
     }
-    case 3: {  /* logical_in_use */
+    case 4: {  /* logical_in_use */
       sqlite3_result_int64(ctx, (pCur->iVal & HCT_PMF_LOGICAL_IN_USE)?1:0);
       break;
     }
-    case 4: {  /* logical_evicted */
+    case 5: {  /* logical_evicted */
       sqlite3_result_int64(ctx, (pCur->iVal & HCT_PMF_LOGICAL_EVICTED)?1:0);
       break;
     }
-    case 5: {  /* logical_irrevicted */
+    case 6: {  /* logical_irrevicted */
       sqlite3_result_int64(ctx, (pCur->iVal & HCT_PMF_LOGICAL_IRREVICTED)?1:0);
       break;
     }
-    case 6: {  /* logical_is_root */
+    case 7: {  /* logical_is_root */
       sqlite3_result_int64(ctx, (pCur->iVal & HCT_PMF_LOGICAL_IS_ROOT)?1:0);
       break;
     }
@@ -2089,11 +2118,12 @@ static int pgmapBestIndex(
 **
 **   apVal[2]: slot
 **   apVal[3]: value
-**   apVal[4]: physical_in_use
-**   apVal[5]: logical_in_use
-**   apVal[6]: logical_evicted
-**   apVal[7]: logical_irrevicted
-**   apVal[8]: logical_is_root
+**   apVal[4]: comment
+**   apVal[5]: physical_in_use
+**   apVal[6]: logical_in_use
+**   apVal[7]: logical_evicted
+**   apVal[8]: logical_irrevicted
+**   apVal[9]: logical_is_root
 */
 static int pgmapUpdate(
   sqlite3_vtab *pVtab, 
@@ -2120,11 +2150,11 @@ static int pgmapUpdate(
   iSlot = sqlite3_value_int64(apVal[0]);
 
   iValue = sqlite3_value_int64(apVal[3]);
-  bPhysicalInUse = sqlite3_value_int(apVal[4]);
-  bLogicalInUse = sqlite3_value_int(apVal[5]);
-  bLogicalEvicted = sqlite3_value_int(apVal[6]);
-  bLogicalIrrevicted = sqlite3_value_int(apVal[7]);
-  bLogicalIsRoot = sqlite3_value_int(apVal[8]);
+  bPhysicalInUse = sqlite3_value_int(apVal[5]);
+  bLogicalInUse = sqlite3_value_int(apVal[6]);
+  bLogicalEvicted = sqlite3_value_int(apVal[7]);
+  bLogicalIrrevicted = sqlite3_value_int(apVal[8]);
+  bLogicalIsRoot = sqlite3_value_int(apVal[9]);
 
   val = iValue & HCT_PAGEMAP_VMASK;
   val |= (bPhysicalInUse ? HCT_PMF_PHYSICAL_IN_USE : 0);

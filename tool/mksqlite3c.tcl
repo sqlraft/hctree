@@ -465,7 +465,6 @@ set flist {
    hct_tmap.c
    hct_record.c
    hct_stats.c
-} {
 } 
 if {$enable_recover} {
   lappend flist sqlite3recover.c dbdata.c

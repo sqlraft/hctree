@@ -465,7 +465,6 @@ typedef struct HctDbCell HctDbCell;
 struct HctDbCell {
   u64 iTid;
   u64 iRangeTid;
-  u32 iOld;
   u32 iRangeOld;
   u32 iOvfl;
   const u8 *aPayload;
@@ -486,7 +485,6 @@ static void hctMemcpy(void *a, const void *b, size_t c){
 ** Flags for HctDbIntkeyEntry.flags
 */
 #define HCTDB_HAS_TID      0x01
-#define HCTDB_HAS_OLD      0x02
 #define HCTDB_HAS_OVFL     0x04
 #define HCTDB_HAS_RANGETID 0x08
 #define HCTDB_HAS_RANGEOLD 0x10
@@ -824,27 +822,25 @@ static int hctDbTidIsConflict(HctDatabase *pDb, u64 iTid){
 
 static int hctDbOffset(int iOff, int flags){
   static const int aVal[] = {
-    0+0+0+0+0, 0+0+0+0+8, 0+0+0+4+0, 0+0+0+4+8,
-    0+0+4+0+0, 0+0+4+0+8, 0+0+4+4+0, 0+0+4+4+8,
-    0+8+0+0+0, 0+8+0+0+8, 0+8+0+4+0, 0+8+0+4+8,
-    0+8+4+0+0, 0+8+4+0+8, 0+8+4+4+0, 0+8+4+4+8,
+    0+0+0+0+0, 0+0+0+0+8, 0+0+0+0+0, 0+0+0+0+8,
+    0+0+4+0+0, 0+0+4+0+8, 0+0+4+0+0, 0+0+4+0+8,
+    0+8+0+0+0, 0+8+0+0+8, 0+8+0+0+0, 0+8+0+0+8,
+    0+8+4+0+0, 0+8+4+0+8, 0+8+4+0+0, 0+8+4+0+8,
 
-    4+0+0+0+0, 4+0+0+0+8, 4+0+0+4+0, 4+0+0+4+8,
-    4+0+4+0+0, 4+0+4+0+8, 4+0+4+4+0, 4+0+4+4+8,
-    4+8+0+0+0, 4+8+0+0+8, 4+8+0+4+0, 4+8+0+4+8,
-    4+8+4+0+0, 4+8+4+0+8, 4+8+4+4+0, 4+8+4+4+8,
+    4+0+0+0+0, 4+0+0+0+8, 4+0+0+0+0, 4+0+0+0+8,
+    4+0+4+0+0, 4+0+4+0+8, 4+0+4+0+0, 4+0+4+0+8,
+    4+8+0+0+0, 4+8+0+0+8, 4+8+0+0+0, 4+8+0+0+8,
+    4+8+4+0+0, 4+8+4+0+8, 4+8+4+0+0, 4+8+4+0+8,
   };
 
   assert( HCTDB_HAS_RANGEOLD==0x10 );  /* +4 */
   assert( HCTDB_HAS_RANGETID==0x08 );  /* +8 */
   assert( HCTDB_HAS_OVFL==0x04 );      /* +4 */
-  assert( HCTDB_HAS_OLD==0x02 );       /* +4 */
   assert( HCTDB_HAS_TID==0x01 );       /* +8 */
 
   assert( aVal[ flags & 0x1F ]==(
       ((flags & HCTDB_HAS_TID) ? 8 : 0)
     + ((flags & HCTDB_HAS_RANGETID) ? 8 : 0)
-    + ((flags & HCTDB_HAS_OLD) ? 4 : 0)
     + ((flags & HCTDB_HAS_RANGEOLD) ? 4 : 0)
     + ((flags & HCTDB_HAS_OVFL) ? 4 : 0)
   ));
@@ -1988,10 +1984,6 @@ static int hctDbCellPut(
     hctMemcpy(&aBuf[iOff], &pCell->iRangeTid, sizeof(u64));
     iOff += sizeof(u64);
   }
-  if( pCell->iOld ){
-    hctMemcpy(&aBuf[iOff], &pCell->iOld, sizeof(u32));
-    iOff += sizeof(u32);
-  }
   if( pCell->iRangeOld ){
     hctMemcpy(&aBuf[iOff], &pCell->iRangeOld, sizeof(u32));
     iOff += sizeof(u32);
@@ -2021,10 +2013,6 @@ static void hctDbCellGet(
     hctMemcpy(&pCell->iRangeTid, &aBuf[iOff], sizeof(u64));
     iOff += sizeof(u64);
   }
-  if( flags & HCTDB_HAS_OLD ){
-    hctMemcpy(&pCell->iOld, &aBuf[iOff], sizeof(u32));
-    iOff += sizeof(u32);
-  }
   if( flags & HCTDB_HAS_RANGEOLD ){
     hctMemcpy(&pCell->iRangeOld, &aBuf[iOff], sizeof(u32));
     iOff += sizeof(u32);
@@ -2050,7 +2038,6 @@ static void hctDbCellGetByIdx(
 static u8 hctDbCellToFlags(HctDbCell *pCell){
   u8 flags = 0;
   if( pCell->iTid ) flags |= HCTDB_HAS_TID;
-  if( pCell->iOld ) flags |= HCTDB_HAS_OLD;
   if( pCell->iOvfl ) flags |= HCTDB_HAS_OVFL;
   if( pCell->iRangeTid ) flags |= HCTDB_HAS_RANGETID;
   if( pCell->iRangeOld ) flags |= HCTDB_HAS_RANGEOLD;
@@ -3791,7 +3778,6 @@ static int hctDbRemoveOverflow(
 
     if( flags & HCTDB_HAS_TID ) iOff += 8;
     if( flags & HCTDB_HAS_RANGETID ) iOff += 8;
-    if( flags & HCTDB_HAS_OLD ) iOff += 4;
     if( flags & HCTDB_HAS_RANGEOLD ) iOff += 4;
 
     ovfl = hctGetU32(&aPage[iOff]);
@@ -3818,10 +3804,11 @@ static void hctDbRemoveTids(
   }
   if( (p->flags & (HCTDB_HAS_TID|HCTDB_HAS_RANGETID))==HCTDB_HAS_RANGETID ){
     u64 iTid;
+    assert( p->flags & HCTDB_HAS_RANGEOLD );
     memcpy(&iTid, &aPg[p->iOff], sizeof(u64));
     if( (iTid & HCT_TID_MASK)<=iSafeTid ){
-      p->flags &= ~HCTDB_HAS_RANGETID;
-      p->iOff += sizeof(u64);
+      p->flags &= ~(HCTDB_HAS_RANGETID|HCTDB_HAS_RANGEOLD);
+      p->iOff += (sizeof(u64) + sizeof(u32));
     }
   }
 }
@@ -4146,14 +4133,6 @@ static int hctDbBalance(
   }
 
   return rc;
-}
-
-/*
-** Return true if page aPg[] can be rebuilt so that the free-gap is 
-** at least nReq bytes in size. Or false otherwise.
-*/
-static int hctDbTestPageCapacity(HctDatabase *pDb, u8 *aPg, int nReq){
-  return ((HctDbIndexNode*)aPg)->hdr.nFreeBytes>=nReq;
 }
 
 static int hctDbBalanceIntkeyNode(
@@ -6876,7 +6855,8 @@ static int hctentryConnect(
         "ikey INTEGER, size INTEGER, offset INTEGER, "
         "child INTEGER, "
         "tid INTEGER, rangetid INTEGER, "
-        "oldpg INTEGER, rangeoldpg INTEGER, ovfl INTEGER, record TEXT"
+        /* "oldpg INTEGER, " */
+        "rangeoldpg INTEGER, ovfl INTEGER, record TEXT"
       ")"
   );
 
@@ -7025,9 +7005,8 @@ static int hctentryColumn(
 
     case 6: /* tid */
     case 7: /* rangetid */
-    case 8: /* oldpg */
-    case 9: /* rangeoldpg */
-    case 10: /* ovfl */
+    case 8: /* rangeoldpg */
+    case 9: /* ovfl */
       if( pIntkey || pIndex || pIndexNode ){
         u8 *aPg = pCur->pg.aOld;
         HctDbCell cell;
@@ -7044,13 +7023,10 @@ static int hctentryColumn(
           if( cell.iRangeTid & HCT_TID_ROLLBACK_OVERRIDE ) iVal = iVal*-1;
           sqlite3_result_int64(ctx, iVal);
         }
-        if( i==8 && cell.iOld ){
-          sqlite3_result_int64(ctx, (i64)cell.iOld);
-        }
-        if( i==9 && cell.iRangeOld ){
+        if( i==8 && cell.iRangeOld ){
           sqlite3_result_int64(ctx, (i64)cell.iRangeOld);
         }
-        if( i==10 && cell.iOvfl ){
+        if( i==9 && cell.iOvfl ){
           sqlite3_result_int64(ctx, (i64)cell.iOvfl);
         }
       }else if( pFan ){
@@ -7061,14 +7037,14 @@ static int hctentryColumn(
           }else{
             sqlite3_result_int64(ctx, (i64)iVal);
           }
-        }else if( i==9 ){ /* rangeoldpg */
+        }else if( i==8 ){ /* rangeoldpg */
           u32 iRangeOldPg = 
             ((pCur->iEntry==0) ? pFan->pgOld0 : pFan->aPgOld1[pCur->iEntry-1]);
           sqlite3_result_int64(ctx, (i64)iRangeOldPg);
         }
       }
       break;
-    case 11: /* record */
+    case 10: /* record */
       if( pIntkey || pIndex || pIndexNode ){
         sqlite3 *db = sqlite3_context_db_handle(ctx);
         u8 *aPg = pCur->pg.aOld;

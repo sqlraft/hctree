@@ -1,5 +1,5 @@
-C In\shctDbBalance(),\smarshal\sthe\scells\son\sthe\sfirst\spage\sbefore\sdeciding\swhether\sor\snot\speer\spages\sare\srequired\stoo.
-D 2023-02-13T20:58:27.289
+C Remove\sthe\sold-page-pointer\salong\swith\sthe\sold-data-tid\swhen\spossible.
+D 2023-02-20T17:18:23.815
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -42,7 +42,7 @@ F doc/hctree/fileformat.wiki 75d2923c1ab4953cafc50a6829ea6e857334b76a64b4a910a17
 F doc/hctree/index.html 5cf85b7b04e6a1e72f3c7e831c1be095bc3cc37a9cbc467f37397b34edbc2e38
 F doc/hctree/mkthreadtest.tcl 58b1c401b35dcabd978f5a9663376a5beee441bdd9d1e49536772dbd68086876
 F doc/hctree/pagetest.c 023b04fc4ceb8e6cffad66c2221472f68dc69a88282109c8235f57ebf945ad25
-F doc/hctree/perftest1.tcl f7d629d072de58bf6e0c3b2b78be827caf8e397556632ee06af9eef0addb0a16
+F doc/hctree/perftest1.tcl f805fe08a9660c62145aa69b09cd1158243c52229cf300cde0df6df271ddfa1b
 F doc/hctree/slides.html 763e1e5b40201595f0924a589c8e6e9a7ca3ca593ed0045d372e66e12ece7aef
 F doc/hctree/slides.wiki 4151889c5485fecd8a71d5d0089645998a2db5ebc3360b570f763e59effed60c
 F doc/hctree/threadtest.data eb38fbd8a9742a2c6c0d3d7ec3b816476e546c909b5a40fce211e359cad175e7
@@ -597,8 +597,8 @@ F src/hctFileInt.h 9a6c62483b7923bc0b428832a3e3dbaa2364cd417bbc78698ca6bce75eb27
 F src/hctInt.h af598ea72481321645c52d3dd951c23f537644b6b1c663694d42183db5b7c592
 F src/hctPManInt.h 44e63f39e3da54ca47f5582127a12a2f33002d1f3ddcd0fc23120731dfe70b5d
 F src/hctTMapInt.h 4ac478747a6ecb607ba14a484cbf189b8d4ff090ed97c0a9704e7a2e727316c0
-F src/hct_database.c cc3a1e133e6783d9c0463276a5cf830393006a511e4de3e383c4544c6f9d4ec0
-F src/hct_file.c 8dfc74f329c3a0d6716e5e607d1030d288599cff2a4ae5fbd842228a1b018b7e
+F src/hct_database.c 81be144b81586ed157c3e45b364a5850ef3c662e34e5302d275296d3ba39cc4e
+F src/hct_file.c 6b75670a5a314adce2262d94f053bcd8bbfb21e7f383074b20478b9bc4db9018
 F src/hct_pman.c 992650137547caae7f2158374d628c4ead3f8fc2990ea8b11c0a0d6903c5ccf0
 F src/hct_record.c 54b0d564be580ca29a54312f9a9abdba193b234ac56ec65a7e40109107041b25
 F src/hct_stats.c 3273fc59855be16ca383522f47c24131c5707c3bef7795f56aa5ac440aae98c0
@@ -2051,7 +2051,7 @@ F tool/mkshellc.tcl b7adf08b82de60811d2cb6af05ff59fc17e5cd6f3e98743c14eaaa3f8971
 F tool/mksourceid.c 36aa8020014aed0836fd13c51d6dc9219b0df1761d6b5f58ff5b616211b079b9
 F tool/mkspeedsql.tcl a1a334d288f7adfe6e996f2e712becf076745c97
 F tool/mksqlite3c-noext.tcl 4f7cfef5152b0c91920355cbfc1d608a4ad242cb819f1aea07f6d0274f584a7f
-F tool/mksqlite3c.tcl 9de8ba0fd58d3be4901debc8e030503c5a4c4af43ecb178c23350d3ecb5a1697
+F tool/mksqlite3c.tcl 74e4a069e4d9315ddb39b4c32fc8ad021caae77868eb0b75360bbb2317f99efe
 F tool/mksqlite3h.tcl d391cff7cad0a372ee1406faee9ccc7dad9cb80a0c95cae0f73d10dd26e06762
 F tool/mksqlite3internalh.tcl eb994013e833359137eb53a55acdad0b5ae1049b
 F tool/mkvsix.tcl b9e0777a213c23156b6542842c238479e496ebf5
@@ -2115,8 +2115,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P 2b515ef126ade9f7dea3f2b425ffc39f65659805665652d7094d3f65f112a1b1
-R 024a80b211ef2452da7b15a4a818652a
+P 3d90eca69803b8925f149ef18a83d55f9aac933ca8429a3983b49d6e356578ee
+R 42f009d414957b2f7f55dceb788e5237
 U dan
-Z befefa99ad5fce72096e67742dcb171a
+Z a4dee11b315c831d3b18064c90d18c45
 # Remove this line to create a well-formed Fossil manifest.
