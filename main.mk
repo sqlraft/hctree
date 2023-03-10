@@ -201,6 +201,7 @@ SRC += \
   $(TOP)/src/hct_tmap.c \
   $(TOP)/src/hct_record.c \
   $(TOP)/src/hct_pman.c  \
+  $(TOP)/src/hctFileInt.h  \
   $(TOP)/src/hctInt.h      \
   $(TOP)/src/hctPManInt.h  \
   $(TOP)/src/hctTMapInt.h \
