@@ -1888,8 +1888,13 @@ static int hctBtreeMovetoUnpacked(
     if( pCur->bUseTree && sqlite3HctTreeCsrIsDelete(pCur->pHctTreeCsr) ){
       if( pCur->eDir==BTREE_DIR_FORWARD ){
         rc = sqlite3HctBtreeNext((BtCursor*)pCur, 0);
-        if( rc==SQLITE_DONE ) rc = SQLITE_OK;
-        *pRes = 1;
+        if( rc==SQLITE_DONE ){
+          /* Cursor points at EOF. *pRes must be -ve in this case. */
+          rc = SQLITE_OK;
+          *pRes = -1;
+        }else{
+          *pRes = 1;
+        }
       }else{
         rc = sqlite3HctBtreePrevious((BtCursor*)pCur, 0);
         if( rc==SQLITE_DONE ) rc = SQLITE_OK;

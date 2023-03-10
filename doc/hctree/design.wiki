@@ -832,9 +832,9 @@ ids may still be recycled as soon as they are eligible.
 
 <h1 id=concurrency>3. Concurrent Transactions Implementation</h1>
 
-<h2 id=concurrency_hct>3.1. Read Transactions</h2>
+<h2 id=concurrency_read>3.1. Read Transactions</h2>
 
-<h2 id=concurrency_hct>3.2. Write Transactions</h2>
+<h2 id=concurrency_write>3.2. Write Transactions</h2>
 
 A write transaction writes no data into the database while executing DDL
 or DML statements. Instead, it proceeds like a read transaction while new
