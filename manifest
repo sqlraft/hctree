@@ -1,5 +1,5 @@
-C Add\shctree_bedrock.md,\sa\spage\sexploring\sthe\skinds\sof\shctree\sfeatures\sthat\smight\sbe\suseful\sto\sa\ssystem\slike\sbedrockdb.
-D 2023-03-14T07:14:12.060
+C Clarify\ssome\sthings\sin\shctree_bedrock.md.
+D 2023-03-14T10:16:36.594
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -39,7 +39,7 @@ F contrib/sqlitecon.tcl 210a913ad63f9f991070821e599d600bd913e0ad
 F doc/F2FS.txt c1d4a0ae9711cfe0e1d8b019d154f1c29e0d3abfe820787ba1e9ed7691160fcd
 F doc/hctree/design.wiki 4199137de3d95d13cd7abf3c72b64f64ef433227651153e4ebd65c3517ac7fe6
 F doc/hctree/fileformat.wiki 75d2923c1ab4953cafc50a6829ea6e857334b76a64b4a910a17a04710b73cccd
-F doc/hctree/hctree_bedrock.md 09ed67f28255298f4d2badf40d5ecbd76046999bbfa322e5f3e13bc6f9be29d5
+F doc/hctree/hctree_bedrock.md 883222f96d1d14aecf434530bb1affcadf250ee4a31565975af8702275ad67e9
 F doc/hctree/index.html 5cf85b7b04e6a1e72f3c7e831c1be095bc3cc37a9cbc467f37397b34edbc2e38
 F doc/hctree/mkthreadtest.tcl 58b1c401b35dcabd978f5a9663376a5beee441bdd9d1e49536772dbd68086876
 F doc/hctree/pagetest.c 023b04fc4ceb8e6cffad66c2221472f68dc69a88282109c8235f57ebf945ad25
@@ -2117,8 +2117,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P be34960514df70a6b81c5fb4c5f1bf70cd68b3ea28fed0d5b53ff7b4a808cc48
-R 443e840d300f289a8abb1136297ce0d3
+P 6f8c8e3895cc105d9af49f093e9a7aefb08c73d32e831f0552ea04cf5faf9005
+R c32c4b82ca4703f7b5d797d8701b0530
 U dan
-Z 2bb82c3312b7136bcd80796f77d586a3
+Z 2fb43e8bbe5989f61b77d87466051094
 # Remove this line to create a well-formed Fossil manifest.

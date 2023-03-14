@@ -64,20 +64,30 @@ from the original transaction.  The journal is distributed to follower nodes,
 which evaluate journal entry scripts in order to bring the follower node
 database up to date.
 
-Each journal entry is assigned a unique integer id - the total number of
-journal entries that preceed it since the beginning of time. Hctree calls this
-value the "commit id" (CID). I think bedrock code sometimes calls this value
-the "commit count", or the "transaction id", which is tricky because hctree
-uses "transaction id" for something else. This page uses "commit id" or CID.
+<div class=hctree-bg>
+<b>Hctree background:</b>
+
+Hctree assigns to each transaction a unique integer id - the total number of
+transactions written to the database since the beginning of time. It calls
+this value the "commit id" (CID).
+
+Bedrock documentation and code sometimes calls this value the "commit count",
+or the "transaction id", which is tricky because hctree uses "transaction id"
+for something else. This page uses "commit id" or CID.
+
+Whatever it's called, each write-transaction/journal entry is assigned a
+CID as part of committing the transaction.
+
+</div>
 
 To improve concurrency, the distributed journal format used by an
 hctree/bedrock system might differ from the current Bedrock in two
 ways:
 
   1.  The contents of each journal entry is changed to a key-value format,
-      where each key identifies a database row by table and PRIMARY KEY, and
-      each value is either the new contents of the database row, or else a
-      tombstone to indicate that the row is to be deleted.
+      where each key identifies a database row by table and PRIMARY KEY or
+      rowid, and each value is either the new contents of the database row, or
+      else a tombstone to indicate that the row is to be deleted.
 
       This change is to improve concurrency on follower nodes, and during
       synchronization/catchup.
@@ -173,7 +183,10 @@ More generally, the at synchronization time, the journal table contains:
      from CID=1 to CID=*iCidLastContiguous*.
 
   *  optionally, a sparse population of journal entries with CID values 
-     between CID=(*iCidLastContiguous*+1) and CID=*iCidLast*.
+     between CID=(*iCidLastContiguous*+1) and CID=*iCidLast*. This
+     sparse population should span a relatively short amount of time - perhaps
+     the same order of magnitude as the amount of time taken to commit a QUORUM
+     transaction.
 
 This makes synchronization more complicated in practice of course, but it
 doesn't really change it logically. During synchronization, in current
@@ -188,7 +201,10 @@ bedrock:
   *  otherwise, each node sends other nodes any journal entries they are
      missing.
 
-None of the above changes for hctree/bedrock.
+None of the above changes for hctree/bedrock. The "summary" must change of
+course, but could be as simple as a single checksum for all transactions
+between CID=1 and CID=*iCidLastContiguous*, accompanied by the full data
+for all transactions from the sparsely populated range.
 
 ~~~ pikchr
 linewid=0.1
@@ -370,13 +386,12 @@ careful never to clobber new data with old.
 More detail [here](design.wiki#mvcc).
 </div>
 
-However, we do have to be a bit careful about readers.
-
 <a name=snapshot_rules></a>
-While processing a stream of transactions from a leader node, a follower
-has to maintain value S0, the snapshot id for the newest snapshot that is
-available in the local database - the snapshot that new readers will read from.
-In follower mode this is determined by two rules:
+However, we do have to be a bit careful about readers. A reader must
+not see an inconsistent snapshot, where a consistent snapshot S is 
+defined as one that would be produced if all journal entries from CID=1
+to CID=S were applied sequentially to the database. There are two
+rules:
 
   *  Snapshot S is available if all transactions with CID values less
      than or equal to S have been completely committed.
@@ -384,6 +399,14 @@ In follower mode this is determined by two rules:
   *  Except, if the transaction with CID value S1 omits a write because it
      would clobber a value written by transaction S2, where (S2>S1), then
      transactions S1 to (S2-1), inclusive, never become available to readers.
+
+More concisely, snapshot S is available if all the rows that make up snapshot S
+have been written to the database.
+
+While processing a stream of transactions from a leader node, a follower
+has to maintain value S0, the snapshot id for the newest snapshot that is
+available in the local database. This is the snapshot that new readers will
+read from.
 
 ### 3.1.\ Example of being a bit careful about readers
 
@@ -505,9 +528,18 @@ hctree generates the journal entry, and:
 
   *  Returns it to the user - so that it can be sent to follower nodes.
 
+When a transaction is rolled back after a CID is allocated (due to failed
+validation), an empty entry is written to the journal and returned to the
+user. The CID cannot be reused (some other thread may already be using CID
+values greater than it), and followers need to know that the transaction is
+finished so that it can keep track of the 
+[available database snapshots](#snapshot_rules).
+
 Leader nodes then simply write ASYNC transactions to the local database using
 multiple threads. This automatically generates journal entries, both
 on disk, and in-memory. These are periodically broadcast to followers.
+
+
 
 
 <a name=quorum></a>
