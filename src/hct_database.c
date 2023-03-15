@@ -517,11 +517,11 @@ static int hctBufferSet(HctBuffer *pBuf, const u8 *aData, int nData){
 
 #ifdef SQLITE_DEBUG
 static int hctSqliteBusy(void){
-  return SQLITE_BUSY;
+  return SQLITE_BUSY_SNAPSHOT;
 }
 # define HCT_SQLITE_BUSY hctSqliteBusy()
 #else
-# define HCT_SQLITE_BUSY SQLITE_BUSY
+# define HCT_SQLITE_BUSY SQLITE_BUSY_SNAPSHOT
 #endif /* SQLITE_DEBUG */
 
 static u64 hctDbTMapLookup(HctDatabase *pDb, u64 iTid, u64 *peState){
@@ -5304,7 +5304,7 @@ int sqlite3HctDbInsert(
       hctDbWriterCleanup(pDb, &pDb->pa, 1);
     }
   }
-  if( rc==SQLITE_LOCKED || rc==SQLITE_BUSY ){
+  if( rc==SQLITE_LOCKED || (rc&0xFF)==SQLITE_BUSY ){
     if( rc==SQLITE_LOCKED ){
       rc = SQLITE_OK;
       pDb->nCasFail++;

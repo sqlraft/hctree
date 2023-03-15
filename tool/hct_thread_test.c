@@ -565,7 +565,7 @@ static char *test_thread(int iTid, void *pArg){
 
       sqlite3_step(pCommit);
       htt_sqlite3_reset(&err, pCommit);
-      if( err.rc==SQLITE_BUSY ){
+      if( (err.rc&0xFF)==SQLITE_BUSY ){
         htt_free_err(&err);
         nBusy++;
         sqlite3_step(pRollback);

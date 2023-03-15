@@ -100,6 +100,7 @@ do_catchsql_test 2.10 {
 } {1 {database is locked}}
 
 do_execsql_test 2.11 {
+  ROLLBACK;
   PRAGMA hct_quiescent_integrity_check = 1;
   PRAGMA integrity_check;
 } {1 ok}
@@ -133,6 +134,7 @@ do_catchsql_test 3.4 {
 } {1 {database is locked}}
 
 do_execsql_test 3.5 {
+  ROLLBACK;
   PRAGMA hct_quiescent_integrity_check = 1;
   PRAGMA integrity_check;
 } {1 ok}

@@ -271,6 +271,7 @@ static void *ttThreadMain(void *pArg){
 
       while( sqlite3_step(pStep->pStmt)==SQLITE_ROW );
       rc = sqlite3_reset(pStep->pStmt);
+      assert( (rc&0xFF)==rc );
 
       if( pStep->eType==STEP_MUTEX_COMMIT ){
         sqlite3_mutex_leave( sqlite3_mutex_alloc(SQLITE_MUTEX_STATIC_APP3) );

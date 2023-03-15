@@ -3307,9 +3307,9 @@ int sqlite3VdbeHalt(Vdbe *p){
           ** is required. */
           rc = vdbeCommit(db, p);
         }
-        if( rc==SQLITE_BUSY && p->readOnly ){
+        if( (rc&0xFF)==SQLITE_BUSY && p->readOnly ){
           sqlite3VdbeLeave(p);
-          return SQLITE_BUSY;
+          return rc;
         }else if( rc!=SQLITE_OK ){
           p->rc = rc;
           sqlite3RollbackAll(db, SQLITE_OK);

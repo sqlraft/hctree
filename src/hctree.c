@@ -83,6 +83,12 @@ struct HBtree {
   Pager *pFakePager;
 };
 
+/* 
+** Another candidate value for HBtree.eTrans. Must be different from
+** SQLITE_TXN_NONE, SQLITE_TXN_READ and SQLITE_TXN_WRITE.
+*/
+#define SQLITE_TXN_ERROR 4
+
 /*
 ** Candidate values for HBtree.eMetaState.
 */
@@ -895,6 +901,8 @@ int sqlite3HctBtreeBeginTrans(Btree *pBt, int wrflag, int *pSchemaVersion){
   int req = wrflag ? SQLITE_TXN_WRITE : SQLITE_TXN_READ;
 
   assert( wrflag==0 || p->pHctDb==0 || pSchemaVersion );
+
+  if( p->eTrans==SQLITE_TXN_ERROR ) return SQLITE_BUSY_SNAPSHOT;
   if( pSchemaVersion ){
     sqlite3HctBtreeGetMeta((Btree*)p, 1, (u32*)pSchemaVersion);
     sqlite3HctDbTransIsConcurrent(p->pHctDb, p->db->bConcurrent);
@@ -1206,8 +1214,9 @@ static int btreeFlushToDisk(HBtree *p){
   }
 
   /* If conflicts have been detected, roll back the transaction */
-  if( rc==SQLITE_BUSY ){
-    rcok = SQLITE_BUSY;
+  assert( rc!=SQLITE_BUSY );
+  if( rc==SQLITE_BUSY_SNAPSHOT ){
+    rcok = SQLITE_BUSY_SNAPSHOT;
     rc = btreeFlushData(p, 1);
     if( rc==SQLITE_DONE ) rc = SQLITE_OK;
   }
@@ -1236,6 +1245,16 @@ static int btreeFlushToDisk(HBtree *p){
   }
 
   return (rc==SQLITE_OK ? rcok : rc);
+}
+
+static void hctEndTransaction(HBtree *p){
+  if( p->eTrans>SQLITE_TXN_NONE && p->pCsrList==0 ){
+    if( p->pHctDb ){
+      sqlite3HctDbEndRead(p->pHctDb);
+    }
+    p->eTrans = SQLITE_TXN_NONE;
+    p->eMetaState = HCT_METASTATE_NONE;
+  }
 }
 
 /*
@@ -1267,6 +1286,9 @@ static int btreeFlushToDisk(HBtree *p){
 int sqlite3HctBtreeCommitPhaseTwo(Btree *pBt, int bCleanup){
   HBtree *const p = (HBtree*)pBt;
   int rc = SQLITE_OK;
+
+  if( p->eTrans==SQLITE_TXN_ERROR ) return SQLITE_BUSY_SNAPSHOT;
+
   if( p->eTrans==SQLITE_TXN_WRITE ){
     /* TODO: Invalidate any active cursors */
     assert( p->pCsrList==0 );
@@ -1279,12 +1301,10 @@ int sqlite3HctBtreeCommitPhaseTwo(Btree *pBt, int bCleanup){
     p->eTrans = SQLITE_TXN_READ;
     p->eMetaState = HCT_METASTATE_READ;
   }
-  if( p->pCsrList==0 ){
-    if( p->pHctDb ){
-      sqlite3HctDbEndRead(p->pHctDb);
-    }
-    p->eTrans = SQLITE_TXN_NONE;
-    p->eMetaState = HCT_METASTATE_NONE;
+  if( rc==SQLITE_OK ){
+    hctEndTransaction(p);
+  }else{
+    p->eTrans = SQLITE_TXN_ERROR;
   }
   return rc;
 }
@@ -1357,7 +1377,12 @@ int sqlite3HctBtreeTripAllCursors(Btree *pBt, int errCode, int writeOnly){
 */
 int sqlite3HctBtreeRollback(Btree *pBt, int tripCode, int writeOnly){
   HBtree *const p = (HBtree*)pBt;
-  if( p->eTrans==SQLITE_TXN_WRITE ){
+
+  assert( SQLITE_TXN_ERROR==4 && SQLITE_TXN_WRITE==2 );
+  assert( SQLITE_TXN_READ==1 && SQLITE_TXN_NONE==0 );
+  assert( p->eTrans!=SQLITE_TXN_ERROR || p->pCsrList==0 );
+
+  if( p->eTrans>=SQLITE_TXN_WRITE ){
     sqlite3HctTreeRollbackTo(p->pHctTree, 0);
     if( p->pHctDb ){
       sqlite3HctTreeClear(p->pHctTree);
@@ -1365,6 +1390,7 @@ int sqlite3HctBtreeRollback(Btree *pBt, int tripCode, int writeOnly){
     p->eTrans = SQLITE_TXN_READ;
     p->nSchemaOp = 0;
   }
+  hctEndTransaction(p);
   return SQLITE_OK;
 }
 
@@ -1389,6 +1415,7 @@ int sqlite3HctBtreeRollback(Btree *pBt, int tripCode, int writeOnly){
 int sqlite3HctBtreeBeginStmt(Btree *pBt, int iStatement){
   HBtree *const p = (HBtree*)pBt;
   int rc = SQLITE_OK;
+  assert( p->eTrans!=SQLITE_TXN_ERROR );
   rc = sqlite3HctTreeBegin(p->pHctTree, iStatement+1);
   return rc;
 }
@@ -1452,6 +1479,7 @@ int sqlite3HctBtreeCursor(
   int rc = SQLITE_OK;
 
   assert( p->eTrans!=SQLITE_TXN_NONE );
+  assert( p->eTrans!=SQLITE_TXN_ERROR );
   assert( pCur->pHctTreeCsr==0 );
 
   /* If opening a cursor with root==1, try to run recovery stage 0. Or, if

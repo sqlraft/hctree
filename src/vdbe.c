@@ -3807,6 +3807,7 @@ case OP_Savepoint: {
 case OP_AutoCommit: {
   int desiredAutoCommit;
   int iRollback;
+  int hrc;
 
   desiredAutoCommit = pOp->p1;
   iRollback = pOp->p2;
@@ -3834,10 +3835,12 @@ case OP_AutoCommit: {
       db->autoCommit = (u8)desiredAutoCommit;
       db->bConcurrent = (u8)pOp->p5;
     }
-    if( sqlite3VdbeHalt(p)==SQLITE_BUSY ){
+    hrc = sqlite3VdbeHalt(p);
+    if( (hrc&0xFF)==SQLITE_BUSY ){
       p->pc = (int)(pOp - aOp);
       db->autoCommit = (u8)(1-desiredAutoCommit);
-      p->rc = rc = SQLITE_BUSY;
+      p->rc = hrc;
+      rc = SQLITE_BUSY;
       goto vdbe_return;
     }
     sqlite3CloseSavepoints(db);
