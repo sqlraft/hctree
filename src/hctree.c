@@ -1920,8 +1920,12 @@ static int hctBtreeMovetoUnpacked(
           /* Cursor points at EOF. *pRes must be -ve in this case. */
           rc = SQLITE_OK;
           *pRes = -1;
-        }else{
+        }else if( pIdxKey==0 ){
           *pRes = 1;
+        }else{
+          u32 nKey;
+          const void *a = sqlite3HctBtreePayloadFetch((BtCursor*)pCur, &nKey);
+          *pRes = sqlite3VdbeRecordCompareWithSkip(nKey, a, pIdxKey, 0);
         }
       }else{
         rc = sqlite3HctBtreePrevious((BtCursor*)pCur, 0);

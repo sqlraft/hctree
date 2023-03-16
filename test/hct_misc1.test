@@ -382,5 +382,24 @@ do_execsql_test 16.1 {
   COMMIT;
 }
 
+#-------------------------------------------------------------------------
+hct_reset_db
+do_execsql_test 17.0 {
+  CREATE TABLE t1(a, b);
+  CREATE INDEX i1 ON t1(a, b);
+
+  INSERT INTO t1 VALUES(123, 'A');
+  INSERT INTO t1 VALUES(123, 'B');
+  INSERT INTO t1 VALUES(123, 'C');
+}
+
+do_execsql_test 17.1 {
+  BEGIN;
+    DELETE FROM t1 WHERE (a, b) = (123, 'A');
+    SELECT count(1) FROM t1 WHERE a=123 AND b IN ('A', 'B');
+  COMMIT;
+} {1}
+
+
 finish_test
 
