@@ -171,6 +171,15 @@ SQLITE_NOINLINE int sqlite3RunVacuum(
     sqlite3SetString(pzErrMsg, db,"cannot VACUUM - SQL statements in progress");
     return SQLITE_ERROR; /* IMP: R-15610-35227 */
   }
+  if( sqlite3IsHct(db->aDb[iDb].pBt) ){
+    if( pOut==0 ){
+      /* Silent noop */
+      return SQLITE_OK;
+    }
+    sqlite3SetString(pzErrMsg, db, "cannot VACUUM - hctree database");
+    return SQLITE_ERROR;
+  }
+
   saved_openFlags = db->openFlags;
   if( pOut ){
     if( sqlite3_value_type(pOut)!=SQLITE_TEXT ){

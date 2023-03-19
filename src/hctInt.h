@@ -201,6 +201,7 @@ int sqlite3HctDbWalkTree(
 
 int sqlite3HctDbPagesize(HctDatabase *pDb);
 
+void sqlite3HctDbRecordTrim(UnpackedRecord *pRec);
 
 /*************************************************************************
 ** Interface to code in hct_file.c
@@ -224,6 +225,4 @@ int sqlite3HctStatsInit(sqlite3*);
 ** Utility functions:
 */
 void *sqlite3HctMalloc(int *pRc, i64 nByte);
-
-int sqlite3IsHct(Btree*);
 

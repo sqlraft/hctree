@@ -611,14 +611,24 @@ static int treeInsert(
 ){
   HctTree *pTree = pCsr->pTree;
   HctTreeNode *pNew;
+  int rc = SQLITE_OK;
 
   assert( bDelete==0 || pKey || (aData==0 && nData==0 && nZero==0) );
 
   pNew = treeNewNode(pCsr, iKey, bDelete, nData, aData, nZero);
   if( pNew==0 ){
-    return SQLITE_NOMEM;
+    rc = SQLITE_NOMEM;
+  }else{
+    int nSave = 0;
+    if( pKey ){
+      nSave = pKey->nField;
+      sqlite3HctDbRecordTrim(pKey);
+    }
+    rc = treeInsertNode(pTree, pTree->iStmt<=0, pKey, iKey, pNew);
+    if( pKey ) pKey->nField = nSave;
   }
-  return treeInsertNode(pTree, pTree->iStmt<=0, pKey, iKey, pNew);
+
+  return rc;
 }
 
 /*

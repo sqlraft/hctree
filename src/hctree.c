@@ -1809,15 +1809,18 @@ int sqlite3HctBtreeLast(BtCursor *pCursor, int *pRes){
       *pRes = (bTreeEof && bDbEof);
       pCur->eDir = BTREE_DIR_REVERSE;
       btreeSetUseTree(pCur);
-      if( pCur->bUseTree && sqlite3HctTreeCsrIsDelete(pCur->pHctTreeCsr) ){
-        rc = sqlite3HctBtreePrevious((BtCursor*)pCur, 0);
-        if( rc==SQLITE_DONE ){
-          *pRes = sqlite3HctBtreeEof((BtCursor*)pCur);
-          rc = SQLITE_OK;
+      if( pCur->bUseTree ){
+        if( sqlite3HctTreeCsrIsDelete(pCur->pHctTreeCsr) ){
+          rc = sqlite3HctBtreePrevious((BtCursor*)pCur, 0);
+          if( rc==SQLITE_DONE ){
+            *pRes = sqlite3HctBtreeEof((BtCursor*)pCur);
+            rc = SQLITE_OK;
+          }
+        }else{
+          pCur->isLast = 1;
         }
       }
     }
-    pCur->isLast = (pCur->bUseTree && (rc==SQLITE_OK));
   }
 
   return rc;
@@ -1997,7 +2000,7 @@ int sqlite3HctBtreeEof(BtCursor *pCursor){
 ** available.
 */
 i64 sqlite3HctBtreeRowCountEst(BtCursor *pCur){
-  assert( 0 );
+  /* TODO: Fix this so that it returns a meaningful value. */
   return -1;
 }
 

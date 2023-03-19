@@ -1305,7 +1305,7 @@ static UnpackedRecord *hctDbAllocateUnpacked(int *pRc, KeyInfo *pKeyInfo){
   return pRet;
 }
 
-static void hctDbRecordTrim(UnpackedRecord *pRec){
+void sqlite3HctDbRecordTrim(UnpackedRecord *pRec){
   if( pRec && pRec->pKeyInfo->nUniqField ){
     int ii;
     u16 nUniqField = pRec->pKeyInfo->nUniqField;
@@ -1353,7 +1353,7 @@ static void hctDbGetKey(
         sqlite3VdbeRecordUnpack(pKeyInfo, nRec, aRec, pKey->pKey);
       }
       if( rc==SQLITE_OK ){
-        hctDbRecordTrim(pKey->pKey);
+        sqlite3HctDbRecordTrim(pKey->pKey);
       }
     }
   }
@@ -3071,7 +3071,7 @@ static int hctDbInsertFlushWrite(HctDatabase *pDb, HctDbWriter *p){
             if( rc!=SQLITE_OK ) break;
             pRec = p->writecsr.pRec;
             sqlite3VdbeRecordUnpack(p->writecsr.pKeyInfo, nFP, aFP, pRec);
-            hctDbRecordTrim(pRec);
+            sqlite3HctDbRecordTrim(pRec);
           }
 
           rc = hctDbInsert(
@@ -3541,7 +3541,7 @@ static int hctDbFindLhsPeer(
     if( rc==SQLITE_OK ){
       pRec = p->writecsr.pRec;
       sqlite3VdbeRecordUnpack(p->writecsr.pKeyInfo, nData, aData, pRec);
-      hctDbRecordTrim(pRec);
+      sqlite3HctDbRecordTrim(pRec);
       pRec->default_rc = 1;
       rc = hctDbCsrSeek(&csr, 0, p->iHeight, 0, pRec, 0, 0);
       pRec->default_rc = 0;
@@ -5249,7 +5249,7 @@ int sqlite3HctDbInsert(
   /* If this operation is inserting an index entry, figure out how many of
   ** the record fields to consider when determining if a potential write
   ** collision is found in the data structure.  */
-  hctDbRecordTrim(pRec);
+  sqlite3HctDbRecordTrim(pRec);
 
 #if 0
   {

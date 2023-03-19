@@ -5592,4 +5592,8 @@ int sqlite3KvvfsInit(void);
 sqlite3_uint64 sqlite3Hwtime(void);
 #endif
 
+#ifdef SQLITE_ENABLE_HCT
+int sqlite3IsHct(Btree*);
+#endif
+
 #endif /* SQLITEINT_H */
