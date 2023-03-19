@@ -275,7 +275,6 @@ static int hctFindKeyInfo(HBtree *p, u32 iRoot, KeyInfo **ppKeyInfo){
   for(pE=sqliteHashFirst(&pSchema->tblHash); pE; pE=sqliteHashNext(pE)){
     Index *pIdx = 0;
     Table *pTab = (Table*)sqliteHashData(pE);
-    if( pTab->tnum==iRoot ) break;
     for(pIdx=pTab->pIndex; pIdx; pIdx=pIdx->pNext){
       if( pIdx->tnum==iRoot ){
         Parse sParse;
@@ -287,6 +286,7 @@ static int hctFindKeyInfo(HBtree *p, u32 iRoot, KeyInfo **ppKeyInfo){
         break;
       }
     }
+    if( pTab->tnum==iRoot ) break;
   }
 
   *ppKeyInfo = pKeyInfo;

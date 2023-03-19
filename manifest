@@ -1,5 +1,5 @@
-C Fix\svarious\sminor\sproblems\swith\sinteractions\sbetween\shctree\sand\ssqlite.
-D 2023-03-19T17:18:38.262
+C Fix\sminor\sproblems\swith\sWITHOUT\sROWID\stables.
+D 2023-03-19T18:35:29.811
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -604,8 +604,8 @@ F src/hct_pman.c 992650137547caae7f2158374d628c4ead3f8fc2990ea8b11c0a0d6903c5ccf
 F src/hct_record.c 54b0d564be580ca29a54312f9a9abdba193b234ac56ec65a7e40109107041b25
 F src/hct_stats.c 3273fc59855be16ca383522f47c24131c5707c3bef7795f56aa5ac440aae98c0
 F src/hct_tmap.c 8c1268442a962f2d6d777253134f7650cdcc27634c9b6698d43a90f20887281a
-F src/hct_tree.c 4a1c5846fdde6410af8ed7d4efb445dfed3c6715d15ea415683dbbb03ed5b5cb
-F src/hctree.c 255e15e7bff791baad708e5cf68e7bda69ca322c67d41f4196f54bb3ccdcb4d5
+F src/hct_tree.c f1685960b3cb1f6c85c44a7f193a5de986cfec2d536e648298953c0ea4d20f44
+F src/hctree.c 636e9819c848e0c3a3a7c60f6303020bb16f0c3efccb239db2dd048c27168b12
 F src/hwtime.h b638809e083b601b618df877b2e89cb87c2a47a01f4def10be4c4ebb54664ac7
 F src/in-operator.md 10cd8f4bcd225a32518407c2fb2484089112fd71
 F src/insert.c 1b11a2e33ee52db93c02fddac67e39d00161d61b69fac2675b82f2aa68c1b61c
@@ -2118,8 +2118,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P 72398d3b562b5c6be591a1c0a9f7b5bc5bdb033a801a9924ad0450b34e74a354
-R 2883d32ccd3071d944c60e02276001c6
+P 1569fb66babbde434ab3b5881167f7a97c969083cc0188f2679e75011f68742a
+R 9d56742fbd27e71f3707f4f851abf632
 U dan
-Z 11dcd9a9338919178de7a19f686a6c1a
+Z 755b11410c44d243a8cdae25c1043a36
 # Remove this line to create a well-formed Fossil manifest.

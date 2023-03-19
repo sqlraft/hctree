@@ -935,38 +935,42 @@ int sqlite3HctTreeRollbackTo(HctTree *pTree, int iStmt){
     HctTreeNode *pNode;
     HctTreeNode *pPrev;
     for(pNode=pTree->pRollback; pNode!=pStop; pNode=pPrev){
+      KeyInfo *pKeyInfo = 0;
+      UnpackedRecord *pRec = 0;
+      HctTreeRoot *pRoot = hctTreeFindRoot(pTree, pNode->iRoot);
+
       pPrev = pNode->pPrev;
+
+      if( (pKeyInfo = pRoot->pKeyInfo) ){
+        pRec = sqlite3VdbeAllocUnpackedRecord(pKeyInfo);
+        if( pRec==0 ){
+          rc = SQLITE_NOMEM;
+          pStop = pNode;
+          break;
+        }
+        sqlite3VdbeRecordUnpack(pKeyInfo, pNode->nData, pNode->aData, pRec);
+      }
+
       if( pNode->pClobber ){
         HctTreeNode *pClobber = pNode->pClobber;
         assert( pNode->iKey==pNode->pClobber->iKey );
         pClobber->pLeft = pClobber->pRight = 0;
         pClobber->bBlack = 0;
-        if( (rc = treeInsertNode(pTree, 1, 0, pNode->iKey, pClobber)) ){
+        if( (rc = treeInsertNode(pTree, 1, pRec, pNode->iKey, pClobber)) ){
           pStop = pNode;
           break;
         }
         treeNodeUnref(pClobber);
       }else{
-        KeyInfo *pKeyInfo;
-        UnpackedRecord *pRec = 0;
         HctTreeCsr csr;
         int res;
         memset(&csr, 0, sizeof(csr));
-        csr.pRoot = hctTreeFindRoot(pTree, pNode->iRoot);
+        csr.pRoot = pRoot;
         csr.pTree = pTree;
-        if( (pKeyInfo = csr.pRoot->pKeyInfo) ){
-          pRec = sqlite3VdbeAllocUnpackedRecord(pKeyInfo);
-          if( pRec==0 ){
-            rc = SQLITE_NOMEM;
-            pStop = pNode;
-            break;
-          }
-          sqlite3VdbeRecordUnpack(pKeyInfo, pNode->nData, pNode->aData, pRec);
-        }
         sqlite3HctTreeCsrSeek(&csr, pRec, pNode->iKey, &res);
         if( res==0 ) treeDelete(&csr, 1);
-        if( pRec ) sqlite3DbFree(pKeyInfo->db, pRec);
       }
+      if( pRec ) sqlite3DbFree(pKeyInfo->db, pRec);
       treeNodeUnref(pNode);
     }
     pTree->pRollback = pStop;
