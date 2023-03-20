@@ -1675,7 +1675,13 @@ sqlite3_int64 sqlite3HctBtreeMaxRecordSize(BtCursor *pCur){
 ** the available payload.
 */
 int sqlite3HctBtreePayload(BtCursor *pCur, u32 offset, u32 amt, void *pBuf){
-  assert( 0 );
+  u32 n = 0;
+  const u8 *p = 0;
+
+  p = (const u8*)sqlite3HctBtreePayloadFetch(pCur, &n);
+  assert( offset+amt<=n );
+  memcpy(pBuf, &p[offset], amt);
+
   return SQLITE_OK;
 }
 
@@ -1686,8 +1692,7 @@ int sqlite3HctBtreePayload(BtCursor *pCur, u32 offset, u32 amt, void *pBuf){
 */
 #ifndef SQLITE_OMIT_INCRBLOB
 int sqlite3HctBtreePayloadChecked(BtCursor *pCur, u32 offset, u32 amt, void *pBuf){
-  assert( 0 );
-  return SQLITE_OK;
+  return sqlite3HctBtreePayload(pCur, offset, amt, pBuf);
 }
 #endif /* SQLITE_OMIT_INCRBLOB */
 
@@ -2337,6 +2342,7 @@ int sqlite3HctBtreeClearTable(Btree *pBt, int iTable, i64 *pnChange){
 
   rc = hctFindKeyInfo(p, iTable, &pKeyInfo);
   if( rc==SQLITE_OK ){
+    i64 nChange = 0;
     BtCursor *pCsr = 0;
     HctTreeCsr *pTreeCsr = 0;
     UnpackedRecord *pRec = 0;
@@ -2358,6 +2364,7 @@ int sqlite3HctBtreeClearTable(Btree *pBt, int iTable, i64 *pnChange){
       rc = sqlite3HctBtreeFirst(pCsr, &res);
       if( res==0 ){
         while( rc==SQLITE_OK ){
+          nChange++;
           if( pKeyInfo ){
             const u8 *aData = 0;
             u32 nData = 0;
@@ -2373,6 +2380,7 @@ int sqlite3HctBtreeClearTable(Btree *pBt, int iTable, i64 *pnChange){
         if( rc==SQLITE_DONE ) rc = SQLITE_OK;
       }
     }
+    if( pnChange ) *pnChange = nChange;
 
     sqlite3KeyInfoUnref(pKeyInfo);
     sqlite3HctBtreeCloseCursor(pCsr);
@@ -2733,7 +2741,6 @@ int sqlite3HctBtreePutData(BtCursor *pCsr, u32 offset, u32 amt, void *z){
 ** Mark this cursor as an incremental blob cursor.
 */
 void sqlite3HctBtreeIncrblobCursor(BtCursor *pCur){
-  assert( 0 );
 }
 #endif
 
