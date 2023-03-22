@@ -8,6 +8,7 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: puresql
 #
 # This file implements tests for the logic used to estimate when
 # running ANALYZE would be beneficial.

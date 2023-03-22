@@ -12,7 +12,7 @@
 # focus of this file is testing the INSERT statement that takes is
 # result from a SELECT.
 #
-# $Id: insert2.test,v 1.19 2008/01/16 18:20:42 danielk1977 Exp $
+# TESTRUNNER: puresql
 
 set testdir [file dirname $argv0]
 source $testdir/tester.tcl

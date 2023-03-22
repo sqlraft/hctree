@@ -124,6 +124,16 @@ if {[info command sqlite_orig]==""} {
         lappend args -key {xyzzy}
       }
 
+      if {[info exists ::G(perm:hct)]} {
+        set fname [lindex $args 1]
+        if {$fname!=":memory:" && $fname!=""} {
+          set args [concat [list \
+            [lindex $args 0]            \
+            "file:$fname?hctree=1" -uri 1
+          ] [lrange $args 2 end]]
+        }
+      }
+
       set res [uplevel 1 sqlite_orig $args]
       if {[info exists ::G(perm:presql)]} {
         [lindex $args 0] eval $::G(perm:presql)

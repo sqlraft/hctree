@@ -13,6 +13,7 @@
 # focus of this script is testing automatic index creation logic,
 # and specifically creation of automatic partial indexes.
 #
+# TESTRUNNER: puresql
 
 set testdir [file dirname $argv0]
 source $testdir/tester.tcl

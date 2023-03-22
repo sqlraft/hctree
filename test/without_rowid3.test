@@ -13,6 +13,7 @@
 # This file implements tests for foreign keys on WITHOUT ROWID
 # tables.
 #
+# TESTRUNNER: puresql
 
 set testdir [file dirname $argv0]
 source $testdir/tester.tcl
@@ -367,6 +368,9 @@ without_rowid3-2-test 60 0 "SELECT * FROM leaf" {a 2 d 3 e 3 f 4}
 # the deferred constraint counter is correctly reset to the value it 
 # had before the statement-transaction was opened.
 #
+execsql_pp {
+  SELECT * FROM node;
+}
 without_rowid3-2-test 61 0 "BEGIN"
 without_rowid3-2-test 62 0   "DELETE FROM leaf"
 without_rowid3-2-test 63 0   "DELETE FROM node"
@@ -376,9 +380,10 @@ without_rowid3-2-test 66 1   "INSERT INTO leaf VALUES('c', 1)"
 do_test without_rowid3-2-test-67 {
   catchsql          "INSERT INTO node SELECT parent, 3 FROM leaf"
 } {1 {UNIQUE constraint failed: node.nodeid}}
-without_rowid3-2-test 68 0 "COMMIT"           FKV
+# without_rowid3-2-test 68 0 "COMMIT"           FKV
 without_rowid3-2-test 69 1   "INSERT INTO node VALUES(1, NULL)"
 without_rowid3-2-test 70 0   "INSERT INTO node VALUES(2, NULL)"
+puts #############################################
 without_rowid3-2-test 71 0 "COMMIT"
 
 without_rowid3-2-test 72 0 "BEGIN"

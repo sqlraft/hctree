@@ -8,6 +8,7 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: puresql
 #
 # This file implements tests for SQLite library.  The focus of the tests
 # in this file is testing the capabilities of sqlite_stat4.

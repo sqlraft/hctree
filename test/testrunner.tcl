@@ -8,6 +8,7 @@ source [file join $testdir permutations.test]
 set argv $saved
 cd $dir
 
+
 #-------------------------------------------------------------------------
 # Usage:
 #
@@ -182,6 +183,12 @@ if {[llength $argv]==2
 
   } elseif {$permutation!="default" && $permutation!=""} {
 
+    test_suite "hct" -prefix "hct." -files [list] -initialize {
+      set ::G(perm:hct) 1
+    } -shutdown {
+      catch { unset ::G(perm:hct) }
+    }
+
     if {[info exists ::testspec($permutation)]==0} {
       error "no such permutation: $permutation"
     }
@@ -330,7 +337,9 @@ if {[llength $argv]==1
 }
 
 #-------------------------------------------------------------------------
-# Parse the command line.
+# This script is not being invoked for the special [status] or [njob] 
+# commands, and that it is not being invoked as a sub-process to run
+# a single test script. So parse the command line.
 #
 for {set ii 0} {$ii < [llength $argv]} {incr ii} {
   set isLast [expr $ii==([llength $argv]-1)]
@@ -430,6 +439,23 @@ proc build_to_dirname {bname} {
 #
 #    {BUILD CONFIG FILENAME} {BUILD CONFIG FILENAME} ...
 #
+
+proc _make_hct_perm {} {
+  foreach f [trd_all_scripts] {
+    set p [trd_script_properties $f]
+    if {[lsearch $p puresql]>=0 || [lsearch $p hct]>=0} {
+      lappend files $f
+    }
+  }
+
+  test_suite "hct" -prefix "hct" -files $files -initialize {
+    set ::G(perm:hct) 1
+  } -shutdown {
+    catch { unset ::G(perm:hct) }
+  }
+}
+_make_hct_perm
+
 proc testset_patternlist {patternlist} {
   global TRG
 
@@ -588,18 +614,12 @@ proc make_new_testset {} {
       set slow 0
 
       if {$c!="make" && $c!="build"} {
-        set fd [open $s]
-        for {set ii 0} {$ii<100 && ![eof $fd]} {incr ii} {
-          set line [gets $fd]
-          if {[string match -nocase *testrunner:* $line]} {
-            regexp -nocase {.*testrunner:(.*)} $line -> properties
-            foreach p $properties {
-              if {$p=="slow"} { set slow 1 }
-              if {$p=="superslow"} { set slow 2 }
-            }
-          }
+
+        set properties [trd_script_properties $s]
+        foreach p $properties {
+          if {$p=="slow"} { set slow 1 }
+          if {$p=="superslow"} { set slow 2 }
         }
-        close $fd
       }
 
       if {$c=="make" && $b==""} {

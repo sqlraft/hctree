@@ -8,6 +8,7 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: puresql
 #
 # This file contains automated tests used to verify that the sqlite_stat4
 # functionality is working.

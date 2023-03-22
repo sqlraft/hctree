@@ -13,7 +13,7 @@
 # The focus of this file is testing that LIMIT and OFFSET work for
 # unusual combinations SELECT statements.
 #
-# $Id: select8.test,v 1.1 2008/01/12 12:48:09 drh Exp $
+# TESTRUNNER: puresql
 
 set testdir [file dirname $argv0]
 source $testdir/tester.tcl

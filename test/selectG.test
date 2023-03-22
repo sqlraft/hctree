@@ -12,6 +12,7 @@
 # This file verifies that INSERT operations with a very large number of
 # VALUE terms works and does not hit the SQLITE_LIMIT_COMPOUND_SELECT limit.
 #
+# TESTRUNNER: puresql
 
 set testdir [file dirname $argv0]
 source $testdir/tester.tcl

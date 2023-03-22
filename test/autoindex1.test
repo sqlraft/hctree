@@ -14,6 +14,7 @@
 # EVIDENCE-OF: R-34271-33106 PRAGMA automatic_index; PRAGMA
 # automatic_index = boolean; Query, set, or clear the automatic indexing
 # capability.
+#
 
 set testdir [file dirname $argv0]
 source $testdir/tester.tcl

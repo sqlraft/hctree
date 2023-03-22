@@ -10,7 +10,7 @@
 #***********************************************************************
 # This file implements regression tests for SQLite library. 
 #
-# $Id: select9.test,v 1.4 2008/07/01 14:39:35 danielk1977 Exp $
+# TESTRUNNER: puresql
 
 # The tests in this file are focused on test compound SELECT statements 
 # that have any or all of an ORDER BY, LIMIT or OFFSET clauses. As of

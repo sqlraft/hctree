@@ -8,6 +8,7 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: hct
 #
 # Test that the truncate optimization is disabled if the SQLITE_DELETE
 # authorization callback returns SQLITE_IGNORE.

@@ -12,6 +12,7 @@
 # This file implements regression tests for SQLite library.  The
 # focus of this file is testing WITHOUT ROWID tables.
 #
+# TESTRUNNER: puresql
 
 set testdir [file dirname $argv0]
 source $testdir/tester.tcl

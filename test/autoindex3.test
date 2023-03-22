@@ -14,6 +14,7 @@
 # and specifically that an automatic index will not be created that
 # shadows a declared index.
 #
+# TESTRUNNER: puresql
 
 set testdir [file dirname $argv0]
 source $testdir/tester.tcl

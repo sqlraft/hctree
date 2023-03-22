@@ -17,6 +17,7 @@
 # using STAT4.  But the query planner should detect this and use the
 # full index rather than the skip-scan.
 #
+# TESTRUNNER: puresql
 
 set testdir [file dirname $argv0]
 source $testdir/tester.tcl
