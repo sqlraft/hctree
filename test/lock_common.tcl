@@ -28,6 +28,7 @@ proc do_multiclient_test {varname script} {
     # Do not run multi-process tests with the unix-excl VFS.
     #
     if {$tn==1 && [permutation]=="unix-excl"} continue
+    if {$tn==1 && [permutation]=="hct"} continue
 
     faultsim_delete_and_reopen
 

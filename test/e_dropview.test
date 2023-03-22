@@ -8,6 +8,7 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: hct
 #
 # This file implements tests to verify that the "testable statements" in 
 # the lang_dropview.html document are correct.

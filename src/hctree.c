@@ -2764,7 +2764,7 @@ int sqlite3HctBtreeLockTable(Btree *p, int iTab, u8 isWriteLock){
 
 #ifndef SQLITE_OMIT_INCRBLOB
 /*
-** Argument pCsr must be a cursor opened for writing on an 
+** Argument pCur must be a cursor opened for writing on an 
 ** INTKEY table currently pointing at a valid table entry. 
 ** This function modifies the data stored as part of that entry.
 **
@@ -2773,13 +2773,18 @@ int sqlite3HctBtreeLockTable(Btree *p, int iTab, u8 isWriteLock){
 ** parameters that attempt to write past the end of the existing data,
 ** no modifications are made and SQLITE_CORRUPT is returned.
 */
-int sqlite3HctBtreePutData(BtCursor *pCsr, u32 offset, u32 amt, void *z){
+int sqlite3HctBtreePutData(BtCursor *pCur, u32 offset, u32 amt, void *z){
+  HBtCursor *pCsr = (HBtCursor*)pCur;
   int rc = SQLITE_OK;
 
-  rc = hctReseekBlobCsr((HBtCursor*)pCsr);
+  if( pCsr->wrFlag==0 ){
+    rc = SQLITE_READONLY;
+  }else{
+    rc = hctReseekBlobCsr(pCsr);
+  }
   if( rc==SQLITE_OK ){
     u32 nData = 0;
-    const void *aData = sqlite3HctBtreePayloadFetch(pCsr, &nData);
+    const void *aData = sqlite3HctBtreePayloadFetch(pCur, &nData);
     if( offset+amt>nData ){
       rc = SQLITE_CORRUPT_BKPT;
     }else{
@@ -2790,13 +2795,13 @@ int sqlite3HctBtreePutData(BtCursor *pCsr, u32 offset, u32 amt, void *z){
         memcpy(&aBuf[offset], z, amt);
 
         memset(&payload, 0, sizeof(payload));
-        payload.nKey = sqlite3HctBtreeIntegerKey(pCsr);
+        payload.nKey = sqlite3HctBtreeIntegerKey(pCur);
         payload.pData = (const void*)aBuf;
         payload.nData = nData;
-        rc = sqlite3HctBtreeInsert(pCsr, &payload, 0, 0);
+        rc = sqlite3HctBtreeInsert(pCur, &payload, 0, 0);
         if( rc==SQLITE_OK ){
           int dummy = 0;
-          rc = sqlite3HctBtreeTableMoveto(pCsr, payload.nKey, 0, &dummy);
+          rc = sqlite3HctBtreeTableMoveto(pCur, payload.nKey, 0, &dummy);
           assert( dummy==0 );
         }
       }else{
