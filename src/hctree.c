@@ -278,9 +278,13 @@ static int hctFindKeyInfo(HBtree *p, u32 iRoot, KeyInfo **ppKeyInfo){
     for(pIdx=pTab->pIndex; pIdx; pIdx=pIdx->pNext){
       if( pIdx->tnum==iRoot ){
         Parse sParse;
+        Parse *pSave = 0;
         memset(&sParse, 0, sizeof(sParse));
         sParse.db = p->db;
+        pSave = sParse.db->pParse;
+        sParse.db->pParse = &sParse;
         pKeyInfo = sqlite3KeyInfoOfIndex(&sParse, pIdx);
+        sParse.db->pParse = pSave;
         rc = sParse.rc;
         sqlite3DbFree(sParse.db, sParse.zErrMsg);
         break;
