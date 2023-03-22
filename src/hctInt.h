@@ -120,6 +120,9 @@ int sqlite3HctTreeForeach(
 );
 void sqlite3HctTreeClear(HctTree *pTree);
 
+void sqlite3HctTreeCsrIncrblob(HctTreeCsr *pCsr);
+int sqlite3HctTreeCsrReseek(HctTreeCsr *pCsr, int*);
+
 /*************************************************************************
 ** Interface to code in hct_database.c
 */
@@ -202,6 +205,12 @@ int sqlite3HctDbWalkTree(
 int sqlite3HctDbPagesize(HctDatabase *pDb);
 
 void sqlite3HctDbRecordTrim(UnpackedRecord *pRec);
+
+/*
+** This function returns the current snapshot-id. It may only be called
+** when a read transaction is active.
+*/
+i64 sqlite3HctDbSnapshotId(HctDatabase *pDb);
 
 /*************************************************************************
 ** Interface to code in hct_file.c

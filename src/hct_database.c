@@ -1318,6 +1318,16 @@ void sqlite3HctDbRecordTrim(UnpackedRecord *pRec){
   }
 }
 
+
+/*
+** This function returns the current snapshot-id. It may only be called
+** when a read transaction is active.
+*/
+i64 sqlite3HctDbSnapshotId(HctDatabase *pDb){
+  assert( pDb->iSnapshotId>0 );
+  return pDb->iSnapshotId;
+}
+
 /*
 ** Load the key belonging to cell iCell on page aPg[] into structure (*pKey).
 */
@@ -4637,21 +4647,38 @@ static int hctDbDelete(
   if( pOp->iInsert==0 ){
     assert( pOp->iPg>0 || bLeftmost );
     if( bLeftmost ){
-      const u8 aNull[] = {0x02, 0x00};
+      u8 *aNull = 0;
       int nNull = 0;
+
       assert( pOp->iPg==0 );
       if( hctPagetype(aTarget)==HCT_PAGETYPE_INDEX ){
-        nNull = 2;
+        int nByte = pRec->nField + 9;
+        aNull = sqlite3HctMalloc(&rc, nByte);
+        if( rc!=SQLITE_OK ) return rc;
+        if( pRec->nField<=126 ){
+          aNull[0] = pRec->nField+1;
+          nNull = pRec->nField+1;
+        }
+        else if( pRec->nField<=16382 ){
+          sqlite3PutVarint(aNull, pRec->nField+2);
+          nNull = pRec->nField+2;
+        }else{
+          assert( sqlite3VarintLen(pRec->nField+3)==3 );
+          sqlite3PutVarint(aNull, pRec->nField+3);
+          nNull = pRec->nField+3;
+        }
       }
+
       hctDbInsertEntry(pDb, aTarget, 0, aNull, nNull);
       if( hctPagetype(aTarget)==HCT_PAGETYPE_INTKEY ){
         HctDbIntkeyEntry *pEntry = &((HctDbIntkeyLeaf*)aTarget)->aEntry[0];
         pEntry->iKey = SMALLEST_INT64;
       }else{
         HctDbIndexEntry *pEntry = &((HctDbIndexLeaf*)aTarget)->aEntry[0];
-        pEntry->nSize = 2;
+        pEntry->nSize = nNull;
       }
       pOp->iInsert = 0;
+      sqlite3_free(aNull);
     }else{
       pOp->iPg--;
       aTarget = p->writepg.aPg[pOp->iPg].aNew;

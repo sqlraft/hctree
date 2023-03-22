@@ -1290,8 +1290,11 @@ int sqlite3HctBtreeCommitPhaseTwo(Btree *pBt, int bCleanup){
   if( p->eTrans==SQLITE_TXN_ERROR ) return SQLITE_BUSY_SNAPSHOT;
 
   if( p->eTrans==SQLITE_TXN_WRITE ){
-    /* TODO: Invalidate any active cursors */
-    assert( p->pCsrList==0 );
+    if( p->pCsrList ){
+      /* Cannot commit with open cursors in hctree */
+      return SQLITE_LOCKED;
+    }
+
     sqlite3HctTreeRelease(p->pHctTree, 0);
     if( p->pHctDb ){
       rc = btreeFlushToDisk(p);
@@ -1685,43 +1688,6 @@ int sqlite3HctBtreePayload(BtCursor *pCur, u32 offset, u32 amt, void *pBuf){
   return SQLITE_OK;
 }
 
-/*
-** This variant of sqlite3HctBtreePayload() works even if the cursor has not
-** in the CURSOR_VALID state.  It is only used by the sqlite3_blob_read()
-** interface.
-*/
-#ifndef SQLITE_OMIT_INCRBLOB
-int sqlite3HctBtreePayloadChecked(BtCursor *pCur, u32 offset, u32 amt, void *pBuf){
-  return sqlite3HctBtreePayload(pCur, offset, amt, pBuf);
-}
-#endif /* SQLITE_OMIT_INCRBLOB */
-
-/*
-** For the entry that cursor pCur is point to, return as
-** many bytes of the key or data as are available on the local
-** b-tree page.  Write the number of available bytes into *pAmt.
-**
-** The pointer returned is ephemeral.  The key/data may move
-** or be destroyed on the next call to any Btree routine,
-** including calls from other threads against the same cache.
-** Hence, a mutex on the BtShared should be held prior to calling
-** this routine.
-**
-** These routines is used to get quick access to key and data
-** in the common case where no overflow pages are used.
-*/
-const void *sqlite3HctBtreePayloadFetch(BtCursor *pCursor, u32 *pAmt){
-  HBtCursor *const pCur = (HBtCursor*)pCursor;
-  const u8 *aData;
-  int nData;
-  if( pCur->bUseTree ){
-    sqlite3HctTreeCsrData(pCur->pHctTreeCsr, &nData, &aData);
-  }else{
-    sqlite3HctDbCsrData(pCur->pHctDbCsr, &nData, &aData);
-  }
-  *pAmt = (u32)nData;
-  return aData;
-}
 
 static int btreeSetUseTree(HBtCursor *pCur){
   int rc = SQLITE_OK;
@@ -1768,6 +1734,68 @@ static int btreeSetUseTree(HBtCursor *pCur){
   }
 
   return rc;
+}
+
+static int hctReseekBlobCsr(HBtCursor *pCsr){
+  int rc = SQLITE_OK;
+  assert( pCsr->pKeyInfo==0 );
+  if( sqlite3HctTreeCsrHasMoved(pCsr->pHctTreeCsr) ){
+    int res = 0;
+    rc = sqlite3HctTreeCsrReseek(pCsr->pHctTreeCsr, &res);
+    if( rc==SQLITE_OK && res==0 ){
+      pCsr->bUseTree = 1;
+    }
+  }
+  return rc;
+}
+
+/*
+** This variant of sqlite3HctBtreePayload() works even if the cursor has not
+** in the CURSOR_VALID state.  It is only used by the sqlite3_blob_read()
+** interface.
+*/
+#ifndef SQLITE_OMIT_INCRBLOB
+int sqlite3HctBtreePayloadChecked(
+  BtCursor *pCur, 
+  u32 offset, 
+  u32 amt, 
+  void *pBuf
+){
+  HBtCursor *pCsr = (HBtCursor*)pCur;
+  int rc = SQLITE_OK;
+  rc = hctReseekBlobCsr(pCsr);
+  if( rc==SQLITE_OK ){
+    rc = sqlite3HctBtreePayload(pCur, offset, amt, pBuf);
+  }
+  return rc;
+}
+#endif /* SQLITE_OMIT_INCRBLOB */
+
+/*
+** For the entry that cursor pCur is point to, return as
+** many bytes of the key or data as are available on the local
+** b-tree page.  Write the number of available bytes into *pAmt.
+**
+** The pointer returned is ephemeral.  The key/data may move
+** or be destroyed on the next call to any Btree routine,
+** including calls from other threads against the same cache.
+** Hence, a mutex on the BtShared should be held prior to calling
+** this routine.
+**
+** These routines is used to get quick access to key and data
+** in the common case where no overflow pages are used.
+*/
+const void *sqlite3HctBtreePayloadFetch(BtCursor *pCursor, u32 *pAmt){
+  HBtCursor *const pCur = (HBtCursor*)pCursor;
+  const u8 *aData;
+  int nData;
+  if( pCur->bUseTree ){
+    sqlite3HctTreeCsrData(pCur->pHctTreeCsr, &nData, &aData);
+  }else{
+    sqlite3HctDbCsrData(pCur->pHctDbCsr, &nData, &aData);
+  }
+  *pAmt = (u32)nData;
+  return aData;
 }
 
 /* Move the cursor to the first entry in the table.  Return SQLITE_OK
@@ -2436,12 +2464,21 @@ int sqlite3HctBtreeDropTable(Btree *pBt, int iTable, int *piMoved){
 */
 void sqlite3HctBtreeGetMeta(Btree *pBt, int idx, u32 *pMeta){
   HBtree *const p = (HBtree*)pBt;
+
   assert( idx>=0 && idx<SQLITE_N_BTREE_META );
-  if( p->pHctDb && p->eMetaState==HCT_METASTATE_NONE ){
-    sqlite3HctDbGetMeta(p->pHctDb, (u8*)p->aMeta, SQLITE_N_BTREE_META*4);
-    p->eMetaState = HCT_METASTATE_READ;
+  assert( p->pHctDb );
+  if( idx==BTREE_DATA_VERSION ){
+    /* TODO: Fix this so that the data_version does not change when the
+    ** database is written by the current connection. */
+    i64 iSnapshot = sqlite3HctDbSnapshotId(p->pHctDb);
+    *pMeta = (u32)iSnapshot;
+  }else{
+    if( p->eMetaState==HCT_METASTATE_NONE ){
+      sqlite3HctDbGetMeta(p->pHctDb, (u8*)p->aMeta, SQLITE_N_BTREE_META*4);
+      p->eMetaState = HCT_METASTATE_READ;
+    }
+    *pMeta = p->aMeta[idx];
   }
-  *pMeta = p->aMeta[idx];
 }
 
 /*
@@ -2733,14 +2770,46 @@ int sqlite3HctBtreeLockTable(Btree *p, int iTab, u8 isWriteLock){
 ** no modifications are made and SQLITE_CORRUPT is returned.
 */
 int sqlite3HctBtreePutData(BtCursor *pCsr, u32 offset, u32 amt, void *z){
-  assert( 0 );
-  return SQLITE_OK;
+  int rc = SQLITE_OK;
+
+  rc = hctReseekBlobCsr((HBtCursor*)pCsr);
+  if( rc==SQLITE_OK ){
+    u32 nData = 0;
+    const void *aData = sqlite3HctBtreePayloadFetch(pCsr, &nData);
+    if( offset+amt>nData ){
+      rc = SQLITE_CORRUPT_BKPT;
+    }else{
+      u8 *aBuf = (u8*)sqlite3_malloc(nData+1);
+      if( aBuf ){
+        BtreePayload payload;
+        memcpy(aBuf, aData, nData);
+        memcpy(&aBuf[offset], z, amt);
+
+        memset(&payload, 0, sizeof(payload));
+        payload.nKey = sqlite3HctBtreeIntegerKey(pCsr);
+        payload.pData = (const void*)aBuf;
+        payload.nData = nData;
+        rc = sqlite3HctBtreeInsert(pCsr, &payload, 0, 0);
+        if( rc==SQLITE_OK ){
+          int dummy = 0;
+          rc = sqlite3HctBtreeTableMoveto(pCsr, payload.nKey, 0, &dummy);
+          assert( dummy==0 );
+        }
+      }else{
+        rc = SQLITE_NOMEM;
+      }
+    }
+  }
+
+  return rc;
 }
 
 /* 
 ** Mark this cursor as an incremental blob cursor.
 */
 void sqlite3HctBtreeIncrblobCursor(BtCursor *pCur){
+  HBtCursor *pCsr = (HBtCursor*)pCur;
+  sqlite3HctTreeCsrIncrblob(pCsr->pHctTreeCsr);
 }
 #endif
 
