@@ -1726,8 +1726,11 @@ static int btreeSetUseTree(HBtCursor *pCur){
     rc = sqlite3HctDbCsrLoadAndDecode(pCur->pHctDbCsr, &pKeyDb);
     if( rc==SQLITE_OK ){
       int res;
+      int nSave = pKeyDb->nField;
+      sqlite3HctDbRecordTrim(pKeyDb);
       sqlite3HctTreeCsrData(pCur->pHctTreeCsr, &nKeyTree, &aKeyTree);
       res = sqlite3VdbeRecordCompare(nKeyTree, aKeyTree, pKeyDb);
+      pKeyDb->nField = nSave;
       if( res==0 ){
         pCur->bUseTree = 2;
       }else{
@@ -1942,8 +1945,8 @@ static int hctBtreeMovetoUnpacked(
     }else{
       assert( pCur->eDir==BTREE_DIR_REVERSE );
       assert( res2<=0 );
-      if( rc==SQLITE_OK && res2>0 && !sqlite3HctDbCsrEof(pCur->pHctDbCsr) ){
-        rc = sqlite3HctDbCsrPrev(pCur->pHctDbCsr);
+      if( rc==SQLITE_OK && res1>0 && !sqlite3HctTreeCsrEof(pCur->pHctTreeCsr) ){
+        rc = sqlite3HctTreeCsrPrev(pCur->pHctTreeCsr);
       }
       if( res1==0 || res2==0 ){
         *pRes = 0;

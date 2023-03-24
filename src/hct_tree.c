@@ -742,6 +742,28 @@ int sqlite3HctTreeAppend(
   return rc;
 }
 
+#if 0
+static void debug_write_op(
+  HctTreeCsr *pCsr, 
+  const char *zOp, 
+  UnpackedRecord *pKey,
+  i64 iKey, 
+  int nData, 
+  const u8 *aData
+){
+  printf("%s(%d) ", zOp, (int)pCsr->pRoot->iRoot);
+  if( pKey ){
+    char *z = sqlite3HctDbRecordToText(0, aData, nData);
+    printf("[%s]\n", z);
+  }else{
+    printf("%lld\n", iKey);
+  }
+  fflush(stdout);
+}
+#else
+# define debug_write_op(r,s,w,x,y,z)
+#endif
+
 int sqlite3HctTreeInsert(
   HctTreeCsr *pCsr,
   UnpackedRecord *pKey,
@@ -751,6 +773,7 @@ int sqlite3HctTreeInsert(
   int nZero
 ){
   assert( pKey==0 || iKey==0 );
+  debug_write_op(pCsr, "INSERT", pKey, iKey, nData, aData);
   return treeInsert(pCsr, pKey, iKey, 0, nData, aData, nZero);
 }
 
@@ -761,6 +784,7 @@ int sqlite3HctTreeDeleteKey(
   int nData, 
   const u8 *aData
 ){
+  debug_write_op(pCsr, "DELETE", pKey, iKey, nData, aData);
   return treeInsert(pCsr, pKey, iKey, 1, nData, aData, 0);
 }
 
