@@ -1252,7 +1252,7 @@ static int btreeFlushToDisk(HBtree *p){
 }
 
 static void hctEndTransaction(HBtree *p){
-  if( p->eTrans>SQLITE_TXN_NONE && p->pCsrList==0 ){
+  if( p->eTrans>SQLITE_TXN_NONE && p->pCsrList==0 && p->db->nVdbeRead<=1 ){
     if( p->pHctDb ){
       sqlite3HctDbEndRead(p->pHctDb);
     }

@@ -484,10 +484,12 @@ static void hctMemcpy(void *a, const void *b, size_t c){
 /*
 ** Flags for HctDbIntkeyEntry.flags
 */
-#define HCTDB_HAS_TID      0x01
-#define HCTDB_HAS_OVFL     0x04
-#define HCTDB_HAS_RANGETID 0x08
-#define HCTDB_HAS_RANGEOLD 0x10
+#define HCTDB_HAS_TID      0x01         /* 8 bytes */
+#define HCTDB_HAS_OVFL     0x04         /* 4 bytes */
+#define HCTDB_HAS_RANGETID 0x08         /* 8 bytes */
+#define HCTDB_HAS_RANGEOLD 0x10         /* 4 bytes */
+
+#define HCTDB_MAX_EXTRA_CELL_DATA (8+4+8+4)
 
 static int hctBufferGrow(HctBuffer *pBuf, int nSize){
   int rc = SQLITE_OK;
@@ -1015,7 +1017,13 @@ static int hctDbIntkeyLeafSearch(
 }
 
 static int hctDbIntkeyLocalsize(int pgsz, int nSize){
-  int nMax = pgsz-sizeof(HctDbIntkeyLeaf)-sizeof(HctDbIntkeyEntry)-12;
+  const int nMax = (
+      pgsz - 
+      sizeof(HctDbIntkeyLeaf) - 
+      sizeof(HctDbIntkeyEntry) - 
+      (HCTDB_MAX_EXTRA_CELL_DATA - sizeof(u32))
+  );
+
   int nLocal;
   if( nSize<nMax ){
     nLocal = nSize;
@@ -4604,10 +4612,8 @@ static int hctDbDelete(
   u64 iTidValue = pDb->iTid | iTidOr;
   u64 iDelRangeTid = 0;
   int rc = SQLITE_OK;
-
+  u8 *aNull = 0;
   int prevFlags = 0;
-  HctDbIndexEntry *pPrev = 0;
-
   int nLocalSz = 0;
   u8 *aTarget = p->writepg.aPg[pOp->iPg].aNew;
   int bLeftmost = (hctIsLeftmost(aTarget) && pOp->iInsert==0);
@@ -4638,67 +4644,63 @@ static int hctDbDelete(
     sqlite3HctFilePageRelease(&p->fanpg);
   }
 
-  /* Remove the cell being deleted from the target page. This must be done
-  ** after hctDbLoadPeers() is called (if it is called). */
-  assert_page_is_ok(aTarget, pDb->pgsz);
-  hctDbRemoveCell(pDb, p, aTarget, pOp->iInsert);
-  assert_page_is_ok(aTarget, pDb->pgsz);
+  if( bLeftmost ){
+    int nNull = 0;
 
-  if( pOp->iInsert==0 ){
-    assert( pOp->iPg>0 || bLeftmost );
-    if( bLeftmost ){
-      u8 *aNull = 0;
-      int nNull = 0;
+    memset(&prev, 0, sizeof(prev));
+    prev.iTid = LARGEST_TID;
+    prevFlags |= HCTDB_HAS_TID;
 
-      assert( pOp->iPg==0 );
-      if( hctPagetype(aTarget)==HCT_PAGETYPE_INDEX ){
-        int nByte = pRec->nField + 9;
-        aNull = sqlite3HctMalloc(&rc, nByte);
-        if( rc!=SQLITE_OK ) return rc;
-        if( pRec->nField<=126 ){
-          aNull[0] = pRec->nField+1;
-          nNull = pRec->nField+1;
-        }
-        else if( pRec->nField<=16382 ){
-          sqlite3PutVarint(aNull, pRec->nField+2);
-          nNull = pRec->nField+2;
-        }else{
-          assert( sqlite3VarintLen(pRec->nField+3)==3 );
-          sqlite3PutVarint(aNull, pRec->nField+3);
-          nNull = pRec->nField+3;
-        }
+    assert( pOp->iPg==0 );
+    if( hctPagetype(aTarget)==HCT_PAGETYPE_INDEX ){
+      int nByte = pRec->nField + 9;
+      aNull = sqlite3HctMalloc(&rc, nByte);
+      if( rc!=SQLITE_OK ) return rc;
+      if( pRec->nField<=126 ){
+        aNull[0] = pRec->nField+1;
+        nNull = pRec->nField+1;
       }
-
-      hctDbInsertEntry(pDb, aTarget, 0, aNull, nNull);
-      if( hctPagetype(aTarget)==HCT_PAGETYPE_INTKEY ){
-        HctDbIntkeyEntry *pEntry = &((HctDbIntkeyLeaf*)aTarget)->aEntry[0];
-        pEntry->iKey = SMALLEST_INT64;
+      else if( pRec->nField<=16382 ){
+        sqlite3PutVarint(aNull, pRec->nField+2);
+        nNull = pRec->nField+2;
       }else{
-        HctDbIndexEntry *pEntry = &((HctDbIndexLeaf*)aTarget)->aEntry[0];
-        pEntry->nSize = nNull;
+        assert( sqlite3VarintLen(pRec->nField+3)==3 );
+        sqlite3PutVarint(aNull, pRec->nField+3);
+        nNull = pRec->nField+3;
       }
-      pOp->iInsert = 0;
-      sqlite3_free(aNull);
-    }else{
+
+      prev.aPayload = aNull;
+    }
+    prev.iTid = LARGEST_TID;
+    prevFlags |= HCTDB_HAS_TID;
+    pOp->nEntrySize = nNull;
+    nLocalSz = hctDbLocalsize(aTarget, pDb->pgsz, pOp->nEntrySize);
+
+  }else{
+    HctDbIndexEntry *pPrev = 0;
+
+    /* Remove the cell being deleted from the target page. This must be done
+    ** after hctDbLoadPeers() is called (if it is called). */
+    assert_page_is_ok(aTarget, pDb->pgsz);
+    hctDbRemoveCell(pDb, p, aTarget, pOp->iInsert);
+    assert_page_is_ok(aTarget, pDb->pgsz);
+    if( pOp->iInsert==0 ){
+      assert( pOp->iPg>0 );
       pOp->iPg--;
       aTarget = p->writepg.aPg[pOp->iPg].aNew;
       assert( hctPagenentry(aTarget)>0 );
       pOp->iInsert = ((HctDbPageHdr*)aTarget)->nEntry - 1;
+    }else{
+      pOp->iInsert--;
     }
-  }else{
-    pOp->iInsert--;
-  }
 
-  /* Load the cell immediately before the one just removed */
-  pPrev = hctDbEntryEntry(aTarget, pOp->iInsert);
-  pOp->nEntrySize = pPrev->nSize;
-  prevFlags = pPrev->flags;
+    /* Load the cell immediately before the one just removed */
+    pPrev = hctDbEntryEntry(aTarget, pOp->iInsert);
+    pOp->nEntrySize = pPrev->nSize;
+    prevFlags = pPrev->flags;
 
-  hctDbCellGet(pDb, &aTarget[pPrev->iOff], pPrev->flags, &prev);
-  nLocalSz = hctDbLocalsize(aTarget, pDb->pgsz, pOp->nEntrySize);
-  if( bLeftmost ){
-    prev.iTid = LARGEST_TID;
-    prevFlags |= HCTDB_HAS_TID;
+    hctDbCellGet(pDb, &aTarget[pPrev->iOff], pPrev->flags, &prev);
+    nLocalSz = hctDbLocalsize(aTarget, pDb->pgsz, pOp->nEntrySize);
   }
 
   /* Update the range-tid and range-oldpg fields. There are several 
@@ -4777,11 +4779,16 @@ static int hctDbDelete(
     pOp->nEntry = hctDbCellPut(pOp->aEntry, &prev, nLocalSz);
     pOp->entryFlags = prevFlags | HCTDB_HAS_RANGETID | HCTDB_HAS_RANGEOLD;
     if( hctPagetype(aTarget)==HCT_PAGETYPE_INTKEY ){
-      pOp->iIntkey = ((HctDbIntkeyLeaf*)aTarget)->aEntry[pOp->iInsert].iKey;
+      if( bLeftmost ){
+        pOp->iIntkey = SMALLEST_INT64;
+      }else{
+        pOp->iIntkey = ((HctDbIntkeyLeaf*)aTarget)->aEntry[pOp->iInsert].iKey;
+      }
     }
   }
 
   assert_page_is_ok(aTarget, pDb->pgsz);
+  if( aNull ) sqlite3_free(aNull);
   return rc;
 }
 
