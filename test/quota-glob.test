@@ -8,6 +8,7 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: hct
 #
 # Tests for the glob-style string compare operator embedded in the
 # quota shim.

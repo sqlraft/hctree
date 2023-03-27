@@ -8,6 +8,7 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: hct
 #
 # Testing the compound-SELECT merge algorithm to ensure that it works
 # when it tries to balance the merge tree.

@@ -8,6 +8,8 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: hct
+#
 # $Id: minmax3.test,v 1.5 2008/07/12 14:52:20 drh Exp $
 
 set testdir [file dirname $argv0]

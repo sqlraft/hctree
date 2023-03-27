@@ -8,6 +8,8 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: hct
+#
 # This file implements regression tests for SQLite library.  The
 # focus of this script is in-memory database backend.
 #
@@ -407,6 +409,7 @@ do_test memdb-8.2 {
 
 # Test that auto-vacuum works with in-memory databases.
 # 
+if {[permutation]!="hct"} {
 ifcapable autovacuum {
   do_test memdb-9.1 {
     db close
@@ -424,6 +427,7 @@ ifcapable autovacuum {
     set after [db one {PRAGMA page_count}]
     expr {$before>$after}
   } {1}
+}
 }
 
 } ;# ifcapable memorydb
