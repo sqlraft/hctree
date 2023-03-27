@@ -3518,6 +3518,7 @@ static int hctDbCsrLoadAndDecode(
   if( rc==SQLITE_OK ){
     *ppRec = pCsr->pRec;
     sqlite3VdbeRecordUnpack(pCsr->pKeyInfo, nData, aData, pCsr->pRec);
+    assert( pCsr->pRec->nField>0 );
   }
 
   return rc;
@@ -5696,8 +5697,12 @@ int sqlite3HctDbCsrLast(HctDbCsr *pCsr){
   if( rc==SQLITE_OK ){
     assert( pPg->nHeight==0 && pPg->iPeerPg==0 );
     hctMemcpy(&pCsr->pg, &pg, sizeof(pg));
-    pCsr->iCell = pPg->nEntry;
-    rc = sqlite3HctDbCsrPrev(pCsr);
+    if( pPg->nEntry==0 ){
+      pCsr->iCell = -1;
+    }else{
+      pCsr->iCell = pPg->nEntry;
+      rc = sqlite3HctDbCsrPrev(pCsr);
+    }
   }
 
   return rc;

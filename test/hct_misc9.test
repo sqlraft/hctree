@@ -55,8 +55,13 @@ do_execsql_test 3.0 {
   DELETE FROM t1 WHERE a=13;
 }
 
-execsql_pp {
-  SELECT * FROM hctentry;
+#-------------------------------------------------------------------------
+hct_reset_db
+do_execsql_test 4.0 {
+  CREATE TABLE t1(a INTEGER PRIMARY KEY, b UNIQUE);
+}
+do_execsql_test 4.1 {
+  SELECT * FROM t1 ORDER BY b DESC;
 }
 
 

@@ -9,6 +9,7 @@ set testdir [file dirname $argv0]
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: hct
 #
 # This file implements tests for JOINs.
 #
