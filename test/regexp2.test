@@ -8,6 +8,7 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: hct
 # 
 # This file implements tests for the REGEXP operator in ext/misc/regexp.c.
 # It focuses on the use of the sqlite3_set_auxdata()/get_auxdata() APIs.

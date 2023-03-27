@@ -8,6 +8,8 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: hct
+#
 # The focus of this file is vector assignments in the SET clause of
 # an UPDATE statement.
 #

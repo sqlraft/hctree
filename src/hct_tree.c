@@ -1359,9 +1359,11 @@ int sqlite3HctTreeCsrReseek(HctTreeCsr *pCsr, int *pRes){
 
 
 int sqlite3HctTreeCsrRestore(HctTreeCsr *pCsr, int *pIsDifferent){
-  int rc;
-  assert( pCsr->iSkip==0 );
-  rc = hctRestoreCursor(pCsr, &pCsr->iSkip);
+  int rc = SQLITE_OK;
+  if( pCsr->pReseek ){
+    assert( pCsr->iSkip==0 );
+    rc = hctRestoreCursor(pCsr, &pCsr->iSkip);
+  }
   *pIsDifferent = pCsr->iSkip;
   return rc;
 }

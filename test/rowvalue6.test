@@ -8,6 +8,8 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: hct
+#
 # The focus of this file is handling of NULL values in row-value IN
 # expressions.
 #
