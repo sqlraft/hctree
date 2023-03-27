@@ -108,8 +108,10 @@ void sqlite3HctTreeCsrUnpin(HctTreeCsr *pCsr);
 
 int sqlite3HctTreeCsrHasMoved(HctTreeCsr *pCsr);
 int sqlite3HctTreeCsrRestore(HctTreeCsr *pCsr, int *pIsDifferent);
+void sqlite3HctTreeCsrClear(HctTreeCsr *pCsr);
 
 u32 sqlite3HctTreeCsrRoot(HctTreeCsr *pCsr);
+
 
 /* Iterate through non-empty tables/indexes within an HctTree structure. Used
 ** when flushing contents to disk.  */
@@ -169,6 +171,7 @@ int sqlite3HctDbCsrFirst(HctDbCsr*);
 int sqlite3HctDbCsrLast(HctDbCsr*);
 int sqlite3HctDbCsrNext(HctDbCsr*);
 int sqlite3HctDbCsrPrev(HctDbCsr*);
+void sqlite3HctDbCsrClear(HctDbCsr*);
 
 void sqlite3HctDbCsrKey(HctDbCsr*, i64 *piKey);
 int sqlite3HctDbCsrData(HctDbCsr *pCsr, int *pnData, const u8 **paData);

@@ -47,6 +47,18 @@ do_execsql_test 2.2 {
   SELECT * FROM t1 WHERE b>'CCD' AND b<'EEE'
 }
 
+#-------------------------------------------------------------------------
+hct_reset_db
+do_execsql_test 3.0 {
+  CREATE TABLE t1(a INTEGER PRIMARY KEY, b UNIQUE);
+  INSERT INTO t1 VALUES(13, 13);
+  DELETE FROM t1 WHERE a=13;
+}
+
+execsql_pp {
+  SELECT * FROM hctentry;
+}
+
 
 finish_test
 

@@ -1193,6 +1193,14 @@ int sqlite3HctTreeCsrSeek(
   return hctTreeCsrSeekInt(pCsr, iKey, pRes);
 }
 
+/*
+** Move the cursor to EOF.
+*/
+void sqlite3HctTreeCsrClear(HctTreeCsr *pCsr){
+  hctRestoreDiscard(pCsr);
+  pCsr->iNode = -1;
+}
+
 int sqlite3HctTreeCsrNext(HctTreeCsr *pCsr){
   int iNode;
   int res = 0;

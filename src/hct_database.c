@@ -4653,22 +4653,22 @@ static int hctDbDelete(
 
     assert( pOp->iPg==0 );
     if( hctPagetype(aTarget)==HCT_PAGETYPE_INDEX ){
-      int nByte = pRec->nField + 9;
+      int nField = p->writecsr.pKeyInfo->nAllField;
+      int nByte = nField + 9;
       aNull = sqlite3HctMalloc(&rc, nByte);
       if( rc!=SQLITE_OK ) return rc;
-      if( pRec->nField<=126 ){
-        aNull[0] = pRec->nField+1;
-        nNull = pRec->nField+1;
+      if( nField<=126 ){
+        aNull[0] = nField+1;
+        nNull = nField+1;
       }
-      else if( pRec->nField<=16382 ){
-        sqlite3PutVarint(aNull, pRec->nField+2);
-        nNull = pRec->nField+2;
+      else if( nField<=16382 ){
+        sqlite3PutVarint(aNull, nField+2);
+        nNull = nField+2;
       }else{
-        assert( sqlite3VarintLen(pRec->nField+3)==3 );
-        sqlite3PutVarint(aNull, pRec->nField+3);
-        nNull = pRec->nField+3;
+        assert( sqlite3VarintLen(nField+3)==3 );
+        sqlite3PutVarint(aNull, nField+3);
+        nNull = nField+3;
       }
-
       prev.aPayload = aNull;
     }
     prev.iTid = LARGEST_TID;
@@ -5942,6 +5942,12 @@ int sqlite3HctDbCsrPrev(HctDbCsr *pCsr){
   }while( rc==SQLITE_OK && pCsr->iCell>=0 && hctDbCurrentIsVisible(pCsr)==0 );
   return rc;
 }
+
+void sqlite3HctDbCsrClear(HctDbCsr *pCsr){
+  hctDbCsrScanFinish(pCsr);
+  hctDbCsrReset(pCsr);
+}
+
 
 int sqlite3HctDbCsrData(HctDbCsr *pCsr, int *pnData, const u8 **paData){
   const u8 *pPg;

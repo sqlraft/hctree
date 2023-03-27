@@ -161,7 +161,9 @@ sqlite3_uint64 sqlite3HctBtreeSeekCount(Btree *pBt){
 ** Clear the current cursor position.
 */
 void sqlite3HctBtreeClearCursor(BtCursor *pCur){
-  /* assert( 0 ); */
+  HBtCursor *pCsr = (HBtCursor*)pCur;
+  sqlite3HctDbCsrClear(pCsr->pHctDbCsr);
+  sqlite3HctTreeCsrClear(pCsr->pHctTreeCsr);
 }
 
 /*
@@ -612,6 +614,8 @@ int sqlite3HctBtreeOpen(
 ){
   int rc = SQLITE_OK;
   HBtree *pNew;
+
+  assert( (flags & BTREE_SINGLE)==0 && zFilename && zFilename[0] );
 
   pNew = (HBtree*)sqlite3_malloc(sizeof(HBtree));
   if( pNew ){
@@ -2057,15 +2061,15 @@ int sqlite3HctBtreeNext(BtCursor *pCursor, int flags){
   HBtCursor *const pCur = (HBtCursor*)pCursor;
   int rc = SQLITE_OK;
   int bDummy;
-  assert( pCur->eDir==BTREE_DIR_FORWARD );
-  assert( pCur->isLast==0 );
 
+  assert( pCur->isLast==0 );
   rc = sqlite3HctBtreeCursorRestore((BtCursor*)pCur, &bDummy);
   if( rc!=SQLITE_OK ) return rc;
 
   if( sqlite3HctBtreeEof((BtCursor*)pCur) ){
     rc = SQLITE_DONE;
   }else{
+    assert( pCur->eDir==BTREE_DIR_FORWARD );
     do{
       if( pCur->bUseTree ){
         rc = sqlite3HctTreeCsrNext(pCur->pHctTreeCsr);

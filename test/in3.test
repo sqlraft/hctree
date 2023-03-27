@@ -8,6 +8,8 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: hct
+#
 # This file tests the optimisations made in November 2007 of expressions 
 # of the following form:
 #
