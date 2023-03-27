@@ -8,6 +8,7 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: hct
 #
 # Tests for calling sqlite3_snapshot_open() when there is already
 # a read transaction open on the database.

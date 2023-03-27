@@ -8,6 +8,8 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: hct
+#
 # This file implements regression tests for SQLite library. 
 #
 # The tests in this file verify that sorting works when the library is

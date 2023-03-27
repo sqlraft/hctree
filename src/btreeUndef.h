@@ -73,6 +73,7 @@
 #undef sqlite3BtreeIsReadonly
 #undef sqlite3BtreeSetVersion
 #undef sqlite3BtreeIntegrityCheck
+#undef sqlite3BtreeCheckpoint
 #undef sqlite3BtreeFakeValidCursor
 #undef sqlite3BtreeCursorSize
 #undef sqlite3BtreeCursorZero

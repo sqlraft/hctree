@@ -73,6 +73,7 @@
 #define sqlite3BtreeIsReadonly sqlite3StockBtreeIsReadonly
 #define sqlite3BtreeSetVersion sqlite3StockBtreeSetVersion
 #define sqlite3BtreeIntegrityCheck sqlite3StockBtreeIntegrityCheck
+#define sqlite3BtreeCheckpoint sqlite3StockBtreeCheckpoint
 #define sqlite3BtreeFakeValidCursor sqlite3StockBtreeFakeValidCursor
 #define sqlite3BtreeCursorSize sqlite3StockBtreeCursorSize
 #define sqlite3BtreeCursorZero sqlite3StockBtreeCursorZero

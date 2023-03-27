@@ -811,7 +811,6 @@ int sqlite3HctBtreeGetRequestedReserve(Btree *p){
 ** Regardless of the value of mxPage, return the maximum page count.
 */
 Pgno sqlite3HctBtreeMaxPageCount(Btree *p, Pgno mxPage){
-  assert( 0 );
   return 0xFFFFFFFF;
 }
 
@@ -940,8 +939,7 @@ int sqlite3HctBtreeBeginTrans(Btree *pBt, int wrflag, int *pSchemaVersion){
 ** SQLITE_OK is returned. Otherwise an SQLite error code. 
 */
 int sqlite3HctBtreeIncrVacuum(Btree *p){
-  assert( 0 );
-  return SQLITE_OK;
+  return SQLITE_DONE;
 }
 
 /*
@@ -2704,9 +2702,7 @@ int sqlite3HctBtreeTxnState(Btree *pBt){
 ** Parameter eMode is one of SQLITE_CHECKPOINT_PASSIVE, FULL or RESTART.
 */
 int sqlite3HctBtreeCheckpoint(Btree *p, int eMode, int *pnLog, int *pnCkpt){
-  int rc = SQLITE_OK;
-  assert( 0 );
-  return rc;
+  return SQLITE_OK;
 }
 #endif
 

@@ -5,6 +5,8 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: hct
+#
 # This file runs all rtree related tests.
 #
 
