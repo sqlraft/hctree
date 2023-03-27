@@ -545,7 +545,6 @@ static int treeInsertNode(
   i64 iKey, 
   HctTreeNode *pNew
 ){
-  int rc;
   HctTreeRoot *pRoot = hctTreeFindRoot(pTree, pNew->iRoot);
   UnpackedRecord *pFree = 0;
   int res = 0;
@@ -608,26 +607,22 @@ static int treeInsertNode(
   return SQLITE_OK;
 }
 
-
-/*
-** Allocate a new tree node. Link it into the rollback list.
-*/
-static HctTreeNode *treeNewNode(
-  HctTreeCsr *pCsr,
+static HctTreeNode *treeNewNode2(
+  HctTree *pTree,
+  HctTreeRoot *pRoot,
   i64 iKey, 
   int bDelete,
   int nData, 
   const u8 *aData,
   int nZero
 ){
-  HctTree *pTree = pCsr->pTree;
   HctTreeNode *pNew;
 
   pNew = (HctTreeNode*)hctMallocZero(sizeof(HctTreeNode) + nData + nZero);
   if( pNew ){
     pNew->iKey = iKey;
     pNew->nData = nData + nZero;
-    pNew->iRoot = pCsr->pRoot->iRoot;
+    pNew->iRoot = pRoot->iRoot;
     pNew->bDelete = bDelete;
     if( (nData+nZero)>0 ){
       pNew->aData = (u8*)&pNew[1];
@@ -642,6 +637,22 @@ static HctTreeNode *treeNewNode(
   }
 
   return pNew;
+}
+
+/*
+** Allocate a new tree node. Link it into the rollback list.
+*/
+static HctTreeNode *treeNewNode(
+  HctTreeCsr *pCsr,
+  i64 iKey, 
+  int bDelete,
+  int nData, 
+  const u8 *aData,
+  int nZero
+){
+  return treeNewNode2(
+      pCsr->pTree, pCsr->pRoot, iKey, bDelete, nData, aData, nZero
+  );
 }
 
 static int treeInsert(
@@ -676,6 +687,17 @@ static int treeInsert(
   }
 
   return rc;
+}
+
+int sqlite3HctTreeUpdateMeta(
+  HctTree *pTree,
+  const u8 *aMeta,                /* Meta data */
+  int nMeta                       /* Size of meta data in bytes */
+){
+  HctTreeRoot *pRoot = hctTreeFindRoot(pTree, 2);
+  HctTreeNode *pNew = treeNewNode2(pTree, pRoot, 0, 0, nMeta, aMeta, 0);
+  treeInsertNode(pTree, pTree->iStmt<=0, 0, 0, pNew);
+  return SQLITE_OK;
 }
 
 /*

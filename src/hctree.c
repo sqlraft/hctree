@@ -94,7 +94,6 @@ struct HBtree {
 */
 #define HCT_METASTATE_NONE  0
 #define HCT_METASTATE_READ  1
-#define HCT_METASTATE_DIRTY 2
 
 /*
 ** A schema op.
@@ -1112,17 +1111,6 @@ static int btreeFlushData(HBtree *p, int bRollback){
   if( bRollback ) sqlite3HctDbRollbackMode(p->pHctDb, 1);
   if( bRollback && p->nRollbackOp==0 ){
     rc = SQLITE_DONE;
-  }else if( p->eMetaState==HCT_METASTATE_DIRTY ){
-    int nRetry = 0;
-    int nData = SQLITE_N_BTREE_META * 4;
-    rc = sqlite3HctDbInsert(p->pHctDb, 2, 0, 0, 0, nData,(u8*)p->aMeta,&nRetry);
-    if( rc==SQLITE_OK ){
-      rc = sqlite3HctDbInsertFlush(p->pHctDb, &nRetry);
-    }
-    p->nRollbackOp += (bRollback ? -1 : 1);
-    if( rc==SQLITE_OK && bRollback && p->nRollbackOp==0 ){
-      rc = SQLITE_DONE;
-    }
   }
 
   if( rc==SQLITE_OK ){
@@ -1466,6 +1454,7 @@ int sqlite3HctBtreeSavepoint(Btree *pBt, int op, int iSavepoint){
     }else{
       sqlite3HctTreeRollbackTo(p->pHctTree, iSavepoint+2);
       btreeRollbackRoot(p, iSavepoint);
+      p->eMetaState = HCT_METASTATE_NONE;
     }
   }
   return rc;
@@ -2481,8 +2470,28 @@ void sqlite3HctBtreeGetMeta(Btree *pBt, int idx, u32 *pMeta){
     *pMeta = (u32)iSnapshot;
   }else{
     if( p->eMetaState==HCT_METASTATE_NONE ){
-      sqlite3HctDbGetMeta(p->pHctDb, (u8*)p->aMeta, SQLITE_N_BTREE_META*4);
-      p->eMetaState = HCT_METASTATE_READ;
+      int rc = SQLITE_OK;
+      if( p->eTrans==SQLITE_TXN_NONE ){
+        rc = sqlite3HctDbGetMeta(
+            p->pHctDb, (u8*)p->aMeta, SQLITE_N_BTREE_META*4
+        );
+      }else{
+        int res = 0;
+        HBtCursor csr;
+        BtCursor *pCsr = (BtCursor*)&csr;
+        memset(&csr, 0, sizeof(csr));
+
+        sqlite3HctBtreeCursor(pBt, 2, 0, 0, pCsr);
+        rc = sqlite3HctBtreeTableMoveto(pCsr, 0, 0, &res);
+        assert( rc==SQLITE_OK );
+        if( rc==SQLITE_OK && res==0 ){
+          const void *aMeta = 0;
+          u32 nMeta = 0;
+          aMeta = sqlite3HctBtreePayloadFetch(pCsr, &nMeta);
+          memcpy(p->aMeta, aMeta, MAX(nMeta, SQLITE_N_BTREE_META*4));
+        }
+        sqlite3HctBtreeCloseCursor(pCsr);
+      }
     }
     *pMeta = p->aMeta[idx];
   }
@@ -2499,8 +2508,9 @@ int sqlite3HctBtreeUpdateMeta(Btree *pBt, int idx, u32 iMeta){
   u32 dummy;
   sqlite3HctBtreeGetMeta((Btree*)p, 0, &dummy);
   p->aMeta[idx] = iMeta;
-  p->eMetaState = HCT_METASTATE_DIRTY;
-  return SQLITE_OK;
+  return sqlite3HctTreeUpdateMeta(
+      p->pHctTree, (u8*)p->aMeta, SQLITE_N_BTREE_META*4
+  );
 }
 
 static char *hctDbMPrintf(int *pRc, const char *zFormat, ...){

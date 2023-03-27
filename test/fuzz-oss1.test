@@ -15,6 +15,7 @@
 # file only - not the bulk of the SQLite source code and tests.
 #
 #***********************************************************************
+# TESTRUNNER: hct
 #
 # This file contains large and complex schemas obtained from open-source
 # software projects.  The schemas are parsed just to make sure that nothing

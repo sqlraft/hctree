@@ -8,6 +8,8 @@
 #    May you share freely, never taking more than you give.
 #
 #*************************************************************************
+# TESTRUNNER: hct
+#
 # This file implements regression tests for SQLite library.  The
 # focus of this script is testing the FTS4 module.
 #
@@ -60,6 +62,7 @@ do_test fts4aa-1.0 {
 
 # Legacy test cases
 #
+breakpoint
 do_test fts4aa-1.1 {
   db eval {
     SELECT docid FROM t1 EXCEPT SELECT docid FROM t1_docsize

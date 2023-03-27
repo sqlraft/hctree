@@ -5,6 +5,8 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: hct
+#
 # Test that the FTS3 extension does not crash when it encounters a
 # corrupt data structure on disk.
 #

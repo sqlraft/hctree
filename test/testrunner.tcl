@@ -185,6 +185,7 @@ if {[llength $argv]==2
 
     test_suite "hct" -prefix "hct." -files [list] -initialize {
       set ::G(perm:hct) 1
+      set ::G(perm:presql) { PRAGMA page_size = 1024 }
     } -shutdown {
       catch { unset ::G(perm:hct) }
     }
@@ -450,6 +451,7 @@ proc _make_hct_perm {} {
 
   test_suite "hct" -prefix "hct" -files $files -initialize {
     set ::G(perm:hct) 1
+    set ::G(perm:presql) { PRAGMA page_size = 1024 }
   } -shutdown {
     catch { unset ::G(perm:hct) }
   }

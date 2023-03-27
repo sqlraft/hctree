@@ -3,6 +3,8 @@
 # The author disclaims copyright to this source code.
 #
 #*************************************************************************
+# TESTRUNNER: hct
+#
 # This file implements regression tests for SQLite library.  The focus
 # of this script is testing isspace/isalnum/tolower problems with the
 # FTS3 module.  Unfortunately, this code isn't a really principled set

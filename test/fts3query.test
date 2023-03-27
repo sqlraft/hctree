@@ -8,6 +8,7 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: hct
 #
 # This file contains tests of fts3 queries that have been useful during
 # the development process as well as some that have been useful in tracking

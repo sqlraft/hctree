@@ -5,6 +5,8 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: hct
+#
 # This file runs all tests.
 #
 # $Id: fts3.test,v 1.2 2008/07/23 18:17:32 drh Exp $

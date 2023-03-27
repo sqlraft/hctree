@@ -3,6 +3,8 @@
 # The author disclaims copyright to this source code.
 #
 #*************************************************************************
+# TESTRUNNER: hct
+#
 # This file implements tests for prefix-searching in the fts3
 # component of the SQLite library.
 #

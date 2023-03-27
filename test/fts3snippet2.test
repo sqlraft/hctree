@@ -8,6 +8,7 @@
 #    May you share freely, never taking more than you give.
 #
 #*************************************************************************
+# TESTRUNNER: hct
 #
 # The tests in this file test the FTS3 auxillary functions offsets(), 
 # snippet() and matchinfo() work. At time of writing, running this file 

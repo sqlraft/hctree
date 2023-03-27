@@ -123,6 +123,8 @@ void sqlite3HctTreeClear(HctTree *pTree);
 void sqlite3HctTreeCsrIncrblob(HctTreeCsr *pCsr);
 int sqlite3HctTreeCsrReseek(HctTreeCsr *pCsr, int*);
 
+int sqlite3HctTreeUpdateMeta(HctTree*, const u8*, int);
+
 /*************************************************************************
 ** Interface to code in hct_database.c
 */
