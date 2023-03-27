@@ -1,5 +1,5 @@
-C Fix\sproblem\swith\sthe\sschema-cookie\svalue\sand\ssub-transaction\srollback.
-D 2023-03-27T16:39:42.261
+C Add\sgencol1.test\sto\sthe\shct\stests.
+D 2023-03-27T16:40:41.901
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -1182,7 +1182,7 @@ F test/fuzzer2.test 033776d664e09c150cbeee405bca2de7f19259d7c291f9eaba76a1b25211
 F test/fuzzerfault.test f64c4aef4c9e9edf1d6dc0d3f1e65dcc81e67c996403c88d14f09b74807a42bc
 F test/fuzzinvariants.c a153253600b2b33a7d5710d40e89b2ac1373a1912517867fb995a45b2d67dcb8
 F test/gcfault.test dd28c228a38976d6336a3fc42d7e5f1ad060cb8c
-F test/gencol1.test cc0dbb0ee116e5602e18ea7d47f2a0f76b26e09a823b7c36ef254370c2b0f3c1
+F test/gencol1.test 2042dfb045bcb8e9fecd2ba9e62700f57877fd8cd88e038cd55f05aa9708c8e6
 F test/genesis.tcl 1e2e2e8e5cc4058549a154ff1892fe5c9de19f98
 F test/having.test a89236dd8d55aa50c4805f82ac9daf64d477a44d712d8209c118978d0ca21ec9
 F test/hct_begin1.test 202dbeca4c281bc74d00905864b3833209c3a67a2c1dcabb6d7d53c45766a8b4
@@ -2119,8 +2119,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P 7f6ef380cd3ba7671ddc140df16ac92ed226fa3ba8d94809e6c5659a72bab612
-R e4d13c0ce8389bb15b0e58169e38feb3
+P b7b929d44ce21ed81b5d48151dabe7f5638d9c4365afee4081e05110d766f88d
+R 8e853f1b50d443d41a452b523da763ed
 U dan
-Z 0ffc7428cc788e1e6afa7d9efe87ac1a
+Z 14b28140b320753ddea1d45ca58f40f3
 # Remove this line to create a well-formed Fossil manifest.
