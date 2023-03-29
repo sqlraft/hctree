@@ -8,6 +8,8 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: hct
+#
 # This file implements regression tests for SQLite library. The focus
 # is testing of where.c. More specifically, the focus is the optimization
 # of WHERE clauses that feature the OR operator.
