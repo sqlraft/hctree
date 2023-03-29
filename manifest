@@ -1,5 +1,5 @@
-C Enable\smore\stest\sscripts.\sMake\ssome\sfixes.
-D 2023-03-29T12:42:25.407
+C Fix\sa\sproblem\swith\sdetecting\sSQLITE_CONSTRAINT_PINNED\serrors;
+D 2023-03-29T16:46:49.129
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -604,7 +604,7 @@ F src/hct_pman.c 992650137547caae7f2158374d628c4ead3f8fc2990ea8b11c0a0d6903c5ccf
 F src/hct_record.c 54b0d564be580ca29a54312f9a9abdba193b234ac56ec65a7e40109107041b25
 F src/hct_stats.c 3273fc59855be16ca383522f47c24131c5707c3bef7795f56aa5ac440aae98c0
 F src/hct_tmap.c 8c1268442a962f2d6d777253134f7650cdcc27634c9b6698d43a90f20887281a
-F src/hct_tree.c 8f5e7b8180382915936efab21b09aefd2041f5f5610847d400faa17d5abe7bef
+F src/hct_tree.c 37cf5fe97dc25ee3c05fc3fe0ac4a04c72b7cd414284a646e32d6a329d70f609
 F src/hctree.c bdd3cccdc7c24a9d7bbd8aa733cbc1770a3019e96e511d44321c4fdb7569eb19
 F src/hwtime.h b638809e083b601b618df877b2e89cb87c2a47a01f4def10be4c4ebb54664ac7
 F src/in-operator.md 10cd8f4bcd225a32518407c2fb2484089112fd71
@@ -2119,8 +2119,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P 7749cf859fbb7e7dc395cc10443e077ec97fb0f167317369b92751b582293448
-R 2f77e28c1ede33dd738919e2ffaf3bd2
+P 21d989d5189cee931661a9f03d220d1f918b25a1b9594327ab4561d7e1a88cb7
+R da9d420401c1e931a7eb3c4a2b3a1706
 U dan
-Z cc1a1368d51d6c90f21836871631f5c1
+Z 89f91d06270cf4a8bc19234319e0734f
 # Remove this line to create a well-formed Fossil manifest.

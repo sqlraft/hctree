@@ -663,6 +663,10 @@ static int treeInsert(
     }
     pCsr->bPin = 0;
     rc = hctSaveCursors(pCsr->pRoot, 0, (pCsr->eIncrblob==0), iKey);
+    if( rc==SQLITE_OK && bPinSave ){
+      int dummy;
+      rc = hctRestoreCursor(pCsr, &dummy);
+    }
     pCsr->bPin = bPinSave;
     if( rc==SQLITE_OK ){
       rc = treeInsertNode(pTree, pTree->iStmt<=0, pKey, iKey, pNew);
