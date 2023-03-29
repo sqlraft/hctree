@@ -8,6 +8,8 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: hct
+#
 # This file implements regression tests for SQLite library. Specifically,
 # it tests that ticket [fa7bf5ec94801e7e2030e41eefe5d9dd96eaacfd] has
 # been resolved.

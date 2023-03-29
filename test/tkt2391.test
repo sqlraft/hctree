@@ -9,6 +9,8 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: hct
+#
 # $Id: tkt2391.test,v 1.1 2007/05/29 12:11:30 danielk1977 Exp $
 
 set testdir [file dirname $argv0]

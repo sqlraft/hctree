@@ -377,7 +377,6 @@ static void hctTreeFixInsert(
   }
 }
 
-#if 1
 static int hctSaveCursors(
   HctTreeRoot *pRoot, 
   HctTreeCsr *pExcept,
@@ -408,24 +407,6 @@ static int hctSaveCursors(
   return rc;
 }
 
-#else
-static int hctSaveCursors(HctTreeRoot *pRoot, HctTreeCsr *pExcept){
-  int rc = SQLITE_OK;
-  HctTreeCsr *pCsr;
-  for(pCsr=pRoot->pCsrList; pCsr; pCsr=pCsr->pCsrNext){
-    if( pCsr!=pExcept && pCsr->pReseek==0 && pCsr->iNode>=0 ){
-      if( pCsr->bPin ){
-        return SQLITE_CONSTRAINT_PINNED;
-      }
-      pCsr->pReseek = pCsr->apNode[pCsr->iNode];
-      pCsr->pReseek->nRef++;
-    }else if( pCsr!=pExcept && pCsr->pReseek==0 ){
-      pCsr->pReseek = TREE_RESEEK_EOF;
-    }
-  }
-  return rc;
-}
-#endif
 
 static int hctTreeCsrSeekInt(
   HctTreeCsr *pCsr, 
@@ -675,11 +656,14 @@ static int treeInsert(
     rc = SQLITE_NOMEM;
   }else{
     int nSave = 0;
+    int bPinSave = pCsr->bPin;
     if( pKey ){
       nSave = pKey->nField;
       sqlite3HctDbRecordTrim(pKey);
     }
+    pCsr->bPin = 0;
     rc = hctSaveCursors(pCsr->pRoot, 0, (pCsr->eIncrblob==0), iKey);
+    pCsr->bPin = bPinSave;
     if( rc==SQLITE_OK ){
       rc = treeInsertNode(pTree, pTree->iStmt<=0, pKey, iKey, pNew);
     }

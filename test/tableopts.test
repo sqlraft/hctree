@@ -8,6 +8,7 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: hct
 #
 # Test the operation of table-options in the WITH clause of the
 # CREATE TABLE statement.

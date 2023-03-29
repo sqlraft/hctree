@@ -8,6 +8,7 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: hct
 #
 # Verify that when columns named "rowid", "oid", and "_rowid_" appear
 # in a table as ordinary columns (not as the INTEGER PRIMARY KEY) then

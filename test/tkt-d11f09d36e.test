@@ -8,6 +8,7 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: hct
 #
 # Test that the bug reported by ticket d11f09d36e7cb0821e01f4 has
 # been fixed.

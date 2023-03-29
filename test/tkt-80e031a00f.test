@@ -8,6 +8,8 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: hct
+#
 # This file implements regression tests for SQLite library. Specifically,
 # it tests that ticket [80e031a00f45dca877ed92b225209cfa09280f4f] has been
 # resolved.  That ticket is about IN and NOT IN operators with empty-set

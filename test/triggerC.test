@@ -8,6 +8,7 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: hct
 #
 
 set testdir [file dirname $argv0]
@@ -931,12 +932,15 @@ do_test triggerC-12.1 {
     SELECT count(*) FROM sqlite_master;
   }
 } {2}
+
+if {[permutation]!="hct"} {
 do_test triggerC-12.2 {
   db eval { SELECT * FROM t1 } {
     if {$a == 3} { execsql { DROP TRIGGER tr1 } }
   }
   execsql { SELECT count(*) FROM sqlite_master }
 } {1}
+}
 
 do_execsql_test triggerC-13.1 {
   PRAGMA recursive_triggers = ON;

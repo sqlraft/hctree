@@ -8,6 +8,7 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: hct
 #
 # Ticket #3773:  Be careful not to over-optimize when a compound
 # subquery contains an ORDER BY clause.

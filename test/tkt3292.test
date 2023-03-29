@@ -8,6 +8,8 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: hct
+#
 # This file implements regression tests for SQLite library. 
 # Specifically, it tests the behavior of the sqlite3VdbeRecordCompare()
 # routine in cases where the rowid is 0 or 1 in file format 4

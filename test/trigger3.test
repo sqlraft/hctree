@@ -6,6 +6,7 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: hct
 #
 # This file tests the RAISE() function.
 #

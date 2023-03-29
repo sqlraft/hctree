@@ -8,6 +8,7 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: hct
 #
 # This file implements tests to verify that ticket [cbd054fa6b] has been
 # fixed.  

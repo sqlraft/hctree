@@ -8,6 +8,7 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: hct
 #
 # This file is to test that ticket #2820 has been fixed.
 # Ticket #2820 observes that a DROP TABLE statement that

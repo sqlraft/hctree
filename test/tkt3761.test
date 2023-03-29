@@ -8,6 +8,7 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: hct
 #
 # Ticket #3761:  Make sure that an incremental vacuum on an in-memory
 # database can be rolled back.
