@@ -8,6 +8,8 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: hct
+#
 # This file implements regression tests for SQLite library.
 #
 # $Id: vtab5.test,v 1.8 2008/07/12 14:52:21 drh Exp $

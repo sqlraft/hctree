@@ -8,6 +8,8 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: hct
+#
 # This file implements regression tests for SQLite library.  The
 # focus of this file is is verifying that the xUpdate, xSync, xCommit
 # and xRollback methods are only invoked after an xBegin or xCreate.

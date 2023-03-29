@@ -8,6 +8,8 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: hct
+#
 # This file implements tests of writing to WITHOUT ROWID virtual tables
 # using the tclvar eponymous virtual table.
 #
