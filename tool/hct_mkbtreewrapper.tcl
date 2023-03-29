@@ -97,6 +97,7 @@ set check_for_null_object {
   sqlite3BtreeTripAllCursors
   sqlite3BtreeSavepoint
   sqlite3BtreeSecureDelete
+  sqlite3BtreeCheckpoint
 }
 
 # Do not generate a wrapper for any of these functions.

@@ -364,6 +364,7 @@ int sqlite3BtreeIntegrityCheck(sqlite3 *a, Btree *p, Pgno *b, int c, int d, int 
   return p->pMethods->xBtreeIntegrityCheck(a, p, b, c, d, e, f);
 }
 int sqlite3BtreeCheckpoint(Btree *p, int a, int *b, int *c){
+  if( p==0 ) return 0;
   return p->pMethods->xBtreeCheckpoint(p, a, b, c);
 }
 static const BtCursorMethods hct_btcursor_methods = {
