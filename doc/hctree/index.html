@@ -96,7 +96,11 @@ is incomplete. The current code has, at least, the following shortcomings:
   <li><p> Transactions that do not fit entirely in main memory (e.g. large
           CREATE INDEX statements) are not handled efficiently.
 
-  <li><p> No support for replication is implemented.
+  <li><p> No support for replication is implemented. There are 
+          <a href=hctree_bedrock.md>extensive notes</a> regarding the kinds
+          of features that might be required to support high-concurrency
+          replication in the <a href=https://bedrockdb.com>bedrock database</a>
+          system though.
 
   <li><p> The prototype library only works on POSIX, not win32, systems.
 
@@ -275,5 +279,35 @@ times already, or perhaps because they contain schema modifications).
 
 <p>In all cases above, "spin-lock" actually means invoke the SQLite xBusy
 callback if one is registered, or to literally spin-lock otherwise.
+
+<h2 id=differences> Other Differences From Stock SQLite</h2>
+
+When using an hctree database:
+
+<ol>
+  <li> A transaction cannot be committed while there are ongoing SELECT
+       statements.
+
+  <li> A "DELETE FROM tbl" statement requires the collation sequences
+       associated with the table be registered. Regular SQLite does not
+       require this.
+
+  <li> REINDEX has less chance of fixing a corrupt index.
+
+  <li> The value returned by "PRAGMA data_version" changes even when the
+       database is modified by the same db connection.
+
+  <li> "PRAGMA locking_mode" is a no-op.
+
+  <li> The backup API does not work.
+
+  <li> The VACUUM command does not work.
+</ol>
+
+These will most likely all eventually be fixed. Issue (1) might be fixed with
+the proviso that it is only possible to commit a transaction with open SELECT
+statements if no other connection has written to the db since the transaction
+was opened.
+
 
 

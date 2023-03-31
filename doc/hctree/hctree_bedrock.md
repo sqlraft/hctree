@@ -611,13 +611,58 @@ Multiple threads can do this concurrently.
 6.\ Conclusion
 -----------------------
 
-The sections above identify the following hctree features:
+The approach described above requires the following new hctree features:
 
-  *  **Follower mode**
+  1.  **Journal Entry Support**
 
-  *  **Journal Entry Support**
+    *  As part of a COMMIT operation on a leader node, after a CID is assigned
+       to the transaction hctree should write a journal entry to a special
+       table in the database.
 
-  *  **Post-validation Callback**
+    *  If transaction validation succeeds and the transaction is committed, the
+       journal entry is committed to the db along with it.
+
+    *  If transaction validation fails and the transaction is rolled back, an
+       empty entry is written to the journal table instead.
+
+  2.  **Follower Mode Writes**
+
+    *  Follower mode writes are used to apply journal entries to a follower
+       database.
+
+    *  For a follower mode write, the CID value is specified by the writer, not
+       generated internally by hctree.
+
+    *  There is no transaction validation for follower mode transactions
+       (although a post-validation callback may still be issued - see below).
+       Instead, writers follow the rule of never clobbering newer data with
+       older data.
+
+  3.  **Follower Mode Snapshot Availability Queries**
+
+    *  On a follower node, a client must be able to query for the CID of 
+       the newest snapshot available.
+
+  4.  **Post-validation Callback**
+
+    *  The post-validation - or perhaps "custom validation" - callback is
+       issued by hctree after a transaction is validated but before it is
+       committed.
+
+    *  It returns a value indicating whether the transaction should be
+       committed or rolled back.
+
+    *  The journal entry data and transaction CID are available to the callback
+       code.
+
+    *  Any reader that attempts to read a key while the transaction that wrote
+       it is in the post-validation callback blocks until the transaction is either
+       committed or rolled back (just as readers do if the writer transaction
+       is still undergoing local validation).
+
+    *  Other readers - those that do not read any keys written by the
+       transaction still in the post-validation callback - may proceed as
+       normal.
 
 
 
