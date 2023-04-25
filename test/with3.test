@@ -111,6 +111,7 @@ ifcapable analyze {
     |  `--RECURSIVE STEP
     |     `--SCAN cnt
     |--SCAN y1
+    |--BLOOM FILTER ON cnt (i=?)
     `--SEARCH cnt USING AUTOMATIC COVERING INDEX (i=?)
   }]
 }

@@ -2610,6 +2610,8 @@ static int pager_truncate(Pager *pPager, Pgno nPage){
   int rc = SQLITE_OK;
   assert( pPager->eState!=PAGER_ERROR );
   assert( pPager->eState!=PAGER_READER );
+  PAGERTRACE(("Truncate %d npage %u\n", PAGERID(pPager), nPage));
+
   
   if( isOpen(pPager->fd) 
    && (pPager->eState>=PAGER_WRITER_DBMOD || pPager->eState==PAGER_OPEN) 
@@ -3561,7 +3563,6 @@ void sqlite3PagerShrink(Pager *pPager){
 ** Numeric values associated with these states are OFF==1, NORMAL=2,
 ** and FULL=3.
 */
-#ifndef SQLITE_OMIT_PAGER_PRAGMAS
 void sqlite3PagerSetFlags(
   Pager *pPager,        /* The pager to set safety level for */
   unsigned pgFlags      /* Various flags */
@@ -3596,7 +3597,6 @@ void sqlite3PagerSetFlags(
     pPager->doNotSpill |= SPILLFLAG_OFF;
   }
 }
-#endif
 
 /*
 ** The following global variable is incremented whenever the library
@@ -5000,18 +5000,7 @@ act_like_temp_file:
   pPager->memDb = (u8)memDb;
   pPager->readOnly = (u8)readOnly;
   assert( useJournal || pPager->tempFile );
-  pPager->noSync = pPager->tempFile;
-  if( pPager->noSync ){
-    assert( pPager->fullSync==0 );
-    assert( pPager->extraSync==0 );
-    assert( pPager->syncFlags==0 );
-    assert( pPager->walSyncFlags==0 );
-  }else{
-    pPager->fullSync = 1;
-    pPager->extraSync = 0;
-    pPager->syncFlags = SQLITE_SYNC_NORMAL;
-    pPager->walSyncFlags = SQLITE_SYNC_NORMAL | (SQLITE_SYNC_NORMAL<<2);
-  }
+  sqlite3PagerSetFlags(pPager, (SQLITE_DEFAULT_SYNCHRONOUS+1)|PAGER_CACHESPILL);
   /* pPager->pFirst = 0; */
   /* pPager->pFirstSynced = 0; */
   /* pPager->pLast = 0; */
@@ -5540,6 +5529,10 @@ static int getPageNormal(
     if( !isOpen(pPager->fd) || pPager->dbSize<pgno || noContent ){
       if( pgno>pPager->mxPgno ){
         rc = SQLITE_FULL;
+        if( pgno<=pPager->dbSize ){
+          sqlite3PcacheRelease(pPg);
+          pPg = 0;
+        }
         goto pager_acquire_err;
       }
       if( noContent ){
@@ -5704,10 +5697,12 @@ DbPage *sqlite3PagerLookup(Pager *pPager, Pgno pgno){
 /*
 ** Release a page reference.
 **
-** The sqlite3PagerUnref() and sqlite3PagerUnrefNotNull() may only be
-** used if we know that the page being released is not the last page.
+** The sqlite3PagerUnref() and sqlite3PagerUnrefNotNull() may only be used
+** if we know that the page being released is not the last reference to page1.
 ** The btree layer always holds page1 open until the end, so these first
-** to routines can be used to release any page other than BtShared.pPage1.
+** two routines can be used to release any page other than BtShared.pPage1.
+** The assert() at tag-20230419-2 proves that this constraint is always
+** honored.
 **
 ** Use sqlite3PagerUnrefPageOne() to release page1.  This latter routine
 ** checks the total number of outstanding pages and if the number of
@@ -5723,7 +5718,7 @@ void sqlite3PagerUnrefNotNull(DbPage *pPg){
     sqlite3PcacheRelease(pPg);
   }
   /* Do not use this routine to release the last reference to page1 */
-  assert( sqlite3PcacheRefCount(pPager->pPCache)>0 );
+  assert( sqlite3PcacheRefCount(pPager->pPCache)>0 ); /* tag-20230419-2 */
 }
 void sqlite3PagerUnref(DbPage *pPg){
   if( pPg ) sqlite3PagerUnrefNotNull(pPg);

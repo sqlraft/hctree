@@ -111,9 +111,9 @@ static void explainIndexRange(StrAccum *pStr, WhereLoop *pLoop){
 
 /*
 ** This function is a no-op unless currently processing an EXPLAIN QUERY PLAN
-** command, or if either SQLITE_DEBUG or SQLITE_ENABLE_STMT_SCANSTATUS was
-** defined at compile-time. If it is not a no-op, a single OP_Explain opcode 
-** is added to the output to describe the table scan strategy in pLevel.
+** command, or if stmt_scanstatus_v2() stats are enabled, or if SQLITE_DEBUG 
+** was defined at compile-time. If it is not a no-op, a single OP_Explain
+** opcode is added to the output to describe the table scan strategy in pLevel.
 **
 ** If an OP_Explain opcode is added to the VM, its address is returned.
 ** Otherwise, if no OP_Explain is coded, zero is returned.
@@ -125,8 +125,8 @@ int sqlite3WhereExplainOneScan(
   u16 wctrlFlags                  /* Flags passed to sqlite3WhereBegin() */
 ){
   int ret = 0;
-#if !defined(SQLITE_DEBUG) && !defined(SQLITE_ENABLE_STMT_SCANSTATUS)
-  if( sqlite3ParseToplevel(pParse)->explain==2 )
+#if !defined(SQLITE_DEBUG)
+  if( sqlite3ParseToplevel(pParse)->explain==2 || IS_STMT_SCANSTATUS(pParse->db) )
 #endif
   {
     SrcItem *pItem = &pTabList->a[pLevel->iFrom];
@@ -292,27 +292,29 @@ void sqlite3WhereAddScanStatus(
   WhereLevel *pLvl,               /* Level to add scanstatus() entry for */
   int addrExplain                 /* Address of OP_Explain (or 0) */
 ){
-  const char *zObj = 0;
-  WhereLoop *pLoop = pLvl->pWLoop;
-  int wsFlags = pLoop->wsFlags;
-  int viaCoroutine = 0;
+  if( IS_STMT_SCANSTATUS( sqlite3VdbeDb(v) ) ){
+    const char *zObj = 0;
+    WhereLoop *pLoop = pLvl->pWLoop;
+    int wsFlags = pLoop->wsFlags;
+    int viaCoroutine = 0;
 
-  if( (wsFlags & WHERE_VIRTUALTABLE)==0  &&  pLoop->u.btree.pIndex!=0 ){
-    zObj = pLoop->u.btree.pIndex->zName;
-  }else{
-    zObj = pSrclist->a[pLvl->iFrom].zName;
-    viaCoroutine = pSrclist->a[pLvl->iFrom].fg.viaCoroutine;
-  }
-  sqlite3VdbeScanStatus(
-      v, addrExplain, pLvl->addrBody, pLvl->addrVisit, pLoop->nOut, zObj
-  );
-
-  if( viaCoroutine==0 ){
-    if( (wsFlags & (WHERE_MULTI_OR|WHERE_AUTO_INDEX))==0 ){
-      sqlite3VdbeScanStatusRange(v, addrExplain, -1, pLvl->iTabCur);
+    if( (wsFlags & WHERE_VIRTUALTABLE)==0  &&  pLoop->u.btree.pIndex!=0 ){
+      zObj = pLoop->u.btree.pIndex->zName;
+    }else{
+      zObj = pSrclist->a[pLvl->iFrom].zName;
+      viaCoroutine = pSrclist->a[pLvl->iFrom].fg.viaCoroutine;
     }
-    if( wsFlags & WHERE_INDEXED ){
-      sqlite3VdbeScanStatusRange(v, addrExplain, -1, pLvl->iIdxCur);
+    sqlite3VdbeScanStatus(
+        v, addrExplain, pLvl->addrBody, pLvl->addrVisit, pLoop->nOut, zObj
+    );
+
+    if( viaCoroutine==0 ){
+      if( (wsFlags & (WHERE_MULTI_OR|WHERE_AUTO_INDEX))==0 ){
+        sqlite3VdbeScanStatusRange(v, addrExplain, -1, pLvl->iTabCur);
+      }
+      if( wsFlags & WHERE_INDEXED ){
+        sqlite3VdbeScanStatusRange(v, addrExplain, -1, pLvl->iIdxCur);
+      }
     }
   }
 }
@@ -489,68 +491,75 @@ static Expr *removeUnindexableInClauseTerms(
   Expr *pX              /* The IN expression to be reduced */
 ){
   sqlite3 *db = pParse->db;
+  Select *pSelect;            /* Pointer to the SELECT on the RHS */
   Expr *pNew;
   pNew = sqlite3ExprDup(db, pX, 0);
   if( db->mallocFailed==0 ){
-    ExprList *pOrigRhs;         /* Original unmodified RHS */
-    ExprList *pOrigLhs;         /* Original unmodified LHS */
-    ExprList *pRhs = 0;         /* New RHS after modifications */
-    ExprList *pLhs = 0;         /* New LHS after mods */
-    int i;                      /* Loop counter */
-    Select *pSelect;            /* Pointer to the SELECT on the RHS */
+    for(pSelect=pNew->x.pSelect; pSelect; pSelect=pSelect->pPrior){
+      ExprList *pOrigRhs;         /* Original unmodified RHS */
+      ExprList *pOrigLhs = 0;     /* Original unmodified LHS */
+      ExprList *pRhs = 0;         /* New RHS after modifications */
+      ExprList *pLhs = 0;         /* New LHS after mods */
+      int i;                      /* Loop counter */
 
-    assert( ExprUseXSelect(pNew) );
-    pOrigRhs = pNew->x.pSelect->pEList;
-    assert( pNew->pLeft!=0 );
-    assert( ExprUseXList(pNew->pLeft) );
-    pOrigLhs = pNew->pLeft->x.pList;
-    for(i=iEq; i<pLoop->nLTerm; i++){
-      if( pLoop->aLTerm[i]->pExpr==pX ){
-        int iField;
-        assert( (pLoop->aLTerm[i]->eOperator & (WO_OR|WO_AND))==0 );
-        iField = pLoop->aLTerm[i]->u.x.iField - 1;
-        if( pOrigRhs->a[iField].pExpr==0 ) continue; /* Duplicate PK column */
-        pRhs = sqlite3ExprListAppend(pParse, pRhs, pOrigRhs->a[iField].pExpr);
-        pOrigRhs->a[iField].pExpr = 0;
-        assert( pOrigLhs->a[iField].pExpr!=0 );
-        pLhs = sqlite3ExprListAppend(pParse, pLhs, pOrigLhs->a[iField].pExpr);
-        pOrigLhs->a[iField].pExpr = 0;
+      assert( ExprUseXSelect(pNew) );
+      pOrigRhs = pSelect->pEList;
+      assert( pNew->pLeft!=0 );
+      assert( ExprUseXList(pNew->pLeft) );
+      if( pSelect==pNew->x.pSelect ){
+        pOrigLhs = pNew->pLeft->x.pList;
       }
-    }
-    sqlite3ExprListDelete(db, pOrigRhs);
-    sqlite3ExprListDelete(db, pOrigLhs);
-    pNew->pLeft->x.pList = pLhs;
-    pNew->x.pSelect->pEList = pRhs;
-    if( pLhs && pLhs->nExpr==1 ){
-      /* Take care here not to generate a TK_VECTOR containing only a
-      ** single value. Since the parser never creates such a vector, some
-      ** of the subroutines do not handle this case.  */
-      Expr *p = pLhs->a[0].pExpr;
-      pLhs->a[0].pExpr = 0;
-      sqlite3ExprDelete(db, pNew->pLeft);
-      pNew->pLeft = p;
-    }
-    pSelect = pNew->x.pSelect;
-    if( pSelect->pOrderBy ){
-      /* If the SELECT statement has an ORDER BY clause, zero the 
-      ** iOrderByCol variables. These are set to non-zero when an 
-      ** ORDER BY term exactly matches one of the terms of the 
-      ** result-set. Since the result-set of the SELECT statement may
-      ** have been modified or reordered, these variables are no longer 
-      ** set correctly.  Since setting them is just an optimization, 
-      ** it's easiest just to zero them here.  */
-      ExprList *pOrderBy = pSelect->pOrderBy;
-      for(i=0; i<pOrderBy->nExpr; i++){
-        pOrderBy->a[i].u.x.iOrderByCol = 0;
+      for(i=iEq; i<pLoop->nLTerm; i++){
+        if( pLoop->aLTerm[i]->pExpr==pX ){
+          int iField;
+          assert( (pLoop->aLTerm[i]->eOperator & (WO_OR|WO_AND))==0 );
+          iField = pLoop->aLTerm[i]->u.x.iField - 1;
+          if( pOrigRhs->a[iField].pExpr==0 ) continue; /* Duplicate PK column */
+          pRhs = sqlite3ExprListAppend(pParse, pRhs, pOrigRhs->a[iField].pExpr);
+          pOrigRhs->a[iField].pExpr = 0;
+          if( pOrigLhs ){
+            assert( pOrigLhs->a[iField].pExpr!=0 );
+            pLhs = sqlite3ExprListAppend(pParse,pLhs,pOrigLhs->a[iField].pExpr);
+            pOrigLhs->a[iField].pExpr = 0;
+          }
+        }
       }
-    }
+      sqlite3ExprListDelete(db, pOrigRhs);
+      if( pOrigLhs ){
+        sqlite3ExprListDelete(db, pOrigLhs);
+        pNew->pLeft->x.pList = pLhs;
+      }
+      pSelect->pEList = pRhs;
+      if( pLhs && pLhs->nExpr==1 ){
+        /* Take care here not to generate a TK_VECTOR containing only a
+        ** single value. Since the parser never creates such a vector, some
+        ** of the subroutines do not handle this case.  */
+        Expr *p = pLhs->a[0].pExpr;
+        pLhs->a[0].pExpr = 0;
+        sqlite3ExprDelete(db, pNew->pLeft);
+        pNew->pLeft = p;
+      }
+      if( pSelect->pOrderBy ){
+        /* If the SELECT statement has an ORDER BY clause, zero the 
+        ** iOrderByCol variables. These are set to non-zero when an 
+        ** ORDER BY term exactly matches one of the terms of the 
+        ** result-set. Since the result-set of the SELECT statement may
+        ** have been modified or reordered, these variables are no longer 
+        ** set correctly.  Since setting them is just an optimization, 
+        ** it's easiest just to zero them here.  */
+        ExprList *pOrderBy = pSelect->pOrderBy;
+        for(i=0; i<pOrderBy->nExpr; i++){
+          pOrderBy->a[i].u.x.iOrderByCol = 0;
+        }
+      }
 
 #if 0
-    printf("For indexing, change the IN expr:\n");
-    sqlite3TreeViewExpr(0, pX, 0);
-    printf("Into:\n");
-    sqlite3TreeViewExpr(0, pNew, 0);
+      printf("For indexing, change the IN expr:\n");
+      sqlite3TreeViewExpr(0, pX, 0);
+      printf("Into:\n");
+      sqlite3TreeViewExpr(0, pNew, 0);
 #endif
+    }
   }
   return pNew;
 }
@@ -1002,11 +1011,12 @@ static int codeCursorHintIsOrFunction(Walker *pWalker, Expr *pExpr){
 */
 static int codeCursorHintFixExpr(Walker *pWalker, Expr *pExpr){
   int rc = WRC_Continue;
+  int reg;
   struct CCurHint *pHint = pWalker->u.pCCurHint;
   if( pExpr->op==TK_COLUMN ){
     if( pExpr->iTable!=pHint->iTabCur ){
-      int reg = ++pWalker->pParse->nMem;   /* Register for column value */
-      sqlite3ExprCode(pWalker->pParse, pExpr, reg);
+      reg = ++pWalker->pParse->nMem;   /* Register for column value */
+      reg = sqlite3ExprCodeTarget(pWalker->pParse, pExpr, reg);
       pExpr->op = TK_REGISTER;
       pExpr->iTable = reg;
     }else if( pHint->pIdx!=0 ){
@@ -1014,15 +1024,12 @@ static int codeCursorHintFixExpr(Walker *pWalker, Expr *pExpr){
       pExpr->iColumn = sqlite3TableColumnToIndex(pHint->pIdx, pExpr->iColumn);
       assert( pExpr->iColumn>=0 );
     }
-  }else if( pExpr->op==TK_AGG_FUNCTION ){
-    /* An aggregate function in the WHERE clause of a query means this must
-    ** be a correlated sub-query, and expression pExpr is an aggregate from
-    ** the parent context. Do not walk the function arguments in this case.
-    **
-    ** todo: It should be possible to replace this node with a TK_REGISTER
-    ** expression, as the result of the expression must be stored in a 
-    ** register at this point. The same holds for TK_AGG_COLUMN nodes. */
+  }else if( pExpr->pAggInfo ){
     rc = WRC_Prune;
+    reg = ++pWalker->pParse->nMem;   /* Register for column value */
+    reg = sqlite3ExprCodeTarget(pWalker->pParse, pExpr, reg);
+    pExpr->op = TK_REGISTER;
+    pExpr->iTable = reg;
   }
   return rc;
 }
@@ -1124,7 +1131,7 @@ static void codeCursorHint(
   }
   if( pExpr!=0 ){
     sWalker.xExprCallback = codeCursorHintFixExpr;
-    sqlite3WalkExpr(&sWalker, pExpr);
+    if( pParse->nErr==0 ) sqlite3WalkExpr(&sWalker, pExpr);
     sqlite3VdbeAddOp4(v, OP_CursorHint, 
                       (sHint.pIdx ? sHint.iIdxCur : sHint.iTabCur), 0, 0,
                       (const char*)pExpr, P4_EXPR);
@@ -1918,7 +1925,7 @@ Bitmask sqlite3WhereCodeOneLoopStart(
         ** guess. */
         addrSeekScan = sqlite3VdbeAddOp1(v, OP_SeekScan, 
                                          (pIdx->aiRowLogEst[0]+9)/10);
-        if( pRangeStart ){
+        if( pRangeStart || pRangeEnd ){
           sqlite3VdbeChangeP5(v, 1);
           sqlite3VdbeChangeP2(v, addrSeekScan, sqlite3VdbeCurrentAddr(v)+1);
           addrSeekScan = 0;
@@ -1959,16 +1966,7 @@ Bitmask sqlite3WhereCodeOneLoopStart(
     assert( pLevel->p2==0 );
     if( pRangeEnd ){
       Expr *pRight = pRangeEnd->pExpr->pRight;
-      if( addrSeekScan ){
-        /* For a seek-scan that has a range on the lowest term of the index,
-        ** we have to make the top of the loop be code that sets the end
-        ** condition of the range.  Otherwise, the OP_SeekScan might jump
-        ** over that initialization, leaving the range-end value set to the
-        ** range-start value, resulting in a wrong answer.
-        ** See ticket 5981a8c041a3c2f3 (2021-11-02).
-        */
-        pLevel->p2 = sqlite3VdbeCurrentAddr(v);
-      }
+      assert( addrSeekScan==0 );
       codeExprOrVector(pParse, pRight, regBase+nEq, nTop);
       whereLikeOptimizationStringFixup(v, pLevel, pRangeEnd);
       if( (pRangeEnd->wtFlags & TERM_VNULL)==0
@@ -2002,7 +2000,7 @@ Bitmask sqlite3WhereCodeOneLoopStart(
     if( zEndAff ) sqlite3DbNNFreeNN(db, zEndAff);
 
     /* Top of the loop body */
-    if( pLevel->p2==0 ) pLevel->p2 = sqlite3VdbeCurrentAddr(v);
+    pLevel->p2 = sqlite3VdbeCurrentAddr(v);
 
     /* Check if the index cursor is past the end of the range. */
     if( nConstraint ){

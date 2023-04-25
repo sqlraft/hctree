@@ -25,6 +25,7 @@ Usage:
   where SWITCHES are:
     --jobs NUMBER-OF-JOBS
     --fuzztest
+    --zipvfs ZIPVFS-SOURCE-DIR
 
 Interesting values for PERMUTATION are:
 
@@ -71,26 +72,32 @@ of sub-processes the test script uses to run tests.
 # switch.
 #
 proc guess_number_of_cores {} {
-  set ret 4
+  if {[catch {number_of_cores} ret]} {
+    set ret 4
   
-  if {$::tcl_platform(os)=="Darwin"} {
-    set cmd "sysctl -n hw.logicalcpu"
-  } else {
-    set cmd "nproc"
-  }
-  catch {
-    set fd [open "|$cmd" r]
-    set ret [gets $fd]
-    close $fd
-    set ret [expr $ret]
+    if {$::tcl_platform(os)=="Darwin"} {
+      set cmd "sysctl -n hw.logicalcpu"
+    } else {
+      set cmd "nproc"
+    }
+    catch {
+      set fd [open "|$cmd" r]
+      set ret [gets $fd]
+      close $fd
+      set ret [expr $ret]
+    }
   }
   return $ret
 }
 
 proc default_njob {} {
   set nCore [guess_number_of_cores]
-  set nHelper [expr int($nCore*0.75)]
-  expr $nHelper>0 ? $nHelper : 1
+  if {$nCore<=2} {
+    set nHelper 1
+  } else {
+    set nHelper [expr int($nCore*0.5)]
+  }
+  return $nHelper
 }
 #-------------------------------------------------------------------------
 
@@ -107,6 +114,7 @@ set TRG(patternlist) [list]
 set TRG(cmdline) $argv
 set TRG(reporttime) 2000
 set TRG(fuzztest) 0                 ;# is the fuzztest option present.
+set TRG(zipvfs) ""                  ;# -zipvfs option, if any
 
 switch -nocase -glob -- $tcl_platform(os) {
   *darwin* {
@@ -354,6 +362,10 @@ for {set ii 0} {$ii < [llength $argv]} {incr ii} {
       if {$isLast} { usage }
     } elseif {($n>2 && [string match "$a*" --fuzztest]) || $a=="-f"} {
       set TRG(fuzztest) 1
+    } elseif {($n>2 && [string match "$a*" --zipvfs]) || $a=="-z"} {
+      incr ii
+      set TRG(zipvfs) [lindex $argv $ii]
+      if {$isLast} { usage }
     } else {
       usage
     }
@@ -601,6 +613,12 @@ proc make_new_testset {} {
   global TRG
 
   set tests [testset_patternlist $TRG(patternlist)]
+
+  if {$TRG(zipvfs)!=""} {
+    source [file join $TRG(zipvfs) test zipvfs_testrunner.tcl]
+    set tests [concat $tests [zipvfs_testrunner_testset]]
+  }
+
   r_write_db {
 
     trdb eval $TRG(schema)
@@ -722,13 +740,17 @@ proc launch_another_job {iJob} {
     set builddir [build_to_dirname $b]
     create_or_clear_dir $builddir
 
-    set     cmd [info nameofexec]
-    lappend cmd [file join $testdir releasetest_data.tcl]
-    lappend cmd trscript
-    if {$TRG(platform)=="win"} { lappend cmd -msvc }
-    lappend cmd $b $srcdir
+    if {$b=="Zipvfs"} {
+      set script [zipvfs_testrunner_script]
+    } else {
+      set     cmd [info nameofexec]
+      lappend cmd [file join $testdir releasetest_data.tcl]
+      lappend cmd trscript
+      if {$TRG(platform)=="win"} { lappend cmd -msvc }
+      lappend cmd $b $srcdir
+      set script [exec {*}$cmd]
+    }
 
-    set script [exec {*}$cmd]
     set fd [open [file join $builddir $TRG(make)] w]
     puts $fd $script
     close $fd
@@ -884,6 +906,9 @@ proc run_testset {} {
 sqlite3 trdb $TRG(dbname)
 trdb timeout $TRG(timeout)
 set tm [lindex [time { make_new_testset }] 0]
+if {$TRG(nJob)>1} {
+  puts "splitting work across $TRG(nJob) cores"
+}
 puts "built testset in [expr $tm/1000]ms.."
 run_testset
 trdb close
