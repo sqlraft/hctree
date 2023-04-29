@@ -35,7 +35,6 @@ struct HctFilePage {
   u32 iPg;                        /* logical page number */
   u32 iNewPg;                     /* New physical page number */
   u32 iOldPg;                     /* Original physical page number */
-  int bDelete;                    /* True when page marked for deletion */
   HctFile *pFile;
 };
 
@@ -130,10 +129,6 @@ char *sqlite3HctFileLogFile(HctFile *pFile);
 int sqlite3HctFileStartRecovery(HctFile *pFile, int iStage);
 int sqlite3HctFileFinishRecovery(HctFile *pFile, int iStage, int rc);
 int sqlite3HctFileRecoverFreelists(HctFile *pFile, int nRoot, u32 *aRoot);
-
-const char *sqlite3HctFileDir(HctFile *pFile);
-const char *sqlite3HctFilePath(HctFile *pFile);
-const char *sqlite3HctFileName(HctFile *pFile);
 
 int sqlite3HctFileFindLogs(HctFile*, void*, int(*)(void*, const char*));
 

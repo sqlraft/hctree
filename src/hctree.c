@@ -1503,9 +1503,11 @@ int sqlite3HctBtreeCursor(
     pCur->wrFlag = wrFlag;
     p->pCsrList = pCur;
   }else{
-    assert( pCur->pHctTreeCsr==0 );
+    sqlite3HctTreeCsrClose(pCur->pHctTreeCsr);
+    pCur->pHctTreeCsr = 0;
     pCur->pKeyInfo = 0;
   }
+
   return rc;
 }
 

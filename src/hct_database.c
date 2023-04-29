@@ -2815,10 +2815,11 @@ static void hctDbWriterCleanup(HctDatabase *pDb, HctDbWriter *p, int bRevert){
 
     sqlite3HctFileDebugPrint(pDb->pFile, 
         "writer cleanup height=%d bRevert=%d\n", p->iHeight, bRevert
-        );
+    );
 
     assert_writer_is_ok(pDb, p);
 
+    /* sqlite3HctFilePageUnwrite(&p->fanpg); */
     sqlite3HctFilePageRelease(&p->fanpg);
 
     /* If not reverting, mark the overflow chains in p->delOvfl as free */
@@ -3015,6 +3016,10 @@ static int hctDbInsertFlushWrite(HctDatabase *pDb, HctDbWriter *p){
           hctPageheight(root.aNew)+1, pPg0->iPg, root.aNew, pDb->pgsz
       );
     }
+  }
+
+  if( rc==SQLITE_OK ){
+    rc = sqlite3HctFilePageRelease(&p->fanpg);
   }
 
   /* Loop through the set of pages to write out. They must be
@@ -4561,6 +4566,7 @@ static int hctDbFindOldPage(
   if( pPg==0 ){
     pPg = &p->writepg.aPg[0];
   }
+  assert( pPg->iOldPg!=0 );
   *piOld = pPg->iOldPg;
   *paOld = pPg->aOld;
 
@@ -4581,13 +4587,15 @@ static u32 hctDbMakeFollowPtr(
 ){
   int rc = *pRc;
   HctFilePage pg;
+  u32 iRet = 0;
 
   memset(&pg, 0, sizeof(pg));
   if( rc==SQLITE_OK ){
     rc = sqlite3HctFilePageNewPhysical(pDb->pFile, &pg);
+    iRet = pg.iNewPg;
   }
   if( rc==SQLITE_OK ){
-    rc = sqlite3HctFileClearPhysInUse(pDb->pFile, pg.iNewPg, 0);
+    rc = sqlite3HctFileClearPhysInUse(pDb->pFile, iRet, 0);
   }
   if( rc==SQLITE_OK ){
     HctDbHistoryFan *pFan = (HctDbHistoryFan*)pg.aNew;
@@ -4597,9 +4605,14 @@ static u32 hctDbMakeFollowPtr(
     pFan->iRangeTid0 = pDb->iTid;
     pFan->iFollowTid0 = iFollowTid;
     pFan->pgOld0 = iPg;
+    rc = sqlite3HctFilePageRelease(&pg);
+  }else{
+    sqlite3HctFilePageUnwrite(&pg);
+    sqlite3HctFilePageRelease(&pg);
   }
+
   *pRc = rc;
-  return pg.iNewPg;
+  return iRet;
 }
 
 static int hctDbDelete(
@@ -4906,19 +4919,28 @@ static int hctDbWriteWriteConflict(
     hctDbGetRange(aTarget, iCell, &ptr);
     while( hctDbFollowRangeOld(pDb, &ptr, &bMerge) ){
       HctFilePage pg;
+      const u8 *aOld = 0;
+
+      if( ptr.iOld==pDb->pa.fanpg.iNewPg ){
+        aOld = pDb->pa.fanpg.aNew;
+        memset(&pg, 0, sizeof(pg));
+      }else{
+        rc = sqlite3HctFilePageGetPhysical(pDb->pFile, ptr.iOld, &pg);
+        aOld = pg.aOld;
+      }
+
       /* assert( bMerge==0 || iRangeTid!=pDb->iTid ); */
-      rc = sqlite3HctFilePageGetPhysical(pDb->pFile, ptr.iOld, &pg);
       if( rc==SQLITE_OK ){
         int iCell = 0;
-        if( hctPagetype(pg.aOld)==HCT_PAGETYPE_HISTORY ){
-          iCell = hctDbFanSearch(&rc, pDb, pg.aOld, pKey, iKey);
+        if( hctPagetype(aOld)==HCT_PAGETYPE_HISTORY ){
+          iCell = hctDbFanSearch(&rc, pDb, aOld, pKey, iKey);
         }else{
           int bExact = 0;
-          rc = hctDbLeafSearch(pDb, pg.aOld, iKey, pKey, &iCell, &bExact);
+          rc = hctDbLeafSearch(pDb, aOld, iKey, pKey, &iCell, &bExact);
           if( rc==SQLITE_OK && bExact ){
             if( bMerge ){
               HctDbCell cell;
-              hctDbCellGetByIdx(pDb, pg.aOld, iCell, &cell);
+              hctDbCellGetByIdx(pDb, aOld, iCell, &cell);
               if( hctDbTidIsVisible(pDb, cell.iTid) ) rc = HCT_SQLITE_BUSY;
             }
             sqlite3HctFilePageRelease(&pg);
@@ -4932,7 +4954,7 @@ static int hctDbWriteWriteConflict(
           }
         }
 
-        hctDbGetRange(pg.aOld, iCell, &ptr);
+        hctDbGetRange(aOld, iCell, &ptr);
         sqlite3HctFilePageRelease(&pg);
       }else{
         break;
@@ -5105,6 +5127,7 @@ nCall++;
     if( p->iHeight==0 && (bClobber || bDel) ){
       rc = hctDbFindOldPage(pDb, p, pRec, iKey, &op.iOldPg, &op.aOldPg);
       if( rc!=SQLITE_OK ) goto insert_out;
+      assert( op.iOldPg!=0 );
     }
 
     if( bDel && p->iHeight==0 ){
@@ -5233,8 +5256,7 @@ nCall++;
     assert_page_is_ok(aTarget, pDb->pgsz);
     assert( op.iInsert>=0 );
     
-//char *z = sqlite3_mprintf("before %d (physical=%d)", p->writepg.aPg[iPg].iPg, p->writepg.aPg[iPg].iNewPg);
-// print_out_page(z, aTarget, pDb->pgsz);
+    /* print_out_page("1", aTarget, pDb->pgsz); */
     if( bUpdateInPlace==0 ){
       hctDbInsertEntry(pDb, aTarget, op.iInsert, op.aEntry, op.nEntry);
     }
@@ -5255,9 +5277,8 @@ nCall++;
       pE->flags = op.entryFlags;
       pE->iChildPg = iChildPg;
     }
-//z = sqlite3_mprintf("after %d (physical=%d)", p->writepg.aPg[iPg].iPg, p->writepg.aPg[iPg].iNewPg);
-//print_out_page(z, aTarget, pDb->pgsz);
 
+    /* print_out_page("2", aTarget, pDb->pgsz); */
     assert_page_is_ok(aTarget, pDb->pgsz);
   }
 

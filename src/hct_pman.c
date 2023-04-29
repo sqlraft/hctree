@@ -620,6 +620,7 @@ void sqlite3HctPManFreePg(
 ){
   int rc = SQLITE_OK;
   pman_debug(pClient, "free", bLogical, iPg, iTid);
+  assert( iPg>0 );
   rc = hctPManMakeSpace(pClient, bLogical, 1);
   if( rc==SQLITE_OK ){
     hctPManAddFree(pClient, bLogical, iPg, iTid);
