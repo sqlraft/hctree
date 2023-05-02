@@ -16,6 +16,7 @@ typedef unsigned int u32;
 
 typedef struct HctConfig HctConfig;
 struct HctConfig {
+  int nDbFile;                    /* Number of files (hct_file.c) */
   int nPageSet;                   /* Used by hct_pman.c */
   int nPageScan;                  /* Used by hct_pman.c */
   int szLogChunk;                 /* Used by hctree.c */
@@ -27,11 +28,15 @@ struct HctConfig {
 #define HCT_TID_MASK  ((((u64)0x00FFFFFF) << 32)|0xFFFFFFFF)
 #define HCT_PGNO_MASK ((u64)0xFFFFFFFF)
 
+#define HCT_MAX_NDBFILE                128
+
+#define HCT_DEFAULT_NDBFILE              1
 #define HCT_DEFAULT_NPAGESET           256
 #define HCT_DEFAULT_NTRYBEFOREUNEVICT  100
 #define HCT_DEFAULT_NPAGESCAN         1024
 #define HCT_DEFAULT_SZLOGCHUNK       16384
 #define HCT_DEFAULT_PAGESIZE          4096
+
 
 
 #include <hctTMapInt.h>

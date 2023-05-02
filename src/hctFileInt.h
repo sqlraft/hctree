@@ -153,4 +153,12 @@ i64 sqlite3HctFileStats(sqlite3*, int, const char**);
 */
 u64 sqlite3HctFileWriteCount(HctFile *pFile);
 
+/*
+** Return the number of files used to store data within the database (the
+** value to return for "PRAGMA hct_ndbfile"). Before returning, set output
+** parameter *pbFixed if the database has been created and the number
+** of files is therefore fixed, or clear it if the db has yet to be created.
+*/
+int sqlite3HctFileNFile(HctFile *pFile, int *pbFixed);
+
 

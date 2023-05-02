@@ -623,6 +623,7 @@ int sqlite3HctBtreeOpen(
     pNew->iNextRoot = 2;
     pNew->db = db;
     pNew->openFlags = flags;
+    pNew->config.nDbFile = HCT_DEFAULT_NDBFILE;
     pNew->config.nPageSet = HCT_DEFAULT_NPAGESET;
     pNew->config.nTryBeforeUnevict = HCT_DEFAULT_NTRYBEFOREUNEVICT;
     pNew->config.nPageScan = HCT_DEFAULT_NPAGESCAN;
@@ -2536,7 +2537,26 @@ int sqlite3HctBtreePragma(Btree *pBt, char **aFnctl){
   const char *zRight = aFnctl[2];
   char *zRet = 0;
 
-  if( 0==sqlite3_stricmp("hct_try_before_unevict", zLeft) ){
+  if( 0==sqlite3_stricmp("hct_ndbfile", zLeft) ){
+    HctFile *pFile = sqlite3HctDbFile(p->pHctDb);
+    int iCurrent = 0;
+    int bFixed = 0;
+    if( zRight ){
+      int iVal = sqlite3Atoi(zRight);
+      if( iVal<1 || iVal>HCT_MAX_NDBFILE ){
+        rc = SQLITE_RANGE;
+      }else{
+        p->config.nDbFile = iVal;
+      }
+    }
+    if( rc==SQLITE_OK ){
+      iCurrent = sqlite3HctFileNFile(pFile, &bFixed);
+      if( bFixed==0 ) iCurrent = p->config.nDbFile;
+      zRet = hctDbMPrintf(&rc, "%d", iCurrent);
+    }
+  }
+
+  else if( 0==sqlite3_stricmp("hct_try_before_unevict", zLeft) ){
     int iVal = 0;
     if( zRight ){
       iVal = sqlite3Atoi(zRight);
