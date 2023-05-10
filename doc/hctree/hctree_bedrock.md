@@ -1,7 +1,7 @@
 
 
-Replication
-===========
+Hctree/Bedrock
+==============
 
 Leader/Follower Replication and Hctree/Bedrock
 ==============================================
