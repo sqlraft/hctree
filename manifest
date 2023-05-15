@@ -1,5 +1,5 @@
-C Add\spage\swith\sideas\sfor\sreplication\sAPIs.
-D 2023-05-10T20:22:42.464
+C Add\ssqlite3hct.h,\scontaining\sthe\ssqlite3_hct_journal_xxx()\sinterfaces.
+D 2023-05-15T19:14:53.837
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -666,6 +666,7 @@ F src/shell.c.in e4762c17316110d4b65afac3572a4d134539a4178ac2afe4821de23f509a728
 F src/sqlite.h.in e54d87c27e75ae07acaec3249e0e008dbf5791771393b21d9c719f9ae3236fa2
 F src/sqlite3.rc 5121c9e10c3964d5755191c80dd1180c122fc3a8
 F src/sqlite3ext.h da473ce2b3d0ae407a6300c4a164589b9a6bfdbec9462688a8593ff16f3bb6e4
+F src/sqlite3hct.h 7acc2f6a3a69835e833c99233a75ad88cb303a246ffe5594fcc8259ca2a8fbfd
 F src/sqliteInt.h 3097a3037e475213dae75c8bd127fb9f39dd699e1adb83d6ffab9d06dd2d5d51
 F src/sqliteLimit.h d7323ffea5208c6af2734574bae933ca8ed2ab728083caa117c9738581a31657
 F src/status.c 160c445d7d28c984a0eae38c144f6419311ed3eace59b44ac6dafc20db4af749
@@ -2135,8 +2136,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P 51f720a4044385be68dc4086a3869819ee0b76f3874f3dc473858349eb779a95
-R 0eb43ed558742efc16ff6af0a785ffbc
+P ce54fd735b6da35c73f217889fc1f59df75bb96e86238f5763f8cf558456cf51
+R 41b1630ca5870656c471fe371d75c8b2
 U dan
-Z 3c100877698565575794b47cfc6350f7
+Z 55990a835d95fc31b1293dfac3754158
 # Remove this line to create a well-formed Fossil manifest.

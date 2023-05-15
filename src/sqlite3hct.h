@@ -1,0 +1,102 @@
+/*
+** 2023 May 16
+**
+** The author disclaims copyright to this source code.  In place of
+** a legal notice, here is a blessing:
+**
+**    May you do good and not evil.
+**    May you find forgiveness for yourself and forgive others.
+**    May you share freely, never taking more than you give.
+**
+*************************************************************************
+*/
+
+
+
+#ifndef SQLITE3HCT_H
+#define SQLITE3HCT_H
+
+/*
+** Make sure we can call this stuff from C++.
+*/
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#define SQLITE_HCT_JOURNAL_HASHSIZE 16
+
+/*
+** Initialize the main database for replication.
+*/
+int sqlite3_hct_journal_init(sqlite3 *db);
+
+/*
+** Write a transaction into the database.
+*/
+int sqlite3_hct_journal_write(
+  sqlite3 *db,                    /* Write to "main" db of this handle */
+  i64 iCid,
+  const char *zSchema,
+  const void *pData, int nData,
+  const void *pSchemaVersion
+);
+
+/*
+** Write empty records for any missing journal entries with cid values
+** less than or equal to iCid.
+*/
+int sqlite3_hct_journal_patchto(sqlite3 *db, i64 iCid);
+
+/*
+** Set output variable (*piCid) to the CID of the newest available 
+** database snapshot. Return SQLITE_OK if successful, or an SQLite
+** error code if something goes wrong.
+*/
+int sqlite3_hct_journal_snapshot(sqlite3 *db, i64 *piCid);
+
+/*
+** Register a custom validation callback with the database handle.
+*/
+int sqlite3_hct_journal_validation_hook(
+  sqlite3 *db,
+  void *pArg,
+  int(*xValidate)(
+    void *pCopyOfArg,
+    i64 iCid
+    const char *zSchema,
+    const void *pData, int nData,
+    const void *pSchemaVersion
+  )
+);
+
+/*
+** Both arguments are assumed to point to SQLITE_HCT_JOURNAL_HASHSIZE
+** byte buffers. This function updates the hash stored in buffer pHash
+** based on the contents of buffer pData.
+*/
+void sqlite3_hct_journal_hash(void *pHash, const void *pData);
+
+/*
+** It is assumed that buffer pHash points to a buffer
+** SQLITE_HCT_JOURNAL_HASHSIZE bytes in size. This function populates this
+** buffer with a hash based on the remaining arguments.
+*/
+void sqlite3_hct_journal_hashentry(
+  void *pHash,              /* OUT: Hash of other arguments */
+  i64 iCid,
+  const char *zSchema,
+  const void *pData, int nData,
+  const void *pSchemaVersion
+);
+
+/*
+** Update the hash in pHash based on the contents of the nul-terminated
+** string passed as the second argument. If the string is zero bytes in
+** length, then the value stored in buffer pHash is unmodified.
+*/
+void sqlite3_hct_journal_hashschema(void *pHash, const char *zSchema);
+
+#ifdef __cplusplus
+}
+#endif
+#endif /* SQLITE3HCT_H */
