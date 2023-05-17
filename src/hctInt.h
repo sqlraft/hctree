@@ -14,6 +14,11 @@ typedef unsigned int u32;
 #define HctCASBool(PTR,OLD,NEW) \
     (int)__sync_bool_compare_and_swap((PTR),(OLD),(NEW))
 
+
+/*
+** bJournal:
+**   Set by sqlite3_hct_journal_init() if a replication database is requested.
+*/
 typedef struct HctConfig HctConfig;
 struct HctConfig {
   int nDbFile;                    /* Number of files (hct_file.c) */
@@ -23,6 +28,8 @@ struct HctConfig {
   int nTryBeforeUnevict;
   int bQuiescentIntegrityCheck;   /* PRAGMA hct_quiescent_integrity_check */
   int pgsz;
+
+  int bJournal;
 };
 
 #define HCT_TID_MASK  ((((u64)0x00FFFFFF) << 32)|0xFFFFFFFF)

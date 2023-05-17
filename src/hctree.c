@@ -2902,7 +2902,6 @@ int sqlite3HctBtreeConnectionCount(Btree *p){
 }
 #endif
 
-
 int sqlite3HctBtreeTransferRow(BtCursor *p1, BtCursor *p2, i64 iKey){
   assert( 0 );
   return SQLITE_LOCKED;
@@ -2911,5 +2910,7 @@ int sqlite3HctBtreeTransferRow(BtCursor *p1, BtCursor *p2, i64 iKey){
 int sqlite3HctLockedErr(u32 pgno){
   return SQLITE_LOCKED;
 }
+
+
 
 #endif /* SQLITE_ENABLE_HCT */

@@ -35,7 +35,7 @@ int sqlite3_hct_journal_init(sqlite3 *db);
 */
 int sqlite3_hct_journal_write(
   sqlite3 *db,                    /* Write to "main" db of this handle */
-  i64 iCid,
+  sqlite3_int64 iCid,
   const char *zSchema,
   const void *pData, int nData,
   const void *pSchemaVersion
@@ -45,14 +45,14 @@ int sqlite3_hct_journal_write(
 ** Write empty records for any missing journal entries with cid values
 ** less than or equal to iCid.
 */
-int sqlite3_hct_journal_patchto(sqlite3 *db, i64 iCid);
+int sqlite3_hct_journal_patchto(sqlite3 *db, sqlite3_int64 iCid);
 
 /*
 ** Set output variable (*piCid) to the CID of the newest available 
 ** database snapshot. Return SQLITE_OK if successful, or an SQLite
 ** error code if something goes wrong.
 */
-int sqlite3_hct_journal_snapshot(sqlite3 *db, i64 *piCid);
+int sqlite3_hct_journal_snapshot(sqlite3 *db, sqlite3_int64 *piCid);
 
 /*
 ** Register a custom validation callback with the database handle.
@@ -62,7 +62,7 @@ int sqlite3_hct_journal_validation_hook(
   void *pArg,
   int(*xValidate)(
     void *pCopyOfArg,
-    i64 iCid
+    sqlite3_int64 iCid,
     const char *zSchema,
     const void *pData, int nData,
     const void *pSchemaVersion
@@ -83,7 +83,7 @@ void sqlite3_hct_journal_hash(void *pHash, const void *pData);
 */
 void sqlite3_hct_journal_hashentry(
   void *pHash,              /* OUT: Hash of other arguments */
-  i64 iCid,
+  sqlite3_int64 iCid,
   const char *zSchema,
   const void *pData, int nData,
   const void *pSchemaVersion

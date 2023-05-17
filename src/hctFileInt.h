@@ -22,7 +22,17 @@ HctFile *sqlite3HctFileOpen(
 );
 void sqlite3HctFileClose(HctFile *pFile);
 
+/*
+** If the database has not yet been created on disk, create it. Or, if
+** the db has already been created, then this function is a no-op.
+*/
 int sqlite3HctFileNewDb(HctFile *pFile);
+
+/*
+** Return true if the db has not yet been created on disk. Or false 
+** if it already has.
+*/
+int sqlite3HctFileIsNewDb(HctFile *pFile);
 
 u32 sqlite3HctFileMaxpage(HctFile *pFile);
 
