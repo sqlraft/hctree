@@ -1,5 +1,5 @@
-C Add\sthe\ssqlite3_hct_journal_init()\sAPI.\sFor\sinitializing\sa\sdatabase\sfor\sleader/follower\sreplication.
-D 2023-05-17T17:45:23.588
+C Add\sdescription\sof\sdata\sblob\sformat\sto\sreplication.md.
+D 2023-05-17T20:01:51.772
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -44,7 +44,7 @@ F doc/hctree/index.html 46105aae0ab24595bd6f2ce9aeb9352d892d6c23d9fc8d9bcec9274e
 F doc/hctree/mkthreadtest.tcl 58b1c401b35dcabd978f5a9663376a5beee441bdd9d1e49536772dbd68086876
 F doc/hctree/pagetest.c 023b04fc4ceb8e6cffad66c2221472f68dc69a88282109c8235f57ebf945ad25
 F doc/hctree/perftest1.tcl f805fe08a9660c62145aa69b09cd1158243c52229cf300cde0df6df271ddfa1b
-F doc/hctree/replication.md 67b7772af10a8a43efc88e0c8646895bc8a5482163a405fdeb3f00a9e815a024
+F doc/hctree/replication.md 8909f5a45ae960f4f249b52e8021655d8631fbd2d4400dd097c6030185e8473e
 F doc/hctree/slides.html 763e1e5b40201595f0924a589c8e6e9a7ca3ca593ed0045d372e66e12ece7aef
 F doc/hctree/slides.wiki 4151889c5485fecd8a71d5d0089645998a2db5ebc3360b570f763e59effed60c
 F doc/hctree/testing.wiki 388b8ad72af28026bc6253d37bce0ffd36d39f66e2132129f624498956858550
@@ -2139,8 +2139,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P 13f5d2c05883808384549672d80634e8b69fe85735dc6d9eccaae2bf1708c426
-R e8c6b5cf57f27c11658d754edbff688f
+P 19190e4c6526ce8a3cd42fcc70d526e11d26ee19ff2f98a92a64a4f24865402b
+R 1942bd1558498e25f0c7af60b63737e3
 U dan
-Z 04572e0d0b368f990a7f3b8ac1adb4a5
+Z 5c9a2852fb3e95229c336620e5392f3d
 # Remove this line to create a well-formed Fossil manifest.

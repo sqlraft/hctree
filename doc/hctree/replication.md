@@ -35,6 +35,7 @@ This page builds on the [speculations here](hctree_bedrock.md).
   <li> [Truncating the Journal Table](#truncating)
   <li> [Hash and Synchronization Related Functions](#hashes)
   <li> [Application Programming Notes](#applications)
+  <li> [Data Formats](#formats)
 </ol>
 
 <a name=configuring></a>
@@ -444,4 +445,43 @@ cid=iCid.
 ---------------------------------
 
 TODO
+
+<a name=formats></a>
+8.\ Data Formats
+----------------
+
+This section describes the format used by the blobs in the "data" column of
+sqlite\_hct\_journal. Each blob consists of a series of entries. Each entry
+begins with either 'T', 'I' or 'D'. The format of the rest of the entry 
+depends on its type. As follows:
+
+<table width=80% align=center cellpadding=5 border=1>
+<tr><th align=left> Character <th align=left> Type <th align=left> Format
+<tr><td> 'T'
+    <td> New table.
+    <td> Nul-terminated table name.
+<tr><td> 'i'
+    <td> Insert on table with IPK or no PK.
+    <td> A varint containing the rowid value. Followed by an SQLite format
+         record containing the other record fields.
+<tr><td> 'I'
+    <td> Insert on table with explicit non-INTEGER PK.
+    <td> an SQLite format record.
+<tr><td> 'd'
+    <td> Delete by rowid.
+    <td> A varint containing the rowid to delete
+<tr><td> 'D'
+    <td> Delete by explicit non-INTEGER PK.
+    <td> An SQLite record containing the PK of the row to delete.
+</table>
+
+
+
+
+
+
+
+
+
+
 
