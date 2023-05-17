@@ -57,6 +57,10 @@ struct HctLogFile {
 **     sqlite3HctBtreeBeginTrans()
 **     sqlite3HctBtreeCommitPhaseTwo()
 **     sqlite3HctBtreeRollback()
+**
+** iJrnlRoot:
+**   If this is non-zero, then it is the logical root page of the
+**   sqlite_hct_journal table.
 */
 struct HBtree {
   BtreeMethods *pMethods;
@@ -79,6 +83,9 @@ struct HBtree {
   u32 iNextRoot;                  /* Next root page to allocate if pHctDb==0 */
   u32 aMeta[SQLITE_N_BTREE_META]; /* 16 database meta values */
   int eMetaState;
+
+  u64 iJrnlRoot;                  /* Root of sqlite_hct_journal */
+  u64 iBaseRoot;                  /* Root of sqlite_hct_baseline */
 
   Pager *pFakePager;
 };
@@ -867,6 +874,36 @@ int sqlite3HctBtreeNewDb(Btree *p){
   return rc;
 }
 
+static u64 hctFindRootByName(HBtree *p, const char *zName){
+  u64 iRet = 0;
+  Schema *pSchema = (Schema*)p->pSchema;
+  Table *pTab = (Table*)sqlite3HashFind(&pSchema->tblHash, zName);
+  if( pTab ){
+    iRet = pTab->tnum;
+  }
+  return iRet;
+}
+
+void sqlite3HctDetectJournals(sqlite3 *db){
+  HBtree *p = (HBtree*)db->aDb[0].pBt;
+  p->iJrnlRoot = hctFindRootByName(p, "sqlite_hct_journal");
+  p->iBaseRoot = hctFindRootByName(p, "sqlite_hct_baseline");
+}
+
+static int hctAttemptRecovery(HBtree *p, int iStage){
+  int rc = SQLITE_OK;
+  assert( iStage==0 || iStage==1 );
+  if( p->pHctDb && sqlite3HctDbStartRecovery(p->pHctDb, iStage) ){
+    rc = hctRecoverLogs(p, iStage);
+    rc = sqlite3HctDbFinishRecovery(p->pHctDb, iStage, rc);
+    if( rc==SQLITE_OK && iStage==1 ){
+      p->iJrnlRoot = hctFindRootByName(p, "sqlite_hct_journal");
+      p->iBaseRoot = hctFindRootByName(p, "sqlite_hct_baseline");
+    }
+  }
+  return rc;
+}
+
 /*
 ** Attempt to start a new transaction. A write-transaction
 ** is started if the second argument is nonzero, otherwise a read-
@@ -917,10 +954,7 @@ int sqlite3HctBtreeBeginTrans(Btree *pBt, int wrflag, int *pSchemaVersion){
 
   if( rc==SQLITE_OK && wrflag ){
     /* Attempt stage 1 recovery here, in case it is required. */
-    if( p->pHctDb && sqlite3HctDbStartRecovery(p->pHctDb, 1) ){
-      rc = hctRecoverLogs(p, 1);
-      rc = sqlite3HctDbFinishRecovery(p->pHctDb, 1, rc);
-    }
+    rc = hctAttemptRecovery(p, 1);
     if( rc==SQLITE_OK ){
       rc = sqlite3HctTreeBegin(p->pHctTree, 1 + p->db->nSavepoint);
     }
@@ -1483,10 +1517,14 @@ int sqlite3HctBtreeCursor(
 
   /* If opening a cursor with root==1, try to run recovery stage 0. Or, if
   ** opening a cursor on some other root page, try to run recovery stage 1. */
-  if( p->pHctDb && sqlite3HctDbStartRecovery(p->pHctDb, iTable!=1) ){
-    rc = hctRecoverLogs(p, iTable!=1);
-    rc = sqlite3HctDbFinishRecovery(p->pHctDb, iTable!=1, rc);
-    if( rc!=SQLITE_OK ) return rc;
+  rc = hctAttemptRecovery(p, iTable!=1);
+  if( rc!=SQLITE_OK ) return rc;
+
+  /* If this is an attempt to open a read/write cursor on either the
+  ** sqlite_hct_journal or sqlite_hct_baseline tables, return an error
+  ** immediately.  */
+  if( wrFlag && (iTable==p->iJrnlRoot || iTable==p->iBaseRoot) ){
+    return SQLITE_READONLY;
   }
 
   pCur->pKeyInfo = pKeyInfo;

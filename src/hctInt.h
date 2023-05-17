@@ -16,8 +16,6 @@ typedef unsigned int u32;
 
 
 /*
-** bJournal:
-**   Set by sqlite3_hct_journal_init() if a replication database is requested.
 */
 typedef struct HctConfig HctConfig;
 struct HctConfig {
@@ -28,8 +26,6 @@ struct HctConfig {
   int nTryBeforeUnevict;
   int bQuiescentIntegrityCheck;   /* PRAGMA hct_quiescent_integrity_check */
   int pgsz;
-
-  int bJournal;
 };
 
 #define HCT_TID_MASK  ((((u64)0x00FFFFFF) << 32)|0xFFFFFFFF)
@@ -146,6 +142,7 @@ typedef struct HctDatabase HctDatabase;
 typedef struct HctDbCsr HctDbCsr;
 
 HctDatabase *sqlite3HctDbFind(sqlite3*, int);
+void sqlite3HctDetectJournals(sqlite3 *db);
 
 HctDatabase *sqlite3HctDbOpen(int*, const char *zFile, HctConfig*);
 void sqlite3HctDbClose(HctDatabase *pDb);

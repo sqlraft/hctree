@@ -96,11 +96,14 @@ int sqlite3_hct_journal_init(sqlite3 *db){
 
   if( rc==SQLITE_OK ){
     rc = sqlite3_exec(db, "COMMIT", 0, 0, 0);
-  }else{
+  }
+  if( rc!=SQLITE_OK ){
     char *zErr = sqlite3_mprintf("%s", sqlite3_errmsg(db));
     sqlite3_exec(db, "ROLLBACK", 0, 0, 0);
     sqlite3ErrorWithMsg(db, rc, "%s", zErr);
     sqlite3_free(zErr);
+  }else{
+    sqlite3HctDetectJournals(db);
   }
 
   return rc;
