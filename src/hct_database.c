@@ -5552,7 +5552,7 @@ static int hctDbRootPagelist(HctDatabase *pDb, int *pnRoot, u32 **paRoot){
 }
 
 int sqlite3HctDbFinishRecovery(HctDatabase *pDb, int iStage, int rc){
-  assert( pDb->eMode==HCT_MODE_ROLLBACK );
+  /* assert( pDb->eMode==HCT_MODE_ROLLBACK ); */
   assert( iStage==0 || iStage==1 );
 
   pDb->iTid = 0;

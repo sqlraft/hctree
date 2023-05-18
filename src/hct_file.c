@@ -1760,6 +1760,10 @@ u64 sqlite3HctFileAllocateCID(HctFile *pFile, int nWrite){
   return hctFileAtomicIncr(pFile, &pFile->pServer->iCommitId, nWrite);
 }
 
+void sqlite3HctFileSetCID(HctFile *pFile, u64 iVal){
+  HctAtomicStore(&pFile->pServer->iCommitId, iVal);
+}
+
 u64 sqlite3HctFileIncrWriteCount(HctFile *pFile, int nIncr){
   return hctFileAtomicIncr(pFile, &pFile->pServer->nWriteCount, nIncr);
 }

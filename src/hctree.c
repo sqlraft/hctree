@@ -84,6 +84,7 @@ struct HBtree {
   u32 aMeta[SQLITE_N_BTREE_META]; /* 16 database meta values */
   int eMetaState;
 
+  int bRecoveryDone;
   u64 iJrnlRoot;                  /* Root of sqlite_hct_journal */
   u64 iBaseRoot;                  /* Root of sqlite_hct_baseline */
 
@@ -884,23 +885,38 @@ static u64 hctFindRootByName(HBtree *p, const char *zName){
   return iRet;
 }
 
-void sqlite3HctDetectJournals(sqlite3 *db){
-  HBtree *p = (HBtree*)db->aDb[0].pBt;
+void hctDetectJournals(HBtree *p){
   p->iJrnlRoot = hctFindRootByName(p, "sqlite_hct_journal");
   p->iBaseRoot = hctFindRootByName(p, "sqlite_hct_baseline");
 }
 
+void sqlite3HctDetectJournals(sqlite3 *db){
+  HBtree *p = (HBtree*)db->aDb[0].pBt;
+  hctDetectJournals(p);
+}
+
 static int hctAttemptRecovery(HBtree *p, int iStage){
   int rc = SQLITE_OK;
-  assert( iStage==0 || iStage==1 );
-  if( p->pHctDb && sqlite3HctDbStartRecovery(p->pHctDb, iStage) ){
-    rc = hctRecoverLogs(p, iStage);
-    rc = sqlite3HctDbFinishRecovery(p->pHctDb, iStage, rc);
-    if( rc==SQLITE_OK && iStage==1 ){
-      p->iJrnlRoot = hctFindRootByName(p, "sqlite_hct_journal");
-      p->iBaseRoot = hctFindRootByName(p, "sqlite_hct_baseline");
+  if( p->bRecoveryDone==0 ){
+    assert( iStage==0 || iStage==1 );
+    if( p->pHctDb && sqlite3HctDbStartRecovery(p->pHctDb, iStage) ){
+      rc = hctRecoverLogs(p, iStage);
+      if( rc==SQLITE_OK && iStage==1 ){
+        hctDetectJournals(p);
+        if( p->iJrnlRoot ){
+          sqlite3HctDbRollbackMode(p->pHctDb, 0);
+          rc = sqlite3HctJrnlRecovery(p->pHctDb, p->iJrnlRoot);
+        }
+      }
+      rc = sqlite3HctDbFinishRecovery(p->pHctDb, iStage, rc);
+    }
+
+    if( iStage==1 ){
+      hctDetectJournals(p);
+      p->bRecoveryDone = 1;
     }
   }
+
   return rc;
 }
 
@@ -1240,6 +1256,16 @@ static int btreeFlushToDisk(HBtree *p){
     /* Invoke the SQLITE_TESTCTRL_HCT_MTCOMMIT hook, if applicable */
     if( p->db->xMtCommit ) p->db->xMtCommit(p->db->pMtCommitCtx, 1);
     rc = sqlite3HctDbValidate(p->db, p->pHctDb, &iCid, &bTmapScan);
+
+    if( p->iJrnlRoot ){
+      rc = sqlite3HctJrnlLog(
+        p->db,
+        iCid, iTid,
+        p->pHctTree,
+        p->iJrnlRoot,
+        p->pHctDb
+      );
+    }
   }
 
   /* If conflicts have been detected, roll back the transaction */
@@ -1516,8 +1542,10 @@ int sqlite3HctBtreeCursor(
   assert( pCur->pHctTreeCsr==0 );
 
   /* If opening a cursor with root==1, try to run recovery stage 0. Or, if
-  ** opening a cursor on some other root page, try to run recovery stage 1. */
-  rc = hctAttemptRecovery(p, iTable!=1);
+  ** opening a cursor on some other root page, try to run recovery stage 1. 
+  ** Do not run any kind of recovery if this call is opening the meta-value
+  ** table (root==2).  */
+  if( iTable!=2 ) rc = hctAttemptRecovery(p, iTable!=1);
   if( rc!=SQLITE_OK ) return rc;
 
   /* If this is an attempt to open a read/write cursor on either the

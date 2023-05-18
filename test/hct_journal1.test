@@ -86,12 +86,50 @@ do_catchsql_test 1.9 {
 db close
 sqlite3 db test.db
 
+breakpoint
 do_catchsql_test 1.10 {
   INSERT INTO sqlite_hct_journal DEFAULT VALUES;
 } {1 {attempt to write a readonly database}}
 do_catchsql_test 1.11 {
   INSERT INTO sqlite_hct_baseline DEFAULT VALUES;
 } {1 {attempt to write a readonly database}}
+
+#-------------------------------------------------------------------------
+hct_reset_db
+catch_hct_journal_init db
+
+do_execsql_test 2.0 {
+  CREATE TABLE t1(x, y);
+  INSERT INTO t1 VALUES(1, 2);
+}
+
+do_execsql_test 2.1 {
+  SELECT cid FROM sqlite_hct_journal
+} {7 8}
+
+db close
+sqlite3 db test.db
+
+do_execsql_test 2.2 {
+  INSERT INTO t1 VALUES(3, 4);
+}
+
+do_execsql_test 2.3 {
+  SELECT cid FROM sqlite_hct_journal
+} {7 8 9}
+
+sqlite3 db2 test.db
+do_execsql_test -db db2 2.4 {
+  INSERT INTO t1 VALUES(5, 6);
+}
+
+do_execsql_test 2.5 {
+  SELECT cid FROM sqlite_hct_journal
+} {7 8 9 10}
+
+execsql_pp {
+  SELECT cid, schema, quote(data), quote(schema_version), quote(hash), tid, validcid FROM sqlite_hct_journal
+}
 
 
 finish_test

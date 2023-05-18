@@ -1,5 +1,6 @@
 
 #include <sqliteInt.h>
+#include "sqlite3hct.h"
 
 typedef sqlite3_int64 i64;
 typedef unsigned char u8;
@@ -248,4 +249,6 @@ int sqlite3HctStatsInit(sqlite3*);
 ** Utility functions:
 */
 void *sqlite3HctMalloc(int *pRc, i64 nByte);
+
+#include <hctJrnlInt.h>
 
