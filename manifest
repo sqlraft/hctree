@@ -1,5 +1,5 @@
-C Prevent\sordinary\sclients\sfrom\swriting\sto\sthe\ssqlite_hct_journal\sand\ssqlite_hct_baseline\stables.
-D 2023-05-17T21:10:26.212
+C Separate\sthe\sCID\sand\sglobal-write-count\svalues.
+D 2023-05-18T11:23:25.428
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -607,12 +607,12 @@ F src/func.c d187be57a886ddf4e6b7ef584a494361899be3df5eee6d4a747b68ff4aff4122
 F src/global.c 428d2580a1cdf5dbe1f356d1feab83710ae0cc862ece0fb57bc8259e43838c74
 F src/hash.c c6af5f96a7a76d000f07c5402c48c318c2566beecdee9e78b9d9f60ce7119565
 F src/hash.h 3340ab6e1d13e725571d7cee6d3e3135f0779a7d8e76a9ce0a85971fa3953c51
-F src/hctFileInt.h 9fb4334b472a75097fb35916891dff3dbc08a873d83e8fb8abeeabe1237fe85c
+F src/hctFileInt.h 577c54951e3040df07b54008f63f1dea6061596d07a5c40f14996cfdbbdd015f
 F src/hctInt.h 02f8a3966a3d7b3b1277cbd8ebc1eb1429f5783c63695eaf545878b9fc4521ea
 F src/hctPManInt.h 44e63f39e3da54ca47f5582127a12a2f33002d1f3ddcd0fc23120731dfe70b5d
 F src/hctTMapInt.h 4ac478747a6ecb607ba14a484cbf189b8d4ff090ed97c0a9704e7a2e727316c0
-F src/hct_database.c 87b82427e19b5b9aaf95d646302dc2267e144af5baaf3a0e436bb7d05d7766c0
-F src/hct_file.c ee7585c1d7d660531244f80f7c72e2d19e3df0fc6e8aee83dd963210adf99a51
+F src/hct_database.c fcd7366ec062530246b57e3d7a2c5e4ea986d215915c242721b87099a16ba62a
+F src/hct_file.c fe5ab195be32c8cd0a6845714892508df7aff3703695c64ee3479e0fc04c7cd7
 F src/hct_journal.c 313e1d9a8b794b3596734ff1e7b49c6b5fb407bb7f0ebeae79a4ede5e6d6359d
 F src/hct_pman.c 63b03b562925e00174464c1b718f8fbdd5c5fa9cd93ac8498abc0d0b804c42fd
 F src/hct_record.c 54b0d564be580ca29a54312f9a9abdba193b234ac56ec65a7e40109107041b25
@@ -2139,8 +2139,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P 34a03e293b399874803eca5eef1d7d680bc5cbb04eb32881d6a8509ad7685d1a
-R d852f38a5994d3b04b25765f79a74be3
+P 6b23e7d32924d8e37fda610aa543879c69bfaa33ea97f109a9e50977cb9cbfea
+R 6cc23b3805572d65e10727b5b3476716
 U dan
-Z 59378dbfe65d8d2d6cabb950ccef9dbb
+Z e635a496e5f1e830b3caff56b60671ed
 # Remove this line to create a well-formed Fossil manifest.

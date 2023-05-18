@@ -6172,19 +6172,26 @@ sqlite3HctDbValidate(
   HctDbCsr *pCsr = 0;
   u64 *pEntry = hctDbFindTMapEntry(pDb->pTmap, pDb->iTid);
   u64 iCid = 0;
+  u64 nFinalWrite = 0;
   int rc = SQLITE_OK;
   int nPageScan = pDb->pConfig->nPageScan;
 
+  /* Set nWrite to the number of pages written by this transaction. This
+  ** is used for scheduling tmap scans only, so it doesn't matter if it
+  ** is slightly inaccurate in some cases.  */
   int nWrite = sqlite3HctFileWriteCount(pDb->pFile) - pDb->nWriteCount;
   assert( nWrite>=0 );
   if( nWrite==0 ) nWrite = 1;
 
   assert( *pEntry==0 );
   HctAtomicStore(pEntry, HCT_TMAP_VALIDATING);
-  iCid = sqlite3HctFileAllocateCID(pDb->pFile, nWrite);
+  iCid = sqlite3HctFileAllocateCID(pDb->pFile, 1);
   HctAtomicStore(pEntry, HCT_TMAP_VALIDATING | iCid);
 
-  if( (iCid / nPageScan)!=((iCid-nWrite) / nPageScan) ) *pbTmapscan = 1;
+  nFinalWrite = sqlite3HctFileIncrWriteCount(pDb->pFile, nWrite);
+  if( (nFinalWrite / nPageScan)!=((nFinalWrite-nWrite) / nPageScan) ){
+    *pbTmapscan = 1;
+  }
 
   assert( pDb->eMode==HCT_MODE_NORMAL );
 
@@ -6194,7 +6201,7 @@ sqlite3HctDbValidate(
   /* If iCid is one more than pDb->iSnapshotId, then this transaction is
   ** being applied against the snapshot that it was run against. In this
   ** case we can skip validation entirely. */
-  if( iCid!=pDb->iSnapshotId+nWrite ){
+  if( iCid!=pDb->iSnapshotId+1 ){
     if( pDb->bConcurrent ){
       pDb->eMode = HCT_MODE_VALIDATE;
       if( hctDbValidateMeta(pDb) ){

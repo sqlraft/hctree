@@ -159,6 +159,7 @@ struct HctFileServer {
   HctFile *pFileList;
 
   u64 iCommitId;                  /* CID value */
+  u64 nWriteCount;                /* Write count */
 
   int iNextFileId;
   char *zPath;                    /* Path to database (aFdDb[0]) */
@@ -1757,6 +1758,10 @@ u64 sqlite3HctFileAllocateTransid(HctFile *pFile){
 u64 sqlite3HctFileAllocateCID(HctFile *pFile, int nWrite){
   assert( nWrite>0 );
   return hctFileAtomicIncr(pFile, &pFile->pServer->iCommitId, nWrite);
+}
+
+u64 sqlite3HctFileIncrWriteCount(HctFile *pFile, int nIncr){
+  return hctFileAtomicIncr(pFile, &pFile->pServer->nWriteCount, nIncr);
 }
 
 u64 sqlite3HctFileGetSnapshotid(HctFile *pFile){

@@ -122,6 +122,11 @@ u64 sqlite3HctFileAllocateTransid(HctFile *pFile);
 u64 sqlite3HctFileAllocateCID(HctFile *pFile, int);
 u64 sqlite3HctFileGetSnapshotid(HctFile *pFile);
 
+/*
+** Increment the global write-count by nIncr, and return the final value. 
+*/
+u64 sqlite3HctFileIncrWriteCount(HctFile *pFile, int nIncr);
+
 HctTMapClient *sqlite3HctFileTMapClient(HctFile*);
 
 int sqlite3HctFilePgsz(HctFile *pFile);
