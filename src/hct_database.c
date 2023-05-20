@@ -16,7 +16,6 @@
 #include <string.h>
 #include <assert.h>
 
-typedef struct HctBuffer HctBuffer;
 typedef struct HctDatabase HctDatabase;
 typedef struct HctDbIndexEntry HctDbIndexEntry;
 typedef struct HctDbIndexLeaf HctDbIndexLeaf;
@@ -39,15 +38,6 @@ typedef struct HctCsrIntkeyOp HctCsrIntkeyOp;
 typedef struct HctCsrIndexOp HctCsrIndexOp;
 
 typedef struct HctDbPageArray HctDbPageArray;
-
-/* 
-** Growable buffer type used for various things.
-*/
-struct HctBuffer {
-  u8 *aBuf;
-  int nBuf;
-  int nAlloc;
-};
 
 struct HctCsrIntkeyOp {
   HctCsrIntkeyOp *pNextOp;
@@ -491,7 +481,7 @@ static void hctMemcpy(void *a, const void *b, size_t c){
 
 #define HCTDB_MAX_EXTRA_CELL_DATA (8+4+8+4)
 
-static int hctBufferGrow(HctBuffer *pBuf, int nSize){
+int sqlite3HctBufferGrow(HctBuffer *pBuf, int nSize){
   int rc = SQLITE_OK;
   if( nSize>pBuf->nAlloc ){
     u8 *aNew = sqlite3_realloc(pBuf->aBuf, nSize);
@@ -504,12 +494,14 @@ static int hctBufferGrow(HctBuffer *pBuf, int nSize){
   }
   return rc;
 }
-static void hctBufferFree(HctBuffer *pBuf){
+
+void sqlite3HctBufferFree(HctBuffer *pBuf){
   sqlite3_free(pBuf->aBuf);
   memset(pBuf, 0, sizeof(HctBuffer));
 }
+
 static int hctBufferSet(HctBuffer *pBuf, const u8 *aData, int nData){
-  int rc = hctBufferGrow(pBuf, nData);
+  int rc = sqlite3HctBufferGrow(pBuf, nData);
   if( rc==SQLITE_OK ){
     hctMemcpy(pBuf->aBuf, aData, nData);
   }
@@ -646,7 +638,7 @@ int sqlite3HctDbPagesize(HctDatabase *pDb){
 
 void sqlite3HctDbClose(HctDatabase *p){
   if( p ){
-    hctBufferFree(&p->pa.fp.buf);
+    sqlite3HctBufferFree(&p->pa.fp.buf);
     sqlite3_free(p->aTmp);
     sqlite3HctFileClose(p->pFile);
     p->pFile = 0;
@@ -1158,7 +1150,7 @@ static int hctDbLoadRecord(
   *pnData = p->nSize;
   if( paData ){
     if( p->flags & HCTDB_HAS_OVFL ){
-      rc = hctBufferGrow(pBuf, p->nSize);
+      rc = sqlite3HctBufferGrow(pBuf, p->nSize);
       *paData = pBuf->aBuf;
       if( rc==SQLITE_OK ){
         u32 pgOvfl;
@@ -1211,7 +1203,7 @@ static int hctDbLoadRecordFP(
   rc = hctDbLoadRecord(pDb, &pFP->buf, aPg, iCell, &nKey, &aKey);
   if( rc==SQLITE_OK ){
     if( aKey!=pFP->buf.aBuf ){
-      rc = hctBufferGrow(&pFP->buf, nKey);
+      rc = sqlite3HctBufferGrow(&pFP->buf, nKey);
       if( rc==SQLITE_OK ){
         hctMemcpy(pFP->buf.aBuf, aKey, nKey);
       }
@@ -1290,7 +1282,7 @@ static int hctDbFanSearch(
       sqlite3HctFilePageRelease(&pg);
     }
   }
-  hctBufferFree(&buf);
+  sqlite3HctBufferFree(&buf);
   assert( i1==i2 );
 
   *pRc = rc;
@@ -1452,7 +1444,7 @@ static int hctDbIndexSearch(
     if( res==0 ){
       *pbExact = 1;
       *piPos = iTest;
-      hctBufferFree(&buf);
+      sqlite3HctBufferFree(&buf);
       return SQLITE_OK;
     }else if( res<0 ){
       i1 = iTest+1;
@@ -1462,7 +1454,7 @@ static int hctDbIndexSearch(
   }
 
   assert( i1==i2 && i2>=0 );
-  hctBufferFree(&buf);
+  sqlite3HctBufferFree(&buf);
   *pbExact = 0;
   *piPos = i2;
   return rc;
@@ -1529,7 +1521,7 @@ static int hctDbCompareFPKey(
   rc = hctDbLoadRecord(pDb, &buf, aPg, 0, &nFP, &aFP);
   if( rc==SQLITE_OK ){
     res = sqlite3VdbeRecordCompare(nFP, aFP, pRec);
-    hctBufferFree(&buf);
+    sqlite3HctBufferFree(&buf);
     *pbGe = (res<=0);
   }
   return rc;
@@ -1760,7 +1752,7 @@ static const u8 *hctDbCsrPageAndCell(HctDbCsr *pCsr, int *piCell){
 
 static void hctDbFreeKeyContents(HctDbKey *pKey){
   hctDbFreeUnpacked(pKey->pKey);
-  hctBufferFree(&pKey->buf);
+  sqlite3HctBufferFree(&pKey->buf);
 }
 
 static void hctDbCsrAscendRange(HctDbCsr *pCsr){
@@ -1797,7 +1789,7 @@ static void hctDbFreeCsr(HctDbCsr *pCsr){
   }
   if( pCsr->pRec ) sqlite3DbFree(pCsr->pKeyInfo->db, pCsr->pRec);
   sqlite3KeyInfoUnref(pCsr->pKeyInfo);
-  hctBufferFree(&pCsr->rec);
+  sqlite3HctBufferFree(&pCsr->rec);
   sqlite3_free(pCsr->aRange);
   pCsr->aRange = 0;
   pCsr->nRangeAlloc = 0;
@@ -1815,7 +1807,7 @@ static void hctDbCsrCleanup(HctDbCsr *pCsr){
   sqlite3_free(pCsr->aRange);
   pCsr->aRange = 0;
   pCsr->nRangeAlloc = 0;
-  hctBufferFree(&pCsr->rec);
+  sqlite3HctBufferFree(&pCsr->rec);
   pCsr->iRoot = 0;
 }
 
@@ -2798,7 +2790,7 @@ static void assert_writer_is_ok(HctDatabase *pDb, HctDbWriter *p){
     }
   }
 
-  hctBufferFree(&buf);
+  sqlite3HctBufferFree(&buf);
   hctDbFreeUnpacked(pRec);
 }
 #else /* if !SQLITE_DEBUG */
@@ -3116,7 +3108,7 @@ static int hctDbInsertFlushWrite(HctDatabase *pDb, HctDbWriter *p){
       }while( rc==SQLITE_LOCKED );
     }
 
-    hctBufferFree(&buf);
+    sqlite3HctBufferFree(&buf);
     sqlite3_free(aDyn);
   }
 
@@ -3572,7 +3564,7 @@ static int hctDbFindLhsPeer(
 
       assert( csr.pg.iPg!=pPg->iPg );
     }
-    hctBufferFree(&buf);
+    sqlite3HctBufferFree(&buf);
   }
 
   if( rc==SQLITE_OK 
@@ -4855,12 +4847,12 @@ static int hctDbInsertFindPosition(
           pDb, &buf, p->writepg.aPg[pOp->iPg].aNew, 0, &nK, &aK
       );
       if( rc!=SQLITE_OK ){
-        hctBufferFree(&buf);
+        sqlite3HctBufferFree(&buf);
         return rc;
       }
       if( xCompare(nK, aK, pRec)<=0 ) break;
     }
-    hctBufferFree(&buf);
+    sqlite3HctBufferFree(&buf);
     rc = hctDbIndexSearch(pDb,
         p->writepg.aPg[pOp->iPg].aNew, xCompare, pRec, &pOp->iInsert, pbClobber
     );
@@ -5769,7 +5761,7 @@ static int hctDbCompareCellKey(
       }else{
         ret = sqlite3VdbeRecordCompare(nRec, aRec, pKey2->pKey);
       }
-      hctBufferFree(&buf);
+      sqlite3HctBufferFree(&buf);
     }
   }
 
@@ -6744,7 +6736,7 @@ static int hctdbLoadPage(
       pCur->zFpKey = zFpKey;
     }
 
-    hctBufferFree(&buf);
+    sqlite3HctBufferFree(&buf);
   }
   return rc;
 }
@@ -7133,7 +7125,7 @@ static int hctentryColumn(
           sqlite3_result_text(ctx, zRec, -1, SQLITE_TRANSIENT);
           sqlite3_free(zRec);
         }
-        hctBufferFree(&buf);
+        sqlite3HctBufferFree(&buf);
       }else if( pFan ){
         char *zRec = sqlite3_mprintf("iSplit0=%d", pFan->iSplit0);
         if( zRec ){
@@ -7506,6 +7498,9 @@ int sqlite3HctVtabInit(sqlite3 *db){
   }
   if( rc==SQLITE_OK ){
     rc = sqlite3HctStatsInit(db);
+  }
+  if( rc==SQLITE_OK ){
+    rc = sqlite3HctJrnlInit(db);
   }
   return rc;
 }

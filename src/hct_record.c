@@ -31,7 +31,7 @@
 ** of bytes in the zero-filled tail is included in the return value only
 ** if those bytes were zeroed in buf[].
 */ 
-u32 hctRecordSerialPut(u8 *buf, Mem *pMem, u32 serial_type){
+static u32 hctRecordSerialPut(u8 *buf, Mem *pMem, u32 serial_type){
   u32 len;
 
   /* Integer and Real */

@@ -53,6 +53,21 @@ struct HctConfig {
 # define SQLITE_LOCKED_ERR(x) SQLITE_LOCKED
 #endif
 
+
+/* 
+** Growable buffer type used for various things.
+*/
+typedef struct HctBuffer HctBuffer;
+struct HctBuffer {
+  u8 *aBuf;
+  int nBuf;
+  int nAlloc;
+};
+int sqlite3HctBufferGrow(HctBuffer *pBuf, int nSize);
+void sqlite3HctBufferFree(HctBuffer *pBuf);
+
+
+
 /*************************************************************************
 ** Interface to code in hct_tree.c
 */

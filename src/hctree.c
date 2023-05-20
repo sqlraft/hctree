@@ -1260,6 +1260,7 @@ static int btreeFlushToDisk(HBtree *p){
     if( p->iJrnlRoot ){
       rc = sqlite3HctJrnlLog(
         p->db,
+        (Schema*)p->pSchema,
         iCid, iTid,
         p->pHctTree,
         p->iJrnlRoot,

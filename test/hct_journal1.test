@@ -127,11 +127,68 @@ do_execsql_test 2.5 {
   SELECT cid FROM sqlite_hct_journal
 } {7 8 9 10}
 
-execsql_pp {
-  SELECT cid, schema, quote(data), quote(schema_version), quote(hash), tid, validcid FROM sqlite_hct_journal
+#-------------------------------------------------------------------------
+hct_reset_db
+catch_hct_journal_init db
+
+do_execsql_test 3.1.0 {
+  CREATE TABLE t1(x PRIMARY KEY, y) WITHOUT ROWID;
+  INSERT INTO t1 VALUES('a', 'one');
+  DELETE FROM t1 WHERE x='a';
+}
+
+do_execsql_test 3.1.1 {
+  SELECT cid, hct_journal_entry(data) FROM sqlite_hct_journal
+} {
+  7 {}
+  8 {t1: ins ('a','one')}
+  9 {t1: del ('a')}
+}
+
+do_execsql_test 3.1.2 {
+  BEGIN CONCURRENT;
+    INSERT INTO t1 VALUES(14, 15);
+    INSERT INTO t1 VALUES(16, 17);
+    INSERT INTO t1 VALUES(18, 19);
+  COMMIT;
+
+  SELECT hct_journal_entry(data) FROM sqlite_hct_journal 
+  ORDER BY cid DESC LIMIT 1;
+} {
+  {t1: ins (14,15) t1: ins (16,17) t1: ins (18,19)}
+}
+
+hct_reset_db
+catch_hct_journal_init db
+
+do_execsql_test 3.2.0 {
+  CREATE TABLE t1(x PRIMARY KEY, y);
+  INSERT INTO t1 VALUES('a', 'one');
+  DELETE FROM t1 WHERE x='a';
+}
+
+do_execsql_test 3.2.1 {
+  SELECT cid, hct_journal_entry(data) FROM sqlite_hct_journal
+} {
+  7 {}
+  8 {t1: ins 1/('a','one')}
+  9 {t1: del 1}
+}
+
+do_execsql_test 3.2.2 {
+  BEGIN CONCURRENT;
+    INSERT INTO t1 VALUES(14, 15);
+    INSERT INTO t1 VALUES(16, 17);
+    INSERT INTO t1 VALUES(18, 19);
+  COMMIT;
+
+  SELECT hct_journal_entry(data) FROM sqlite_hct_journal 
+  ORDER BY cid DESC LIMIT 1;
+} {
+  {t1: ins 1/(14,15) t1: ins 2/(16,17) t1: ins 3/(18,19)}
 }
 
 
-finish_test
 
+finish_test
 
