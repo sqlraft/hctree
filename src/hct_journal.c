@@ -222,8 +222,8 @@ typedef struct JrnlCtx JrnlCtx;
 struct JrnlCtx {
   Schema *pSchema;
   HctTree *pTree;
-
   HctBuffer buf;
+  HctBuffer schema;
 };
 
 typedef struct JrnlTree JrnlTree;
@@ -305,60 +305,96 @@ static void hctJrnlRecordPrefix(
   pBuf->nBuf = (aBodyOut - pBuf->aBuf);
 }
 
-int hctJrnlLogTree(void *pCtx, u32 iRoot, KeyInfo *pKeyInfo){
+static int hctBufferAppend(HctBuffer *pBuf, const char *zFmt, ...){
+  va_list ap;
+  char *zApp = 0;
+  int nApp = 0;
+
+  va_start(ap, zFmt);
+  zApp = sqlite3_vmprintf(zFmt, ap);
+  va_end(ap);
+
+  nApp = sqlite3Strlen30(zApp);
+  if( sqlite3HctBufferGrow(pBuf, pBuf->nBuf+nApp+1) ) return SQLITE_NOMEM;
+  memcpy(&pBuf->aBuf[pBuf->nBuf], zApp, nApp+1);
+  pBuf->nBuf += nApp;
+  sqlite3_free(zApp);
+  return SQLITE_OK;
+}
+
+
+static int hctJrnlLogTree(void *pCtx, u32 iRoot, KeyInfo *pKeyInfo){
   int rc = SQLITE_OK;
   JrnlCtx *pJrnl = (JrnlCtx*)pCtx;
   HctBuffer *pBuf = &pJrnl->buf;
-  JrnlTree jrnltree;
 
-  memset(&jrnltree, 0, sizeof(jrnltree));
-  if( hctJrnlFindTree(pJrnl->pSchema, iRoot, &jrnltree) ){
-    int nName = sqlite3Strlen30(jrnltree.zName);
-
-    rc = sqlite3HctBufferGrow(pBuf, pBuf->nBuf+1+nName+1);
+  if( iRoot==HCT_TREE_SCHEMAOP_ROOT ){
+    HctTreeCsr *pCsr = 0;
+    rc = sqlite3HctTreeCsrOpen(pJrnl->pTree, iRoot, &pCsr);
     if( rc==SQLITE_OK ){
-      HctTreeCsr *pCsr = 0;
-
-      pBuf->aBuf[pBuf->nBuf++] = 'T';
-      memcpy(&pBuf->aBuf[pBuf->nBuf], jrnltree.zName, nName+1);
-      pBuf->nBuf += nName+1;
-      rc = sqlite3HctTreeCsrOpen(pJrnl->pTree, iRoot, &pCsr);
-
+      for(rc=sqlite3HctTreeCsrFirst(pCsr);
+          rc==SQLITE_OK && sqlite3HctTreeCsrEof(pCsr)==0;
+          rc=sqlite3HctTreeCsrNext(pCsr)
+      ){
+        int nData = 0;
+        const u8 *aData = 0;
+        sqlite3HctTreeCsrData(pCsr, &nData, &aData);
+        rc = hctBufferAppend(&pJrnl->schema, "%s%.*s", 
+            (pJrnl->schema.nBuf>0 ? ";" : ""), nData, (const char*)aData
+        );
+      }
+    }
+  }else{
+    JrnlTree jrnltree;
+    memset(&jrnltree, 0, sizeof(jrnltree));
+    if( hctJrnlFindTree(pJrnl->pSchema, iRoot, &jrnltree) ){
+      int nName = sqlite3Strlen30(jrnltree.zName);
+  
+      rc = sqlite3HctBufferGrow(pBuf, pBuf->nBuf+1+nName+1);
       if( rc==SQLITE_OK ){
-        for(rc=sqlite3HctTreeCsrFirst(pCsr);
-            rc==SQLITE_OK && sqlite3HctTreeCsrEof(pCsr)==0;
-            rc=sqlite3HctTreeCsrNext(pCsr)
-        ){
-          i64 iKey = 0;
-          int nData = 0;
-          const u8 *aData = 0;
-          int bDel = 0;
-
-          sqlite3HctTreeCsrKey(pCsr, &iKey);
-          sqlite3HctTreeCsrData(pCsr, &nData, &aData);
-          bDel = sqlite3HctTreeCsrIsDelete(pCsr);
-
-          rc = sqlite3HctBufferGrow(pBuf, pBuf->nBuf+1+9+9+nData);
-          if( rc!=SQLITE_OK ) break;
-
-          if( pKeyInfo==0 ){
-            pBuf->aBuf[pBuf->nBuf++] = bDel ? 'd' : 'i';
-            pBuf->nBuf += sqlite3PutVarint(&pBuf->aBuf[pBuf->nBuf], iKey);
-          }else{
-            pBuf->aBuf[pBuf->nBuf++] = bDel ? 'D' : 'I';
-            if( bDel ){
-              hctJrnlRecordPrefix(pBuf, nData, aData, pKeyInfo->nUniqField);
+        HctTreeCsr *pCsr = 0;
+  
+        pBuf->aBuf[pBuf->nBuf++] = 'T';
+        memcpy(&pBuf->aBuf[pBuf->nBuf], jrnltree.zName, nName+1);
+        pBuf->nBuf += nName+1;
+        rc = sqlite3HctTreeCsrOpen(pJrnl->pTree, iRoot, &pCsr);
+  
+        if( rc==SQLITE_OK ){
+          for(rc=sqlite3HctTreeCsrFirst(pCsr);
+              rc==SQLITE_OK && sqlite3HctTreeCsrEof(pCsr)==0;
+              rc=sqlite3HctTreeCsrNext(pCsr)
+          ){
+            i64 iKey = 0;
+            int nData = 0;
+            const u8 *aData = 0;
+            int bDel = 0;
+  
+            sqlite3HctTreeCsrKey(pCsr, &iKey);
+            sqlite3HctTreeCsrData(pCsr, &nData, &aData);
+            bDel = sqlite3HctTreeCsrIsDelete(pCsr);
+  
+            rc = sqlite3HctBufferGrow(pBuf, pBuf->nBuf+1+9+9+nData);
+            if( rc!=SQLITE_OK ) break;
+  
+            if( pKeyInfo==0 ){
+              pBuf->aBuf[pBuf->nBuf++] = bDel ? 'd' : 'i';
+              pBuf->nBuf += sqlite3PutVarint(&pBuf->aBuf[pBuf->nBuf], iKey);
+            }else{
+              pBuf->aBuf[pBuf->nBuf++] = bDel ? 'D' : 'I';
+              if( bDel ){
+                hctJrnlRecordPrefix(pBuf, nData, aData, pKeyInfo->nUniqField);
+              }
+            }
+            if( bDel==0 ){
+              pBuf->nBuf += sqlite3PutVarint(&pBuf->aBuf[pBuf->nBuf], nData);
+              memcpy(&pBuf->aBuf[pBuf->nBuf], aData, nData);
+              pBuf->nBuf += nData;
             }
           }
-          if( bDel==0 ){
-            pBuf->nBuf += sqlite3PutVarint(&pBuf->aBuf[pBuf->nBuf], nData);
-            memcpy(&pBuf->aBuf[pBuf->nBuf], aData, nData);
-            pBuf->nBuf += nData;
-          }
         }
+  
+        sqlite3HctTreeCsrClose(pCsr);
       }
-
-      sqlite3HctTreeCsrClose(pCsr);
     }
   }
 
@@ -383,10 +419,11 @@ int sqlite3HctJrnlLog(
   jrnlctx.pSchema = pSchema;
   jrnlctx.pTree = pTree;
 
-  rc = sqlite3HctTreeForeach(pTree, (void*)&jrnlctx, hctJrnlLogTree);
+  rc = sqlite3HctTreeForeach(pTree, 1, (void*)&jrnlctx, hctJrnlLogTree);
   if( rc==SQLITE_OK ){
-    pRec = hctJrnlComposeRecord(
-        iCid, "", jrnlctx.buf.aBuf, jrnlctx.buf.nBuf, iTid, &nRec
+    pRec = hctJrnlComposeRecord(iCid, 
+       (jrnlctx.schema.nBuf ? (const char*)jrnlctx.schema.aBuf : ""),
+       jrnlctx.buf.aBuf, jrnlctx.buf.nBuf, iTid, &nRec
     );
     if( !pRec ) rc = SQLITE_NOMEM_BKPT;
   }
@@ -404,6 +441,7 @@ int sqlite3HctJrnlLog(
   }
 
   sqlite3HctBufferFree(&jrnlctx.buf);
+  sqlite3HctBufferFree(&jrnlctx.schema);
   return rc;
 }
 
@@ -424,23 +462,6 @@ int sqlite3HctJrnlRecovery(HctDatabase *pDb, u64 iJrnlRoot){
   }
 
   return rc;
-}
-
-static int hctBufferAppend(HctBuffer *pBuf, const char *zFmt, ...){
-  va_list ap;
-  char *zApp = 0;
-  int nApp = 0;
-
-  va_start(ap, zFmt);
-  zApp = sqlite3_vmprintf(zFmt, ap);
-  va_end(ap);
-
-  nApp = sqlite3Strlen30(zApp);
-  if( sqlite3HctBufferGrow(pBuf, pBuf->nBuf+nApp+1) ) return SQLITE_NOMEM;
-  memcpy(&pBuf->aBuf[pBuf->nBuf], zApp, nApp+1);
-  pBuf->nBuf += nApp;
-  sqlite3_free(zApp);
-  return SQLITE_OK;
 }
 
 static int hctBufferAppendIf(HctBuffer *pBuf, const char *zSep){

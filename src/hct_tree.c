@@ -1362,6 +1362,7 @@ u32 sqlite3HctTreeCsrRoot(HctTreeCsr *pCsr){
 
 int sqlite3HctTreeForeach(
   HctTree *pTree,
+  int bSchemaOp,
   void *pCtx,
   int (*x)(void *, u32, KeyInfo*)
 ){
@@ -1370,7 +1371,7 @@ int sqlite3HctTreeForeach(
   for(i=0; rc==SQLITE_OK && i<pTree->nRootHash; i++){
     HctTreeRoot *p;
     for(p=pTree->apRootHash[i]; rc==SQLITE_OK && p; p=p->pHashNext){
-      if( p->pNode ){
+      if( p->pNode && (bSchemaOp || p->iRoot!=HCT_TREE_SCHEMAOP_ROOT) ){
         rc = x(pCtx, p->iRoot, p->pKeyInfo);
       }
     }

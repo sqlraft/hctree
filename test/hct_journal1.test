@@ -168,11 +168,11 @@ do_execsql_test 3.2.0 {
 }
 
 do_execsql_test 3.2.1 {
-  SELECT cid, hct_journal_entry(data) FROM sqlite_hct_journal
+  SELECT cid, schema, hct_journal_entry(data) FROM sqlite_hct_journal
 } {
-  7 {}
-  8 {t1: ins 1/('a','one')}
-  9 {t1: del 1}
+  7 {CREATE TABLE t1(x PRIMARY KEY, y);} {}
+  8 {}                                   {t1: ins 1/('a','one')}
+  9 {}                                   {t1: del 1}
 }
 
 do_execsql_test 3.2.2 {

@@ -53,6 +53,7 @@ struct HctConfig {
 # define SQLITE_LOCKED_ERR(x) SQLITE_LOCKED
 #endif
 
+#define HCT_TREE_SCHEMAOP_ROOT 3
 
 /* 
 ** Growable buffer type used for various things.
@@ -137,10 +138,18 @@ void sqlite3HctTreeCsrClear(HctTreeCsr *pCsr);
 u32 sqlite3HctTreeCsrRoot(HctTreeCsr *pCsr);
 
 
-/* Iterate through non-empty tables/indexes within an HctTree structure. Used
-** when flushing contents to disk.  */
+/* 
+** Iterate through non-empty tables/indexes within an HctTree structure. Used
+** when flushing contents to disk.  
+**
+** If parameter bSchemaOp is false, then no callback is issued for the table
+** with root page number HCT_TREE_SCHEMAOP_ROOT. If bSchemaOp is non-zero,
+** then HCT_TREE_SCHEMAOP_ROOT is treated like any other table.
+*/
+
 int sqlite3HctTreeForeach(
   HctTree *pTree,
+  int bSchemOp,
   void *pCtx,
   int (*x)(void *, u32, KeyInfo*)
 );
