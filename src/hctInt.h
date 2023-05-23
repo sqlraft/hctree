@@ -167,7 +167,7 @@ typedef struct HctDatabase HctDatabase;
 typedef struct HctDbCsr HctDbCsr;
 
 HctDatabase *sqlite3HctDbFind(sqlite3*, int);
-void sqlite3HctDetectJournals(sqlite3 *db);
+int sqlite3HctDetectJournals(sqlite3 *db);
 
 HctDatabase *sqlite3HctDbOpen(int*, const char *zFile, HctConfig*);
 void sqlite3HctDbClose(HctDatabase *pDb);

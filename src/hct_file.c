@@ -178,6 +178,9 @@ struct HctFileServer {
   HctPManServer *pPManServer;     /* Page manager server */
   int eInitState;
 
+  void *pJrnlPtr;
+  void(*xJrnlDel)(void*);
+
   i64 st_dev;                     /* File identification 1 */
   i64 st_ino;                     /* File identification 2 */
   HctFileServer *pServerNext;     /* Next object in g.pServerList list */
@@ -1312,6 +1315,9 @@ void sqlite3HctFileClose(HctFile *pFile){
       for(i=0; i<pDel->nFdDb; i++){ close(pDel->aFdDb[i]); }
       if( pDel->fdMap ) close(pDel->fdMap);
 
+      if( pDel->xJrnlDel ){
+        pDel->xJrnlDel(pDel->pJrnlPtr);
+      }
       sqlite3_free(pDel->zDir);
       sqlite3_free(pDel->zPath);
       sqlite3_mutex_free(pDel->pMutex);
@@ -1774,6 +1780,21 @@ u64 sqlite3HctFileGetSnapshotid(HctFile *pFile){
 
 int sqlite3HctFilePgsz(HctFile *pFile){
   return pFile->szPage;
+}
+
+void sqlite3HctFileSetJrnlPtr(
+  HctFile *pFile, 
+  void *pPtr, 
+  void(*xDel)(void*)
+){
+  assert( pFile->pServer->pJrnlPtr==0 );
+  assert( pFile->pServer->xJrnlDel==0 );
+  pFile->pServer->pJrnlPtr = pPtr;
+  pFile->pServer->xJrnlDel = xDel;
+}
+
+void *sqlite3HctFileGetJrnlPtr(HctFile *pFile){
+  return pFile->pServer->pJrnlPtr;
 }
 
 /*

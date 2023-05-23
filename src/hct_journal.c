@@ -33,6 +33,29 @@
     "hash BLOB"                             \
 ");"
 
+typedef struct HctJrnlSchema HctJrnlSchema;
+struct HctJrnlSchema {
+  u8 aVersion[SQLITE_HCT_JOURNAL_HASHSIZE];
+  u64 iCid;
+  HctJrnlSchema *pPrev;
+};
+
+typedef struct HctJrnlServer HctJrnlServer;
+struct HctJrnlServer {
+  HctJrnlSchema *pSchema;
+};
+
+/*
+** There is one instance of this structure for each database handle (HBtree*)
+** open on a replication-enabled hctree database.
+*/
+struct HctJournal {
+  u64 iJrnlRoot;                  /* Root page of journal table */
+  u64 iBaseRoot;                  /* Base page of journal table */
+  HctDatabase *pDb;
+  HctJrnlServer *pServer;
+};
+
 /*
 ** Initialize the main database for replication.
 */
@@ -104,7 +127,7 @@ int sqlite3_hct_journal_init(sqlite3 *db){
     sqlite3ErrorWithMsg(db, rc, "%s", zErr);
     sqlite3_free(zErr);
   }else{
-    sqlite3HctDetectJournals(db);
+    rc = sqlite3HctDetectJournals(db);
   }
 
   return rc;
@@ -140,6 +163,7 @@ static u8 *hctJrnlComposeRecord(
   u64 iCid,
   const char *zSchema,
   const u8 *pData, int nData,
+  const u8 *pSchemaVersion,
   u64 iTid,
   int *pnRec
 ){
@@ -149,9 +173,14 @@ static u8 *hctJrnlComposeRecord(
   int nBody = 0;
   int nSchema = 0;                /* Length of zSchema, in bytes */
   int nTidByte = 0;
+  u8 aHash[SQLITE_HCT_JOURNAL_HASHSIZE];
 
   nSchema = sqlite3Strlen30(zSchema);
   nTidByte = hctJrnlIntSize(iTid);
+
+  sqlite3_hct_journal_hashentry(
+      aHash, iCid, zSchema, pData, nData, pSchemaVersion
+  );
 
   /* First figure out how large the eventual record will be */
   nHdr = 1                                     /* size of header varint */
@@ -192,12 +221,12 @@ static u8 *hctJrnlComposeRecord(
 
     /* "schema_version" field - SQLITE_HCT_JOURNAL_HASHSIZE byte BLOB */
     *pHdr++ = (u8)((SQLITE_HCT_JOURNAL_HASHSIZE * 2) + 12);
-    memset(pBody, 0, SQLITE_HCT_JOURNAL_HASHSIZE);
+    memcpy(pBody, pSchemaVersion, SQLITE_HCT_JOURNAL_HASHSIZE);
     pBody += SQLITE_HCT_JOURNAL_HASHSIZE;
 
     /* "hash" field - SQLITE_HCT_JOURNAL_HASHSIZE byte BLOB */
     *pHdr++ = (u8)((SQLITE_HCT_JOURNAL_HASHSIZE * 2) + 12);
-    memset(pBody, 0, SQLITE_HCT_JOURNAL_HASHSIZE);
+    memcpy(pBody, aHash, SQLITE_HCT_JOURNAL_HASHSIZE);
     pBody += SQLITE_HCT_JOURNAL_HASHSIZE;
 
     /* "tid" field - INTEGER */
@@ -401,29 +430,71 @@ static int hctJrnlLogTree(void *pCtx, u32 iRoot, KeyInfo *pKeyInfo){
   return rc;
 }
 
+/*
+** Locate and return the HctJrnlSchema object that should be used for
+** the "schema_version" field of transaction iCid.
+*/
+static HctJrnlSchema *hctJrnlFindSchema(
+  int *pRc,                       /* IN/OUT: Error code */
+  HctJournal *pJrnl,              /* Journal handle */
+  JrnlCtx *pCtx,                  /* Journal entry context */
+  u64 iCid                        /* CID for current transaction */
+){
+  HctJrnlSchema *p = 0;
+  if( *pRc==SQLITE_OK ){
+    p = HctAtomicLoad(&pJrnl->pServer->pSchema);
+    while( p->iCid>iCid ) p = p->pPrev; 
+
+    if( pCtx->schema.nBuf>0 ){
+      HctJrnlSchema *pNew;            /* New HctJrnlSchema object */
+      assert( p==pJrnl->pServer->pSchema );
+
+      pNew = (HctJrnlSchema*)sqlite3HctMalloc(pRc, sizeof(HctJrnlSchema));
+      if( pNew ){
+        memcpy(pNew->aVersion, p->aVersion, SQLITE_HCT_JOURNAL_HASHSIZE);
+        sqlite3_hct_journal_hashschema(
+            pNew->aVersion, (const char*)pCtx->schema.aBuf
+        );
+        pNew->iCid = iCid;
+        pNew->pPrev = p;
+        HctAtomicStore(&pJrnl->pServer->pSchema, pNew);
+        p = pNew;
+      }
+    }
+  }
+
+  return p;
+}
+
 int sqlite3HctJrnlLog(
+  HctJournal *pJrnl,
   sqlite3 *db,
   Schema *pSchema,
   u64 iCid,
   u64 iTid,
   HctTree *pTree,
-  u64 iJrnlRoot,
   HctDatabase *pDb
 ){
   u8 *pRec = 0;
   int nRec = 0;
   int rc = SQLITE_OK;
   JrnlCtx jrnlctx;
+  HctJrnlSchema *pJSchema = 0;
 
   memset(&jrnlctx, 0, sizeof(jrnlctx));
   jrnlctx.pSchema = pSchema;
   jrnlctx.pTree = pTree;
 
   rc = sqlite3HctTreeForeach(pTree, 1, (void*)&jrnlctx, hctJrnlLogTree);
+
+  pJSchema = hctJrnlFindSchema(&rc, pJrnl, &jrnlctx, iCid);
+
   if( rc==SQLITE_OK ){
     pRec = hctJrnlComposeRecord(iCid, 
        (jrnlctx.schema.nBuf ? (const char*)jrnlctx.schema.aBuf : ""),
-       jrnlctx.buf.aBuf, jrnlctx.buf.nBuf, iTid, &nRec
+       jrnlctx.buf.aBuf, jrnlctx.buf.nBuf, 
+       pJSchema->aVersion,
+       iTid, &nRec
     );
     if( !pRec ) rc = SQLITE_NOMEM_BKPT;
   }
@@ -432,7 +503,9 @@ int sqlite3HctJrnlLog(
     int nRetry = 0;
     do {
       nRetry = 0;
-      rc = sqlite3HctDbInsert(pDb, iJrnlRoot, 0, iCid, 0, nRec, pRec, &nRetry);
+      rc = sqlite3HctDbInsert(
+          pDb, (u32)pJrnl->iJrnlRoot, 0, iCid, 0, nRec, pRec, &nRetry
+      );
       assert( nRetry==0 );
       if( rc!=SQLITE_OK ) break;
       rc = sqlite3HctDbInsertFlush(pDb, &nRetry);
@@ -445,29 +518,278 @@ int sqlite3HctJrnlLog(
   return rc;
 }
 
-int sqlite3HctJrnlRecovery(HctDatabase *pDb, u64 iJrnlRoot){
+static void hctJrnlDelServer(void *p){
+  HctJrnlServer *pServer = (HctJrnlServer*)p;
+  HctJrnlSchema *pSchema = 0;
+  HctJrnlSchema *pPrev = 0;
+
+  for(pSchema=pServer->pSchema; pSchema; pSchema=pPrev){
+    pPrev = pSchema->pPrev;
+    sqlite3_free(pSchema);
+  }
+  sqlite3_free(pServer);
+}
+
+typedef struct HctJournalRecord HctJournalRecord;
+struct HctJournalRecord {
+  i64 iCid;
+  const char *zSchema; int nSchema;
+  const void *pData; int nData;
+  const void *pSchemaVersion;
+  const void *pHash;
+  i64 iTid;
+  i64 iValidCid;
+};
+
+
+typedef struct HctRecordReader HctRecordReader;
+struct HctRecordReader {
+  const u8 *aRec;
+  int nRec;
+  int nHdr;
+  const u8 *pHdr;
+  const u8 *pBody;
+};
+
+static void hctJrnlReadInit(
+  HctRecordReader *p,
+  int nRec,
+  const u8 *aRec
+){
+  memset(p, 0, sizeof(*p));
+  p->aRec = aRec;
+  p->nRec = nRec;
+  p->pHdr = p->aRec + getVarint32(aRec, p->nHdr);
+  p->pBody = &p->aRec[p->nHdr];
+}
+
+static const u8 *hctJrnlReadBlobText(
+  int *pRc, 
+  HctRecordReader *p, 
+  int bText, 
+  int *pnData
+){
+  const u8 *pRet = 0;
+  if( *pRc==SQLITE_OK ){
+    u64 iType = 0;
+    p->pHdr += sqlite3GetVarint(p->pHdr, &iType);
+    if( iType<12 || (iType % 2)!=bText ){
+      *pRc = SQLITE_CORRUPT_BKPT;
+    }else{
+      *pnData = (iType - 12) / 2;
+      pRet = p->pBody;
+      p->pBody += (*pnData);
+    }
+  }
+  return pRet;
+}
+
+static const char *hctJrnlReadText(
+  int *pRc, 
+  HctRecordReader *p, 
+  int *pnText
+){
+  return (const char*)hctJrnlReadBlobText(pRc, p, 1, pnText);
+}
+static const u8 *hctJrnlReadBlob(
+  int *pRc, 
+  HctRecordReader *p, 
+  int *pnText
+){
+  return hctJrnlReadBlobText(pRc, p, 0, pnText);
+}
+
+static i64 hctJrnlReadInteger(int *pRc, HctRecordReader *p){
+  i64 iRet = 0;
+  if( *pRc==SQLITE_OK ){
+    u64 iType = 0;
+    p->pHdr += sqlite3GetVarint(p->pHdr, &iType);
+    switch( iType ){
+      case 1:
+        iRet = p->pBody[0];
+        p->pBody++;
+        break;
+      case 2:
+        iRet = ((u64)p->pBody[0] << 8) 
+             + ((u64)p->pBody[1] << 0);
+        p->pBody += 2;
+        break;
+      case 3:
+        iRet = ((u64)p->pBody[0] << 16)
+             + ((u64)p->pBody[1] << 8) 
+             + ((u64)p->pBody[2] << 0);
+        p->pBody += 3;
+        break;
+      case 4:
+        iRet = ((u64)p->pBody[0] << 24)
+             + ((u64)p->pBody[1] << 16) 
+             + ((u64)p->pBody[2] << 8) 
+             + ((u64)p->pBody[3] << 0);
+        p->pBody += 4;
+        break;
+      case 5:
+        iRet = ((u64)p->pBody[0] << 40)
+             + ((u64)p->pBody[1] << 32) 
+             + ((u64)p->pBody[2] << 24) 
+             + ((u64)p->pBody[3] << 16) 
+             + ((u64)p->pBody[4] << 8) 
+             + ((u64)p->pBody[5] << 0);
+        p->pBody += 6;
+        break;
+      case 6:
+        iRet = ((u64)p->pBody[0] << 56)
+             + ((u64)p->pBody[1] << 48) 
+             + ((u64)p->pBody[2] << 40) 
+             + ((u64)p->pBody[3] << 32) 
+             + ((u64)p->pBody[4] << 24) 
+             + ((u64)p->pBody[5] << 16) 
+             + ((u64)p->pBody[6] << 8) 
+             + ((u64)p->pBody[7] << 0);
+        p->pBody += 6;
+        break;
+      case 8:
+        iRet = 0;
+        break;
+      case 9:
+        iRet = 1;
+        break;
+      default:
+        *pRc = SQLITE_CORRUPT_BKPT;
+        break;
+    }
+  }
+
+  return iRet;
+}
+
+static int hctJrnlReadJournalRecord(HctDbCsr *pCsr, HctJournalRecord *pRec){
+  int rc = SQLITE_OK;
+  int nData = 0;
+  const u8 *aData = 0;
+
+  memset(pRec, 0, sizeof(*pRec));
+
+  sqlite3HctDbCsrKey(pCsr, (i64*)&pRec->iCid);
+  rc = sqlite3HctDbCsrData(pCsr, &nData, &aData);
+  if( rc==SQLITE_OK ){
+    int nHash = 0;
+    HctRecordReader rdr;
+    hctJrnlReadInit(&rdr, nData, aData);
+
+    /* "cid" field - always NULL */
+    if( *rdr.pHdr++!=0 ) return SQLITE_CORRUPT_BKPT;
+
+    /* "schema" field - always TEXT. */
+    pRec->zSchema = hctJrnlReadText(&rc, &rdr, &pRec->nSchema);
+
+    /* "data" field - always BLOB */
+    pRec->pData = hctJrnlReadBlob(&rc, &rdr, &pRec->nData);
+    
+    /* "schema_version" field - SQLITE_HCT_JOURNAL_HASHSIZE byte BLOB */
+    pRec->pSchemaVersion = (const void*)hctJrnlReadBlob(&rc, &rdr, &nHash);
+    if( nHash!=SQLITE_HCT_JOURNAL_HASHSIZE ) rc = SQLITE_CORRUPT_BKPT;
+
+    /* "hash" field - SQLITE_HCT_JOURNAL_HASHSIZE byte BLOB */
+    pRec->pHash = (const void*)hctJrnlReadBlob(&rc, &rdr, &nHash);
+    if( nHash!=SQLITE_HCT_JOURNAL_HASHSIZE ) rc = SQLITE_CORRUPT_BKPT;
+
+    /* "tid" field - an INTEGER */
+    pRec->iTid = hctJrnlReadInteger(&rc, &rdr);
+
+    /* "valid_cid" field - an INTEGER */
+    pRec->iValidCid = hctJrnlReadInteger(&rc, &rdr);
+  }
+  return rc;
+}
+
+int sqlite3HctJrnlRecovery(HctJournal *pJrnl, HctDatabase *pDb){
+  HctJrnlServer *pServer = 0;
+  HctJrnlSchema *pSchema = 0;
+  HctFile *pFile = sqlite3HctDbFile(pDb);
+  u8 aSchema[SQLITE_HCT_JOURNAL_HASHSIZE];
   int rc = SQLITE_OK;
   HctDbCsr *pCsr = 0;
 
-  rc = sqlite3HctDbCsrOpen(pDb, 0, (u32)iJrnlRoot, &pCsr);
+  memset(aSchema, 0, sizeof(aSchema));
+
+  rc = sqlite3HctDbCsrOpen(pDb, 0, (u32)pJrnl->iJrnlRoot, &pCsr);
   if( rc==SQLITE_OK ){
     rc = sqlite3HctDbCsrLast(pCsr);
-    if( rc==SQLITE_OK && sqlite3HctDbCsrEof(pCsr)==0 ){
-      HctFile *pFile = sqlite3HctDbFile(pDb);
-      u64 iCid = 0;
-      sqlite3HctDbCsrKey(pCsr, (i64*)&iCid);
-      sqlite3HctFileSetCID(pFile, iCid);
+  }
+  if( rc==SQLITE_OK ){
+    if( sqlite3HctDbCsrEof(pCsr)==0 ){
+      HctJournalRecord rec;
+      rc = hctJrnlReadJournalRecord(pCsr, &rec);
+      if( rc==SQLITE_OK ){
+        sqlite3HctFileSetCID(pFile, rec.iCid);
+        memcpy(aSchema, rec.pSchemaVersion, SQLITE_HCT_JOURNAL_HASHSIZE);
+      }
     }
     sqlite3HctDbCsrClose(pCsr);
+  }
+
+  pServer = (HctJrnlServer*)sqlite3HctMalloc(&rc, sizeof(HctJrnlServer));
+  if( rc==SQLITE_OK ){
+    sqlite3HctFileSetJrnlPtr(pFile, (void*)pServer, hctJrnlDelServer);
+    pSchema = (HctJrnlSchema*)sqlite3HctMalloc(&rc, sizeof(HctJrnlSchema));
+    if( pSchema ){
+      memcpy(pSchema->aVersion, aSchema, SQLITE_HCT_JOURNAL_HASHSIZE);
+      pServer->pSchema = pSchema;
+    }
+    pJrnl->pServer = pServer;
   }
 
   return rc;
 }
 
-static int hctBufferAppendIf(HctBuffer *pBuf, const char *zSep){
-  if( pBuf->nBuf>0 ){
-    hctBufferAppend(pBuf, "%s", zSep);
+static u64 hctFindRootByName(Schema *pSchema, const char *zName){
+  u64 iRet = 0;
+  Table *pTab = (Table*)sqlite3HashFind(&pSchema->tblHash, zName);
+  if( pTab ){
+    iRet = pTab->tnum;
   }
+  return iRet;
+}
+
+int sqlite3HctJournalNewIf(
+  Schema *pSchema, 
+  HctDatabase *pDb, 
+  HctJournal **pp
+){
+  int rc = SQLITE_OK;
+  u64 iJrnlRoot = hctFindRootByName(pSchema, "sqlite_hct_journal");
+  u64 iBaseRoot = hctFindRootByName(pSchema, "sqlite_hct_baseline");
+
+  assert( *pp==0 );
+
+  if( (iJrnlRoot==0)!=(iBaseRoot==0) ){
+    return SQLITE_CORRUPT_BKPT;
+  }
+  if( iJrnlRoot ){
+    HctJournal *pNew = sqlite3HctMalloc(&rc, sizeof(HctJournal));
+    if( pNew ){
+      HctFile *pFile = sqlite3HctDbFile(pDb);
+      pNew->iJrnlRoot = iJrnlRoot;
+      pNew->iBaseRoot = iBaseRoot;
+      pNew->pDb = pDb;
+      pNew->pServer = (HctJrnlServer*)sqlite3HctFileGetJrnlPtr(pFile);
+      *pp = pNew;
+    }
+  }
+
+  return rc;
+}
+
+int sqlite3HctJournalIsTable(HctJournal *pJrnl, u64 iTable){
+  return (pJrnl && (pJrnl->iJrnlRoot==iTable || pJrnl->iBaseRoot==iTable));
+}
+
+static int hctBufferAppendIf(HctBuffer *pBuf, const char *zSep){
+  int rc = SQLITE_OK;
+  if( pBuf->nBuf>0 ){
+    rc = hctBufferAppend(pBuf, "%s", zSep);
+  }
+  return rc;
 }
 
 static void hctJournalEntryFunc(

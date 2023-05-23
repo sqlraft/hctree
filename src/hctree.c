@@ -57,10 +57,6 @@ struct HctLogFile {
 **     sqlite3HctBtreeBeginTrans()
 **     sqlite3HctBtreeCommitPhaseTwo()
 **     sqlite3HctBtreeRollback()
-**
-** iJrnlRoot:
-**   If this is non-zero, then it is the logical root page of the
-**   sqlite_hct_journal table.
 */
 struct HBtree {
   BtreeMethods *pMethods;
@@ -85,8 +81,11 @@ struct HBtree {
   int eMetaState;
 
   int bRecoveryDone;
+#if 0
   u64 iJrnlRoot;                  /* Root of sqlite_hct_journal */
   u64 iBaseRoot;                  /* Root of sqlite_hct_baseline */
+#endif
+  HctJournal *pHctJrnl;
 
   Pager *pFakePager;
 };
@@ -875,24 +874,21 @@ int sqlite3HctBtreeNewDb(Btree *p){
   return rc;
 }
 
-static u64 hctFindRootByName(HBtree *p, const char *zName){
-  u64 iRet = 0;
-  Schema *pSchema = (Schema*)p->pSchema;
-  Table *pTab = (Table*)sqlite3HashFind(&pSchema->tblHash, zName);
-  if( pTab ){
-    iRet = pTab->tnum;
+static int hctDetectJournals(HBtree *p){
+  int rc = SQLITE_OK;
+  if( p->pHctJrnl==0 ){
+    rc = sqlite3HctJournalNewIf((Schema*)p->pSchema, p->pHctDb, &p->pHctJrnl);
   }
-  return iRet;
+  return rc;
 }
 
-void hctDetectJournals(HBtree *p){
-  p->iJrnlRoot = hctFindRootByName(p, "sqlite_hct_journal");
-  p->iBaseRoot = hctFindRootByName(p, "sqlite_hct_baseline");
-}
-
-void sqlite3HctDetectJournals(sqlite3 *db){
+int sqlite3HctDetectJournals(sqlite3 *db){
   HBtree *p = (HBtree*)db->aDb[0].pBt;
-  hctDetectJournals(p);
+  int rc = hctDetectJournals(p);
+  if( rc==SQLITE_OK ){
+    rc = sqlite3HctJrnlRecovery(p->pHctJrnl, p->pHctDb);
+  }
+  return SQLITE_OK;
 }
 
 static int hctAttemptRecovery(HBtree *p, int iStage){
@@ -903,9 +899,9 @@ static int hctAttemptRecovery(HBtree *p, int iStage){
       rc = hctRecoverLogs(p, iStage);
       if( rc==SQLITE_OK && iStage==1 ){
         hctDetectJournals(p);
-        if( p->iJrnlRoot ){
+        if( p->pHctJrnl ){
           sqlite3HctDbRollbackMode(p->pHctDb, 0);
-          rc = sqlite3HctJrnlRecovery(p->pHctDb, p->iJrnlRoot);
+          rc = sqlite3HctJrnlRecovery(p->pHctJrnl, p->pHctDb);
         }
       }
       rc = sqlite3HctDbFinishRecovery(p->pHctDb, iStage, rc);
@@ -1257,13 +1253,13 @@ static int btreeFlushToDisk(HBtree *p){
     if( p->db->xMtCommit ) p->db->xMtCommit(p->db->pMtCommitCtx, 1);
     rc = sqlite3HctDbValidate(p->db, p->pHctDb, &iCid, &bTmapScan);
 
-    if( p->iJrnlRoot ){
+    if( p->pHctJrnl ){
       rc = sqlite3HctJrnlLog(
+        p->pHctJrnl,
         p->db,
         (Schema*)p->pSchema,
         iCid, iTid,
         p->pHctTree,
-        p->iJrnlRoot,
         p->pHctDb
       );
     }
@@ -1552,7 +1548,7 @@ int sqlite3HctBtreeCursor(
   /* If this is an attempt to open a read/write cursor on either the
   ** sqlite_hct_journal or sqlite_hct_baseline tables, return an error
   ** immediately.  */
-  if( wrFlag && (iTable==p->iJrnlRoot || iTable==p->iBaseRoot) ){
+  if( wrFlag && sqlite3HctJournalIsTable(p->pHctJrnl, iTable) ){
     return SQLITE_READONLY;
   }
 
@@ -2304,7 +2300,7 @@ int sqlite3HctBtreeInsert(
 int sqlite3HctSchemaOp(Btree *pBt, const char *zSql){
   int rc = SQLITE_OK;
   HBtree *const p = (HBtree*)pBt;
-  if( p->iJrnlRoot!=0 ){
+  if( p->pHctJrnl ){
     HctTreeCsr *pCsr = 0;
 
     rc = sqlite3HctTreeCsrOpen(p->pHctTree, HCT_TREE_SCHEMAOP_ROOT, &pCsr);

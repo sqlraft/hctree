@@ -178,4 +178,7 @@ u64 sqlite3HctFileWriteCount(HctFile *pFile);
 */
 int sqlite3HctFileNFile(HctFile *pFile, int *pbFixed);
 
+void sqlite3HctFileSetJrnlPtr(HctFile *pFile, void *pPtr, void(*xDel)(void*));
+void *sqlite3HctFileGetJrnlPtr(HctFile *pFile);
+
 
