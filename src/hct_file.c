@@ -820,7 +820,7 @@ static int hctFileServerInit(
 ){
   int rc = SQLITE_OK;
   assert( sqlite3_mutex_held(p->pMutex) );
-  if( p->szPage==0 ){
+  if( p->zPath==0 ){
     i64 szHdr;                    /* Size of header file */
     i64 szMap;                    /* Size of pagemap file */
     int nChunk = 0;               /* Number of chunks in database */

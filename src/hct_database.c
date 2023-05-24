@@ -638,7 +638,6 @@ int sqlite3HctDbPagesize(HctDatabase *pDb){
 
 void sqlite3HctDbClose(HctDatabase *p){
   if( p ){
-    sqlite3HctBufferFree(&p->pa.fp.buf);
     sqlite3_free(p->aTmp);
     sqlite3HctFileClose(p->pFile);
     p->pFile = 0;
@@ -2810,6 +2809,9 @@ static void hctDbWriterCleanup(HctDatabase *pDb, HctDbWriter *p, int bRevert){
     );
 
     assert_writer_is_ok(pDb, p);
+
+    sqlite3HctBufferFree(&p->fp.buf);
+    memset(&p->fp, 0, sizeof(p->fp));
 
     /* sqlite3HctFilePageUnwrite(&p->fanpg); */
     sqlite3HctFilePageRelease(&p->fanpg);
