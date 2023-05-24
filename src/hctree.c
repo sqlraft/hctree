@@ -670,6 +670,7 @@ int sqlite3HctBtreeClose(Btree *pBt){
       p->xSchemaFree(p->pSchema);
     }
     sqlite3_free(p->pSchema);
+    sqlite3HctJournalClose(p->pHctJrnl);
     sqlite3HctTreeFree(p->pHctTree);
     sqlite3HctDbClose(p->pHctDb);
     sqlite3_free(p->aSchemaOp);
@@ -1206,6 +1207,7 @@ static int btreeFlushToDisk(HBtree *p){
   /* Write a log file for this transaction. The TID field is still set
   ** to zero at this point.  */
   rc = btreeWriteLog(p);
+
   if( rc==SQLITE_OK ){
     sqlite3HctDbStartWrite(p->pHctDb, &iTid);
     /* Invoke the SQLITE_TESTCTRL_HCT_MTCOMMIT hook, if applicable */

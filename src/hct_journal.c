@@ -373,6 +373,7 @@ static int hctJrnlLogTree(void *pCtx, u32 iRoot, KeyInfo *pKeyInfo){
             (pJrnl->schema.nBuf>0 ? ";" : ""), nData, (const char*)aData
         );
       }
+      sqlite3HctTreeCsrClose(pCsr);
     }
   }else{
     JrnlTree jrnltree;
@@ -554,6 +555,7 @@ int sqlite3HctJrnlLog(
     }while( nRetry );
   }
 
+  sqlite3_free(pRec);
   sqlite3HctBufferFree(&jrnlctx.buf);
   sqlite3HctBufferFree(&jrnlctx.schema);
   return rc;
@@ -813,6 +815,10 @@ int sqlite3HctJournalNewIf(
   }
 
   return rc;
+}
+
+void sqlite3HctJournalClose(HctJournal *pJrnl){
+  sqlite3_free(pJrnl);
 }
 
 int sqlite3HctJournalIsTable(HctJournal *pJrnl, u64 iTable){

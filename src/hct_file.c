@@ -959,6 +959,7 @@ static int hctFileInitHdr(HctFileServer *p){
       memcpy(p->pMapping->aChunk[0].pData, aBuf, HCT_HEADER_PAGESIZE);
     }
   }
+  sqlite3_free(aBuf);
   return rc;
 }
 

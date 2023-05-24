@@ -320,25 +320,34 @@ int sqlite3HctTMapServerNew(u64 iLargestTid, HctTMapServer **pp){
 ** from that list and frees all associated allocations.
 */
 static void hctTMapFreeMap(HctTMapServer *p, HctTMapFull *pMap){
-  int nFree = 0;
+  int iFirst = 0;                 /* First in pMap->m.aaMap[] to free */
+  int iSave = 0;                  /* First in pMap->m.aaMap[] to preserve */
   int ii;
 
   assert( pMap && pMap->nRef==0 );
   if( pMap==p->pList ){
-    if( pMap->pNext==0 ) nFree = pMap->m.nMap;
+    if( pMap->pNext==0 ) iSave = pMap->m.nMap;
     p->pList = pMap->pNext;
   }else{
     HctTMapFull *pPrev;
+    HctTMapFull *pNext = pMap->pNext;
+
     for(pPrev=p->pList; pPrev->pNext!=pMap; pPrev=pPrev->pNext);
-    if( pMap->pNext==0 ){
-      for(nFree=0; nFree<pMap->m.nMap; nFree++){
-        if( pMap->m.aaMap[nFree]==pPrev->m.aaMap[0] ) break;
+    for(iSave=0; iSave<pMap->m.nMap; iSave++){
+      if( pMap->m.aaMap[iSave]==pPrev->m.aaMap[0] ) break;
+    }
+
+    if( pNext ){
+      u64 *aDoNotDel = pNext->m.aaMap[pNext->m.nMap-1];
+      for(iFirst=pMap->m.nMap; iFirst>0; iFirst--){
+        if( pMap->m.aaMap[iFirst-1]==aDoNotDel ) break;
       }
     }
+
     pPrev->pNext = pMap->pNext;
   }
 
-  for(ii=0; ii<nFree; ii++){
+  for(ii=iFirst; ii<iSave; ii++){
     sqlite3_free(pMap->m.aaMap[ii]);
   }
   sqlite3_free(pMap);

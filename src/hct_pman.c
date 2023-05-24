@@ -133,10 +133,6 @@ struct HctPManClient {
   HctConfig *pConfig;
   HctPManServer *pServer;
   HctFile *pFile;
-#if 0
-  HctPManPageset *apAcc[2];       /* Accumulating physical, logical sets */
-  HctPManPageset *apUse[2];       /* Physical, logical sets for using */
-#endif
 
   HctPManFreePgSet aPgSet[2];     /* Free physical and logical pages */
 
@@ -597,6 +593,7 @@ u32 sqlite3HctPManAllocPg(
       }
     }
   }
+  sqlite3_free(pPgset);
 
   if( rc==SQLITE_OK ){
     assert( pSet->nPg>0 && pSet->aPg[pSet->iFirst].iTid<=iSafeTid );
