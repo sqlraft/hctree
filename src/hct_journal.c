@@ -36,7 +36,8 @@
 typedef struct HctJrnlSchema HctJrnlSchema;
 struct HctJrnlSchema {
   u8 aVersion[SQLITE_HCT_JOURNAL_HASHSIZE];
-  u64 iCid;
+  u64 iCid;                       /* CID that created this new schema version */
+  u64 iTid;                       /* TID that created it. */
   HctJrnlSchema *pPrev;
 };
 
@@ -431,6 +432,18 @@ static int hctJrnlLogTree(void *pCtx, u32 iRoot, KeyInfo *pKeyInfo){
 }
 
 /*
+** Free the linked-list of HctJrnlSchema objects passed as the only argument.
+*/
+static void hctJrnlSchemaFree(HctJrnlSchema *p){
+  HctJrnlSchema *pPrev = 0;
+  HctJrnlSchema *pDel = 0;
+  for(pDel=p; pDel; pDel=pPrev){
+    pPrev = pDel->pPrev;
+    sqlite3_free(pDel);
+  }
+}
+
+/*
 ** Locate and return the HctJrnlSchema object that should be used for
 ** the "schema_version" field of transaction iCid.
 */
@@ -438,16 +451,33 @@ static HctJrnlSchema *hctJrnlFindSchema(
   int *pRc,                       /* IN/OUT: Error code */
   HctJournal *pJrnl,              /* Journal handle */
   JrnlCtx *pCtx,                  /* Journal entry context */
-  u64 iCid                        /* CID for current transaction */
+  u64 iCid,                       /* CID for current transaction */
+  u64 iTid                        /* TID for current transaction */
 ){
   HctJrnlSchema *p = 0;
   if( *pRc==SQLITE_OK ){
+
     p = HctAtomicLoad(&pJrnl->pServer->pSchema);
     while( p->iCid>iCid ) p = p->pPrev; 
 
+    /* If this transaction modifies the schema, then a new schema hash
+    ** (and a new HctJrnlSchema object) must be created. This requires
+    ** no special locking, as:
+    **
+    **   + Every transaction that modifies the schema also writes to
+    **     the schema cookie table entry.
+    **
+    **   + The schema cookie table entry is subject to the usual validation
+    **     constraints. And since this function is called after validation,
+    **     it is not possible for two threads to create a new schema
+    **     version simultaneously - one of them would have failed validation
+    **     on the schema cookie.
+    */
     if( pCtx->schema.nBuf>0 ){
       HctJrnlSchema *pNew;            /* New HctJrnlSchema object */
+      HctJrnlSchema *pLast;           /* Last HctJrnlSchema object required */
       assert( p==pJrnl->pServer->pSchema );
+      i64 iSafeTid = sqlite3HctFileSafeTID(sqlite3HctDbFile(pJrnl->pDb));
 
       pNew = (HctJrnlSchema*)sqlite3HctMalloc(pRc, sizeof(HctJrnlSchema));
       if( pNew ){
@@ -456,10 +486,21 @@ static HctJrnlSchema *hctJrnlFindSchema(
             pNew->aVersion, (const char*)pCtx->schema.aBuf
         );
         pNew->iCid = iCid;
+        pNew->iTid = iTid;
         pNew->pPrev = p;
         HctAtomicStore(&pJrnl->pServer->pSchema, pNew);
-        p = pNew;
       }
+      p = pNew;
+
+      /* All current and future transactions include TID iSafeTid in their
+      ** transactions. This means that no client - extant or future - will
+      ** need to follow the HctJrnlSchema.pNext pointer from an object
+      ** with (HctJrnlSchema.iTid<=iSafeTid). Any such objects can therefore
+      ** all be freed now.  */
+      for(pLast=p; pLast->pPrev && pLast->iTid>iSafeTid; pLast=pLast->pPrev);
+      assert( pLast->pPrev==0 || pLast->iTid<=iSafeTid );
+      hctJrnlSchemaFree(pLast->pPrev);
+      pLast->pPrev = 0;
     }
   }
 
@@ -487,7 +528,7 @@ int sqlite3HctJrnlLog(
 
   rc = sqlite3HctTreeForeach(pTree, 1, (void*)&jrnlctx, hctJrnlLogTree);
 
-  pJSchema = hctJrnlFindSchema(&rc, pJrnl, &jrnlctx, iCid);
+  pJSchema = hctJrnlFindSchema(&rc, pJrnl, &jrnlctx, iCid, iTid);
 
   if( rc==SQLITE_OK ){
     pRec = hctJrnlComposeRecord(iCid, 
@@ -520,13 +561,7 @@ int sqlite3HctJrnlLog(
 
 static void hctJrnlDelServer(void *p){
   HctJrnlServer *pServer = (HctJrnlServer*)p;
-  HctJrnlSchema *pSchema = 0;
-  HctJrnlSchema *pPrev = 0;
-
-  for(pSchema=pServer->pSchema; pSchema; pSchema=pPrev){
-    pPrev = pSchema->pPrev;
-    sqlite3_free(pSchema);
-  }
+  hctJrnlSchemaFree(pServer->pSchema);
   sqlite3_free(pServer);
 }
 

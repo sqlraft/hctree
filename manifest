@@ -1,5 +1,5 @@
-C Add\sschema\sand\sentry\shashes\sto\sthe\ssqlite_hct_journal\sentries.
-D 2023-05-23T20:31:12.290
+C Free\sold\sHctJrnlSchema\sobjects\swhen\sit\scan\sbe\sproven\sthat\sthey\sare\sno\slonger\srequired.
+D 2023-05-24T16:58:50.466
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -613,7 +613,7 @@ F src/hctPManInt.h 44e63f39e3da54ca47f5582127a12a2f33002d1f3ddcd0fc23120731dfe70
 F src/hctTMapInt.h 4ac478747a6ecb607ba14a484cbf189b8d4ff090ed97c0a9704e7a2e727316c0
 F src/hct_database.c ea898fbc244d7f771505dc510bb17d37f9e969ad5cc5fc9c4618cfaa46be9226
 F src/hct_file.c e4a618116ecf202cd03211e97e559a72c3d9d304f33edb24683c246e5c7f69d3
-F src/hct_journal.c 121baaca49977a0b00c0bc8182996f6b70f1514d3b951462b3924cd390d844e7
+F src/hct_journal.c aadadf04527733c67bea22323fafb85866539c62219daa31691e1714779d811a
 F src/hct_journalhash.c 94b45a60c091bee76f58ace86a575689dbb68526a17b929c001b356a151af175
 F src/hct_pman.c 63b03b562925e00174464c1b718f8fbdd5c5fa9cd93ac8498abc0d0b804c42fd
 F src/hct_record.c 9c0886b0da4b86df8389cf83885b96c63a8fda147c9b93ff4eac1b7100a13d78
@@ -1219,7 +1219,7 @@ F test/hct_growth1.test 80928cdcdf0e0128856d367400b432e6895a51a9a828c066f1068080
 F test/hct_growth2.test 4bd9f76b0021599a0524e8531244fe30dfe8bf444ff67f344a8c1e941e8c3447
 F test/hct_hst1.test 00892878bb403619ba4a9e58e1aa8320b85f43d760b86226b12467f0e4787acb
 F test/hct_hst2.test 3cc73ce70f9d5d2750cbd7e815190487eb62116fbdab39739f6e95bcbdc797ed
-F test/hct_journal1.test d8b60709f6497bddd34784c66c94190b6a7aed8ef7078fe0ed53a90cbc3c8354
+F test/hct_journal1.test 5bcd4e5b796c1fa1dc7aba9efe9a54a0877a4bbbff27169f67ff7fabd01087e7
 F test/hct_misc1.test 0b804f4f9cd1e1b4482f304a8f8ea10c874df26de8914c1bb563f604d7a92e56
 F test/hct_misc2.test caabfe956efd58721a8e8ef3c3076cfca1aa827a813f6329945532d7b1ade244
 F test/hct_misc3.test e74bcf359c0ad44a05723c5bd8e47fbf28375f0a6ca959052db91f0229efff1a
@@ -2140,8 +2140,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P d20e3d10dff00e84c07e31dbaa0e3c8aac2dda04b3068a3c6db91fa5c7e520dd
-R 4434bc1ea934e018341c2667b7dce834
+P 6b6d5e3e2da6d246cd7e4d04e3d200059c727b4dca70faa4a8e31d68e714ec5e
+R e4ac26d9fc6a9b18e766c4a91c18d768
 U dan
-Z 4f920b39b90484a634d2689ad102c6cf
+Z c4d6584e496a7472a0fb313db3b83a33
 # Remove this line to create a well-formed Fossil manifest.

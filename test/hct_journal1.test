@@ -214,7 +214,7 @@ do_execsql_test 4.0 {
 }
 
 execsql_pp {
-  SELECT cid, schema, hct_journal_entry(data), quote(schema_version), quote(hash) FROM sqlite_hct_journal
+  SELECT cid, schema, hct_journal_entry(data), quote(schema_version), quote(hash), tid, validcid FROM sqlite_hct_journal
 }
 
 finish_test
