@@ -571,6 +571,12 @@ int sqlite3HctJrnlWriteEmpty(HctJournal *pJrnl, u64 iCid, u64 iTid){
   pJSchema = HctAtomicLoad(&pJrnl->pServer->pSchema);
   while( pJSchema->iCid>iCid ) pJSchema = pJSchema->pPrev;
 
+  if( pJSchema->iCid==iCid ){
+    HctJrnlSchema *pPrev = pJSchema->pPrev;
+    assert( pJrnl->pServer->pSchema==pJSchema );
+    memcpy(pJSchema->aVersion, pPrev->aVersion, SQLITE_HCT_JOURNAL_HASHSIZE);
+  }
+
   sqlite3HctDbJournalRbMode(pJrnl->pDb, 1);
   rc = hctJrnlWriteRecord(pJrnl, iCid, "", 0, 0, pJSchema->aVersion, iTid);
   sqlite3HctDbJournalRbMode(pJrnl->pDb, 0);
