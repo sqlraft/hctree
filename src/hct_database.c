@@ -320,6 +320,7 @@ struct HctDatabase {
 #define HCT_MODE_NORMAL    0
 #define HCT_MODE_ROLLBACK  1
 #define HCT_MODE_VALIDATE  3
+#define HCT_MODE_JOURNALRB 4
 
 
 /* 
@@ -787,7 +788,7 @@ static int hctDbTidIsVisible(HctDatabase *pDb, u64 iTid){
 ** false if the write should proceed.
 */
 static int hctDbTidIsConflict(HctDatabase *pDb, u64 iTid){
-  if( iTid<=pDb->iLocalMinTid ){
+  if( iTid==pDb->iTid || iTid<=pDb->iLocalMinTid ){
     return 0;
   }else{
     u64 eState = 0;
@@ -2090,6 +2091,7 @@ static int hctDbFollowRangeOld(
 
   i64 iDoNotMergeTid = (pDb->eMode==HCT_MODE_VALIDATE) ? 0 : pDb->iTid;
   assert( pDb->eMode!=HCT_MODE_ROLLBACK );
+  assert( pDb->eMode!=HCT_MODE_JOURNALRB );
 
   if( iRangeTidValue>pDb->iLocalMinTid ){
     bRet = 1;
@@ -3131,6 +3133,15 @@ void sqlite3HctDbRollbackMode(HctDatabase *pDb, int bRollback){
   assert( bRollback==0 || pDb->eMode==HCT_MODE_NORMAL );
   pDb->pa.nWriteKey = 0;
   pDb->eMode = bRollback ? HCT_MODE_ROLLBACK : HCT_MODE_NORMAL;
+}
+void sqlite3HctDbJournalRbMode(HctDatabase *pDb, int bRollback){
+  assert( bRollback==0 || bRollback==1 );
+  assert( bRollback==1 || pDb->eMode==HCT_MODE_JOURNALRB );
+  assert( bRollback==0 || pDb->eMode==HCT_MODE_NORMAL );
+  assert( bRollback==1 || pDb->eMode==HCT_MODE_JOURNALRB );
+
+  pDb->pa.nWriteKey = 0;
+  pDb->eMode = bRollback ? HCT_MODE_JOURNALRB : HCT_MODE_NORMAL;
 }
 
 i64 sqlite3HctDbNCasFail(HctDatabase *pDb){
@@ -4629,6 +4640,7 @@ static int hctDbDelete(
   HctDbCell prev;           /* Previous cell on page */
 
   assert( pOp->bFullDel==0 );
+  assert( pDb->eMode!=HCT_MODE_JOURNALRB );
 
   if( pOp->iInsert==0 && !bLeftmost ){
     /* If deleting the first key on the first page, set the eBalance flag (as 
@@ -5137,7 +5149,7 @@ nCall++;
 
       if( p->iHeight==0 ){
         cell.iTid = pDb->iTid;
-        if( pDb->eMode==HCT_MODE_ROLLBACK ){
+        if( pDb->eMode==HCT_MODE_ROLLBACK || pDb->eMode==HCT_MODE_JOURNALRB ){
           cell.iTid |= HCT_TID_ROLLBACK_OVERRIDE;
         }
 
@@ -5314,7 +5326,10 @@ int sqlite3HctDbInsert(
   }
 #endif
 
-  assert( pDb->eMode==HCT_MODE_NORMAL || pDb->eMode==HCT_MODE_ROLLBACK );
+  assert( pDb->eMode==HCT_MODE_NORMAL 
+       || pDb->eMode==HCT_MODE_ROLLBACK
+       || pDb->eMode==HCT_MODE_JOURNALRB
+  );
   if( pDb->eMode==HCT_MODE_ROLLBACK ){
     int op = 0;
 
@@ -6010,7 +6025,7 @@ static int hctDbValidateEntry(HctDatabase *pDb, HctDbCsr *pCsr){
     int iOff = hctDbCellOffset(pCsr->pg.aOld, pCsr->iCell, &flags);
     if( flags & HCTDB_HAS_TID ){
       u64 iTid = hctGetU64(&pCsr->pg.aOld[iOff]);
-      if( iTid!=pDb->iTid && hctDbTidIsConflict(pCsr->pDb, iTid) ){
+      if( hctDbTidIsConflict(pCsr->pDb, iTid) ){
         rc = HCT_SQLITE_BUSY;
       }
     }

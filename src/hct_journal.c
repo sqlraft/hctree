@@ -134,6 +134,25 @@ int sqlite3_hct_journal_init(sqlite3 *db){
   return rc;
 }
 
+/*
+** Register a custom validation callback with the database handle.
+*/
+int sqlite3_hct_journal_validation_hook(
+  sqlite3 *db,
+  void *pArg,
+  int(*xValidate)(
+    void *pCopyOfArg,
+    sqlite3_int64 iCid,
+    const char *zSchema,
+    const void *pData, int nData,
+    const void *pSchemaVersion
+  )
+){
+  db->xValidate = xValidate;
+  db->pValidateArg = pArg;
+  return SQLITE_OK;
+}
+
 #define MAX_6BYTE ((((i64)0x00008000)<<32)-1)
 
 static int hctJrnlIntSize(u64 iVal){
@@ -212,13 +231,17 @@ static u8 *hctJrnlComposeRecord(
 
     /* "schema" field - TEXT */
     pHdr += sqlite3PutVarint(pHdr, (nSchema*2) + 13);
-    memcpy(pBody, zSchema, nSchema);
-    pBody += nSchema;
+    if( nSchema>0 ){
+      memcpy(pBody, zSchema, nSchema);
+      pBody += nSchema;
+    }
 
     /* "data" field - BLOB */
     pHdr += sqlite3PutVarint(pHdr, (nData*2) + 12);
-    memcpy(pBody, pData, nData);
-    pBody += nData;
+    if( nData>0 ){
+      memcpy(pBody, pData, nData);
+      pBody += nData;
+    }
 
     /* "schema_version" field - SQLITE_HCT_JOURNAL_HASHSIZE byte BLOB */
     *pHdr++ = (u8)((SQLITE_HCT_JOURNAL_HASHSIZE * 2) + 12);
@@ -508,6 +531,52 @@ static HctJrnlSchema *hctJrnlFindSchema(
   return p;
 }
 
+static int hctJrnlWriteRecord(
+  HctJournal *pJrnl,
+  u64 iCid,
+  const char *zSchema,
+  const void *pData, int nData,
+  const void *pSV,
+  u64 iTid
+){
+  int rc = SQLITE_OK;
+  u8 *pRec = 0;
+  int nRec = 0;
+
+  pRec = hctJrnlComposeRecord(iCid, zSchema, pData, nData, pSV, iTid, &nRec);
+  if( pRec==0 ){
+    rc = SQLITE_NOMEM_BKPT;
+  }else{
+    int nRetry = 0;
+    do {
+      nRetry = 0;
+      rc = sqlite3HctDbInsert(
+          pJrnl->pDb, (u32)pJrnl->iJrnlRoot, 0, iCid, 0, nRec, pRec, &nRetry
+      );
+      assert( nRetry==0 );
+      if( rc!=SQLITE_OK ) break;
+      rc = sqlite3HctDbInsertFlush(pJrnl->pDb, &nRetry);
+      if( rc!=SQLITE_OK ) break;
+    }while( nRetry );
+  }
+  sqlite3_free(pRec);
+
+  return rc;
+}
+
+int sqlite3HctJrnlWriteEmpty(HctJournal *pJrnl, u64 iCid, u64 iTid){
+  HctJrnlSchema *pJSchema = 0;
+  int rc = SQLITE_OK;
+
+  pJSchema = HctAtomicLoad(&pJrnl->pServer->pSchema);
+  while( pJSchema->iCid>iCid ) pJSchema = pJSchema->pPrev;
+
+  sqlite3HctDbJournalRbMode(pJrnl->pDb, 1);
+  rc = hctJrnlWriteRecord(pJrnl, iCid, "", 0, 0, pJSchema->aVersion, iTid);
+  sqlite3HctDbJournalRbMode(pJrnl->pDb, 0);
+  return rc;
+}
+
 int sqlite3HctJrnlLog(
   HctJournal *pJrnl,
   sqlite3 *db,
@@ -517,11 +586,10 @@ int sqlite3HctJrnlLog(
   HctTree *pTree,
   HctDatabase *pDb
 ){
-  u8 *pRec = 0;
-  int nRec = 0;
   int rc = SQLITE_OK;
   JrnlCtx jrnlctx;
   HctJrnlSchema *pJSchema = 0;
+  const char *zSchema = 0;
 
   memset(&jrnlctx, 0, sizeof(jrnlctx));
   jrnlctx.pSchema = pSchema;
@@ -530,32 +598,24 @@ int sqlite3HctJrnlLog(
   rc = sqlite3HctTreeForeach(pTree, 1, (void*)&jrnlctx, hctJrnlLogTree);
 
   pJSchema = hctJrnlFindSchema(&rc, pJrnl, &jrnlctx, iCid, iTid);
+  zSchema = (jrnlctx.schema.nBuf ? (const char*)jrnlctx.schema.aBuf : "");
 
   if( rc==SQLITE_OK ){
-    pRec = hctJrnlComposeRecord(iCid, 
-       (jrnlctx.schema.nBuf ? (const char*)jrnlctx.schema.aBuf : ""),
-       jrnlctx.buf.aBuf, jrnlctx.buf.nBuf, 
-       pJSchema->aVersion,
-       iTid, &nRec
+    rc = hctJrnlWriteRecord(pJrnl, iCid, zSchema, 
+        jrnlctx.buf.aBuf, jrnlctx.buf.nBuf, pJSchema->aVersion, iTid
     );
-    if( !pRec ) rc = SQLITE_NOMEM_BKPT;
   }
 
-  if( rc==SQLITE_OK ){
-    int nRetry = 0;
-    do {
-      nRetry = 0;
-      rc = sqlite3HctDbInsert(
-          pDb, (u32)pJrnl->iJrnlRoot, 0, iCid, 0, nRec, pRec, &nRetry
-      );
-      assert( nRetry==0 );
-      if( rc!=SQLITE_OK ) break;
-      rc = sqlite3HctDbInsertFlush(pDb, &nRetry);
-      if( rc!=SQLITE_OK ) break;
-    }while( nRetry );
+  /* If one is registered, invoke the validation hook */
+  if( rc==SQLITE_OK && db->xValidate ){
+    int res = db->xValidate(db->pValidateArg, iCid, zSchema, 
+        jrnlctx.buf.aBuf, jrnlctx.buf.nBuf, pJSchema->aVersion
+    );
+    if( res!=0 ){
+      rc = SQLITE_BUSY_SNAPSHOT;
+    }
   }
 
-  sqlite3_free(pRec);
   sqlite3HctBufferFree(&jrnlctx.buf);
   sqlite3HctBufferFree(&jrnlctx.schema);
   return rc;
@@ -825,6 +885,53 @@ int sqlite3HctJournalIsTable(HctJournal *pJrnl, u64 iTable){
   return (pJrnl && (pJrnl->iJrnlRoot==iTable || pJrnl->iBaseRoot==iTable));
 }
 
+/*
+** Called during log file recovery to remove the entry with "tid" (not CID!) 
+** value  iTid from the sqlite_hct_journal table.
+*/
+int sqlite3HctJrnlRollbackEntry(HctJournal *pJrnl, i64 iTid){
+  i64 iDel = 0;
+  HctDbCsr *pCsr = 0;
+  int rc = SQLITE_OK;
+
+  rc = sqlite3HctDbCsrOpen(pJrnl->pDb, 0, (u32)pJrnl->iJrnlRoot, &pCsr);
+  if( rc==SQLITE_OK ){
+    HctJournalRecord rec;
+    for(rc=sqlite3HctDbCsrLast(pCsr);
+        iDel==0 && rc==SQLITE_OK && sqlite3HctDbCsrEof(pCsr)==0;
+        rc=sqlite3HctDbCsrPrev(pCsr)
+    ){
+      hctJrnlReadJournalRecord(pCsr, &rec);
+      if( rec.iTid==iTid ) iDel = rec.iCid;
+    }
+
+    if( iDel!=0 ){
+      const void *pSV = 0;
+      if( rec.nSchema==0 ){
+        pSV = rec.pSchemaVersion;
+      }else{
+        rc = sqlite3HctDbCsrPrev(pCsr);
+        if( rc==SQLITE_OK ){
+          if( 0==sqlite3HctDbCsrEof(pCsr) ){
+            hctJrnlReadJournalRecord(pCsr, &rec);
+            pSV = rec.pSchemaVersion;
+          }else{
+            assert( !"todo" );
+            /* read schema version from sqlite_hct_baseline */
+          }
+        }
+      }
+      if( rc==SQLITE_OK ){
+        rc = hctJrnlWriteRecord(pJrnl, iDel, "", 0, 0, pSV, iTid);
+      }
+    }
+
+    sqlite3HctDbCsrClose(pCsr);
+  }
+
+  return rc;
+}
+
 static int hctBufferAppendIf(HctBuffer *pBuf, const char *zSep){
   int rc = SQLITE_OK;
   if( pBuf->nBuf>0 ){
@@ -924,4 +1031,3 @@ int sqlite3HctJrnlInit(sqlite3 *db){
   );
   return rc;
 }
-

@@ -450,8 +450,13 @@ static int hctRecoverOne(void *pCtx, const char *zFile){
   }
 
   if( rc==SQLITE_OK && iStage==HCT_RECOVER_STAGE1 ){
-    /* TODO!!! */
-    unlink(zFile);
+    if( p->pHctJrnl ){
+      rc = sqlite3HctJrnlRollbackEntry(p->pHctJrnl, iTid);
+    }
+    if( rc==SQLITE_OK ){
+      /* TODO!!! */
+      unlink(zFile);
+    }
   }
 
  recover_one_done:
@@ -1273,6 +1278,9 @@ static int btreeFlushToDisk(HBtree *p){
     rcok = SQLITE_BUSY_SNAPSHOT;
     rc = btreeFlushData(p, 1);
     if( rc==SQLITE_DONE ) rc = SQLITE_OK;
+    if( iCid>0 && p->pHctJrnl ){
+      rc = sqlite3HctJrnlWriteEmpty(p->pHctJrnl, iCid, iTid);
+    }
   }
 
   for(i=0; rc==SQLITE_OK && i<p->nSchemaOp; i++){

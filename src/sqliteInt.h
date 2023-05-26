@@ -1740,6 +1740,10 @@ struct sqlite3 {
   /* Used as part of testing hctree commits */
   void (*xMtCommit)(void*, int);
   void *pMtCommitCtx;
+
+  /* The sqlite3_hct_journal_validation_hook() callback */
+  void *pValidateArg;
+  int (*xValidate)(void*, i64, const char*, const void*, int, const void*);
 };
 
 /*
