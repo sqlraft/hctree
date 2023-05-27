@@ -468,68 +468,70 @@ static void hctJrnlSchemaFree(HctJrnlSchema *p){
 }
 
 /*
-** Locate and return the HctJrnlSchema object that should be used for
-** the "schema_version" field of transaction iCid.
+** Allocate and return a new schema object. Based on the current schema
+** and the SQL script in parameter zSchema. 
+**
+** The returned object is not yet linked into the HctJournal object. That is
+** done by hctJrnlLinkSchema(). If hctJrnlLinkSchema() is not called (e.g.
+** because the validation callback failed), the returned schema object 
+** should be freed with sqlite3_free().
 */
-static HctJrnlSchema *hctJrnlFindSchema(
-  int *pRc,                       /* IN/OUT: Error code */
-  HctJournal *pJrnl,              /* Journal handle */
-  JrnlCtx *pCtx,                  /* Journal entry context */
-  u64 iCid,                       /* CID for current transaction */
-  u64 iTid                        /* TID for current transaction */
+static HctJrnlSchema *hctJrnlSchemaNew(
+  int *pRc,
+  HctJournal *pJrnl,
+  const char *zSchema,
+  u64 iCid,
+  u64 iTid
 ){
-  HctJrnlSchema *p = 0;
-  if( *pRc==SQLITE_OK ){
+  HctJrnlSchema *pPrev = 0;
+  HctJrnlSchema *pNew = 0;
 
-    p = HctAtomicLoad(&pJrnl->pServer->pSchema);
-    while( p->iCid>iCid ) p = p->pPrev; 
+  assert( zSchema && zSchema[0] );
+  pPrev = HctAtomicLoad(&pJrnl->pServer->pSchema);
 
-    /* If this transaction modifies the schema, then a new schema hash
-    ** (and a new HctJrnlSchema object) must be created. This requires
-    ** no special locking, as:
-    **
-    **   + Every transaction that modifies the schema also writes to
-    **     the schema cookie table entry.
-    **
-    **   + The schema cookie table entry is subject to the usual validation
-    **     constraints. And since this function is called after validation,
-    **     it is not possible for two threads to create a new schema
-    **     version simultaneously - one of them would have failed validation
-    **     on the schema cookie.
-    */
-    if( pCtx->schema.nBuf>0 ){
-      HctJrnlSchema *pNew;            /* New HctJrnlSchema object */
-      HctJrnlSchema *pLast;           /* Last HctJrnlSchema object required */
-      assert( p==pJrnl->pServer->pSchema );
-      i64 iSafeTid = sqlite3HctFileSafeTID(sqlite3HctDbFile(pJrnl->pDb));
-
-      pNew = (HctJrnlSchema*)sqlite3HctMalloc(pRc, sizeof(HctJrnlSchema));
-      if( pNew ){
-        memcpy(pNew->aVersion, p->aVersion, SQLITE_HCT_JOURNAL_HASHSIZE);
-        sqlite3_hct_journal_hashschema(
-            pNew->aVersion, (const char*)pCtx->schema.aBuf
-        );
-        pNew->iCid = iCid;
-        pNew->iTid = iTid;
-        pNew->pPrev = p;
-        HctAtomicStore(&pJrnl->pServer->pSchema, pNew);
-      }
-      p = pNew;
-
-      /* All current and future transactions include TID iSafeTid in their
-      ** transactions. This means that no client - extant or future - will
-      ** need to follow the HctJrnlSchema.pNext pointer from an object
-      ** with (HctJrnlSchema.iTid<=iSafeTid). Any such objects can therefore
-      ** all be freed now.  */
-      for(pLast=p; pLast->pPrev && pLast->iTid>iSafeTid; pLast=pLast->pPrev);
-      assert( pLast->pPrev==0 || pLast->iTid<=iSafeTid );
-      hctJrnlSchemaFree(pLast->pPrev);
-      pLast->pPrev = 0;
-    }
+  pNew = (HctJrnlSchema*)sqlite3HctMalloc(pRc, sizeof(HctJrnlSchema));
+  if( pNew ){
+    memcpy(pNew->aVersion, pPrev->aVersion, SQLITE_HCT_JOURNAL_HASHSIZE);
+    sqlite3_hct_journal_hashschema(pNew->aVersion, zSchema);
+    pNew->iCid = iCid;
+    pNew->iTid = iTid;
+    pNew->pPrev = pPrev;
   }
 
+  return pNew;
+}
+
+static HctJrnlSchema *hctJrnlSchemaFind(
+  HctJournal *pJrnl,              /* Journal handle */
+  u64 iCid
+){
+  HctJrnlSchema *p;
+  p = HctAtomicLoad(&pJrnl->pServer->pSchema);
+  while( p->iCid>iCid ) p = p->pPrev; 
   return p;
 }
+
+static void hctJrnlSchemaLink(
+  HctJournal *pJrnl,              /* Journal handle */
+  HctJrnlSchema *pSchema
+){
+  HctJrnlSchema *pLast = 0;
+  i64 iSafeTid = sqlite3HctFileSafeTID(sqlite3HctDbFile(pJrnl->pDb));
+  assert( pSchema->pPrev==HctAtomicLoad(&pJrnl->pServer->pSchema) );
+
+  HctAtomicStore(&pJrnl->pServer->pSchema, pSchema);
+
+  /* All current and future transactions include TID iSafeTid in their
+  ** transactions. This means that no client - extant or future - will
+  ** need to follow the HctJrnlSchema.pNext pointer from an object
+  ** with (HctJrnlSchema.iTid<=iSafeTid). Any such objects can therefore
+  ** all be freed now.  */
+  for(pLast=pSchema; pLast->pPrev && pLast->iTid>iSafeTid; pLast=pLast->pPrev);
+  assert( pLast->pPrev==0 || pLast->iTid<=iSafeTid );
+  hctJrnlSchemaFree(pLast->pPrev);
+  pLast->pPrev = 0;
+}
+
 
 static int hctJrnlWriteRecord(
   HctJournal *pJrnl,
@@ -571,12 +573,6 @@ int sqlite3HctJrnlWriteEmpty(HctJournal *pJrnl, u64 iCid, u64 iTid){
   pJSchema = HctAtomicLoad(&pJrnl->pServer->pSchema);
   while( pJSchema->iCid>iCid ) pJSchema = pJSchema->pPrev;
 
-  if( pJSchema->iCid==iCid ){
-    HctJrnlSchema *pPrev = pJSchema->pPrev;
-    assert( pJrnl->pServer->pSchema==pJSchema );
-    memcpy(pJSchema->aVersion, pPrev->aVersion, SQLITE_HCT_JOURNAL_HASHSIZE);
-  }
-
   sqlite3HctDbJournalRbMode(pJrnl->pDb, 1);
   rc = hctJrnlWriteRecord(pJrnl, iCid, "", 0, 0, pJSchema->aVersion, iTid);
   sqlite3HctDbJournalRbMode(pJrnl->pDb, 0);
@@ -602,9 +598,13 @@ int sqlite3HctJrnlLog(
   jrnlctx.pTree = pTree;
 
   rc = sqlite3HctTreeForeach(pTree, 1, (void*)&jrnlctx, hctJrnlLogTree);
-
-  pJSchema = hctJrnlFindSchema(&rc, pJrnl, &jrnlctx, iCid, iTid);
   zSchema = (jrnlctx.schema.nBuf ? (const char*)jrnlctx.schema.aBuf : "");
+
+  if( zSchema[0] ){
+    pJSchema = hctJrnlSchemaNew(&rc, pJrnl, zSchema, iCid, iTid);
+  }else{
+    pJSchema = hctJrnlSchemaFind(pJrnl, iCid);
+  }
 
   if( rc==SQLITE_OK ){
     rc = hctJrnlWriteRecord(pJrnl, iCid, zSchema, 
@@ -619,6 +619,14 @@ int sqlite3HctJrnlLog(
     );
     if( res!=0 ){
       rc = SQLITE_BUSY_SNAPSHOT;
+    }
+  }
+
+  if( zSchema[0] ){
+    if( rc==SQLITE_OK ){
+      hctJrnlSchemaLink(pJrnl, pJSchema);
+    }else{
+      sqlite3_free(pJSchema);
     }
   }
 

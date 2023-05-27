@@ -1258,9 +1258,13 @@ static int btreeFlushToDisk(HBtree *p){
   if( rc==SQLITE_OK ){
     /* Invoke the SQLITE_TESTCTRL_HCT_MTCOMMIT hook, if applicable */
     if( p->db->xMtCommit ) p->db->xMtCommit(p->db->pMtCommitCtx, 1);
+
+    /* Validate the transaction */
     rc = sqlite3HctDbValidate(p->db, p->pHctDb, &iCid, &bTmapScan);
 
-    if( p->pHctJrnl ){
+    /* If validation passed and this database is configured for replication,
+    ** write the journal entry and invoke the custom validation hook */
+    if( rc==SQLITE_OK && p->pHctJrnl ){
       rc = sqlite3HctJrnlLog(
         p->pHctJrnl,
         p->db,

@@ -156,6 +156,29 @@ do_execsql_test 2.2 {
 } {1 ok 3}
 
 
+#-------------------------------------------------------------------------
+hct_reset_db
+
+do_execsql_test 3.0 {
+  CREATE TABLE t4(x, y);
+  INSERT INTO t4 VALUES(1, 2);
+  INSERT INTO t4 VALUES(3, 4);
+}
+
+sqlite3 db2 test.db
+
+do_execsql_test -db db2 3.1 {
+  BEGIN CONCURRENT;
+    INSERT INTO t4 VALUES(5, 6);
+}
+
+do_execsql_test 3.2 {
+  CREATE tABLE t5(a);
+}
+
+do_test 3.3 {
+  catchsql { COMMIT } db2
+} {1 {database is locked}}
 
 
 finish_test

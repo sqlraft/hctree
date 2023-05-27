@@ -5581,6 +5581,9 @@ int sqlite3HctDbFinishRecovery(HctDatabase *pDb, int iStage, int rc){
       rc = sqlite3HctFileRecoverFreelists(pDb->pFile, nRoot, aRoot);
       sqlite3_free(aRoot);
     }
+
+    assert( pDb->iSnapshotId>0 );
+    pDb->iSnapshotId = sqlite3HctFileGetSnapshotid(pDb->pFile);
   }
   return sqlite3HctFileFinishRecovery(pDb->pFile, iStage, rc);
 }
