@@ -31,6 +31,7 @@ This page builds on the [speculations here](hctree_bedrock.md).
   <li> [Configuring a Database For Replication](#configuring)
   <li> [Automatic Journalling For Leaders](#leaders)
   <li> [Applying Changes To Follower Databases](#followers)
+  <li> [Selecting Leader/Follower Mode](#mode)
   <li> [Custom Validation Callback](#callback)
   <li> [Truncating the Journal Table](#truncating)
   <li> [Hash and Synchronization Related Functions](#hashes)
@@ -47,15 +48,29 @@ by calling the following function:
 
 ```
     /*
-    ** Initialize the main database for replication.
+    ** Initialize the main database for replication. Return SQLITE_OK if
+    ** successful. Otherwise, return an SQLite error code and leave an
+    ** English language error message in the db handle for sqlite3_errmsg().
     */
     int sqlite3_hct_journal_init(sqlite3 *db);
 ```
 
-This API must be called before the database is created - immediately after
-an empty db is opened. Then, when the database is created, it sets a header
-flag to mark it as a replication database and ensures that the special
-sqlite\_hct\_journal and sqlite\_hct\_baseline tables are created:
+When this API is called, the following must be true:
+
+  *  The database must be completely empty (contain zero tables),
+  *  The connection passed as the argument must be the only connection
+     open on the database, and
+  *  There must not be an open transaction on the database connection.
+
+Some attempt is made to verify the three conditions above, but race conditions
+are possible. For example, if another thread opens a connection to the 
+database while sqlite3\_hct\_journal\_init() is being called, database
+corruption may follow.
+
+The "replication" setting is persistent - this API function must only be
+called once, not every time the database is opened. In practice, a database
+suports replication if it contains the following tables (which are created
+by the sqlite3\_hct\_journal\_write() call:
 
 ```
     CREATE TABLE sqlite_hct_journal(
@@ -92,11 +107,10 @@ hashes used in the journal and baseline tables:
     #define SQLITE_HCT_JOURNAL_HASHSIZE 16
 ```
 
-As with other system tables (sqlite\_schema, sqlite\_stat1 etc.) the journal
-and baseline tables may be read using SQL SELECT statements, but may not be
-written by ordinary clients using UPDATE, DELETE or INSERT statements.
-They may only be modified indirectly, using the interfaces described in the 
-following sections.
+The journal and baseline tables may be read like any other database table
+using SQL SELECT statements, but it is an error (SQLITE\_READONLY) to attempt
+to write to them directly. They may only be modified indirectly, using the
+interfaces described in the following sections.
 
 <a name=leaders></a>
 2.\ Automatic Journalling For Leaders
@@ -245,8 +259,61 @@ In practice, the available snapshot S is the largest value for which all
 journal entries with CID values S or smaller are already present in the
 journal table.
 
+<a name=mode></a>
+4.\ Selecting Leader/Follower Mode
+------------------------------------
+
+Each replication-enabled database opened by a process is at all times in 
+either LEADER or FOLLOWER mode. In FOLLOWER mode, it is an error to attempt
+to write to the database using the SQL interface. In LEADER mode, it is
+an error to call the sqlite3\_hct\_journal\_write() or
+sqlite3\_hct\_journal\_snapshot() interfaces.
+
+The LEADER/FOLLOWER setting is per-database, not per-database handle. If a
+process has multiple handles open on a replication enabled database, then all
+handles share a single LEADER/FOLLOWER setting.
+
+```
+    #define SQLITE_HCT_JOURNAL_MODE_FOLLOWER 0
+    #define SQLITE_HCT_JOURNAL_MODE_LEADER   1
+
+    /* 
+    ** Query the LEADER/FOLLOWER setting of the db passed as the 
+    ** first argument. Return either an SQLITE_HCT_JOURNAL_MODE_XXX constant,
+    ** or else a -1 to indicate that the main database of handle db is not a
+    ** replication enabled hct database.
+    */
+    int sqlite3_hct_journal_mode(sqlite3 *db);
+
+    /*
+    ** Set the LEADER/FOLLOWER mode of the db passed as the first argument.
+    ** Return SQLITE_OK if the db mode is successfully changed, or if
+    ** it does not need to be changed because the requested mode is the
+    ** same as the current mode. Otherwise, return an SQLite error code
+    ** and leave an English language error message in the database handle
+    ** for sqlite3_errmsg().
+    **
+    ** It is safe to call this function while there are ongoing read
+    ** transactions. However, this function may not be called concurrently
+    ** with any write transaction or sqlite3_hct_journal_write() call on
+    ** the same database (database, not just database handle). Doing so
+    ** may cause database corruption.
+    */
+    int sqlite3_hct_journal_setmode(sqlite3 *db, int eMode);
+```
+
+When a replication database is first opened, or when it is first marked as a
+replication database by a call to sqlite3\_hct\_journal\_init(), it is in
+FOLLOWER mode.
+
+It may then be changed to LEADER mode using the API. Except, the mode may
+only be changed to LEADER if there are no <a href=#holes>holes in the
+journal</a>. A database in leader mode may be changed to FOLLOWER mode at
+any time using the API.
+
+
 <a name=callback></a>
-4.\ Custom Validation Callback
+5.\ Custom Validation Callback
 ------------------------------
 
 The sqlite3\_hct\_journal\_validation\_hook() API is used to register a
@@ -317,7 +384,7 @@ running for transaction T:
      back.
 
 <a name=truncating></a>
-5.\ Truncating the Journal Table
+6.\ Truncating the Journal Table
 --------------------------------
 
 In order to avoid the journal table from growing indefinitely, old entries 
@@ -350,7 +417,7 @@ and update the baseline table:
 ```
 
 <a name=hashes></a>
-6.\ Hash and Synchronization Related Functions
+7.\ Hash and Synchronization Related Functions
 ----------------------------------------------
 
 Synchronization between nodes is largely left to the application. The contents
@@ -416,6 +483,7 @@ the SQL script in the "schema" column of a journal entry:
     void sqlite3_hct_journal_hashschema(void *pHash, const char *zSchema);
 ```
 
+<a name=holes></a>
 <b>Plugging Journal Holes</b>
 
 If a journal table is "missing" entries - that is it does not contain only
@@ -426,8 +494,8 @@ holes, the following are true:
   *  No data associated with journal entries that follow the first hole in
      the journal will be visible to readers
 
-  *  It is not possible to write to the database using normal SQL interfaces.
-     Any attempt to do so fails with an SQLITE_BUSY_SNAPSHOT error.
+  *  It is not possible to switch the database from FOLLOWER to LEADER mode
+     while holes exist.
 
 Calling the following API writes empty entries (entries containing no data or
 schema modifications) to the journal table into all holes up to and including
@@ -441,13 +509,13 @@ cid=iCid.
 ```
 
 <a name=applications></a>
-7.\ Application Programming Notes
+8.\ Application Programming Notes
 ---------------------------------
 
 TODO
 
 <a name=formats></a>
-8.\ Data Formats
+9.\ Data Formats
 ----------------
 
 This section describes the format used by the blobs in the "data" column of
