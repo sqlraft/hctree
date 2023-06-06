@@ -710,7 +710,10 @@ static void hctDbRootPageInit(
   }
 }
 
-static int hctDbSnapshotOpen(HctDatabase *pDb){
+/*
+** Open a read transaction, if one is not already open.
+*/
+int sqlite3HctDbStartRead(HctDatabase *pDb){
   int rc = SQLITE_OK;
 
   assert( (pDb->iSnapshotId==0)==(pDb->pTmap==0) );
@@ -851,11 +854,9 @@ int sqlite3HctDbGetMeta(HctDatabase *pDb, u8 *aBuf, int nBuf){
   HctFilePage pg;
   int rc;
 
+  assert( pDb->iSnapshotId );
   memset(aBuf, 0, nBuf);
-  rc = hctDbSnapshotOpen(pDb);
-  if( rc==SQLITE_OK ){
-    rc = sqlite3HctFilePageGet(pDb->pFile, 2, &pg);
-  }
+  rc = sqlite3HctFilePageGet(pDb->pFile, 2, &pg);
   while( rc==SQLITE_OK ){
     HctDbIntkeyLeaf *pLeaf = (HctDbIntkeyLeaf*)pg.aOld;
     int iOff;
@@ -5600,6 +5601,8 @@ int sqlite3HctDbCsrOpen(
   int rc = SQLITE_OK;
   HctDbCsr *p;
 
+  assert( pDb->iSnapshotId!=0 );
+
   /* Search for an existing cursor that can be reused. */
   HctDbCsr **pp;
   for(pp=&pDb->pScannerList; *pp; pp=&(*pp)->pNextScanner){
@@ -5620,7 +5623,6 @@ int sqlite3HctDbCsrOpen(
     p->iCell = -1;
     p->pKeyInfo = pKeyInfo;
     sqlite3KeyInfoRef(pKeyInfo);
-    rc = hctDbSnapshotOpen(pDb);
   }
   *ppCsr = p;
   return rc;

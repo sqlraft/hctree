@@ -187,6 +187,7 @@ int sqlite3HctDbInsert(
   int *pnRetry
 );
 int sqlite3HctDbInsertFlush(HctDatabase *pDb, int *pnRetry);
+int sqlite3HctDbStartRead(HctDatabase*);
 int sqlite3HctDbStartWrite(HctDatabase*, u64*);
 int sqlite3HctDbEndWrite(HctDatabase*, u64, int);
 int sqlite3HctDbEndRead(HctDatabase*);

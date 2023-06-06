@@ -33,17 +33,61 @@
     "hash BLOB"                             \
 ");"
 
+/*
+** In follower mode, it is not possible to call sqlite3_hct_journal_write()
+** for the transaction with CID (N + HCT_MAX_LEADING_WRITE) until all 
+** transactions with CID values of N or less have been committed.
+*/
+#define HCT_MAX_LEADING_WRITE 1024
+
 typedef struct HctJrnlSchema HctJrnlSchema;
+typedef struct HctJrnlServer HctJrnlServer;
+
+/*
+** One object of this type is shared by all connections to the same 
+** database. Managed by the HctFileServer object (see functions
+** sqlite3HctFileGetJrnlPtr() and SetJrnlPtr()).
+**
+** pSchema:
+**   Head of linked-list of schema objects.
+**
+** eMode:
+**   The current database mode - either SQLITE_HCT_JOURNAL_MODE_FOLLOWER or
+**   SQLITE_HCT_JOURNAL_MODE_LEADER.
+**
+** iSnapshot:
+**   This is meaningful in FOLLOWER mode only.
+**
+**   This is set to a CID value for which it and all prior transactions are
+**   committed. It may be written by any client using an atomic CAS operation,
+**   but may only be increased, never decreased. No transaction with a CID
+**   greater than (iSnapshot + HCT_MAX_LEADING_WRITE) may be started - 
+**   iSnapshot must be increased first.
+**
+** nCommit:
+**   Size of aCommit[] array.
+**
+** aCommit:
+**   This array is only populated if the object is in FOLLOWER mode.
+**
+**   Say the size of the array is N (actually HctJrnlServer.nCommit). Then,
+**   when transaction X is committed, slot aCommit[X % N] is set to X. Or,
+**   if transaction X is committed but no snapshot is valid until Y (for Y>X),
+**   then instead slot aCommit[X % N] is set to Y.
+*/
+struct HctJrnlServer {
+  HctJrnlSchema *pSchema;
+  int eMode;
+  u64 iSnapshot;
+  int nCommit;
+  u64 *aCommit;                   /* Array of size nCommit */
+};
+
 struct HctJrnlSchema {
   u8 aVersion[SQLITE_HCT_JOURNAL_HASHSIZE];
   u64 iCid;                       /* CID that created this new schema version */
   u64 iTid;                       /* TID that created it. */
   HctJrnlSchema *pPrev;
-};
-
-typedef struct HctJrnlServer HctJrnlServer;
-struct HctJrnlServer {
-  HctJrnlSchema *pSchema;
 };
 
 /*
@@ -636,9 +680,12 @@ int sqlite3HctJrnlLog(
 }
 
 static void hctJrnlDelServer(void *p){
-  HctJrnlServer *pServer = (HctJrnlServer*)p;
-  hctJrnlSchemaFree(pServer->pSchema);
-  sqlite3_free(pServer);
+  if( p ){
+    HctJrnlServer *pServer = (HctJrnlServer*)p;
+    hctJrnlSchemaFree(pServer->pSchema);
+    sqlite3_free(pServer->aCommit);
+    sqlite3_free(pServer);
+  }
 }
 
 typedef struct HctJournalRecord HctJournalRecord;
@@ -650,6 +697,16 @@ struct HctJournalRecord {
   const void *pHash;
   i64 iTid;
   i64 iValidCid;
+};
+
+/*
+** Structure containing values read from the sqlite_hct_baseline table.
+*/
+typedef struct HctBaselineRecord HctBaselineRecord;
+struct HctBaselineRecord {
+  i64 iCid;
+  u8 aHash[SQLITE_HCT_JOURNAL_HASHSIZE];
+  u8 aSchemaVersion[SQLITE_HCT_JOURNAL_HASHSIZE];
 };
 
 
@@ -773,6 +830,22 @@ static i64 hctJrnlReadInteger(int *pRc, HctRecordReader *p){
   return iRet;
 }
 
+static void hctJrnlReadHash(
+  int *pRc,                       /* IN/OUT: Error code */
+  HctRecordReader *p,             /* Record reader */
+  u8 *aHash                       /* Pointer to buffer to populate */
+){
+  int nHash = 0;
+  const u8 *a = 0;
+  a = hctJrnlReadBlob(pRc, p, &nHash);
+  if( *pRc==SQLITE_OK && nHash!=SQLITE_HCT_JOURNAL_HASHSIZE ){
+    *pRc = SQLITE_CORRUPT_BKPT;
+  }
+  if( *pRc==SQLITE_OK ){
+    memcpy(aHash, a, SQLITE_HCT_JOURNAL_HASHSIZE);
+  }
+}
+
 static int hctJrnlReadJournalRecord(HctDbCsr *pCsr, HctJournalRecord *pRec){
   int rc = SQLITE_OK;
   int nData = 0;
@@ -813,17 +886,85 @@ static int hctJrnlReadJournalRecord(HctDbCsr *pCsr, HctJournalRecord *pRec){
   return rc;
 }
 
+/*
+** Read the contents of the sqlite_hct_baseline table into structure
+** (*pRec). Return SQLITE_OK if successful, or an SQLite error code
+** otherwise.
+*/
+static int hctJrnlReadBaseline(
+  HctJournal *pJrnl,              /* Database to read from */
+  HctBaselineRecord *pRec         /* Populate this structure before returning */
+){
+  HctDbCsr *pCsr = 0;
+  int rc = SQLITE_OK;
+
+  /* Open a cursor on the baseline table */
+  rc = sqlite3HctDbCsrOpen(pJrnl->pDb, 0, (u32)pJrnl->iBaseRoot, &pCsr);
+
+  /* Move the cursor to the first record in the table. */
+  if( rc==SQLITE_OK ){
+    rc = sqlite3HctDbCsrFirst(pCsr);
+  }
+  if( rc==SQLITE_OK && sqlite3HctDbCsrEof(pCsr) ){
+    rc = SQLITE_CORRUPT_BKPT;
+  }
+
+  if( rc==SQLITE_OK ){
+    int nData = 0;
+    const u8 *aData = 0;
+
+    rc = sqlite3HctDbCsrData(pCsr, &nData, &aData);
+    if( rc==SQLITE_OK ){
+      HctRecordReader rdr;
+      hctJrnlReadInit(&rdr, nData, aData);
+
+      /* "cid" field - an INTEGER */
+      pRec->iCid = hctJrnlReadInteger(&rc, &rdr);
+
+      /* "hash" field - SQLITE_HCT_JOURNAL_HASHSIZE byte BLOB */
+      hctJrnlReadHash(&rc, &rdr, pRec->aHash);
+
+      /* "schema_version" field - SQLITE_HCT_JOURNAL_HASHSIZE byte BLOB */
+      hctJrnlReadHash(&rc, &rdr, pRec->aSchemaVersion);
+    }
+  }
+  sqlite3HctDbCsrClose(pCsr);
+
+  return rc;
+}
+
+/*
+** Do special recovery (startup) processing for replication-enabled databases.
+** This function is called during stage 1 recovery - after any log files have
+** been processed (and the database schema + contents restored), but before the
+** free-page-lists are recovered.
+*/
 int sqlite3HctJrnlRecovery(HctJournal *pJrnl, HctDatabase *pDb){
+  HctBaselineRecord base;         /* sqlite_hct_baseline data */
   HctJrnlServer *pServer = 0;
   HctJrnlSchema *pSchema = 0;
   HctFile *pFile = sqlite3HctDbFile(pDb);
-  u8 aSchema[SQLITE_HCT_JOURNAL_HASHSIZE];
   int rc = SQLITE_OK;
   HctDbCsr *pCsr = 0;
 
+  i64 iMaxCid = 0;                
+  u8 aSchema[SQLITE_HCT_JOURNAL_HASHSIZE];
   memset(aSchema, 0, sizeof(aSchema));
 
-  rc = sqlite3HctDbCsrOpen(pDb, 0, (u32)pJrnl->iJrnlRoot, &pCsr);
+  /* Read the contents of the sqlite_hct_baseline table. */
+  rc = hctJrnlReadBaseline(pJrnl, &base);
+
+  /* Allocate the new HctJrnlServer structure */
+  pServer = (HctJrnlServer*)sqlite3HctMalloc(&rc, sizeof(HctJrnlServer));
+
+  /* Read the last record of the sqlite_hct_journal table. Specifically,
+  ** the value of fields "cid" and "schema_version". Store these values
+  ** in stack variables iCid and aSchema, respectively.  Or, if the
+  ** sqlite_hct_journal table is empty, populate iCid and aSchema[] with
+  ** values from the baseline table.  */
+  if( rc==SQLITE_OK ){
+    rc = sqlite3HctDbCsrOpen(pDb, 0, (u32)pJrnl->iJrnlRoot, &pCsr);
+  }
   if( rc==SQLITE_OK ){
     rc = sqlite3HctDbCsrLast(pCsr);
   }
@@ -832,24 +973,67 @@ int sqlite3HctJrnlRecovery(HctJournal *pJrnl, HctDatabase *pDb){
       HctJournalRecord rec;
       rc = hctJrnlReadJournalRecord(pCsr, &rec);
       if( rc==SQLITE_OK ){
-        sqlite3HctFileSetCID(pFile, rec.iCid);
+        iMaxCid = rec.iCid;
         memcpy(aSchema, rec.pSchemaVersion, SQLITE_HCT_JOURNAL_HASHSIZE);
       }
+    }else{
+      iMaxCid = base.iCid;
+      memcpy(aSchema, base.aSchemaVersion, SQLITE_HCT_JOURNAL_HASHSIZE);
     }
-    sqlite3HctDbCsrClose(pCsr);
   }
 
-  pServer = (HctJrnlServer*)sqlite3HctMalloc(&rc, sizeof(HctJrnlServer));
+  /* Scan the sqlite_hct_journal table from beginning to end. When
+  ** the first missing entry is found, calculate the size of the 
+  ** HctJrnlServer.aCommit[] API and allocate it. Then continue
+  ** scanning the sqlite_hct_journal table, populating aCommit[] along
+  ** the way.  */
   if( rc==SQLITE_OK ){
-    sqlite3HctFileSetJrnlPtr(pFile, (void*)pServer, hctJrnlDelServer);
-    pSchema = (HctJrnlSchema*)sqlite3HctMalloc(&rc, sizeof(HctJrnlSchema));
-    if( pSchema ){
-      memcpy(pSchema->aVersion, aSchema, SQLITE_HCT_JOURNAL_HASHSIZE);
-      pServer->pSchema = pSchema;
+    i64 iPrev = base.iCid;
+    int nTrans = 0;
+    u64 *aCommit = 0;
+
+    for(rc = sqlite3HctDbCsrFirst(pCsr);
+        rc==SQLITE_OK && 0==sqlite3HctDbCsrEof(pCsr);
+        rc = sqlite3HctDbCsrNext(pCsr)
+    ){
+      i64 iCid = 0;
+      sqlite3HctDbCsrKey(pCsr, &iCid);
+      if( iPrev!=0 && iCid!=iPrev+1 ){
+        nTrans = iMaxCid - iPrev;
+        break;
+      }
     }
-    pJrnl->pServer = pServer;
+    nTrans = MAX(HCT_MAX_LEADING_WRITE, nTrans);
+
+    pServer->nCommit = nTrans*2;
+    aCommit = (u64*)sqlite3HctMalloc(&rc, pServer->nCommit*sizeof(u64));
+    pServer->aCommit = aCommit;
+    pServer->iSnapshot = iPrev;
+
+    while( rc==SQLITE_OK && 0==sqlite3HctDbCsrEof(pCsr) ){
+      HctJournalRecord rec;
+      rc = hctJrnlReadJournalRecord(pCsr, &rec);
+      if( rc==SQLITE_OK ){
+        i64 iVal = rec.iValidCid ? rec.iValidCid : rec.iCid;
+        pServer->aCommit[rec.iCid % pServer->nCommit] = iVal;
+      }
+      if( rc==SQLITE_OK ){
+        rc = sqlite3HctDbCsrNext(pCsr);
+      }
+    }
   }
 
+  pSchema = (HctJrnlSchema*)sqlite3HctMalloc(&rc, sizeof(HctJrnlSchema));
+  if( rc==SQLITE_OK ){
+    memcpy(pSchema->aVersion, aSchema, SQLITE_HCT_JOURNAL_HASHSIZE);
+    pServer->pSchema = pSchema;
+    sqlite3HctFileSetJrnlPtr(pFile, (void*)pServer, hctJrnlDelServer);
+    pJrnl->pServer = pServer;
+  }else{
+    hctJrnlDelServer((void*)pServer);
+  }
+
+  sqlite3HctDbCsrClose(pCsr);
   return rc;
 }
 

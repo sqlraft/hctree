@@ -888,13 +888,25 @@ static int hctDetectJournals(HBtree *p){
   return rc;
 }
 
+/*
+** This is called by sqlite3_hct_journal_init() after the journal and
+** baseline tables have been created in the database to initialize the
+** journal sub-system.
+**
+** Return SQLITE_OK if successful, or an SQLite error code if an error
+** occurs.
+*/
 int sqlite3HctDetectJournals(sqlite3 *db){
   HBtree *p = (HBtree*)db->aDb[0].pBt;
   int rc = hctDetectJournals(p);
   if( rc==SQLITE_OK ){
+    rc = sqlite3HctDbStartRead(p->pHctDb);
+  }
+  if( rc==SQLITE_OK ){
     rc = sqlite3HctJrnlRecovery(p->pHctJrnl, p->pHctDb);
   }
-  return SQLITE_OK;
+  sqlite3HctDbEndRead(p->pHctDb);
+  return rc;
 }
 
 static int hctAttemptRecovery(HBtree *p, int iStage){
@@ -942,20 +954,6 @@ static int hctAttemptRecovery(HBtree *p, int iStage){
 **      sqlite3HctBtreeInsert()
 **      sqlite3HctBtreeDelete()
 **      sqlite3HctBtreeUpdateMeta()
-**
-** If an initial attempt to acquire the lock fails because of lock contention
-** and the database was previously unlocked, then invoke the busy handler
-** if there is one.  But if there was previously a read-lock, do not
-** invoke the busy handler - just return SQLITE_BUSY.  SQLITE_BUSY is 
-** returned when there is already a read-lock in order to avoid a deadlock.
-**
-** Suppose there are two processes A and B.  A has a read lock and B has
-** a reserved lock.  B tries to promote to exclusive but is blocked because
-** of A's read lock.  A tries to promote to reserved but is blocked by B.
-** One or the other of the two processes must give way or there can be
-** no progress.  By returning SQLITE_BUSY and not invoking the busy callback
-** when A already has a read lock, we encourage A to give up and let B
-** proceed.
 */
 int sqlite3HctBtreeBeginTrans(Btree *pBt, int wrflag, int *pSchemaVersion){
   HBtree *const p = (HBtree*)pBt;
@@ -965,17 +963,20 @@ int sqlite3HctBtreeBeginTrans(Btree *pBt, int wrflag, int *pSchemaVersion){
   assert( wrflag==0 || p->pHctDb==0 || pSchemaVersion );
 
   if( p->eTrans==SQLITE_TXN_ERROR ) return SQLITE_BUSY_SNAPSHOT;
+  rc = sqlite3HctDbStartRead(p->pHctDb);
+
+  if( rc==SQLITE_OK && wrflag ){
+    /* Attempt stage 1 recovery here, in case it is required. */
+    rc = hctAttemptRecovery(p, 1);
+  }
+
   if( pSchemaVersion ){
     sqlite3HctBtreeGetMeta((Btree*)p, 1, (u32*)pSchemaVersion);
     sqlite3HctDbTransIsConcurrent(p->pHctDb, p->db->bConcurrent);
   }
 
   if( rc==SQLITE_OK && wrflag ){
-    /* Attempt stage 1 recovery here, in case it is required. */
-    rc = hctAttemptRecovery(p, 1);
-    if( rc==SQLITE_OK ){
-      rc = sqlite3HctTreeBegin(p->pHctTree, 1 + p->db->nSavepoint);
-    }
+    rc = sqlite3HctTreeBegin(p->pHctTree, 1 + p->db->nSavepoint);
   }
   if( rc==SQLITE_OK && p->eTrans<req ){
     p->eTrans = req;

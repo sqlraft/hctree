@@ -1933,7 +1933,7 @@ int sqlite3HctFileRecoverFreelists(HctFile *pFile, int nRoot, u32 *aRoot){
     if( (iVal & HCT_PMF_LOGICAL_IN_USE)==0 
         && iPg<=nPg2 
         && iPg>=HCT_FIRST_LOGICAL
-      ){
+    ){
       sqlite3HctPManServerInit(&rc, pServer->pPManServer, iPg, 1);
     }
     if( (iVal & HCT_PMF_LOGICAL_IS_ROOT) && iPg>=3  ){

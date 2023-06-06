@@ -41,6 +41,19 @@ int sqlite3_hct_journal_write(
   const void *pSchemaVersion
 );
 
+/* 
+** Candidate values for second arg to sqlite3_hct_journal_mode() 
+*/
+#define SQLITE_HCT_JOURNAL_MODE_FOLLOWER 0
+#define SQLITE_HCT_JOURNAL_MODE_LEADER   1
+#define SQLITE_HCT_JOURNAL_MODE_QUERY   -1
+
+/*
+** Set or query the LEADER/FOLLOWER setting of the db passed as the
+** first argument.
+*/
+int sqlite3_hct_journal_mode(sqlite3 *db, int eMode);
+
 /*
 ** Write empty records for any missing journal entries with cid values
 ** less than or equal to iCid.
