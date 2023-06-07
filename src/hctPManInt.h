@@ -37,7 +37,9 @@ void sqlite3HctPManServerFree(HctPManServer*);
 ** during initialization. To load the initial set of free physical and
 ** logical pages.
 */
-void sqlite3HctPManServerInit(int *pRc, HctPManServer*, u32 iPg, int bLogical);
+void sqlite3HctPManServerInit(
+    int *pRc, HctPManServer*, u64 iTid, u32 iPg, int bLogical
+);
 
 /*
 ** Each separate database connection holds a handle of this type for
@@ -97,5 +99,5 @@ int sqlite3HctPManVtabInit(sqlite3 *db);
 */
 int sqlite3HctPManFreeTree(HctPManClient *p, HctFile*, u32 iRoot, u64 iTid);
 
-int sqlite3HctPManServerInitRoot(int *pRc, HctPManServer*, HctFile*, u32);
+int sqlite3HctPManServerInitRoot(int *pRc, HctPManServer*, u64, HctFile*, u32);
 i64 sqlite3HctPManStats(sqlite3 *db, int iStat, const char **pzStat);

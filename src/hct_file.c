@@ -1907,7 +1907,9 @@ int sqlite3HctFileFinishRecovery(HctFile *pFile, int iStage, int rc){
 int sqlite3HctFileRecoverFreelists(HctFile *pFile, int nRoot, u32 *aRoot){
   int rc = SQLITE_OK;
   HctFileServer *pServer = pFile->pServer;
+  HctPManServer *pPManServer = pServer->pPManServer;
   HctMapping *pMapping = pServer->pMapping;
+  u64 iSafeTid = hctFilePagemapGet(pMapping, HCT_PAGEMAP_TRANSID_EOF);
   u64 nPg1 = hctFilePagemapGet(pMapping, HCT_PAGEMAP_PHYSICAL_EOF);
   u64 nPg2 = hctFilePagemapGet(pMapping, HCT_PAGEMAP_LOGICAL_EOF);
   u32 iPg;
@@ -1919,7 +1921,7 @@ int sqlite3HctFileRecoverFreelists(HctFile *pFile, int nRoot, u32 *aRoot){
   nPg2 = nPg2 & HCT_PAGEMAP_VMASK;
 
   sqlite3HctPManClientHandoff(pFile->pPManClient);
-  sqlite3HctPManServerReset(pServer->pPManServer);
+  sqlite3HctPManServerReset(pPManServer);
 
   nPg = MAX((nPg1 & 0xFFFFFFFF), (nPg2 & 0xFFFFFFFF));
   for(iPg=1; iPg<=nPg; iPg++){
@@ -1928,20 +1930,20 @@ int sqlite3HctFileRecoverFreelists(HctFile *pFile, int nRoot, u32 *aRoot){
      && (iPg<=nPg1) 
      && (iPg>iPhysOff) 
     ){
-      sqlite3HctPManServerInit(&rc, pServer->pPManServer, iPg, 0);
+      sqlite3HctPManServerInit(&rc, pPManServer, iSafeTid, iPg, 0);
     }
     if( (iVal & HCT_PMF_LOGICAL_IN_USE)==0 
         && iPg<=nPg2 
         && iPg>=HCT_FIRST_LOGICAL
     ){
-      sqlite3HctPManServerInit(&rc, pServer->pPManServer, iPg, 1);
+      sqlite3HctPManServerInit(&rc, pPManServer, iSafeTid, iPg, 1);
     }
     if( (iVal & HCT_PMF_LOGICAL_IS_ROOT) && iPg>=3  ){
       int ii;
       for(ii=0; ii<nRoot && aRoot[ii]!=iPg; ii++);
       if( ii==nRoot ){
         /* A free root page! */
-        sqlite3HctPManServerInitRoot(&rc, pServer->pPManServer, pFile, iPg);
+        sqlite3HctPManServerInitRoot(&rc, pPManServer, iSafeTid, pFile, iPg);
       }
     }
   }

@@ -249,6 +249,7 @@ static HctPManPageset *hctPManPagesetNew(int *pRc, int nAlloc){
 void sqlite3HctPManServerInit(
   int *pRc, 
   HctPManServer *pServer, 
+  u64 iTid,
   u32 iPg, 
   int bLogical
 ){
@@ -259,6 +260,7 @@ void sqlite3HctPManServerInit(
     HctPManPageset *pNew = hctPManPagesetNew(pRc, PAGESET_INIT_SIZE);
     if( pNew==0 ) return;
     pNew->pNext = p->pHead;
+    pNew->iMaxTid = iTid;
     p->pHead = pNew;
     if( p->pTail==0 ) p->pTail = pNew;
   }
@@ -665,6 +667,7 @@ typedef struct InitRootCtx InitRootCtx;
 struct InitRootCtx {
   HctFile *pFile;
   HctPManServer *pServer;
+  u64 iTid;
 };
 
 static int pmanInitRootCb(void *pCtx, u32 iLogic, u32 iPhys){
@@ -672,10 +675,10 @@ static int pmanInitRootCb(void *pCtx, u32 iLogic, u32 iPhys){
   int rc = SQLITE_OK;
 
   if( iLogic && !sqlite3HctFilePageIsFree(p->pFile, iLogic, 1) ){
-    sqlite3HctPManServerInit(&rc, p->pServer, iLogic, 1);
+    sqlite3HctPManServerInit(&rc, p->pServer, p->iTid, iLogic, 1);
   }
   if( iPhys && !sqlite3HctFilePageIsFree(p->pFile, iPhys, 0) && rc==SQLITE_OK ){
-    sqlite3HctPManServerInit(&rc, p->pServer, iPhys, 0);
+    sqlite3HctPManServerInit(&rc, p->pServer, p->iTid, iPhys, 0);
   }
 
   return rc;
@@ -684,6 +687,7 @@ static int pmanInitRootCb(void *pCtx, u32 iLogic, u32 iPhys){
 int sqlite3HctPManServerInitRoot(
   int *pRc, 
   HctPManServer *pServer, 
+  u64 iTid,
   HctFile *pFile, 
   u32 iRoot
 ){
@@ -691,6 +695,7 @@ int sqlite3HctPManServerInitRoot(
   InitRootCtx ctx;
   ctx.pServer = pServer;
   ctx.pFile = pFile;
+  ctx.iTid = iTid;
   rc = sqlite3HctDbWalkTree(pFile, iRoot, pmanInitRootCb, (void*)&ctx);
   if( rc==SQLITE_OK ){
     rc = sqlite3HctFilePageClearIsRoot(pFile, iRoot);

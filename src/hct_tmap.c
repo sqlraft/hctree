@@ -667,7 +667,7 @@ int sqlite3HctTMapRecoverySet(HctTMapClient *p, u64 iTid, u64 iCid){
     p->pBuild = pNew = (HctTMapFull*)sqlite3HctMalloc(&rc,
         sizeof(HctTMapFull) + nMap*sizeof(u64*)
     );
-    p->pBuild->iBuildMin = iTid;
+    p->iBuildMin = iTid;
     if( pNew ){
       int ii;
       pNew->m.iFirstTid = iFirst;
@@ -689,7 +689,7 @@ int sqlite3HctTMapRecoverySet(HctTMapClient *p, u64 iTid, u64 iCid){
       }
     }
   }
-  p->pBuild->iBuildMin = MIN(p->pBuild->iBuildMin, iTid);
+  p->iBuildMin = MIN(p->iBuildMin, iTid);
 
   while( rc==SQLITE_OK && pNew->m.iFirstTid>iTid ){
     assert( 0 );
