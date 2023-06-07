@@ -151,6 +151,10 @@ struct HctTMapStats {
 **
 ** pNextClient:
 **   Linked list of all clients associated with pServer.
+**
+** pBuild:
+**   This is used by the sqlite3HctTMapRecoveryXXX() API when constructing
+**   a new tmap object as part of sqlite_hct_journal recovery.
 */
 struct HctTMapClient {
   HctTMapServer *pServer;
@@ -159,6 +163,9 @@ struct HctTMapClient {
   HctTMapClient *pNextClient;
   HctTMapFull *pMap;
   HctTMapStats stats;
+
+  HctTMapFull *pBuild;
+  u64 iBuildMin;                  /* Min TID value explicitly set in pBuild */
 };
 
 #define HCT_LOCKVALUE_ACTIVE (((u64)0x01) << 56)
@@ -641,5 +648,78 @@ i64 sqlite3HctTMapStats(sqlite3 *db, int iStat, const char **pzStat){
   }
 
   return iVal;
+}
+
+int sqlite3HctTMapRecoverySet(HctTMapClient *p, u64 iTid, u64 iCid){
+  int rc = SQLITE_OK;
+  HctTMapFull *pNew = p->pBuild;
+  if( pNew==0 ){
+    u64 iFirst = 1;
+    u64 iEof = p->pServer->pList->m.iFirstTid;
+    u64 iLast = iEof + (HCT_TMAP_PAGESIZE*2);
+    int nMap = 0;
+    if( iTid>(HCT_TMAP_PAGESIZE/2) ){
+      iFirst = iTid - (HCT_TMAP_PAGESIZE/2);
+    }
+    nMap = ((iLast - iFirst) + HCT_TMAP_PAGESIZE-1) / HCT_TMAP_PAGESIZE;
+    assert( nMap>0 );
+
+    p->pBuild = pNew = (HctTMapFull*)sqlite3HctMalloc(&rc,
+        sizeof(HctTMapFull) + nMap*sizeof(u64*)
+    );
+    p->pBuild->iBuildMin = iTid;
+    if( pNew ){
+      int ii;
+      pNew->m.iFirstTid = iFirst;
+      pNew->m.nMap = nMap;
+      pNew->m.aaMap = (u64**)&pNew[1];
+      pNew->nRef = 1;
+      for(ii=0; ii<nMap; ii++){
+        u64 *aMap = (u64*)sqlite3HctMalloc(&rc,sizeof(u64) * HCT_TMAP_PAGESIZE);
+        pNew->m.aaMap[ii] = aMap;
+      }
+      if( rc==SQLITE_OK ){
+        u64 ee;
+        for(ee=iFirst; ee<iEof; ee++){
+          int iMap = (ee - iFirst) / HCT_TMAP_PAGESIZE;
+          int iOff = (ee - iFirst) % HCT_TMAP_PAGESIZE;
+          iOff = HCT_TMAP_ENTRYSLOT(iOff);
+          pNew->m.aaMap[iMap][iOff] = ((u64)1 | HCT_TMAP_COMMITTED);
+        }
+      }
+    }
+  }
+  p->pBuild->iBuildMin = MIN(p->pBuild->iBuildMin, iTid);
+
+  while( rc==SQLITE_OK && pNew->m.iFirstTid>iTid ){
+    assert( 0 );
+  }
+
+  if( rc==SQLITE_OK ){
+    int iMap = (iTid - pNew->m.iFirstTid) / HCT_TMAP_PAGESIZE;
+    int iOff = (iTid - pNew->m.iFirstTid) % HCT_TMAP_PAGESIZE;
+    pNew->m.aaMap[iMap][iOff] = (iCid | HCT_TMAP_COMMITTED);
+  }
+
+  return rc;
+}
+
+void sqlite3HctTMapRecoveryFinish(HctTMapClient *p, int rc){
+  HctTMapFull *pNew = p->pBuild;
+  if( pNew ){
+    p->pBuild = 0;
+    if( rc==SQLITE_OK ){
+      pNew->pNext = p->pServer->pList;
+      p->pServer->pList = pNew;
+      p->pServer->iMinMinTid = p->iBuildMin;
+    }else{
+      int ii;
+      for(ii=0; ii<pNew->m.nMap; ii++){
+        sqlite3_free(pNew->m.aaMap[ii]);
+      }
+      sqlite3_free(pNew);
+    }
+    p->iBuildMin = 0;
+  }
 }
 

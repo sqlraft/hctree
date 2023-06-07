@@ -988,10 +988,16 @@ int sqlite3HctJrnlRecovery(HctJournal *pJrnl, HctDatabase *pDb){
   ** scanning the sqlite_hct_journal table, populating aCommit[] along
   ** the way.  */
   if( rc==SQLITE_OK ){
+    HctTMapClient *pTClient = sqlite3HctFileTMapClient(pFile);
     i64 iPrev = base.iCid;
     int nTrans = 0;
     u64 *aCommit = 0;
 
+    /* Scan until the first missing entry. Set nTrans to the number of
+    ** number of entries between the first missing one and the last
+    ** present, or to HCT_MAX_LEADING_WRITE, whichever is greater.
+    ** Set iPrev to the largest CID value for which it and all previous
+    ** CIDs have been written into the journal table.  */
     for(rc = sqlite3HctDbCsrFirst(pCsr);
         rc==SQLITE_OK && 0==sqlite3HctDbCsrEof(pCsr);
         rc = sqlite3HctDbCsrNext(pCsr)
@@ -1010,17 +1016,22 @@ int sqlite3HctJrnlRecovery(HctJournal *pJrnl, HctDatabase *pDb){
     pServer->aCommit = aCommit;
     pServer->iSnapshot = iPrev;
 
+    /* Scan through whatever is left of the sqlite_hct_journal table, 
+    ** populating the aCommit[] array and the transaction-map (hct_tmap.c)
+    ** along the way. */
     while( rc==SQLITE_OK && 0==sqlite3HctDbCsrEof(pCsr) ){
       HctJournalRecord rec;
       rc = hctJrnlReadJournalRecord(pCsr, &rec);
       if( rc==SQLITE_OK ){
         i64 iVal = rec.iValidCid ? rec.iValidCid : rec.iCid;
         pServer->aCommit[rec.iCid % pServer->nCommit] = iVal;
+        rc = sqlite3HctTMapRecoverySet(pTClient, rec.iTid, rec.iCid);
       }
       if( rc==SQLITE_OK ){
         rc = sqlite3HctDbCsrNext(pCsr);
       }
     }
+    sqlite3HctTMapRecoveryFinish(pTClient, rc);
   }
 
   pSchema = (HctJrnlSchema*)sqlite3HctMalloc(&rc, sizeof(HctJrnlSchema));

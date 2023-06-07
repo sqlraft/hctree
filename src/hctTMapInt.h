@@ -137,3 +137,15 @@ i64 sqlite3HctTMapStats(sqlite3 *db, int iStat, const char **pzStat);
 
 void sqlite3HctTMapScan(HctTMapClient*);
 
+
+/* 
+** The following API is used when recovering a replication-enabled database.
+** In that case, a new HctTMap object must be created during recovery to
+** reflect the contents of the sqlite_hct_journal table.
+*/
+int sqlite3HctTMapRecoverySet(HctTMapClient*, u64 iTid, u64 iCid);
+void sqlite3HctTMapRecoveryFinish(HctTMapClient*, int rc);
+
+
+
+
