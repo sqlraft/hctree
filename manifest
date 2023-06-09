@@ -1,5 +1,5 @@
-C Ensure\sfree\spages\sare\snot\sreused\stoo\ssoon\sfollowing\srecovery\sof\sa\sreplication-enabled\sdatabase.
-D 2023-06-07T20:35:19.244
+C Fix\sa\spage\sleak\sthat\scould\soccur\sfollowing\sa\sDROP\sINDEX\scommand.
+D 2023-06-09T19:26:51.885
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -615,12 +615,12 @@ F src/hct_database.c 817c99951275f28cf21916e9b77c534dbc0be98d0fccf5bdbf12a9b7055
 F src/hct_file.c 4e221b9e20af2e1b99c6b12f1fddf31f4f4a0084419bbe07eb767a0daa333d1e
 F src/hct_journal.c 799b1d26f60159f5d42545b7e33dfd7b275ef6b30ff85d302bab09cbf65ad73c
 F src/hct_journalhash.c 94b45a60c091bee76f58ace86a575689dbb68526a17b929c001b356a151af175
-F src/hct_pman.c c2e0a15655207633ebc9e6be222ee74984d743373b776dbe258f9e7d4e57a1a4
+F src/hct_pman.c 308a194796e5a5956fc6fcd74ef4a45ee41583ab0cf6fe3022deb9852cd8af91
 F src/hct_record.c 9c0886b0da4b86df8389cf83885b96c63a8fda147c9b93ff4eac1b7100a13d78
 F src/hct_stats.c 3273fc59855be16ca383522f47c24131c5707c3bef7795f56aa5ac440aae98c0
 F src/hct_tmap.c be847a8c14b8adf7b071e547b5d5be632f212933b25f8a05193be36e47408441
 F src/hct_tree.c ed8be9047379752c28a8b7b954c24b8d351e41236eafbc6bd2d0a3d8b25a7132
-F src/hctree.c f467c19ad8f7c541095aac0917b8bc672cdc8e56ed1d353ef00b0dfc1e5ee101
+F src/hctree.c e0fa47e0ab14f2c5bdc379cad4c179850b512ad9a9c523e3dab43c0374382579
 F src/hwtime.h b638809e083b601b618df877b2e89cb87c2a47a01f4def10be4c4ebb54664ac7
 F src/in-operator.md 10cd8f4bcd225a32518407c2fb2484089112fd71
 F src/insert.c a8de1db43335fc4946370a7a7e47d89975ad678ddb15078a150e993ba2fb37d4
@@ -2141,8 +2141,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P 5013ae7b6e6e57f8bd0f211e6433c7492c51a71fc59fdc5fce93a38adc1453df
-R f262d5b7557d0ce94743b6e74ea81e64
+P 0a0e19e37dc64a69564706b672e2464f254e10ace4159ad2413c796ea944c1a8
+R 9aa5afbd298d68a5cf80828ded9e2356
 U dan
-Z 7f4419c50414f3459139e381de090918
+Z 9212d6c5e71371970f0e575f918008b3
 # Remove this line to create a well-formed Fossil manifest.

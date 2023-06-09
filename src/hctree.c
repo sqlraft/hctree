@@ -934,6 +934,12 @@ static int hctAttemptRecovery(HBtree *p, int iStage){
   return rc;
 }
 
+static int hctSchemaLoaded(HBtree *p){
+  Schema *pSchema = (Schema*)p->pSchema;
+  return ((pSchema->schemaFlags & DB_SchemaLoaded) ? 1 : 0);
+}
+
+
 /*
 ** Attempt to start a new transaction. A write-transaction
 ** is started if the second argument is nonzero, otherwise a read-
@@ -965,9 +971,8 @@ int sqlite3HctBtreeBeginTrans(Btree *pBt, int wrflag, int *pSchemaVersion){
   if( p->eTrans==SQLITE_TXN_ERROR ) return SQLITE_BUSY_SNAPSHOT;
   rc = sqlite3HctDbStartRead(p->pHctDb);
 
-  if( rc==SQLITE_OK && wrflag ){
-    /* Attempt stage 1 recovery here, in case it is required. */
-    rc = hctAttemptRecovery(p, 1);
+  if( rc==SQLITE_OK ){
+    rc = hctAttemptRecovery(p, hctSchemaLoaded(p));
   }
 
   if( pSchemaVersion ){
@@ -1552,13 +1557,6 @@ int sqlite3HctBtreeCursor(
   assert( p->eTrans!=SQLITE_TXN_NONE );
   assert( p->eTrans!=SQLITE_TXN_ERROR );
   assert( pCur->pHctTreeCsr==0 );
-
-  /* If opening a cursor with root==1, try to run recovery stage 0. Or, if
-  ** opening a cursor on some other root page, try to run recovery stage 1. 
-  ** Do not run any kind of recovery if this call is opening the meta-value
-  ** table (root==2).  */
-  if( iTable!=2 ) rc = hctAttemptRecovery(p, iTable!=1);
-  if( rc!=SQLITE_OK ) return rc;
 
   /* If this is an attempt to open a read/write cursor on either the
   ** sqlite_hct_journal or sqlite_hct_baseline tables, return an error

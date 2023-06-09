@@ -675,9 +675,11 @@ static int pmanInitRootCb(void *pCtx, u32 iLogic, u32 iPhys){
   int rc = SQLITE_OK;
 
   if( iLogic && !sqlite3HctFilePageIsFree(p->pFile, iLogic, 1) ){
+    rc = sqlite3HctFilePageClearInUse(p->pFile, iLogic, 1);
     sqlite3HctPManServerInit(&rc, p->pServer, p->iTid, iLogic, 1);
   }
   if( iPhys && !sqlite3HctFilePageIsFree(p->pFile, iPhys, 0) && rc==SQLITE_OK ){
+    rc = sqlite3HctFilePageClearInUse(p->pFile, iPhys, 0);
     sqlite3HctPManServerInit(&rc, p->pServer, p->iTid, iPhys, 0);
   }
 
