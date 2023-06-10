@@ -5471,6 +5471,12 @@ int sqlite3HctDbStartRecovery(HctDatabase *pDb, int iStage){
     hctDbPageArrayReset(&pDb->pa.writepg);
     hctDbPageArrayReset(&pDb->pa.discardpg);
     pDb->eMode = HCT_MODE_ROLLBACK;
+
+    /* During recovery the connection should read the latest version of
+    ** the db - no exceptions. Set these two to the largest possible 
+    ** values to ensure that this happens.  */
+    pDb->iSnapshotId = LARGEST_TID;
+    pDb->iLocalMinTid = LARGEST_TID;
   }
   return (pDb->eMode==HCT_MODE_ROLLBACK);
 }
@@ -5564,6 +5570,7 @@ static int hctDbRootPagelist(HctDatabase *pDb, int *pnRoot, u32 **paRoot){
 int sqlite3HctDbFinishRecovery(HctDatabase *pDb, int iStage, int rc){
   /* assert( pDb->eMode==HCT_MODE_ROLLBACK ); */
   assert( iStage==0 || iStage==1 );
+  assert( pDb->iSnapshotId>0 );
 
   pDb->iTid = 0;
   pDb->eMode = HCT_MODE_NORMAL;
@@ -5582,10 +5589,9 @@ int sqlite3HctDbFinishRecovery(HctDatabase *pDb, int iStage, int rc){
       rc = sqlite3HctFileRecoverFreelists(pDb->pFile, nRoot, aRoot);
       sqlite3_free(aRoot);
     }
-
-    assert( pDb->iSnapshotId>0 );
-    pDb->iSnapshotId = sqlite3HctFileGetSnapshotid(pDb->pFile);
   }
+  pDb->iSnapshotId = 0;
+  pDb->iLocalMinTid = 0;
   return sqlite3HctFileFinishRecovery(pDb->pFile, iStage, rc);
 }
 

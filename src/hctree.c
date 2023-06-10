@@ -969,10 +969,11 @@ int sqlite3HctBtreeBeginTrans(Btree *pBt, int wrflag, int *pSchemaVersion){
   assert( wrflag==0 || p->pHctDb==0 || pSchemaVersion );
 
   if( p->eTrans==SQLITE_TXN_ERROR ) return SQLITE_BUSY_SNAPSHOT;
-  rc = sqlite3HctDbStartRead(p->pHctDb);
+
+  rc = hctAttemptRecovery(p, hctSchemaLoaded(p));
 
   if( rc==SQLITE_OK ){
-    rc = hctAttemptRecovery(p, hctSchemaLoaded(p));
+    rc = sqlite3HctDbStartRead(p->pHctDb);
   }
 
   if( pSchemaVersion ){
@@ -1557,6 +1558,7 @@ int sqlite3HctBtreeCursor(
   assert( p->eTrans!=SQLITE_TXN_NONE );
   assert( p->eTrans!=SQLITE_TXN_ERROR );
   assert( pCur->pHctTreeCsr==0 );
+  assert( iTable==1 || iTable==2 || p->bRecoveryDone );
 
   /* If this is an attempt to open a read/write cursor on either the
   ** sqlite_hct_journal or sqlite_hct_baseline tables, return an error
