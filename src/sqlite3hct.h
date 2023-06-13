@@ -49,10 +49,14 @@ int sqlite3_hct_journal_write(
 #define SQLITE_HCT_JOURNAL_MODE_QUERY   -1
 
 /*
-** Set or query the LEADER/FOLLOWER setting of the db passed as the
-** first argument.
+** Query the LEADER/FOLLOWER setting of the db passed as the only argument.
 */
-int sqlite3_hct_journal_mode(sqlite3 *db, int eMode);
+int sqlite3_hct_journal_mode(sqlite3 *db);
+
+/*
+** Set the LEADER/FOLLOWER setting of the db passed as the first argument.
+*/
+int sqlite3_hct_journal_setmode(sqlite3 *db, int eMode);
 
 /*
 ** Write empty records for any missing journal entries with cid values

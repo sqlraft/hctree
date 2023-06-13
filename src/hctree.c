@@ -1563,7 +1563,10 @@ int sqlite3HctBtreeCursor(
   /* If this is an attempt to open a read/write cursor on either the
   ** sqlite_hct_journal or sqlite_hct_baseline tables, return an error
   ** immediately.  */
-  if( wrFlag && sqlite3HctJournalIsTable(p->pHctJrnl, iTable) ){
+  if( wrFlag 
+   && 0==(p->db->flags & SQLITE_WriteSchema)
+   && sqlite3HctJournalIsReadonly(p->pHctJrnl, iTable) 
+  ){
     return SQLITE_READONLY;
   }
 
@@ -2881,6 +2884,10 @@ int sqlite3HctBtreeSchemaLocked(Btree *p){
 HctDatabase *sqlite3HctDbFind(sqlite3 *db, int iDb){
   Btree *pBt = db->aDb[iDb].pBt;
   return sqlite3IsHct(pBt) ? ((HBtree*)pBt)->pHctDb : 0;
+}
+HctJournal *sqlite3HctJrnlFind(sqlite3 *db){
+  Btree *pBt = db->aDb[0].pBt;
+  return sqlite3IsHct(pBt) ? ((HBtree*)pBt)->pHctJrnl : 0;
 }
 
 #ifndef SQLITE_OMIT_SHARED_CACHE

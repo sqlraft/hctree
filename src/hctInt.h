@@ -276,5 +276,11 @@ int sqlite3HctStatsInit(sqlite3*);
 */
 void *sqlite3HctMalloc(int *pRc, i64 nByte);
 
+/*************************************************************************
+** hctree.c:
+**/
+
 #include <hctJrnlInt.h>
+HctJournal *sqlite3HctJrnlFind(sqlite3*);
+
 

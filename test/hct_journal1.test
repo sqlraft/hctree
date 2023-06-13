@@ -96,6 +96,7 @@ do_catchsql_test 1.11 {
 #-------------------------------------------------------------------------
 hct_reset_db
 catch_hct_journal_init db
+sqlite3_hct_journal_setmode db LEADER
 
 do_execsql_test 2.0 {
   CREATE TABLE t1(x, y);
@@ -108,8 +109,9 @@ do_execsql_test 2.1 {
 
 db close
 sqlite3 db test.db
-
 breakpoint
+sqlite3_hct_journal_setmode db LEADER
+
 do_execsql_test 2.2 {
   INSERT INTO t1 VALUES(3, 4);
 }
@@ -130,6 +132,7 @@ do_execsql_test 2.5 {
 #-------------------------------------------------------------------------
 hct_reset_db
 catch_hct_journal_init db
+sqlite3_hct_journal_setmode db LEADER
 
 do_execsql_test 3.1.0 {
   CREATE TABLE t1(x PRIMARY KEY, y) WITHOUT ROWID;
@@ -160,6 +163,7 @@ do_execsql_test 3.1.2 {
 
 hct_reset_db
 catch_hct_journal_init db
+sqlite3_hct_journal_setmode db LEADER
 
 do_execsql_test 3.2.0 {
   CREATE TABLE t1(x PRIMARY KEY, y);
@@ -191,6 +195,7 @@ do_execsql_test 3.2.2 {
 #-------------------------------------------------------------------------
 hct_reset_db
 catch_hct_journal_init db
+sqlite3_hct_journal_setmode db LEADER
 
 do_execsql_test 4.0 {
   CREATE TABLE t1(a, b);
@@ -202,16 +207,17 @@ do_execsql_test 4.0 {
   ALTER TABLE t3 RENAME TO t4;
 }
 
-# execsql_pp { SELECT cid, schema, hct_journal_entry(data), quote(schema_version) FROM sqlite_hct_journal }
+execsql_pp { SELECT cid, schema, hct_journal_entry(data), quote(schema_version) FROM sqlite_hct_journal }
 
 db close
 sqlite3 db test.db
+sqlite3_hct_journal_setmode db LEADER
 
-do_execsql_test 4.0 {
+do_execsql_test 4.1 {
   INSERT INTO t4 VALUES(3, 4);
 }
 
-# execsql_pp { SELECT cid, schema, hct_journal_entry(data), quote(schema_version), quote(hash), tid, validcid FROM sqlite_hct_journal }
+execsql_pp { SELECT cid, schema, hct_journal_entry(data), quote(schema_version) FROM sqlite_hct_journal }
 
 finish_test
 

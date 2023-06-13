@@ -959,8 +959,8 @@ int sqlite3HctJrnlRecovery(HctJournal *pJrnl, HctDatabase *pDb){
 
   /* Read the last record of the sqlite_hct_journal table. Specifically,
   ** the value of fields "cid" and "schema_version". Store these values
-  ** in stack variables iCid and aSchema, respectively.  Or, if the
-  ** sqlite_hct_journal table is empty, populate iCid and aSchema[] with
+  ** in stack variables iMaxCid and aSchema, respectively.  Or, if the
+  ** sqlite_hct_journal table is empty, populate iMaxCid and aSchema[] with
   ** values from the baseline table.  */
   if( rc==SQLITE_OK ){
     rc = sqlite3HctDbCsrOpen(pDb, 0, (u32)pJrnl->iJrnlRoot, &pCsr);
@@ -1038,8 +1038,9 @@ int sqlite3HctJrnlRecovery(HctJournal *pJrnl, HctDatabase *pDb){
   if( rc==SQLITE_OK ){
     memcpy(pSchema->aVersion, aSchema, SQLITE_HCT_JOURNAL_HASHSIZE);
     pServer->pSchema = pSchema;
-    sqlite3HctFileSetJrnlPtr(pFile, (void*)pServer, hctJrnlDelServer);
     pJrnl->pServer = pServer;
+    sqlite3HctFileSetJrnlPtr(pFile, (void*)pServer, hctJrnlDelServer);
+    if( iMaxCid>0 ) sqlite3HctFileSetCID(pFile, iMaxCid);
   }else{
     hctJrnlDelServer((void*)pServer);
   }
@@ -1090,8 +1091,12 @@ void sqlite3HctJournalClose(HctJournal *pJrnl){
   sqlite3_free(pJrnl);
 }
 
-int sqlite3HctJournalIsTable(HctJournal *pJrnl, u64 iTable){
-  return (pJrnl && (pJrnl->iJrnlRoot==iTable || pJrnl->iBaseRoot==iTable));
+int sqlite3HctJournalIsReadonly(HctJournal *pJrnl, u64 iTable){
+  return (pJrnl && (
+       pJrnl->pServer->eMode==SQLITE_HCT_JOURNAL_MODE_FOLLOWER
+    || pJrnl->iJrnlRoot==iTable 
+    || pJrnl->iBaseRoot==iTable
+  ));
 }
 
 /*
@@ -1136,6 +1141,105 @@ int sqlite3HctJrnlRollbackEntry(HctJournal *pJrnl, i64 iTid){
     }
 
     sqlite3HctDbCsrClose(pCsr);
+  }
+
+  return rc;
+}
+
+
+
+/*
+** Return the current journal mode - SQLITE_HCT_JOURNAL_MODE_FOLLOWER or
+** SQLITE_HCT_JOURNAL_MODE_LEADER - for the main database of the connection
+** passed as the only argument. Or, if the main database is not a
+** replication-enabled hct database, return -1;
+*/
+int sqlite3_hct_journal_mode(sqlite3 *db){
+  int eRet = -1;
+  HctJournal *pJrnl = sqlite3HctJrnlFind(db);
+  if( pJrnl ){
+    eRet = pJrnl->pServer->eMode;
+  }
+  return eRet;
+}
+
+/*
+** Return true if the journal is complete - contains no holes. Or false
+** otherwise. This function is not threadsafe. Results are undefined
+** if there are concurrent transactions running on the database.
+*/
+static int hctJrnlIsComplete(HctJournal *pJrnl){
+  HctJrnlServer *pServer = pJrnl->pServer;
+  u64 iSnapshot = pServer->iSnapshot;
+  int ii;
+
+  assert( pServer->eMode==SQLITE_HCT_JOURNAL_MODE_FOLLOWER );
+
+  /* Set iSnapshot to the CID of the last contiguous commit */
+  while( 1 ){
+    int iNext = (iSnapshot+1) % pServer->nCommit;
+    u64 iVal = HctAtomicLoad(&pServer->aCommit[iNext]);
+    if( iVal<=iSnapshot ) break;
+    iSnapshot++;
+  }
+
+  /* See if there are any transactions yet committed with CID values greater
+  ** than iSnapshot. If there are, then the journal is not complete.  */
+  for(ii=0; ii<pServer->nCommit; ii++){
+    u64 iVal = HctAtomicLoad(&pServer->aCommit[ii]);
+    if( iVal>iSnapshot ){
+      return 0;
+    }
+  }
+
+  return 1;
+}
+
+/*
+** Set the LEADER/FOLLOWER setting of the main database of the connection 
+** passed as the first argument.
+*/
+int sqlite3_hct_journal_setmode(sqlite3 *db, int eMode){
+  int rc = SQLITE_OK;
+  HctJournal *pJrnl = sqlite3HctJrnlFind(db);
+
+  if( pJrnl==0 ){
+    rc = sqlite3_exec(db, "SELECT 1 FROM sqlite_schema LIMIT 1", 0, 0, 0);
+    if( rc==SQLITE_OK ){
+      pJrnl = sqlite3HctJrnlFind(db);
+    }
+  }
+
+  if( rc==SQLITE_OK ){
+    if( eMode!=SQLITE_HCT_JOURNAL_MODE_LEADER
+        && eMode!=SQLITE_HCT_JOURNAL_MODE_FOLLOWER
+      ){
+      return SQLITE_MISUSE_BKPT;
+    }else if( pJrnl==0 ){
+      sqlite3ErrorWithMsg(db, SQLITE_ERROR, "not a journaled hct database");
+      rc = SQLITE_ERROR;
+    }else{
+      HctFile *pFile = sqlite3HctDbFile(pJrnl->pDb);
+      HctJrnlServer *pServer = pJrnl->pServer;
+      if( eMode!=pServer->eMode ){
+        if( eMode==SQLITE_HCT_JOURNAL_MODE_LEADER ){
+          /* Switch from FOLLOWER to LEADER mode. This is only allowed if
+          ** there are no holes in the journal.  */
+          if( hctJrnlIsComplete(pJrnl)==0 ){
+            sqlite3ErrorWithMsg(db, SQLITE_ERROR, "incomplete journal");
+            rc = SQLITE_ERROR;
+          }else{
+            pServer->eMode = SQLITE_HCT_JOURNAL_MODE_LEADER;
+          }
+        }else{
+          /* Switch from LEADER to FOLLOWER mode. This is always possible. */
+          u64 iSnapshotId = sqlite3HctFileGetSnapshotid(pFile);
+          memset(pServer->aCommit, 0, pServer->nCommit*sizeof(u64));
+          pServer->iSnapshot = iSnapshotId;
+          pServer->eMode = SQLITE_HCT_JOURNAL_MODE_FOLLOWER;
+        }
+      }
+    }
   }
 
   return rc;
