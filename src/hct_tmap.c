@@ -428,7 +428,7 @@ void sqlite3HctTMapClientFree(HctTMapClient *pClient){
 }
 
 
-int sqlite3HctTMapBegin(HctTMapClient *pClient, HctTMap **ppMap){
+int sqlite3HctTMapBegin(HctTMapClient *pClient, u64 iSnapshot, HctTMap **ppMap){
   HctTMapFull *pMap = pClient->pMap;
   u64 iEof = pMap->m.iFirstTid + pMap->m.nMap*HCT_TMAP_PAGESIZE;
 
@@ -446,6 +446,7 @@ int sqlite3HctTMapBegin(HctTMapClient *pClient, HctTMap **ppMap){
       u64 iVal = HctAtomicLoad( hctTMapFind(pMap, iSafe+1) );
       u64 eState = (iVal & HCT_TMAP_STATE_MASK);
       if( eState!=HCT_TMAP_COMMITTED && eState!=HCT_TMAP_ROLLBACK ) break;
+      if( iSnapshot!=0 && (iVal & HCT_TMAP_CID_MASK)>iSnapshot ) break;
       iSafe++;
     }
 
@@ -580,7 +581,7 @@ u64 sqlite3HctTMapSafeTID(HctTMapClient *p){
 
 /*
 ** This is called by write transactions immediately after obtaining
-** the transactions TID value (at the start of the commit process).
+** the transaction's TID value (at the start of the commit process).
 */
 int sqlite3HctTMapNewTID(
   HctTMapClient *p,               /* Transaction map client */

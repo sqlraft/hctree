@@ -93,11 +93,19 @@ struct HctJrnlSchema {
 /*
 ** There is one instance of this structure for each database handle (HBtree*)
 ** open on a replication-enabled hctree database.
+**
+** bInWrite:
+**   Set to true while the database connection is in a call to
+**   sqlite3_hct_journal_write().
 */
 struct HctJournal {
   u64 iJrnlRoot;                  /* Root page of journal table */
   u64 iBaseRoot;                  /* Base page of journal table */
+  int bInWrite;
+  u64 iWriteTid;
+  u64 iWriteCid;
   HctDatabase *pDb;
+  HctTree *pTree;
   HctJrnlServer *pServer;
 };
 
@@ -611,15 +619,15 @@ static int hctJrnlWriteRecord(
 }
 
 int sqlite3HctJrnlWriteEmpty(HctJournal *pJrnl, u64 iCid, u64 iTid){
-  HctJrnlSchema *pJSchema = 0;
   int rc = SQLITE_OK;
+  if( pJrnl->bInWrite==0 ){
+    HctJrnlSchema *pJSchema = HctAtomicLoad(&pJrnl->pServer->pSchema);
+    while( pJSchema->iCid>iCid ) pJSchema = pJSchema->pPrev;
 
-  pJSchema = HctAtomicLoad(&pJrnl->pServer->pSchema);
-  while( pJSchema->iCid>iCid ) pJSchema = pJSchema->pPrev;
-
-  sqlite3HctDbJournalRbMode(pJrnl->pDb, 1);
-  rc = hctJrnlWriteRecord(pJrnl, iCid, "", 0, 0, pJSchema->aVersion, iTid);
-  sqlite3HctDbJournalRbMode(pJrnl->pDb, 0);
+    sqlite3HctDbJournalRbMode(pJrnl->pDb, 1);
+    rc = hctJrnlWriteRecord(pJrnl, iCid, "", 0, 0, pJSchema->aVersion, iTid);
+    sqlite3HctDbJournalRbMode(pJrnl->pDb, 0);
+  }
   return rc;
 }
 
@@ -636,6 +644,8 @@ int sqlite3HctJrnlLog(
   JrnlCtx jrnlctx;
   HctJrnlSchema *pJSchema = 0;
   const char *zSchema = 0;
+
+  if( pJrnl->bInWrite ) return SQLITE_OK;
 
   memset(&jrnlctx, 0, sizeof(jrnlctx));
   jrnlctx.pSchema = pSchema;
@@ -1060,6 +1070,7 @@ static u64 hctFindRootByName(Schema *pSchema, const char *zName){
 
 int sqlite3HctJournalNewIf(
   Schema *pSchema, 
+  HctTree *pTree, 
   HctDatabase *pDb, 
   HctJournal **pp
 ){
@@ -1079,6 +1090,7 @@ int sqlite3HctJournalNewIf(
       pNew->iJrnlRoot = iJrnlRoot;
       pNew->iBaseRoot = iBaseRoot;
       pNew->pDb = pDb;
+      pNew->pTree = pTree;
       pNew->pServer = (HctJrnlServer*)sqlite3HctFileGetJrnlPtr(pFile);
       *pp = pNew;
     }
@@ -1092,7 +1104,7 @@ void sqlite3HctJournalClose(HctJournal *pJrnl){
 }
 
 int sqlite3HctJournalIsReadonly(HctJournal *pJrnl, u64 iTable){
-  return (pJrnl && (
+  return (pJrnl && pJrnl->bInWrite==0 && (
        pJrnl->pServer->eMode==SQLITE_HCT_JOURNAL_MODE_FOLLOWER
     || pJrnl->iJrnlRoot==iTable 
     || pJrnl->iBaseRoot==iTable
@@ -1146,6 +1158,36 @@ int sqlite3HctJrnlRollbackEntry(HctJournal *pJrnl, i64 iTid){
   return rc;
 }
 
+/*
+** Find the HctJournal object associated with the "main" database of the
+** connection passed as the only argument. If successful, set (*ppJrnl)
+** to point to said object and return SQLITE_OK. Or, if the database is
+** not a replication-enabled db, set (*ppJrnl) to NULL and return SQLITE_OK.
+** Or, if an error occurs, return an SQLite error code. The final value
+** of (*ppJrnl) is undefined in this case.
+*/
+static int hctJrnlFind(sqlite3 *db, HctJournal **ppJrnl){
+  int rc = SQLITE_OK;
+  HctJournal *pJrnl = sqlite3HctJrnlFind(db);
+
+  if( pJrnl==0 ){
+    /* If the journal was not found, it might be because the database is
+    ** not yet initialized. Run a query to ensure it is, then try to retrieve
+    ** the journal object again.  */
+    rc = sqlite3_exec(db, "SELECT 1 FROM sqlite_schema LIMIT 1", 0, 0, 0);
+    if( rc==SQLITE_OK ){
+      pJrnl = sqlite3HctJrnlFind(db);
+    }
+  }
+
+  if( rc==SQLITE_OK && pJrnl==0 ){
+    sqlite3ErrorWithMsg(db, SQLITE_ERROR, "not a journaled hct database");
+    rc = SQLITE_ERROR;
+  }
+
+  *ppJrnl = pJrnl;
+  return rc;
+}
 
 
 /*
@@ -1242,6 +1284,323 @@ int sqlite3_hct_journal_setmode(sqlite3 *db, int eMode){
     }
   }
 
+  return rc;
+}
+
+static int hctJrnlGetInsertStmt(
+  sqlite3 *db, 
+  const char *zTab, 
+  int *piPk,
+  sqlite3_stmt **ppStmt
+){
+  sqlite3_str *pStr;
+  Schema *pSchema = db->aDb[0].pSchema;
+  Table *pTab = (Table*)sqlite3HashFind(&pSchema->tblHash, zTab);
+  char *zSql = 0;
+  int rc = SQLITE_OK;
+  int ii;
+
+  assert( pTab );
+  *piPk = (int)pTab->iPKey;
+
+  *ppStmt = 0;
+  pStr = sqlite3_str_new(0);
+  sqlite3_str_appendf(pStr, "INSERT INTO main.%Q VALUES(", zTab);
+  for(ii=0; ii<pTab->nCol; ii++){
+    sqlite3_str_append(pStr, "?,", (ii==pTab->nCol-1) ? 1 : 2);
+  }
+  sqlite3_str_append(pStr, ")", 1);
+  zSql = sqlite3_str_finish(pStr);
+
+  if( zSql==0 ){
+    rc = SQLITE_NOMEM_BKPT;
+  }else{
+    rc = sqlite3_prepare_v2(db, zSql, -1, ppStmt, 0);
+    sqlite3_free(zSql);
+  }
+
+  return rc;
+}
+
+/*
+** Parameter aData[] points to a record encoded in SQLite format. Bind
+** each value in the record to the statement passed as the second argument.
+*/
+static int hctJrnlBindRecord(int *pRc, sqlite3_stmt *pStmt, const u8 *aData){
+  int rc = *pRc;
+  int ret = 0;
+  if( rc==SQLITE_OK ){
+    const u8 *pHdr = aData;
+    const u8 *pData = 0;
+    int nHdr;
+    int iBind;
+
+    pHdr += getVarint32(pHdr, nHdr);
+    pData = &aData[nHdr];
+    for(iBind=1; pHdr<&aData[nHdr]; iBind++){
+      u32 t;
+      pHdr += getVarint32(pHdr, t);
+      switch( t ){
+        case 10:
+        case 11:
+        case 0:   /* NULL */
+          sqlite3_bind_null(pStmt, iBind);
+          break;
+
+        case 1: { /* 1 byte integer */
+          i64 iVal = pData[0];
+          pData += 1;
+          sqlite3_bind_int64(pStmt, iBind, iVal);
+          break;
+        }
+        case 2: { /* 2 byte integer */
+          i64 iVal = ((i64)pData[0]<<8) + (i64)pData[1];
+          pData += 2;
+          sqlite3_bind_int64(pStmt, iBind, iVal);
+          break;
+        }
+        case 3: { /* 3 byte integer */
+          i64 iVal = ((i64)pData[0]<<16) + ((i64)pData[1]<<8) + (i64)pData[2];
+          pData += 3;
+          sqlite3_bind_int64(pStmt, iBind, iVal);
+          break;
+        }
+        case 4: { /* 4 byte integer */
+          i64 iVal = ((i64)pData[0]<<24) 
+                   + ((i64)pData[1]<<16) 
+                   + ((i64)pData[2]<<8) 
+                   + (i64)pData[3];
+          pData += 4;
+          sqlite3_bind_int64(pStmt, iBind, iVal);
+          break;
+        }
+        case 5: { /* 6 byte integer */
+          i64 iVal = ((i64)pData[0]<<40) 
+                   + ((i64)pData[1]<<32) 
+                   + ((i64)pData[2]<<24) 
+                   + ((i64)pData[3]<<16) 
+                   + ((i64)pData[4]<<8) 
+                   + (i64)pData[5];
+          pData += 6;
+          sqlite3_bind_int64(pStmt, iBind, iVal);
+          break;
+        }
+
+        case 6: case 7: { /* 8 byte integer, 8 byte real value */
+          u64 iVal = ((u64)pData[0]<<56) 
+                   + ((u64)pData[1]<<48) 
+                   + ((u64)pData[2]<<40) 
+                   + ((u64)pData[3]<<32) 
+                   + ((u64)pData[4]<<24) 
+                   + ((u64)pData[5]<<16) 
+                   + ((u64)pData[6]<<8) 
+                   + (u64)pData[7];
+          pData += 8;
+          if( t==6 ){
+            i64 iVal2;
+            memcpy(&iVal2, &iVal, sizeof(iVal));
+            sqlite3_bind_int64(pStmt, iBind, iVal2);
+          }else{
+            double rVal2;
+            memcpy(&rVal2, &iVal, sizeof(iVal));
+            sqlite3_bind_double(pStmt, iBind, rVal2);
+          }
+          break;
+        }
+
+        case 8:   /* integer value 0 */
+          sqlite3_bind_int(pStmt, iBind, 0);
+          break;
+
+        case 9:   /* integer value 1 */
+          sqlite3_bind_int(pStmt, iBind, 1);
+          break;
+
+        default: {
+          int nByte = (t - 12) / 2;
+          if( t & 0x01 ){
+            sqlite3_bind_text(
+                pStmt, iBind, (const char*)pData, nByte, SQLITE_TRANSIENT
+            );
+          }else{
+            sqlite3_bind_blob(
+                pStmt, iBind, (const void*)pData, nByte, SQLITE_TRANSIENT
+            );
+          }
+          pData += nByte;
+          break;
+        };
+      }
+    }
+
+    ret = pData - aData;
+  }
+  return ret;
+}
+
+u64 sqlite3HctJrnlWriteTid(HctJournal *pJrnl, u64 *piCid){
+  u64 iRet = 0;
+  assert( *piCid==0 );
+  if( pJrnl && pJrnl->bInWrite ){
+    iRet = pJrnl->iWriteTid;
+    *piCid = pJrnl->iWriteCid;
+  }
+  return iRet;
+}
+
+u64 sqlite3HctJournalSnapshot(HctJournal *pJrnl){
+  u64 iRet = 0;
+  if( pJrnl ){
+    HctJrnlServer *pServer = pJrnl->pServer;
+    if( pServer->eMode==SQLITE_HCT_JOURNAL_MODE_FOLLOWER ){
+      iRet = pServer->iSnapshot;
+      while( 1 ){
+        u64 iTrial = iRet + 1;
+        u64 iVal = HctAtomicLoad(&pServer->aCommit[iTrial % pServer->nCommit]);
+        if( iVal<iTrial ) break;
+        iRet = iTrial;
+      }
+    }
+  }
+  return iRet;
+}
+
+/*
+** Write a transaction into the database.
+*/
+int sqlite3_hct_journal_write(
+  sqlite3 *db,                    /* Write to "main" db of this handle */
+  sqlite3_int64 iCid,
+  const char *zSchema,
+  const void *pData, int nData,
+  const void *pSchemaVersion
+){
+  int rc = SQLITE_OK;
+  HctJournal *pJrnl = 0;
+  u64 iValidCid = 0;
+
+  rc = hctJrnlFind(db, &pJrnl);
+  if( rc!=SQLITE_OK ) return rc;
+  pJrnl->bInWrite = 1;
+
+  /* Check that the journal is in follower mode */
+  if( pJrnl->pServer->eMode!=SQLITE_HCT_JOURNAL_MODE_FOLLOWER ){
+    rc = SQLITE_ERROR;
+    sqlite3ErrorWithMsg(db, rc, "database is not in FOLLOWER mode");
+  }
+
+  /* Check that there is no transaction open on the connection */
+  if( rc==SQLITE_OK && sqlite3_get_autocommit(db)==0 ){
+    rc = SQLITE_ERROR;
+    sqlite3ErrorWithMsg(db, rc, "open transaction on database");
+  }
+
+  if( rc==SQLITE_OK ){
+    Schema *pSchema = db->aDb[0].pSchema;
+    int ii = 0;
+    const u8 *aData = (const u8*)pData;
+    const char *zTab = 0;                   /* Table currently being written */
+    u64 iRoot = 0;                          /* Root page of zTab */
+
+    rc = sqlite3_exec(db, "BEGIN CONCURRENT", 0, 0, 0);
+    if( rc==SQLITE_OK && zSchema[0]!='\0' ){
+      rc = sqlite3_exec(db, zSchema, 0, 0, 0);
+    }
+
+    while( rc==SQLITE_OK && ii<nData ){
+      char t = aData[ii++];
+      switch( t ){
+        case 'T': {
+          zTab = (const char*)&aData[ii];
+          iRoot = hctFindRootByName(pSchema, zTab);
+          if( iRoot==0 ){
+            rc = SQLITE_CORRUPT_BKPT;
+          }else{
+            ii += sqlite3Strlen30(zTab) + 1;
+          }
+          break;
+        }
+
+        case 'i': {
+          i64 iRowid = 0;
+          int iPk = -1;
+          int nByte = 0;
+          sqlite3_stmt *pStmt = 0;
+
+          rc = hctJrnlGetInsertStmt(db, zTab, &iPk, &pStmt);
+
+          ii += sqlite3GetVarint(&aData[ii], (u64*)&iRowid);
+          ii += getVarint32(&aData[ii], nByte);
+          hctJrnlBindRecord(&rc, pStmt, &aData[ii]);
+          ii += nByte;
+          sqlite3_bind_int64(pStmt, iPk+1, iRowid);
+          if( rc==SQLITE_OK ){
+            sqlite3_step(pStmt);
+            rc = sqlite3_finalize(pStmt);
+          }
+
+          break;
+        }
+        
+        default:
+          assert( 0 );
+          break;
+      }
+    }
+  }
+
+  /* Allocate a TID value for this transaction. This is done now, instead
+  ** of as part of the COMMIT command, so that the TID can be written to
+  ** the sqlite_hct_journal table as part of the new record.  */
+  if( rc==SQLITE_OK ){
+    rc = sqlite3HctDbStartWrite(pJrnl->pDb, &pJrnl->iWriteTid);
+    pJrnl->iWriteCid = iCid;
+  }
+
+  /* Write the sqlite_hct_journal record directly into the HctTree 
+  ** structure.  We don't write via the SQL interface here, because
+  ** writing to the db once sqlite3HctDbStartWrite() has been called
+  ** causes assert() failures. And we don't write directly to the db
+  ** either, because the write needs to be rolled back if there is
+  ** a conflict.  */
+  if( rc==SQLITE_OK ){
+    u8 *pRec = 0;
+    int nRec = 0;
+
+    /* TODO: "validcid" value */
+    pRec = hctJrnlComposeRecord(
+        iCid, zSchema, pData, nData, pSchemaVersion, pJrnl->iWriteTid, &nRec
+    );
+    if( pRec==0 ){
+      rc = SQLITE_NOMEM_BKPT;
+    }else{
+      HctTreeCsr *pCsr = 0;
+      u64 root = hctFindRootByName(db->aDb[0].pSchema, "sqlite_hct_journal");
+
+      rc = sqlite3HctTreeCsrOpen(pJrnl->pTree, root, &pCsr);
+      if( rc==SQLITE_OK ){
+        rc = sqlite3HctTreeInsert(pCsr, 0, iCid, nRec, pRec, 0);
+        sqlite3HctTreeCsrClose(pCsr);
+      }
+    }
+    sqlite3_free(pRec);
+
+    if( rc==SQLITE_OK ){
+      rc = sqlite3_exec(db, "COMMIT", 0, 0, 0);
+    }
+    if( rc!=SQLITE_OK ){
+      sqlite3_exec(db, "ROLLBACK", 0, 0, 0);
+    }else{
+      HctJrnlServer *pServer = pJrnl->pServer;
+      i64 iVal = iValidCid ? iValidCid : iCid;
+      HctAtomicStore(&pServer->aCommit[iCid % pServer->nCommit], iVal);
+      if( HctAtomicLoad(&pServer->iSnapshot)==0 ){
+        HctCASBool(&pServer->iSnapshot, (u64)0, (u64)iCid);
+      }
+    }
+  }
+
+  pJrnl->bInWrite = 0;
   return rc;
 }
 

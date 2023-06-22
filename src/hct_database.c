@@ -713,7 +713,7 @@ static void hctDbRootPageInit(
 /*
 ** Open a read transaction, if one is not already open.
 */
-int sqlite3HctDbStartRead(HctDatabase *pDb){
+int sqlite3HctDbStartRead(HctDatabase *pDb, HctJournal *pJrnl){
   int rc = SQLITE_OK;
 
   assert( (pDb->iSnapshotId==0)==(pDb->pTmap==0) );
@@ -724,10 +724,18 @@ int sqlite3HctDbStartRead(HctDatabase *pDb){
       pDb->aTmp = (u8*)sqlite3HctMalloc(&rc, pDb->pgsz);
     }
     if( rc==SQLITE_OK ){
+      u64 iSnapshot = 0;
       HctTMapClient *pTMapClient = sqlite3HctFileTMapClient(pDb->pFile);
-      rc = sqlite3HctTMapBegin(pTMapClient, &pDb->pTmap);
+
+      iSnapshot = sqlite3HctJournalSnapshot(pJrnl);
+      rc = sqlite3HctTMapBegin(pTMapClient, iSnapshot, &pDb->pTmap);
       assert( rc==SQLITE_OK );  /* todo */
-      pDb->iSnapshotId = sqlite3HctFileGetSnapshotid(pDb->pFile);
+
+      iSnapshot = sqlite3HctJournalSnapshot(pJrnl);
+      if( iSnapshot==0 ){
+        iSnapshot = sqlite3HctFileGetSnapshotid(pDb->pFile);
+      }
+      pDb->iSnapshotId = iSnapshot;
       pDb->iLocalMinTid = sqlite3HctTMapCommitedTID(pTMapClient);
       assert( pDb->iSnapshotId>0 );
     }
@@ -6191,7 +6199,7 @@ sqlite3HctDbValidate(
 ){
   HctDbCsr *pCsr = 0;
   u64 *pEntry = hctDbFindTMapEntry(pDb->pTmap, pDb->iTid);
-  u64 iCid = 0;
+  u64 iCid = *piCid;
   u64 nFinalWrite = 0;
   int rc = SQLITE_OK;
   int nPageScan = pDb->pConfig->nPageScan;
@@ -6204,8 +6212,10 @@ sqlite3HctDbValidate(
   if( nWrite==0 ) nWrite = 1;
 
   assert( *pEntry==0 );
-  HctAtomicStore(pEntry, HCT_TMAP_VALIDATING);
-  iCid = sqlite3HctFileAllocateCID(pDb->pFile, 1);
+  if( iCid==0 ){
+    HctAtomicStore(pEntry, HCT_TMAP_VALIDATING);
+    iCid = sqlite3HctFileAllocateCID(pDb->pFile, 1);
+  }
   HctAtomicStore(pEntry, HCT_TMAP_VALIDATING | iCid);
 
   nFinalWrite = sqlite3HctFileIncrWriteCount(pDb->pFile, nWrite);

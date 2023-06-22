@@ -166,6 +166,8 @@ int sqlite3HctTreeUpdateMeta(HctTree*, const u8*, int);
 typedef struct HctDatabase HctDatabase;
 typedef struct HctDbCsr HctDbCsr;
 
+typedef struct HctJournal HctJournal;
+
 HctDatabase *sqlite3HctDbFind(sqlite3*, int);
 int sqlite3HctDetectJournals(sqlite3 *db);
 
@@ -187,7 +189,7 @@ int sqlite3HctDbInsert(
   int *pnRetry
 );
 int sqlite3HctDbInsertFlush(HctDatabase *pDb, int *pnRetry);
-int sqlite3HctDbStartRead(HctDatabase*);
+int sqlite3HctDbStartRead(HctDatabase*,HctJournal*);
 int sqlite3HctDbStartWrite(HctDatabase*, u64*);
 int sqlite3HctDbEndWrite(HctDatabase*, u64, int);
 int sqlite3HctDbEndRead(HctDatabase*);

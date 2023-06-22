@@ -883,7 +883,9 @@ int sqlite3HctBtreeNewDb(Btree *p){
 static int hctDetectJournals(HBtree *p){
   int rc = SQLITE_OK;
   if( p->pHctJrnl==0 ){
-    rc = sqlite3HctJournalNewIf((Schema*)p->pSchema, p->pHctDb, &p->pHctJrnl);
+    rc = sqlite3HctJournalNewIf(
+        (Schema*)p->pSchema, p->pHctTree, p->pHctDb, &p->pHctJrnl
+    );
   }
   return rc;
 }
@@ -900,7 +902,7 @@ int sqlite3HctDetectJournals(sqlite3 *db){
   HBtree *p = (HBtree*)db->aDb[0].pBt;
   int rc = hctDetectJournals(p);
   if( rc==SQLITE_OK ){
-    rc = sqlite3HctDbStartRead(p->pHctDb);
+    rc = sqlite3HctDbStartRead(p->pHctDb, 0);
   }
   if( rc==SQLITE_OK ){
     rc = sqlite3HctJrnlRecovery(p->pHctJrnl, p->pHctDb);
@@ -973,7 +975,7 @@ int sqlite3HctBtreeBeginTrans(Btree *pBt, int wrflag, int *pSchemaVersion){
   rc = hctAttemptRecovery(p, hctSchemaLoaded(p));
 
   if( rc==SQLITE_OK ){
-    rc = sqlite3HctDbStartRead(p->pHctDb);
+    rc = sqlite3HctDbStartRead(p->pHctDb, p->pHctJrnl);
   }
 
   if( pSchemaVersion ){
@@ -1221,9 +1223,15 @@ static int btreeFlushToDisk(HBtree *p){
   rc = btreeWriteLog(p);
 
   if( rc==SQLITE_OK ){
-    sqlite3HctDbStartWrite(p->pHctDb, &iTid);
+    /* Obtain the TID for this transaction.  */
+    iTid = sqlite3HctJrnlWriteTid(p->pHctJrnl, &iCid);
+    if( iTid==0 ){
+      sqlite3HctDbStartWrite(p->pHctDb, &iTid);
+    }
+
     /* Invoke the SQLITE_TESTCTRL_HCT_MTCOMMIT hook, if applicable */
     if( p->db->xMtCommit ) p->db->xMtCommit(p->db->pMtCommitCtx, 0);
+
     assert( iTid>0 );
     rc = hctLogFileFinish(p->pLog, iTid);
   }
@@ -1563,10 +1571,7 @@ int sqlite3HctBtreeCursor(
   /* If this is an attempt to open a read/write cursor on either the
   ** sqlite_hct_journal or sqlite_hct_baseline tables, return an error
   ** immediately.  */
-  if( wrFlag 
-   && 0==(p->db->flags & SQLITE_WriteSchema)
-   && sqlite3HctJournalIsReadonly(p->pHctJrnl, iTable) 
-  ){
+  if( wrFlag && sqlite3HctJournalIsReadonly(p->pHctJrnl, iTable) ){
     return SQLITE_READONLY;
   }
 

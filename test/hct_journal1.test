@@ -206,9 +206,6 @@ do_execsql_test 4.0 {
   INSERT INTO t3 VALUES(1, 2);
   ALTER TABLE t3 RENAME TO t4;
 }
-
-execsql_pp { SELECT cid, schema, hct_journal_entry(data), quote(schema_version) FROM sqlite_hct_journal }
-
 db close
 sqlite3 db test.db
 sqlite3_hct_journal_setmode db LEADER
@@ -216,8 +213,6 @@ sqlite3_hct_journal_setmode db LEADER
 do_execsql_test 4.1 {
   INSERT INTO t4 VALUES(3, 4);
 }
-
-execsql_pp { SELECT cid, schema, hct_journal_entry(data), quote(schema_version) FROM sqlite_hct_journal }
 
 finish_test
 
