@@ -8,7 +8,6 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
-# TESTRUNNER: hct
 #
 # Test that it is possible to have two open blob handles on a single
 # blob object.

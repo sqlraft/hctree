@@ -8,7 +8,6 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
-# TESTRUNNER: hct
 #
 # This file contains test cases for sqlite3_db_release_memory and
 # the PRAGMA shrink_memory statement.

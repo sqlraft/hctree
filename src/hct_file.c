@@ -1926,6 +1926,16 @@ int sqlite3HctFileRecoverFreelists(HctFile *pFile, int nRoot, u32 *aRoot){
   nPg = MAX((nPg1 & 0xFFFFFFFF), (nPg2 & 0xFFFFFFFF));
   for(iPg=1; iPg<=nPg; iPg++){
     u64 iVal = hctFilePagemapGetSafe(pMapping, iPg);
+
+    if( (iVal & HCT_PMF_LOGICAL_IS_ROOT) && iPg>=3  ){
+      int ii;
+      for(ii=0; ii<nRoot && aRoot[ii]!=iPg; ii++);
+      if( ii==nRoot ){
+        /* A free root page! */
+        sqlite3HctPManServerInitRoot(&rc, pPManServer, iSafeTid, pFile, iPg);
+      }
+    }
+
     if( (iVal & HCT_PMF_PHYSICAL_IN_USE)==0 
      && (iPg<=nPg1) 
      && (iPg>iPhysOff) 
@@ -1938,14 +1948,8 @@ int sqlite3HctFileRecoverFreelists(HctFile *pFile, int nRoot, u32 *aRoot){
     ){
       sqlite3HctPManServerInit(&rc, pPManServer, iSafeTid, iPg, 1);
     }
-    if( (iVal & HCT_PMF_LOGICAL_IS_ROOT) && iPg>=3  ){
-      int ii;
-      for(ii=0; ii<nRoot && aRoot[ii]!=iPg; ii++);
-      if( ii==nRoot ){
-        /* A free root page! */
-        sqlite3HctPManServerInitRoot(&rc, pPManServer, iSafeTid, pFile, iPg);
-      }
-    }
+
+
   }
 
   return rc;

@@ -668,6 +668,7 @@ struct InitRootCtx {
   HctFile *pFile;
   HctPManServer *pServer;
   u64 iTid;
+  u64 iRoot;                      /* Logical root page of this tree */
 };
 
 static int pmanInitRootCb(void *pCtx, u32 iLogic, u32 iPhys){
@@ -676,11 +677,15 @@ static int pmanInitRootCb(void *pCtx, u32 iLogic, u32 iPhys){
 
   if( iLogic && !sqlite3HctFilePageIsFree(p->pFile, iLogic, 1) ){
     rc = sqlite3HctFilePageClearInUse(p->pFile, iLogic, 1);
-    sqlite3HctPManServerInit(&rc, p->pServer, p->iTid, iLogic, 1);
+    if( iLogic<p->iRoot ){
+      sqlite3HctPManServerInit(&rc, p->pServer, p->iTid, iLogic, 1);
+    }
   }
   if( iPhys && !sqlite3HctFilePageIsFree(p->pFile, iPhys, 0) && rc==SQLITE_OK ){
     rc = sqlite3HctFilePageClearInUse(p->pFile, iPhys, 0);
-    sqlite3HctPManServerInit(&rc, p->pServer, p->iTid, iPhys, 0);
+    if( iPhys<p->iRoot ){
+      sqlite3HctPManServerInit(&rc, p->pServer, p->iTid, iPhys, 0);
+    }
   }
 
   return rc;
@@ -698,6 +703,7 @@ int sqlite3HctPManServerInitRoot(
   ctx.pServer = pServer;
   ctx.pFile = pFile;
   ctx.iTid = iTid;
+  ctx.iRoot = iRoot;
   rc = sqlite3HctDbWalkTree(pFile, iRoot, pmanInitRootCb, (void*)&ctx);
   if( rc==SQLITE_OK ){
     rc = sqlite3HctFilePageClearIsRoot(pFile, iRoot);
