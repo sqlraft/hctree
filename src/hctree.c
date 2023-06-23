@@ -937,8 +937,8 @@ static int hctAttemptRecovery(HBtree *p, int iStage){
 }
 
 static int hctSchemaLoaded(HBtree *p){
-  Schema *pSchema = (Schema*)p->pSchema;
-  return ((pSchema->schemaFlags & DB_SchemaLoaded) ? 1 : 0);
+  Schema *pS = (Schema*)p->pSchema;
+  return ( (pS->schemaFlags & DB_SchemaLoaded)!=0 || (pS->tblHash.count>1));
 }
 
 
