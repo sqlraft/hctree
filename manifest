@@ -1,5 +1,5 @@
-C Fix\sa\sproblem\swith\sinitialization\sin\sdatabases\swith\sa\ssqlite_stat1\stable.
-D 2023-06-23T14:14:50.637
+C Fix\sa\smemory\sleak.
+D 2023-06-23T14:36:57.843
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -621,7 +621,7 @@ F src/hct_record.c 9c0886b0da4b86df8389cf83885b96c63a8fda147c9b93ff4eac1b7100a13
 F src/hct_stats.c 3273fc59855be16ca383522f47c24131c5707c3bef7795f56aa5ac440aae98c0
 F src/hct_tmap.c 61b98b794d2c7c7f0adba21c3e3db1f2378c632af19287b24f9d9ab1ee97e902
 F src/hct_tree.c ed8be9047379752c28a8b7b954c24b8d351e41236eafbc6bd2d0a3d8b25a7132
-F src/hctree.c 22961b9107907f2d894ead3ffd6163c4556723e747b1cf7d4e83b3189f40ac46
+F src/hctree.c b2f502c25171fd438557d79c80584791fb098be3c808825a6715f4cede3451d2
 F src/hwtime.h b638809e083b601b618df877b2e89cb87c2a47a01f4def10be4c4ebb54664ac7
 F src/in-operator.md 10cd8f4bcd225a32518407c2fb2484089112fd71
 F src/insert.c a8de1db43335fc4946370a7a7e47d89975ad678ddb15078a150e993ba2fb37d4
@@ -2145,8 +2145,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P 3ef53e76cc61de35128d30360af4dd4cfe637b615b56180e7069b527ebcd5116
-R 0201c5ab26ce554a3c124b12bbc9df63
+P 03a460c60ed5c0a28da235f4f839ecbc5aac6fe4174e3610a40ed167baf03e68
+R 11ff3dd8909157fb0083ac5b82436050
 U dan
-Z ae5b90504ef65d0771500822a6e075a2
+Z 6837ebed420f399233fdd8913f8882b0
 # Remove this line to create a well-formed Fossil manifest.

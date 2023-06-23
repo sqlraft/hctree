@@ -2950,6 +2950,7 @@ int sqlite3HctBtreePutData(BtCursor *pCur, u32 offset, u32 amt, void *z){
           rc = sqlite3HctBtreeTableMoveto(pCur, payload.nKey, 0, &dummy);
           assert( dummy==0 );
         }
+        sqlite3_free(aBuf);
       }else{
         rc = SQLITE_NOMEM;
       }
