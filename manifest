@@ -1,5 +1,5 @@
-C Fix\sa\sproblem\swith\srecovery\sfollowing\sa\sDROP\sTABLE\scommand.
-D 2023-06-23T18:47:56.856
+C Fix\sanother\stest\sscript\sproblem.
+D 2023-06-23T18:48:43.792
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -964,7 +964,7 @@ F test/date2.test 5008ea725a55650f18a77d68bb183d1988ff8cb5176701e0fe72e31c4bc024
 F test/date3.test 5677dfd63ca549acc1628c2818737b98fcce9a23126b03d835892c17e7b6ae39
 F test/dbdata.test 626e7a97d91b4f906408c6dd0fa52b73d8081d2ef46b7f8f8063e46fa3f8940f
 F test/dbfuzz.c 73047c920d6210e5912c87cdffd9a1c281d4252e
-F test/dbfuzz001.test 749959d3ce527667db57fb22d248c9d72f5918ad95d361420c5868fb9ff398c4
+F test/dbfuzz001.test 55e1a3504f8dea84155e09912fe3b1c3ad77e0b1a938ec42ca03b8e51b321e30
 F test/dbfuzz2-seed1.db e6225c6f3d7b63f9c5b6867146a5f329d997ab105bee64644dc2b3a2f2aebaee
 F test/dbfuzz2.c 4b3c12de4d98b1b2d908ab03d217d4619e47c8b23d5e67f8a6f2b1bdee7cae23
 F test/dbpage.test fce29035c7566fd7835ec0f19422cb4b9c6944ce0e1b936ff8452443f92e887d
@@ -2145,8 +2145,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P 656ba980c7ceab023802fc12308c26f0371cb714c63fa2ccb08beb3706ef4d89
-R 128794b11880e12c0c5949a315db442e
+P 51de6dd5bb4411930448016152da48ac4d404fef11f0da06ff6dee43cf5c5fdc
+R 956355997b0dda16b3e467e8c5d0e9c1
 U dan
-Z 5948381401e806176f4f78623a2a72dc
+Z 137a2e5761d60ad392b48b51c3c3f676
 # Remove this line to create a well-formed Fossil manifest.
