@@ -255,6 +255,13 @@ void sqlite3HctDbRecordTrim(UnpackedRecord *pRec);
 */
 i64 sqlite3HctDbSnapshotId(HctDatabase *pDb);
 
+int sqlite3HctDbCsrFindLastWrite(
+  HctDbCsr *pCsr,                 /* Cursor to seek */
+  UnpackedRecord *pRec,           /* Key for index/without rowid tables */
+  i64 iKey,                       /* Key for intkey tables */
+  u64 *piCid                      /* Last CID to write to this key */
+);
+
 /*************************************************************************
 ** Interface to code in hct_file.c
 */
@@ -284,5 +291,7 @@ void *sqlite3HctMalloc(int *pRc, i64 nByte);
 
 #include <hctJrnlInt.h>
 HctJournal *sqlite3HctJrnlFind(sqlite3*);
+
+int sqlite3HctBtreeIsNewTable(Btree *pBt, u64 iRoot);
 
 

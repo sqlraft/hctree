@@ -1538,6 +1538,10 @@ static int hctDbCompareFPKey(
 
 static int hctDbCsrGoLeft(HctDbCsr*);
 
+/*
+** Seek the cursor within its tree. This only seeks within the tree, it does
+** not follow any old-data pointers.
+*/
 int hctDbCsrSeek(
   HctDbCsr *pCsr,                 /* Cursor to seek */
   HctDbFPKey *pFP,
@@ -2477,10 +2481,9 @@ static int hctDbCsrRollbackDescend(
 
 static int hctDbCsrSeekAndDescend(
   HctDbCsr *pCsr,                 /* Cursor to seek */
-  int iHeight,                    /* Height to seek at (0==leaf, 1==parent) */
-  RecordCompare xCompare,
   UnpackedRecord *pRec,           /* Key for index/without rowid tables */
   i64 iKey,                       /* Key for intkey tables */
+  int bStopOnExact,               /* Stop on exact match, even if not visible */
   int *pbExact
 ){
   int rc = SQLITE_OK;
@@ -2492,6 +2495,10 @@ static int hctDbCsrSeekAndDescend(
   assert( pCsr->pDb->eMode==HCT_MODE_VALIDATE || pCsr->pDb->iTid==0 );
 
   rc = hctDbCsrSeek(pCsr, 0, 0, 0, pRec, iKey, &bExact);
+  if( bExact && bStopOnExact ){
+    *pbExact = 1;
+    return rc;
+  }
 
   while( rc==SQLITE_OK && (0==bExact || 0==hctDbCurrentIsVisible(pCsr)) ){
     HctRangePtr ptr;
@@ -2518,7 +2525,12 @@ static int hctDbCsrSeekAndDescend(
               pCsr->pDb, p->pg.aOld, iKey, pRec, &p->iCell, &bExact
           );
           if( rc!=SQLITE_OK ) break;
-          if( bExact==0 ) p->iCell--;
+          if( bExact==0 ){
+            p->iCell--;
+          }else if( bStopOnExact ){
+            *pbExact = 1;
+            return SQLITE_OK;
+          }
           if( p->iCell<0 ) break;
           if( p->eRange==HCT_RANGE_FOLLOW ) bExact = 0;
         }
@@ -2535,6 +2547,52 @@ static int hctDbCsrSeekAndDescend(
   }
 
   *pbExact = bExact;
+  return rc;
+}
+
+/*
+** Find the CID of the last transaction to write to a specified key.
+**
+** This must be called from within a transaction.
+*/
+int sqlite3HctDbCsrFindLastWrite(
+  HctDbCsr *pCsr,                 /* Cursor to seek */
+  UnpackedRecord *pRec,           /* Key for index/without rowid tables */
+  i64 iKey,                       /* Key for intkey tables */
+  u64 *piCid                      /* Last CID to write to this key */
+){
+  int rc = SQLITE_OK;
+  u64 iCid = 0;
+  int bExact = 0;
+
+  rc = hctDbCsrSeekAndDescend(pCsr, pRec, iKey, 1, &bExact);
+  if( rc==SQLITE_OK && bExact ){
+    u64 iTid = 0;
+    if( pCsr->nRange>1 ){
+      /* In this case the key has been deleted. Find the TID of the 
+      ** transaction that deleted it. */
+      HctDbRangeCsr *p = &pCsr->aRange[pCsr->nRange-2];
+      HctRangePtr ptr;
+      hctDbGetRange(p->pg.aOld, p->iCell, &ptr);
+      iTid = ptr.iRangeTid;
+    }else{
+      HctDbCell cell;
+      hctDbCellGetByIdx(pCsr->pDb, pCsr->pg.aOld, pCsr->iCell, &cell);
+      if( pCsr->nRange ){
+        iTid = cell.iRangeTid;
+      }else{
+        iTid = cell.iTid;
+      }
+    }
+
+    if( iTid ){
+      u64 dummy = 0;
+      iTid = (iTid & HCT_TID_MASK);
+      iCid = hctDbTMapLookup(pCsr->pDb, iTid, &dummy);
+    }
+  }
+
+  *piCid = iCid;
   return rc;
 }
 
@@ -2571,7 +2629,7 @@ int sqlite3HctDbCsrSeek(
   hctDbCsrReset(pCsr);
 
   if( rc==SQLITE_OK ){
-    rc = hctDbCsrSeekAndDescend(pCsr, 0, 0, pRec, iKey, &bExact);
+    rc = hctDbCsrSeekAndDescend(pCsr, pRec, iKey, 0, &bExact);
   }
   if( rc==SQLITE_OK ){
     rc = hctDbCsrScanStart(pCsr, pRec, iKey);
@@ -6100,7 +6158,7 @@ static int hctDbValidateIntkey(HctDatabase *pDb, HctDbCsr *pCsr){
         }else{
           pCsr->eDir = BTREE_DIR_FORWARD;
         }
-        rc = hctDbCsrSeekAndDescend(pCsr, 0, 0, 0, pOp->iFirst, &bDum);
+        rc = hctDbCsrSeekAndDescend(pCsr, 0, pOp->iFirst, 0, &bDum);
       }
     }
 

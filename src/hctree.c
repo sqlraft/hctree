@@ -1549,6 +1549,13 @@ int sqlite3HctBtreeSavepoint(Btree *pBt, int op, int iSavepoint){
   return rc;
 }
 
+int sqlite3HctBtreeIsNewTable(Btree *pBt, u64 iRoot){
+  HBtree *const p = (HBtree*)pBt;
+  int ii;
+  for(ii=0; ii<p->nSchemaOp && p->aSchemaOp[ii].pgnoRoot!=iRoot; ii++);
+  return ii<p->nSchemaOp;
+}
+
 /*
 ** Open a new cursor
 */

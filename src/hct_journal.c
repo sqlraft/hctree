@@ -1305,7 +1305,7 @@ static int hctJrnlGetInsertStmt(
 
   *ppStmt = 0;
   pStr = sqlite3_str_new(0);
-  sqlite3_str_appendf(pStr, "INSERT INTO main.%Q VALUES(", zTab);
+  sqlite3_str_appendf(pStr, "REPLACE INTO main.%Q VALUES(", zTab);
   for(ii=0; ii<pTab->nCol; ii++){
     sqlite3_str_append(pStr, "?,", (ii==pTab->nCol-1) ? 1 : 2);
   }
@@ -1465,6 +1465,26 @@ u64 sqlite3HctJournalSnapshot(HctJournal *pJrnl){
   return iRet;
 }
 
+static u64 hctJournalFindLastWrite(
+  int *pRc,                       /* IN/OUT: Error code */
+  HctJournal *pJrnl,              /* Journal object */
+  u64 iRoot,                      /* Root page of table */
+  i64 iRowid                      /* Key (for rowid tables) */
+){
+  int rc = *pRc;
+  u64 iRet = 0;
+  if( rc==SQLITE_OK ){
+    HctDbCsr *pCsr = 0;
+    rc = sqlite3HctDbCsrOpen(pJrnl->pDb, 0, iRoot, &pCsr);
+    if( rc==SQLITE_OK ){
+      rc = sqlite3HctDbCsrFindLastWrite(pCsr, 0, iRowid, &iRet);
+      sqlite3HctDbCsrClose(pCsr);
+    }
+    *pRc = rc;
+  }
+  return iRet;
+}
+
 /*
 ** Write a transaction into the database.
 */
@@ -1503,8 +1523,14 @@ int sqlite3_hct_journal_write(
     u64 iRoot = 0;                          /* Root page of zTab */
 
     rc = sqlite3_exec(db, "BEGIN CONCURRENT", 0, 0, 0);
-    if( rc==SQLITE_OK && zSchema[0]!='\0' ){
-      rc = sqlite3_exec(db, zSchema, 0, 0, 0);
+    if( rc==SQLITE_OK ){
+      const char *zSql = zSchema;
+      if( zSchema[0] ){
+        rc = sqlite3_exec(db, zSchema, 0, 0, 0);
+      }else{
+        int iSchema = 0;
+        rc = sqlite3BtreeBeginTrans(db->aDb[0].pBt, 1, &iSchema);
+      }
     }
 
     while( rc==SQLITE_OK && ii<nData ){
@@ -1523,22 +1549,29 @@ int sqlite3_hct_journal_write(
 
         case 'i': {
           i64 iRowid = 0;
+          u64 iLastCid = 0;
           int iPk = -1;
           int nByte = 0;
-          sqlite3_stmt *pStmt = 0;
-
-          rc = hctJrnlGetInsertStmt(db, zTab, &iPk, &pStmt);
 
           ii += sqlite3GetVarint(&aData[ii], (u64*)&iRowid);
           ii += getVarint32(&aData[ii], nByte);
-          hctJrnlBindRecord(&rc, pStmt, &aData[ii]);
-          ii += nByte;
-          sqlite3_bind_int64(pStmt, iPk+1, iRowid);
-          if( rc==SQLITE_OK ){
-            sqlite3_step(pStmt);
-            rc = sqlite3_finalize(pStmt);
+
+          if( sqlite3HctBtreeIsNewTable(db->aDb[0].pBt, iRoot)==0 ){
+            iLastCid = hctJournalFindLastWrite(&rc, pJrnl, iRoot, iRowid);
+          }
+          if( iLastCid<=iCid ){
+            sqlite3_stmt *pStmt = 0;
+            rc = hctJrnlGetInsertStmt(db, zTab, &iPk, &pStmt);
+
+            hctJrnlBindRecord(&rc, pStmt, &aData[ii]);
+            sqlite3_bind_int64(pStmt, iPk+1, iRowid);
+            if( rc==SQLITE_OK ){
+              sqlite3_step(pStmt);
+              rc = sqlite3_finalize(pStmt);
+            }
           }
 
+          ii += nByte;
           break;
         }
         
