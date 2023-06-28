@@ -71,7 +71,7 @@ static int testValidationHook(
   sqlite3_int64 iCid,
   const char *zSchema,
   const void *pData, int nData,
-  const void *pSchemaVersion
+  sqlite3_int64 iSchemaCid
 ){
   ValidationHook *pHook = (ValidationHook*)pArg;
   Tcl_Obj *pEval = 0;
@@ -84,8 +84,7 @@ static int testValidationHook(
   if( Tcl_ListObjAppendElement(p, pEval, Tcl_NewWideIntObj(iCid))
    || Tcl_ListObjAppendElement(p, pEval, Tcl_NewStringObj(zSchema, -1))
    || Tcl_ListObjAppendElement(p, pEval, Tcl_NewByteArrayObj(pData, nData))
-   || Tcl_ListObjAppendElement(p, pEval, 
-     Tcl_NewByteArrayObj(pSchemaVersion, SQLITE_HCT_JOURNAL_HASHSIZE))
+   || Tcl_ListObjAppendElement(p, pEval, Tcl_NewWideIntObj(iSchemaCid))
   ){
     rc = TCL_ERROR;
   }
@@ -216,17 +215,15 @@ static int test_hct_journal_write(
   Tcl_Obj *CONST objv[]           /* Command arguments */
 ){
   sqlite3_int64 iCid = 0;
+  sqlite3_int64 iSchemaCid = 0;
   const char *zSchema = 0;
   const unsigned char *aData = 0;
   int nData = 0;
   int rc;
   sqlite3 *db = 0;
 
-  const unsigned char *aSVersion = 0;
-  int nSVersion = 0;
-
   if( objc!=6 ){
-    Tcl_WrongNumArgs(interp, 1, objv, "DB CID SCHEMA DATA SCHEMA_VERSION");
+    Tcl_WrongNumArgs(interp, 1, objv, "DB CID SCHEMA DATA SCHEMACID");
     return TCL_ERROR;
   }
   rc = getDbPointer(interp, Tcl_GetString(objv[1]), &db);
@@ -235,9 +232,10 @@ static int test_hct_journal_write(
   if( rc!=TCL_OK ) return rc;
   zSchema = Tcl_GetString(objv[3]);
   aData = Tcl_GetByteArrayFromObj(objv[4], &nData);
-  aSVersion = Tcl_GetByteArrayFromObj(objv[5], &nSVersion);
+  rc = Tcl_GetWideIntFromObj(interp, objv[5], &iSchemaCid);
+  if( rc!=TCL_OK ) return rc;
 
-  rc = sqlite3_hct_journal_write(db, iCid, zSchema, aData, nData, aSVersion);
+  rc = sqlite3_hct_journal_write(db, iCid, zSchema, aData, nData, iSchemaCid);
 
   Tcl_SetObjResult(interp, Tcl_NewStringObj(sqlite3ErrName(rc), -1));
   return TCL_OK;

@@ -38,7 +38,7 @@ int sqlite3_hct_journal_write(
   sqlite3_int64 iCid,
   const char *zSchema,
   const void *pData, int nData,
-  const void *pSchemaVersion
+  sqlite3_int64 iSchemaCid
 );
 
 /* 
@@ -82,7 +82,7 @@ int sqlite3_hct_journal_validation_hook(
     sqlite3_int64 iCid,
     const char *zSchema,
     const void *pData, int nData,
-    const void *pSchemaVersion
+    sqlite3_int64 iSchemaCid
   )
 );
 
@@ -103,7 +103,7 @@ void sqlite3_hct_journal_hashentry(
   sqlite3_int64 iCid,
   const char *zSchema,
   const void *pData, int nData,
-  const void *pSchemaVersion
+  sqlite3_int64 iSchemaCid
 );
 
 /*

@@ -59,9 +59,9 @@ do_test 1.5 {
 } {0 {}}
 
 do_execsql_test 1.6 {
-  SELECT cid, quote(schema_version), quote(hash) FROM sqlite_hct_baseline
+  SELECT cid, schemacid, quote(hash) FROM sqlite_hct_baseline
 } {
-  0 X'00000000000000000000000000000000' X'00000000000000000000000000000000'
+  0 0 X'00000000000000000000000000000000'
 }
 
 do_execsql_test 1.7 {
@@ -70,7 +70,7 @@ do_execsql_test 1.7 {
   0 cid            INTEGER 0 {} 1 
   1 schema         TEXT 0 {} 0 
   2 data           BLOB 0 {} 0 
-  3 schema_version BLOB 0 {} 0 
+  3 schemacid      INTEGER 0 {} 0 
   4 hash           BLOB 0 {} 0 
   5 tid            INTEGER 0 {} 0 
   6 validcid       INTEGER 0 {} 0

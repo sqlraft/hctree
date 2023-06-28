@@ -285,6 +285,19 @@ void sqlite3_hct_journal_hash(void *pHash, const void *pData){
   MD5Final(pHash, &ctx);
 }
 
+static void md5U64(MD5Context *pCtx, sqlite3_uint64 iVal){
+  u8 aVal[8];
+  aVal[0] = (iVal >> 56) & 0xFF;
+  aVal[1] = (iVal >> 48) & 0xFF;
+  aVal[2] = (iVal >> 40) & 0xFF;
+  aVal[3] = (iVal >> 32) & 0xFF;
+  aVal[4] = (iVal >> 24) & 0xFF;
+  aVal[5] = (iVal >> 16) & 0xFF;
+  aVal[6] = (iVal >>  8) & 0xFF;
+  aVal[7] = (iVal >>  0) & 0xFF;
+  MD5Update(pCtx, aVal, sizeof(aVal));
+}
+
 /*
 ** It is assumed that buffer pHash points to a buffer
 ** SQLITE_HCT_JOURNAL_HASHSIZE bytes in size. This function populates this
@@ -295,25 +308,16 @@ void sqlite3_hct_journal_hashentry(
   sqlite3_int64 iCid,
   const char *zSchema,
   const void *pData, int nData,
-  const void *pSchemaVersion
+  sqlite3_int64 iSchemaCid
 ){
   u8 aCid[8];
   MD5Context ctx;
   MD5Init(&ctx);
 
-  aCid[0] = (iCid >> 56) & 0xFF;
-  aCid[1] = (iCid >> 48) & 0xFF;
-  aCid[2] = (iCid >> 40) & 0xFF;
-  aCid[3] = (iCid >> 32) & 0xFF;
-  aCid[4] = (iCid >> 24) & 0xFF;
-  aCid[5] = (iCid >> 16) & 0xFF;
-  aCid[6] = (iCid >>  8) & 0xFF;
-  aCid[7] = (iCid >>  0) & 0xFF;
-
-  MD5Update(&ctx, aCid, sizeof(aCid));
+  md5U64(&ctx, (sqlite3_uint64)iCid);
   MD5Update(&ctx, (const u8*)zSchema, sqlite3Strlen30(zSchema));
   MD5Update(&ctx, pData, nData);
-  MD5Update(&ctx, pSchemaVersion, SQLITE_HCT_JOURNAL_HASHSIZE);
+  md5U64(&ctx, (sqlite3_uint64)iSchemaCid);
 
   MD5Final(pHash, &ctx);
 }

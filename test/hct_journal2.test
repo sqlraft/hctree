@@ -92,16 +92,17 @@ do_catchsql_test 1.6 {
   CREATE TABLE t2(a, b);
 } {1 {database is locked}}
 
-do_execsql_test 1.7 {
-  SELECT cid, schema, hct_journal_entry(data),
-    schema_version = lag(schema_version) OVER (ORDER BY cid)
-  FROM sqlite_hct_journal
-} {
-  7 {CREATE TABLE t1(x, y);} {}   {}
-  8 {} {t1: ins 1/(1,2)}           1
-  9 {} {}                          1
-  10 {} {t1: ins 2/(5,6)}          1
-  11 {} {}                         1
+set JOURNAL_QUERY {
+  SELECT cid, schema, hct_journal_entry(data), schemacid
+  FROM sqlite_hct_journal o
+}
+
+do_execsql_test 1.7 $JOURNAL_QUERY {
+  7 {CREATE TABLE t1(x, y);} {}    0
+  8 {} {t1: ins 1/(1,2)}           7
+  9 {} {}                          0
+  10 {} {t1: ins 2/(5,6)}          7
+  11 {} {}                         0
 }
 
 set ::validate_ret 0
@@ -111,19 +112,15 @@ do_execsql_test 1.8 {
   ALTER TABLE t1 ADD COLUMN z;
 }
 
-do_execsql_test 1.9 {
-  SELECT cid, schema, hct_journal_entry(data),
-    schema_version = lag(schema_version) OVER (ORDER BY cid)
-  FROM sqlite_hct_journal
-} {
-  7 {CREATE TABLE t1(x, y);} {}        {}
-  8 {} {t1: ins 1/(1,2)}               1
-  9 {} {}                              1
-  10 {} {t1: ins 2/(5,6)}              1
-  11 {} {}                             1
-  12 {CREATE INDEX t1i ON t1(x);}   {} 0
-  13 {} {t1: ins 3/(7,8)}              1
-  14 {ALTER TABLE t1 ADD COLUMN z;} {} 0
+do_execsql_test 1.9 $JOURNAL_QUERY {
+  7 {CREATE TABLE t1(x, y);} {}        0
+  8 {} {t1: ins 1/(1,2)}               7
+  9 {} {}                              0
+  10 {} {t1: ins 2/(5,6)}              7
+  11 {} {}                             0
+  12 {CREATE INDEX t1i ON t1(x);}   {} 7
+  13 {} {t1: ins 3/(7,8)}              12
+  14 {ALTER TABLE t1 ADD COLUMN z;} {} 12
 }
 
 sqlite3 db2 test.db
@@ -132,7 +129,6 @@ do_execsql_test -db db2 1.10 {
 } {1 2 {}  5 6 {}  7 8 {}}
 
 proc validate {iCid zSchema data schema_version} {
-breakpoint
   catch { db2 eval COMMIT }
   return 1
 }
@@ -147,18 +143,16 @@ do_catchsql_test 1.11 {
 } {1 {database is locked}}
 
   
-do_execsql_test 1.12 {
-  SELECT cid, schema, hct_journal_entry(data),
-    schema_version = lag(schema_version) OVER (ORDER BY cid)
-  FROM sqlite_hct_journal WHERE cid>=14
-} {
-  14 {ALTER TABLE t1 ADD COLUMN z;} {} {}
-  15 {} {} 1
-  16 {} {} 1
+do_execsql_test 1.12 "
+  $JOURNAL_QUERY WHERE cid>=14
+" {
+  14 {ALTER TABLE t1 ADD COLUMN z;} {} 12
+  15 {} {} 0
+  16 {} {} 0
 }
 
 execsql_pp {
-  SELECT cid, schema, hct_journal_entry(data), quote(schema_version) FROM sqlite_hct_journal
+  SELECT cid, schema, hct_journal_entry(data), schemacid FROM sqlite_hct_journal
 }
 
 

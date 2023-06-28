@@ -53,7 +53,7 @@ do_test 1.2 {
   set lRet [list]
   db eval {SELECT * FROM sqlite_hct_journal ORDER BY cid ASC} x { 
     lappend lRet [sqlite3_hct_journal_write db2 \
-        $x(cid) $x(schema) $x(data) $x(schema_version)
+        $x(cid) $x(schema) $x(data) $x(schemacid)
     ]
   }
   set lRet
@@ -99,7 +99,7 @@ foreach {tn cid lCid} {
 } {
   do_test 2.1.$tn.1 {
     db eval { SELECT * FROM sqlite_hct_journal WHERE cid = $cid } x {}
-    sqlite3_hct_journal_write db2 $x(cid) $x(schema) $x(data) $x(schema_version)
+    sqlite3_hct_journal_write db2 $x(cid) $x(schema) $x(data) $x(schemacid)
   } {SQLITE_OK}
 
   do_execsql_test -db db2 2.1.$tn.2 {
@@ -113,7 +113,7 @@ proc test_dbs_match {tn sql} {
 
 set sql {
   SELECT 
-    cid, schema, hct_journal_entry(data), quote(schema_version) 
+    cid, schema, hct_journal_entry(data), schemacid
   FROM sqlite_hct_journal
 }
 test_dbs_match 2.2 "SELECT rowid, * FROM t1"
@@ -134,7 +134,7 @@ foreach {tn cid visible} {
 } {
   do_test 2.4.$tn.1 {
     db eval { SELECT * FROM sqlite_hct_journal WHERE cid = $cid } x {}
-    sqlite3_hct_journal_write db2 $x(cid) $x(schema) $x(data) $x(schema_version)
+    sqlite3_hct_journal_write db2 $x(cid) $x(schema) $x(data) $x(schemacid)
   } {SQLITE_OK}
 
   do_execsql_test -db db2 2.4.$tn.2 {
@@ -188,7 +188,7 @@ foreach {tn iList} {
     }
 
     do_test 3.1.$tn.$ii {
-      set ar [list $x(cid) $x(schema) $x(data) $x(schema_version)]
+      set ar [list $x(cid) $x(schema) $x(data) $x(schemacid)]
       sqlite3_hct_journal_write db2 {*}$ar
     } {SQLITE_OK}
   }
