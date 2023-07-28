@@ -73,7 +73,7 @@ typedef struct HctJrnlServer HctJrnlServer;
 **      Therefore, if a schema transaction has passed validation, it is
 **      guaranteed exclusive access to the iSchemaCid variable.
 **
-**   2) In FOLLOWER mode, the array is:
+**   2) In FOLLOWER mode, the value is:
 **
 **      * read from within sqlite3_hct_journal_write(), just after opening
 **        a snapshot, and
@@ -1218,17 +1218,60 @@ static int hctJrnlGetInsertStmt(
   int ii;
 
   assert( pTab );
-  *piPk = (int)pTab->iPKey;
 
   *ppStmt = 0;
   pStr = sqlite3_str_new(0);
-  sqlite3_str_appendf(pStr, "REPLACE INTO main.%Q VALUES(", zTab);
-  for(ii=0; ii<pTab->nCol; ii++){
-    sqlite3_str_append(pStr, "?,", (ii==pTab->nCol-1) ? 1 : 2);
+  sqlite3_str_appendf(pStr, "REPLACE INTO main.%Q(", zTab);
+  if( pTab->iPKey<0 ){
+    sqlite3_str_appendf(pStr, "_rowid_, ");
   }
-  sqlite3_str_append(pStr, ")", 1);
-  zSql = sqlite3_str_finish(pStr);
+  for(ii=0; ii<pTab->nCol; ii++){
+    const char *zSep = (ii==pTab->nCol-1) ? ") VALUES (" : ",";
+    sqlite3_str_appendf(pStr, "%Q%s ", pTab->aCol[ii].zCnName, zSep);
+  }
+  if( pTab->iPKey<0 ){
+    sqlite3_str_appendf(pStr, "?%d, ", pTab->nCol+1);
+    *piPk = pTab->nCol+1;
+  }else{
+    *piPk = pTab->iPKey+1;
+  }
+  for(ii=0; ii<pTab->nCol; ii++){
+    const char *zSep = (ii==pTab->nCol-1) ? ")" : ", ";
+    sqlite3_str_appendf(pStr, "?%d%s", ii+1, zSep);
+  }
 
+  zSql = sqlite3_str_finish(pStr);
+  if( zSql==0 ){
+    rc = SQLITE_NOMEM_BKPT;
+  }else{
+    rc = sqlite3_prepare_v2(db, zSql, -1, ppStmt, 0);
+    sqlite3_free(zSql);
+  }
+
+  return rc;
+}
+
+static int hctJrnlGetDeleteStmt(
+  sqlite3 *db, 
+  const char *zTab, 
+  sqlite3_stmt **ppStmt
+){
+  Schema *pSchema = db->aDb[0].pSchema;
+  Table *pTab = (Table*)sqlite3HashFind(&pSchema->tblHash, zTab);
+  int rc = SQLITE_OK;
+  char *zSql = 0;
+  const char *zRowid = "_rowid_";
+
+  assert( pTab );
+  if( pTab->iPKey>=0 ){
+    zRowid = pTab->aCol[pTab->iPKey].zCnName;
+  }
+
+  *ppStmt = 0;
+  zSql = sqlite3_mprintf(
+      "DELETE FROM main.%Q WHERE main.%Q.%Q = ?", 
+      pTab->zName, pTab->zName, zRowid
+  );
   if( zSql==0 ){
     rc = SQLITE_NOMEM_BKPT;
   }else{
@@ -1413,8 +1456,16 @@ int sqlite3_hct_journal_write(
   sqlite3_int64 iSchemaCid
 ){
   int rc = SQLITE_OK;
+  char *zErr = 0;                 /* Error message, if any */
   HctJournal *pJrnl = 0;
   u64 iValidCid = 0;
+  u64 iSnapshotId = 0;
+  Btree *pBt = db->aDb[0].pBt;
+  Schema *pSchema = db->aDb[0].pSchema;
+  int ii = 0;
+  const u8 *aData = (const u8*)pData;
+  const char *zTab = 0;                   /* Table currently being written */
+  u64 iRoot = 0;                          /* Root page of zTab */
 
   rc = hctJrnlFind(db, &pJrnl);
   if( rc!=SQLITE_OK ) return rc;
@@ -1422,79 +1473,120 @@ int sqlite3_hct_journal_write(
 
   /* Check that the journal is in follower mode */
   if( pJrnl->pServer->eMode!=SQLITE_HCT_JOURNAL_MODE_FOLLOWER ){
-    rc = SQLITE_ERROR;
-    sqlite3ErrorWithMsg(db, rc, "database is not in FOLLOWER mode");
+    sqlite3ErrorWithMsg(db, SQLITE_ERROR, "database is not in FOLLOWER mode");
+    return SQLITE_ERROR;
   }
 
   /* Check that there is no transaction open on the connection */
   if( rc==SQLITE_OK && sqlite3_get_autocommit(db)==0 ){
-    rc = SQLITE_ERROR;
-    sqlite3ErrorWithMsg(db, rc, "open transaction on database");
+    sqlite3ErrorWithMsg(db, SQLITE_ERROR, "open transaction on database");
+    return SQLITE_ERROR;
   }
 
+  /* Open a concurrent transaction on the db handle. Then ensure that the
+  ** snapshot on the main database has also been opened.  */
+  rc = sqlite3_exec(db, "BEGIN CONCURRENT", 0, 0, 0);
   if( rc==SQLITE_OK ){
-    Schema *pSchema = db->aDb[0].pSchema;
-    int ii = 0;
-    const u8 *aData = (const u8*)pData;
-    const char *zTab = 0;                   /* Table currently being written */
-    u64 iRoot = 0;                          /* Root page of zTab */
+    int dummy = 0;
+    rc = sqlite3BtreeBeginTrans(pBt, 1, &dummy);
+  }
 
-    rc = sqlite3_exec(db, "BEGIN CONCURRENT", 0, 0, 0);
-    if( rc==SQLITE_OK ){
-      if( zSchema[0] ){
-        rc = sqlite3_exec(db, zSchema, 0, 0, 0);
-      }else{
-        int iSchema = 0;
-        rc = sqlite3BtreeBeginTrans(db->aDb[0].pBt, 1, &iSchema);
-      }
+  /* Check that the snapshot that was just opened has a schema new enough
+  ** for this transaction to be applied. */
+  if( rc==SQLITE_OK ){
+    iSnapshotId = sqlite3HctBtreeSnapshotId(pBt);
+    if( iSchemaCid>iSnapshotId ){
+      rc = SQLITE_BUSY;
+      zErr = sqlite3_mprintf(
+          "change may not be applied yet (requires newer schema)"
+      );
     }
+  }
 
-    while( rc==SQLITE_OK && ii<nData ){
-      char t = aData[ii++];
-      switch( t ){
-        case 'T': {
-          zTab = (const char*)&aData[ii];
-          iRoot = hctFindRootByName(pSchema, zTab);
-          if( iRoot==0 ){
-            rc = SQLITE_CORRUPT_BKPT;
-          }else{
-            ii += sqlite3Strlen30(zTab) + 1;
+  if( rc==SQLITE_OK && zSchema[0] ){
+    if( iSnapshotId!=iCid-1 ){
+      rc = SQLITE_BUSY;
+      zErr = sqlite3_mprintf(
+          "change may not be applied yet (is schema change)"
+      );
+    }else{
+      rc = sqlite3_exec(db, zSchema, 0, 0, 0);
+    }
+  }
+
+  while( rc==SQLITE_OK && ii<nData ){
+    char t = aData[ii++];
+    switch( t ){
+      case 'T': {
+        zTab = (const char*)&aData[ii];
+        iRoot = hctFindRootByName(pSchema, zTab);
+        if( iRoot==0 ){
+          rc = SQLITE_CORRUPT_BKPT;
+        }else{
+          ii += sqlite3Strlen30(zTab) + 1;
+        }
+        break;
+      }
+
+      case 'i': {
+        i64 iRowid = 0;
+        u64 iLastCid = 0;
+        int iPk = -1;
+        int nByte = 0;
+
+        ii += sqlite3GetVarint(&aData[ii], (u64*)&iRowid);
+        ii += getVarint32(&aData[ii], nByte);
+
+        if( sqlite3HctBtreeIsNewTable(db->aDb[0].pBt, iRoot)==0 ){
+          iLastCid = hctJournalFindLastWrite(&rc, pJrnl, iRoot, iRowid);
+        }
+        if( iLastCid<=iCid ){
+          sqlite3_stmt *pStmt = 0;
+          rc = hctJrnlGetInsertStmt(db, zTab, &iPk, &pStmt);
+
+          hctJrnlBindRecord(&rc, pStmt, &aData[ii]);
+          sqlite3_bind_int64(pStmt, iPk, iRowid);
+          if( rc==SQLITE_OK ){
+            sqlite3_step(pStmt);
+            rc = sqlite3_finalize(pStmt);
           }
-          break;
         }
 
-        case 'i': {
-          i64 iRowid = 0;
-          u64 iLastCid = 0;
-          int iPk = -1;
-          int nByte = 0;
+        ii += nByte;
+        break;
+      }
 
-          ii += sqlite3GetVarint(&aData[ii], (u64*)&iRowid);
-          ii += getVarint32(&aData[ii], nByte);
+      /* Delete by rowid */
+      case 'd': {
+        i64 iRowid = 0;
+        u64 iLastCid = 0;
 
-          if( sqlite3HctBtreeIsNewTable(db->aDb[0].pBt, iRoot)==0 ){
-            iLastCid = hctJournalFindLastWrite(&rc, pJrnl, iRoot, iRowid);
-          }
-          if( iLastCid<=iCid ){
+        ii += sqlite3GetVarint(&aData[ii], (u64*)&iRowid);
+        if( sqlite3HctBtreeIsNewTable(db->aDb[0].pBt, iRoot)==0 ){
+          iLastCid = hctJournalFindLastWrite(&rc, pJrnl, iRoot, iRowid);
+          if( iLastCid==0 ){
+            if( iSnapshotId!=iCid-1 ){
+              rc = SQLITE_BUSY;
+              zErr = sqlite3_mprintf(
+                  "change may not be applied yet (delete of future key)"
+              );
+            }
+          }else if( iLastCid<=iCid ){
             sqlite3_stmt *pStmt = 0;
-            rc = hctJrnlGetInsertStmt(db, zTab, &iPk, &pStmt);
-
-            hctJrnlBindRecord(&rc, pStmt, &aData[ii]);
-            sqlite3_bind_int64(pStmt, iPk+1, iRowid);
+            rc = hctJrnlGetDeleteStmt(db, zTab, &pStmt);
+            sqlite3_bind_int64(pStmt, 1, iRowid);
             if( rc==SQLITE_OK ){
               sqlite3_step(pStmt);
               rc = sqlite3_finalize(pStmt);
             }
           }
-
-          ii += nByte;
-          break;
         }
-        
-        default:
-          assert( 0 );
-          break;
+        break;
       }
+
+      default:
+        assert( 0 );
+        break;
     }
   }
 
@@ -1537,9 +1629,7 @@ int sqlite3_hct_journal_write(
     if( rc==SQLITE_OK ){
       rc = sqlite3_exec(db, "COMMIT", 0, 0, 0);
     }
-    if( rc!=SQLITE_OK ){
-      sqlite3_exec(db, "ROLLBACK", 0, 0, 0);
-    }else{
+    if( rc==SQLITE_OK ){
       HctJrnlServer *pServer = pJrnl->pServer;
       i64 iVal = iValidCid ? iValidCid : iCid;
       HctAtomicStore(&pServer->aCommit[iCid % pServer->nCommit], iVal);
@@ -1549,6 +1639,15 @@ int sqlite3_hct_journal_write(
     }
   }
 
+  if( rc!=SQLITE_OK ){
+    sqlite3_exec(db, "ROLLBACK", 0, 0, 0);
+    if( zErr ){
+      sqlite3ErrorWithMsg(db, rc, "%s", zErr);
+      sqlite3_free(zErr);
+    }else{
+      sqlite3ErrorWithMsg(db, rc, 0);
+    }
+  }
   pJrnl->bInWrite = 0;
   return rc;
 }

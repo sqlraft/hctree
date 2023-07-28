@@ -293,5 +293,6 @@ void *sqlite3HctMalloc(int *pRc, i64 nByte);
 HctJournal *sqlite3HctJrnlFind(sqlite3*);
 
 int sqlite3HctBtreeIsNewTable(Btree *pBt, u64 iRoot);
+u64 sqlite3HctBtreeSnapshotId(Btree *pBt);
 
 

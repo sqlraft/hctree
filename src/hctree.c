@@ -1556,6 +1556,11 @@ int sqlite3HctBtreeIsNewTable(Btree *pBt, u64 iRoot){
   return ii<p->nSchemaOp;
 }
 
+u64 sqlite3HctBtreeSnapshotId(Btree *pBt){
+  HBtree *const p = (HBtree*)pBt;
+  return sqlite3HctDbSnapshotId(p->pHctDb);
+}
+
 /*
 ** Open a new cursor
 */

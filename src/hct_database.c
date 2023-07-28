@@ -2579,6 +2579,7 @@ int sqlite3HctDbCsrFindLastWrite(
       HctDbCell cell;
       hctDbCellGetByIdx(pCsr->pDb, pCsr->pg.aOld, pCsr->iCell, &cell);
       if( pCsr->nRange ){
+        assert( pCsr->nRange==1 );
         iTid = cell.iRangeTid;
       }else{
         iTid = cell.iTid;
@@ -2589,6 +2590,8 @@ int sqlite3HctDbCsrFindLastWrite(
       u64 dummy = 0;
       iTid = (iTid & HCT_TID_MASK);
       iCid = hctDbTMapLookup(pCsr->pDb, iTid, &dummy);
+    }else{
+      iCid = 1;
     }
   }
 

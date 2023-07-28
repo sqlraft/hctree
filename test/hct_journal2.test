@@ -152,6 +152,9 @@ do_execsql_test 1.12 "
 }
 
 execsql_pp {
+  SELECT * FROM sqlite_hct_baseline
+}
+execsql_pp {
   SELECT cid, schema, hct_journal_entry(data), schemacid FROM sqlite_hct_journal
 }
 
