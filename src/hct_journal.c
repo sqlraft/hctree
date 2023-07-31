@@ -954,6 +954,7 @@ int sqlite3HctJrnlRecovery(HctJournal *pJrnl, HctDatabase *pDb){
         nTrans = iMaxCid - iPrev;
         break;
       }
+      iPrev = iCid;
     }
     nTrans = MAX(HCT_MAX_LEADING_WRITE, nTrans);
 
@@ -1564,20 +1565,22 @@ int sqlite3_hct_journal_write(
         ii += sqlite3GetVarint(&aData[ii], (u64*)&iRowid);
         if( sqlite3HctBtreeIsNewTable(db->aDb[0].pBt, iRoot)==0 ){
           iLastCid = hctJournalFindLastWrite(&rc, pJrnl, iRoot, iRowid);
-          if( iLastCid==0 ){
-            if( iSnapshotId!=iCid-1 ){
-              rc = SQLITE_BUSY;
-              zErr = sqlite3_mprintf(
-                  "change may not be applied yet (delete of future key)"
-              );
-            }
-          }else if( iLastCid<=iCid ){
+          if( iLastCid<=iCid ){
             sqlite3_stmt *pStmt = 0;
             rc = hctJrnlGetDeleteStmt(db, zTab, &pStmt);
             sqlite3_bind_int64(pStmt, 1, iRowid);
             if( rc==SQLITE_OK ){
               sqlite3_step(pStmt);
               rc = sqlite3_finalize(pStmt);
+            }
+            if( rc==SQLITE_OK 
+             && iCid!=iSnapshotId+1 
+             && sqlite3_changes(db)==0 
+            ){
+              rc = SQLITE_BUSY;
+              zErr = sqlite3_mprintf(
+                  "change may not be applied yet (delete of future key)"
+              );
             }
           }
         }

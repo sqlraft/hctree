@@ -1,0 +1,177 @@
+# 2023 June 30
+#
+# The author disclaims copyright to this source code.  In place of
+# a legal notice, here is a blessing:
+#
+#    May you do good and not evil.
+#    May you find forgiveness for yourself and forgive others.
+#    May you share freely, never taking more than you give.
+#
+#*************************************************************************
+#
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+source $testdir/hct_common.tcl
+set testprefix hct_journal5
+
+hct_reset_db
+catch_hct_journal_init db
+sqlite3_hct_journal_setmode db LEADER
+
+proc foreach-perm {var list body {prefix {}}} {
+  upvar $var myvar
+
+  set nItem [llength $list]
+  if {$nItem==1} {
+    set myvar [concat $prefix $list]
+    uplevel $body
+  } else {
+    for {set i 0} {$i < $nItem} {incr i} {
+      set item [lindex $list $i]
+      set sublist [lreplace $list $i $i] 
+      set newprefix [concat $prefix [list $item]]
+      uplevel [list foreach-perm $var $sublist $body $newprefix]
+    }
+  }
+
+}
+
+proc hct_delete_db {name} {
+  forcedelete $name
+  foreach f [glob -nocomplain ${name}-*] {
+    forcedelete $f
+  }
+}
+
+proc hct_copy_db {from to} {
+  hct_delete_db $to
+
+  file copy -force $from $to
+  foreach f [glob -nocomplain ${from}-*] {
+    set fto "$to-[string range $f [string length $from]+1 end]"
+    file copy -force $f $fto
+    #puts "copying $f to $fto"
+  }
+}
+
+proc do_perm_test {tn sql} {
+  hct_copy_db test.db save.db
+
+  set cid1 [db one {SELECT max(cid) from sqlite_hct_journal}]
+  db eval $sql
+
+  set tlist [list]
+  db eval { 
+    SELECT cid, schema, data, schemacid 
+    FROM sqlite_hct_journal WHERE cid>$cid1 ORDER BY cid 
+  } {
+    lappend tlist $cid
+    set T($cid) [list $cid $schema $data $schemacid]
+  }
+
+
+  foreach-perm p $tlist {
+    set testname "$tn.($p)"
+    hct_copy_db save.db test.db2
+    sqlite3 db2 test.db2
+
+    set nBusy 0
+    while {[llength $p]>0} {
+      set t [lindex $p 0]
+      set p [lrange $p 1 end]
+
+      set res [sqlite3_hct_journal_write db2 {*}$T($t)]
+
+      if {$res=="SQLITE_BUSY"} {
+        lappend p $t
+        incr nBusy
+        if {$nBusy>100} { error "busy loop!" }
+      } elseif {$res!="SQLITE_OK"} {
+        error $res
+      }
+    }
+
+    db eval { 
+      SELECT name FROM sqlite_schema 
+      WHERE type='table' AND name NOT LIKE 'sqlite%'
+    } {
+      test_dbs_match $testname.$name "SELECT * FROM $name"
+    }
+  }
+}
+
+do_execsql_test 1.0 {
+  CREATE TABLE t1(a INTEGER PRIMARY KEY, b TEXT);
+  INSERT INTO t1 VALUES(1, 'one');
+}
+
+do_perm_test 1.1 {
+  INSERT INTO t1 VALUES(2, 'two');
+  INSERT INTO t1 VALUES(3, 'three');
+  INSERT INTO t1 VALUES(4, 'four');
+}
+
+do_execsql_test 1.2 {
+  SELECT * FROM t1
+} {
+  1 one  2 two  3 three  4 four
+}
+
+do_perm_test 1.3 {
+  UPDATE t1 SET b='five' WHERE a=4;
+  UPDATE t1 SET b='six' WHERE a=4;
+  UPDATE t1 SET b='seven' WHERE a=4;
+  UPDATE t1 SET b='eight' WHERE a=4;
+} 
+
+do_perm_test 1.4 {
+  DELETE FROM t1 WHERE a=3;
+  INSERT INTO t1 VALUES(3, 'xyz');
+  UPDATE t1 SET b='hello' WHERE a=3;
+}
+
+do_perm_test 1.5 {
+  INSERT INTO t1 VALUES(9, 'nine');
+  DELETE FROM t1 WHERE a=9;
+}
+
+do_perm_test 1.6 {
+  UPDATE t1 SET b='abc' WHERE a=2;
+  DELETE FROM t1 WHERE a=2;
+}
+
+do_perm_test 1.7 {
+  INSERT INTO t1 VALUES(2, 'eleven');
+  DELETE FROM t1 WHERE a=2;
+  INSERT INTO t1 VALUES(2, 'twelve');
+  DELETE FROM t1 WHERE a=2;
+  INSERT INTO t1 VALUES(2, 'thirteen');
+  DELETE FROM t1 WHERE a=2;
+}
+
+do_perm_test 1.8 {
+  BEGIN;
+    INSERT INTO t1 VALUES(39, 'thirtynine');
+    DELETE FROM t1 WHERE a=39;
+  COMMIT;
+  BEGIN;
+    INSERT INTO t1 VALUES(39, 'forty');
+    DELETE FROM t1 WHERE a=39;
+  COMMIT;
+  BEGIN;
+    INSERT INTO t1 VALUES(39, 'fifty');
+    DELETE FROM t1 WHERE a=39;
+  COMMIT;
+}
+
+do_perm_test 1.9 {
+  INSERT INTO t1 VALUES(100, 'hundred');
+  CREATE TABLE t2(x INTEGER PRIMARY KEY, y TEXT);
+  INSERT INTO t2 VALUES(100, 'hundred');
+}
+
+
+
+finish_test
+
