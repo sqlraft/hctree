@@ -1414,12 +1414,17 @@ u64 sqlite3HctJournalSnapshot(HctJournal *pJrnl){
   if( pJrnl ){
     HctJrnlServer *pServer = pJrnl->pServer;
     if( pServer->eMode==SQLITE_HCT_JOURNAL_MODE_FOLLOWER ){
-      iRet = pServer->iSnapshot;
-      while( 1 ){
-        u64 iTrial = iRet + 1;
-        u64 iVal = HctAtomicLoad(&pServer->aCommit[iTrial % pServer->nCommit]);
-        if( iVal<iTrial ) break;
-        iRet = iTrial;
+      u64 iTest = 0;
+      u64 iValid = 0;
+      iRet = HctAtomicLoad(&pServer->iSnapshot);
+      for(iTest=iRet+1; 1; iTest++){
+        u64 iVal = HctAtomicLoad(&pServer->aCommit[iTest % pServer->nCommit]);
+        if( iVal<iTest ) break;
+        if( iVal==iTest ){
+          if( iTest>=iValid ) iRet = iTest;
+        }else{
+          iValid = MAX(iVal, iValid);
+        }
       }
     }
   }
@@ -1551,6 +1556,8 @@ int sqlite3_hct_journal_write(
             sqlite3_step(pStmt);
             rc = sqlite3_finalize(pStmt);
           }
+        }else{
+          iValidCid = MAX(iValidCid, iLastCid);
         }
 
         ii += nByte;
@@ -1582,6 +1589,8 @@ int sqlite3_hct_journal_write(
                   "change may not be applied yet (delete of future key)"
               );
             }
+          }else{
+            iValidCid = MAX(iValidCid, iLastCid);
           }
         }
         break;

@@ -169,8 +169,55 @@ do_test 3.1 {
   }
 } {}
 
-
 test_dbs_match 3.2 { SELECT * FROM t1 }
+
+#-------------------------------------------------------------------------
+hct_reset_db
+catch_hct_journal_init db
+sqlite3_hct_journal_setmode db LEADER
+
+do_execsql_test 4.0 {
+  CREATE TABLE t1(a INTEGER PRIMARY KEY, b TEXT);
+  INSERT INTO t1 VALUES(1000, 'one');
+}
+
+hct_copy_db test.db test.db2
+sqlite3 db2 test.db2
+set cid0 [db eval {SELECT max(cid) FROM sqlite_hct_journal}]
+
+do_execsql_test 4.1 {
+  BEGIN;
+    UPDATE t1 SET b = 'two' WHERE a=1000;
+    INSERT INTO t1 VALUES(1001, 'x');
+  COMMIT;
+  BEGIN;
+    UPDATE t1 SET b = 'three' WHERE a=1000;
+    INSERT INTO t1 VALUES(1002, 'y');
+  COMMIT;
+  BEGIN;
+    UPDATE t1 SET b = 'four' WHERE a=1000;
+    INSERT INTO t1 VALUES(1003, 'z');
+  COMMIT;
+}
+
+foreach o  {3 1} { lappend lCid [expr $cid0 + $o] }
+
+do_test 4.2 {
+  while {[llength $lCid]>0} {
+    set c [lindex $lCid 0]
+    set lCid [lrange $lCid 1 end]
+    db eval {
+      SELECT cid, schema, data, schemacid FROM sqlite_hct_journal WHERE cid=$c
+    } {
+      set rc [sqlite3_hct_journal_write db2 $cid $schema $data $schemacid]
+    }
+  }
+} {}
+
+do_execsql_test -db db2 4.3 {
+  SELECT * FROM t1;
+} {1000 one}
+
 
 finish_test
 

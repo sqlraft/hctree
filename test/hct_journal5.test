@@ -55,12 +55,24 @@ proc hct_copy_db {from to} {
   }
 }
 
+proc hct_db_contents {db} {
+  set ret [list]
+  $db eval {
+    SELECT name FROM sqlite_schema 
+    WHERE name NOT LIKE 'sqlite%' AND type='table'
+  } {
+    lappend ret "table $name"
+    lappend ret {*}[$db eval "SELECT * FROM $name"]
+  }
+  set ret
+}
+
 proc do_perm_test {tn sql} {
   hct_copy_db test.db save.db
 
   set cid1 [db one {SELECT max(cid) from sqlite_hct_journal}]
-  db eval $sql
 
+  db eval $sql
   set tlist [list]
   db eval { 
     SELECT cid, schema, data, schemacid 
@@ -70,6 +82,14 @@ proc do_perm_test {tn sql} {
     set T($cid) [list $cid $schema $data $schemacid]
   }
 
+  hct_copy_db save.db test.db2
+  sqlite3 db2 test.db2
+  lappend lStateSave [hct_db_contents db2]
+  foreach t $tlist {
+    sqlite3_hct_journal_write db2 {*}$T($t)
+    lappend lStateSave [hct_db_contents db2]
+  }
+  db2 close
 
   foreach-perm p $tlist {
     set testname "$tn.($p)"
@@ -77,6 +97,7 @@ proc do_perm_test {tn sql} {
     sqlite3 db2 test.db2
 
     set nBusy 0
+    set lState $lStateSave
     while {[llength $p]>0} {
       set t [lindex $p 0]
       set p [lrange $p 1 end]
@@ -90,6 +111,13 @@ proc do_perm_test {tn sql} {
       } elseif {$res!="SQLITE_OK"} {
         error $res
       }
+
+      set contents [hct_db_contents db2]
+      set iThis [lsearch -exact $lState $contents]
+      if {$iThis<0} {
+        error "bad state - got $iThis"
+      }
+      set lState [lrange $lState $iThis end]
     }
 
     db eval { 
