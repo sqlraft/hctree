@@ -3,7 +3,7 @@
 <h1> How to Update SQLite </h1>
 
 <pre>
-fossil pull --project-code 2ab58778c2967968b94284e989e43dc11791f548
+fossil pull https://sqlite.org/src --project-code 2ab58778c2967968b94284e989e43dc11791f548
 fossil up hctree
 fossil merge trunk
 </pre>

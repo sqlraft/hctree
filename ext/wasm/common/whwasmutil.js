@@ -111,7 +111,8 @@
      of `target.instance` (a WebAssembly.Module instance) and it must
      contain the symbols exported by the WASM module associated with
      this code. In an Enscripten environment it must be set to
-     `Module['asm']`. The exports object must contain a minimum of the
+     `Module['asm']` (versions <=3.1.43) or `wasmExports` (versions
+     >=3.1.44). The exports object must contain a minimum of the
      following symbols:
 
      - `memory`: a WebAssembly.Memory object representing the WASM
@@ -174,7 +175,7 @@
 globalThis.WhWasmUtilInstaller = function(target){
   'use strict';
   if(undefined===target.bigIntEnabled){
-    target.bigIntEnabled = !!self['BigInt64Array'];
+    target.bigIntEnabled = !!globalThis['BigInt64Array'];
   }
 
   /** Throws a new Error, the message of which is the concatenation of
@@ -355,8 +356,8 @@ globalThis.WhWasmUtilInstaller = function(target){
           break;
         default:
           if(target.bigIntEnabled){
-            if(n===self['BigUint64Array']) return c.HEAP64U;
-            else if(n===self['BigInt64Array']) return c.HEAP64;
+            if(n===globalThis['BigUint64Array']) return c.HEAP64U;
+            else if(n===globalThis['BigInt64Array']) return c.HEAP64;
             break;
           }
     }
@@ -1656,25 +1657,11 @@ globalThis.WhWasmUtilInstaller = function(target){
         ? opt.callProxy : undefined;
     }
 
-    /** If true, the constructor emits a warning. The intent is that
-        this be set to true after bootstrapping of the higher-level
-        client library is complete, to warn downstream clients that
-        they shouldn't be relying on this implemenation detail which
-        does not have a stable interface. */
-    static warnOnUse = false;
-
-    /** If true, convertArg() will FuncPtrAdapter.debugOut() when it
-        (un)installs a function binding to/from WASM. Note that
-        deinstallation of bindScope=transient bindings happens
-        via scopedAllocPop() so will not be output. */
-    static debugFuncInstall = false;
-
-    /** Function used for debug output. */
-    static debugOut = console.debug.bind(console);
-
-    static bindScopes = [
-      'transient', 'context', 'singleton', 'permanent'
-    ];
+    /**
+       Note that static class members are defined outside of the class
+       to work around an emcc toolchain build problem: one of the
+       tools in emsdk v3.1.42 does not support the static keyword.
+    */
 
     /* Dummy impl. Overwritten per-instance as needed. */
     contextKey(argv,argIndex){
@@ -1760,6 +1747,26 @@ globalThis.WhWasmUtilInstaller = function(target){
       }
     }/*convertArg()*/
   }/*FuncPtrAdapter*/;
+
+  /** If true, the constructor emits a warning. The intent is that
+      this be set to true after bootstrapping of the higher-level
+      client library is complete, to warn downstream clients that
+      they shouldn't be relying on this implemenation detail which
+      does not have a stable interface. */
+  xArg.FuncPtrAdapter.warnOnUse = false;
+
+  /** If true, convertArg() will FuncPtrAdapter.debugOut() when it
+      (un)installs a function binding to/from WASM. Note that
+      deinstallation of bindScope=transient bindings happens
+      via scopedAllocPop() so will not be output. */
+  xArg.FuncPtrAdapter.debugFuncInstall = false;
+
+  /** Function used for debug output. */
+  xArg.FuncPtrAdapter.debugOut = console.debug.bind(console);
+
+  xArg.FuncPtrAdapter.bindScopes = [
+    'transient', 'context', 'singleton', 'permanent'
+  ];
 
   const __xArgAdapterCheck =
         (t)=>xArg.get(t) || toss("Argument adapter not found:",t);

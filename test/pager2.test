@@ -147,10 +147,10 @@ do_test pager2-2.2 {
   file size test.db
 } {3072}
 
-#-------------------------------------------------------------------------
-# Test that shared in-memory databases seem to work.
-#
 ifcapable shared_cache {
+  #-------------------------------------------------------------------------
+  # Test that shared in-memory databases seem to work.
+  #
   db close
   do_test pager2-3.1 {
     forcedelete test.db
@@ -165,8 +165,7 @@ ifcapable shared_cache {
     db2 eval { INSERT INTO t1 VALUES(1, 2) }
     list [catch { db3 eval { INSERT INTO t1 VALUES(3, 4) } } msg] $msg
   } {1 {no such table: t1}}
+  db1 close
 }
-
-db1 close
 
 finish_test
