@@ -1212,6 +1212,17 @@ int sqlite3_hct_journal_setmode(sqlite3 *db, int eMode){
   return rc;
 }
 
+static void hctJrnlFixIndexes(Table *pTab){
+  Index *pIdx;
+  for(pIdx=pTab->pIndex; pIdx; pIdx=pIdx->pNext){
+    if( pIdx->idxType==SQLITE_IDXTYPE_UNIQUE ){
+      pIdx->idxType = SQLITE_IDXTYPE_APPDEF;
+    }
+    pIdx->uniqNotNull = 0;
+    pIdx->onError = OE_None;
+  }
+}
+
 static int hctJrnlGetInsertStmt(
   sqlite3 *db, 
   const char *zTab, 
@@ -1226,6 +1237,7 @@ static int hctJrnlGetInsertStmt(
   int ii;
 
   assert( pTab );
+  hctJrnlFixIndexes(pTab);
 
   *ppStmt = 0;
   pStr = sqlite3_str_new(0);
