@@ -265,6 +265,7 @@ static u8 *hctJrnlComposeRecord(
   const u8 *pData, int nData,
   u64 iSchemaCid,
   u64 iTid,
+  u64 iValidCid,
   int *pnRec
 ){
   u8 *pRec = 0;
@@ -274,11 +275,13 @@ static u8 *hctJrnlComposeRecord(
   int nSchema = 0;                /* Length of zSchema, in bytes */
   int nTidByte = 0;
   int nSchemaCidByte = 0;
+  int nValidCidByte = 0;
   u8 aHash[SQLITE_HCT_JOURNAL_HASHSIZE];
 
   nSchema = sqlite3Strlen30(zSchema);
   nTidByte = hctJrnlIntSize(iTid);
   nSchemaCidByte = hctJrnlIntSize(iSchemaCid);
+  nValidCidByte = hctJrnlIntSize(iValidCid);
 
   sqlite3_hct_journal_hashentry(
       aHash, iCid, zSchema, pData, nData, iSchemaCid
@@ -300,7 +303,7 @@ static u8 *hctJrnlComposeRecord(
        + nSchemaCidByte                        /* "schemacid" - INTEGER */
        + SQLITE_HCT_JOURNAL_HASHSIZE           /* "hash" - BLOB */
        + nTidByte                              /* "tid" - INTEGER */
-       + 0;                                    /* "validcid" - INTEGER */
+       + nValidCidByte;                        /* "validcid" - INTEGER */
 
   nRec = nBody+nHdr;
   pRec = (u8*)sqlite3_malloc(nRec);
@@ -341,7 +344,9 @@ static u8 *hctJrnlComposeRecord(
     pBody += nTidByte;
 
     /* "validcid" field - INTEGER */
-    *pHdr++ = (u8)8;
+    *pHdr++ = hctJrnlIntHdr(nValidCidByte);
+    hctJrnlIntPut(pBody, iValidCid, nValidCidByte);
+    pBody += nValidCidByte;
 
     assert( pHdr==&pRec[nHdr] );
     assert( pBody==&pRec[nRec] );
@@ -549,7 +554,9 @@ static int hctJrnlWriteRecord(
   u8 *pRec = 0;
   int nRec = 0;
 
-  pRec = hctJrnlComposeRecord(iCid,zSchema,pData,nData,iSchemaCid,iTid, &nRec);
+  pRec = hctJrnlComposeRecord(
+      iCid, zSchema, pData, nData, iSchemaCid, iTid, 0, &nRec
+  );
   if( pRec==0 ){
     rc = SQLITE_NOMEM_BKPT;
   }else{
@@ -1621,8 +1628,8 @@ int sqlite3_hct_journal_write(
     int nRec = 0;
 
     /* TODO: "validcid" value */
-    pRec = hctJrnlComposeRecord(
-        iCid, zSchema, pData, nData, iSchemaCid, pJrnl->iWriteTid, &nRec
+    pRec = hctJrnlComposeRecord(iCid, zSchema, 
+        pData, nData, iSchemaCid, pJrnl->iWriteTid, iValidCid, &nRec
     );
     if( pRec==0 ){
       rc = SQLITE_NOMEM_BKPT;

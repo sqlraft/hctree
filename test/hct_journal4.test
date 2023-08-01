@@ -218,6 +218,14 @@ do_execsql_test -db db2 4.3 {
   SELECT * FROM t1;
 } {1000 one}
 
+do_test 4.3 {
+  set c [expr 2+$cid0]
+  db eval {
+    SELECT cid, schema, data, schemacid FROM sqlite_hct_journal WHERE cid=$c
+  } {
+    set rc [sqlite3_hct_journal_write db2 $cid $schema $data $schemacid]
+  }
+} {}
 
 finish_test
 
