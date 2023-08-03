@@ -566,10 +566,12 @@ static int hctJrnlWriteRecord(
       rc = sqlite3HctDbInsert(
           pJrnl->pDb, (u32)pJrnl->iJrnlRoot, 0, iCid, 0, nRec, pRec, &nRetry
       );
-      assert( nRetry==0 );
       if( rc!=SQLITE_OK ) break;
-      rc = sqlite3HctDbInsertFlush(pJrnl->pDb, &nRetry);
-      if( rc!=SQLITE_OK ) break;
+      assert( nRetry==0 || nRetry==1 );
+      if( nRetry==0 ){
+        rc = sqlite3HctDbInsertFlush(pJrnl->pDb, &nRetry);
+        if( rc!=SQLITE_OK ) break;
+      }
     }while( nRetry );
   }
   sqlite3_free(pRec);
@@ -577,12 +579,20 @@ static int hctJrnlWriteRecord(
   return rc;
 }
 
-int sqlite3HctJrnlWriteEmpty(HctJournal *pJrnl, u64 iCid, u64 iTid){
+int sqlite3HctJrnlWriteEmpty(
+  HctJournal *pJrnl, 
+  u64 iCid, 
+  u64 iTid, 
+  sqlite3 *db                     /* If non-NULL, invoke custom validation */
+){
   int rc = SQLITE_OK;
   if( pJrnl->bInWrite==0 ){
     sqlite3HctDbJournalRbMode(pJrnl->pDb, 1);
     rc = hctJrnlWriteRecord(pJrnl, iCid, "", 0, 0, 0, iTid);
     sqlite3HctDbJournalRbMode(pJrnl->pDb, 0);
+    if( rc==SQLITE_OK && db && db->xValidate ){
+      (void)db->xValidate(db->pValidateArg, iCid, "", 0, 0, 0);
+    }
   }
   return rc;
 }
@@ -593,21 +603,21 @@ int sqlite3HctJrnlLog(
   Schema *pSchema,
   u64 iCid,
   u64 iTid,
-  HctTree *pTree,
-  HctDatabase *pDb
+  int *pbValidateCalled
 ){
   int rc = SQLITE_OK;
   JrnlCtx jrnlctx;
   const char *zSchema = 0;
   u64 iSchemaCid = HctAtomicLoad(&pJrnl->pServer->iSchemaCid);
 
+  assert( *pbValidateCalled==0 );
   if( pJrnl->bInWrite ) return SQLITE_OK;
 
   memset(&jrnlctx, 0, sizeof(jrnlctx));
   jrnlctx.pSchema = pSchema;
-  jrnlctx.pTree = pTree;
+  jrnlctx.pTree = pJrnl->pTree;
 
-  rc = sqlite3HctTreeForeach(pTree, 1, (void*)&jrnlctx, hctJrnlLogTree);
+  rc = sqlite3HctTreeForeach(pJrnl->pTree, 1, (void*)&jrnlctx, hctJrnlLogTree);
   zSchema = (jrnlctx.schema.nBuf ? (const char*)jrnlctx.schema.aBuf : "");
 
   if( rc==SQLITE_OK ){
@@ -624,6 +634,7 @@ int sqlite3HctJrnlLog(
     if( res!=0 ){
       rc = SQLITE_BUSY_SNAPSHOT;
     }
+    *pbValidateCalled = 1;
   }
 
   if( zSchema[0] && rc==SQLITE_OK ){

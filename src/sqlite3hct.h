@@ -42,11 +42,10 @@ int sqlite3_hct_journal_write(
 );
 
 /* 
-** Candidate values for second arg to sqlite3_hct_journal_mode() 
+** Candidate values for second arg to sqlite3_hct_journal_setmode() 
 */
 #define SQLITE_HCT_JOURNAL_MODE_FOLLOWER 0
 #define SQLITE_HCT_JOURNAL_MODE_LEADER   1
-#define SQLITE_HCT_JOURNAL_MODE_QUERY   -1
 
 /*
 ** Query the LEADER/FOLLOWER setting of the db passed as the only argument.
@@ -55,6 +54,9 @@ int sqlite3_hct_journal_mode(sqlite3 *db);
 
 /*
 ** Set the LEADER/FOLLOWER setting of the db passed as the first argument.
+** Return SQLITE_OK if successful. Otherwise, return an SQLite error code
+** and leave an English language error message (accessible using
+** sqlite3_errmsg()) in the database handle.
 */
 int sqlite3_hct_journal_setmode(sqlite3 *db, int eMode);
 
@@ -105,13 +107,6 @@ void sqlite3_hct_journal_hashentry(
   const void *pData, int nData,
   sqlite3_int64 iSchemaCid
 );
-
-/*
-** Update the hash in pHash based on the contents of the nul-terminated
-** string passed as the second argument. If the string is zero bytes in
-** length, then the value stored in buffer pHash is unmodified.
-*/
-void sqlite3_hct_journal_hashschema(void *pHash, const char *zSchema);
 
 #ifdef __cplusplus
 }

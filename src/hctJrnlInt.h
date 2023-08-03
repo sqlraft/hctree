@@ -35,8 +35,7 @@ int sqlite3HctJrnlLog(
   Schema *pSchema,
   u64 iCid,
   u64 iTid,
-  HctTree *pTree,
-  HctDatabase *pDb
+  int *pbCustomValid
 );
 
 /*
@@ -62,7 +61,7 @@ int sqlite3HctJournalIsReadonly(HctJournal *pJrnl, u64 iTable);
 
 int sqlite3HctJrnlRollbackEntry(HctJournal *pJrnl, i64 iTid);
 
-int sqlite3HctJrnlWriteEmpty(HctJournal *Jrnl, u64 iCid, u64 iTid);
+int sqlite3HctJrnlWriteEmpty(HctJournal *Jrnl, u64 iCid, u64 iTid, sqlite3 *db);
 
 u64 sqlite3HctJrnlWriteTid(HctJournal *pJrnl, u64 *piCid);
 

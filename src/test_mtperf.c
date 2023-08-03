@@ -11,10 +11,53 @@
 *************************************************************************
 **
 **
+** To create a new thread-test object:
+**
+**     sqlite_thread_test CMD-NAME DBPATH
+**
+** Which then supports the following commands:
+**
+**     $cmd configure OPTION ?VALUE?
+**     $cmd thread NAME SQL-SCRIPT 
+**     $cmd run
+**     $cmd result ARRAY-NAME
+**     $cmd destroy
+**
+** Configuration options:
+**
+**   -ntransaction INTEGER
+**     Number of transactions that each thread should attempt when [run]
+**     is called. If this is set to 0, the -nsecond option governs how long
+**     each thread is run for by [run]. Default 0.
+**
+**   -nsecond INTEGER
+**     If the -ntransaction option is not set to 0, this option is ignored.
+**     Or, if -ntransaction is 0, then the number of seconds that [run] runs 
+**     the configured test for. Default 10.
+**
+**   -sqlconfig SQL
+**     SQL script run by each thread immediately after it opens its 
+**     connection.
+**
+**   -nwalpage INTEGER
+**     This is useful only when testing with legacy databases, including
+**     wal2 legacy databases. It has two effects:
+**
+**       * Causes each thread to evaluate a "PRAGMA journal_size_limit"
+**         command with a parameter (in bytes) that corresponds to -nwalpage
+**         database pages. This causes wal2 mode databases to swap wal
+**         files after the current wal contains -nwalpage frames.
+**
+**       * Causes a checkpoint to be run if the wal-hook is invoked with
+**         a parameter of more than -nwalpage. Checkpoint is run outside
+**         of the commit mutex, assuming one is used.
+**
+**   -follower PATH
 */
 
 #include <tcl.h>
 #include <sqlite3.h>
+#include <sqlite3hct.h>
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -68,6 +111,7 @@ struct TT_Thread {
   int nStep;
   TT_Step *aStep;
   sqlite3 *db;
+  sqlite3 *fdb;
 
   /* Result variables - number of successful transactions and number of
   ** SQLITE_BUSY transactions */
@@ -86,6 +130,7 @@ struct TT_Test {
   int nThread;                    /* Number of entries in aThread[] */
   int nWalPage;                   /* Target size of wal files in pages */
   Tcl_Obj *pSqlConfig;            /* SQL script to configure db handles */
+  Tcl_Obj *pFollower;             /* Path to follower database */
   TT_Thread *aThread;
 };
 
@@ -304,8 +349,46 @@ static void *ttThreadMain(void *pArg){
   return 0;
 }
 
+static int ttValidationHook(
+  void *pCopyOfArg,
+  sqlite3_int64 iCid,
+  const char *zSchema,
+  const void *pData, int nData,
+  sqlite3_int64 iSchemaCid
+){
+  TT_Thread *pThread = (TT_Thread*)pCopyOfArg;
+  sqlite3 *fdb = pThread->fdb;
+  int rc = SQLITE_OK;
+  rc = sqlite3_hct_journal_write(fdb, iCid, zSchema, pData, nData, iSchemaCid);
+  if( rc!=SQLITE_OK ){
+    sqlite3_hct_journal_write(fdb, iCid, "", 0, 0, 0);
+  }
+  return rc;
+}
+
 static int ttRunTest(TT_Test *p){
   int ii = 0;
+
+  /* If one is configured, open a follower database handle for each thread. 
+  ** And configure a custom-validation hook on the main db.  */
+  if( p->pFollower ){
+    const char *zPath = Tcl_GetString(p->pFollower);
+    for(ii=0; ii<p->nThread; ii++){
+      TT_Thread *pThread = &p->aThread[ii];
+      int rc = sqlite3_open_v2(zPath, &pThread->fdb, 
+          SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE |
+          SQLITE_OPEN_URI |SQLITE_OPEN_NOMUTEX, 0
+      );
+      if( rc!=SQLITE_OK ){
+        Tcl_ResetResult(p->interp);
+        Tcl_AppendResult(p->interp, 
+            "error opening follower db \"", zPath, "\"", (char*)0
+        );
+        return TCL_ERROR;
+      }
+      sqlite3_hct_journal_validation_hook(pThread->db,pThread,ttValidationHook);
+    }
+  }
 
   for(ii=0; ii<p->nThread; ii++){
     TT_Thread *pThread = &p->aThread[ii];
@@ -354,6 +437,85 @@ static int ttTestResult(TT_Test *p){
   return TCL_OK;
 }
 
+static int ttConfigure(TT_Test *p, Tcl_Obj *pOpt, Tcl_Obj *pVal){
+  const char *azOpt[] = {
+    "-nsecond", "-ntransaction", "-sqlconfig", "-nwalpage", "-follower", 0
+  };
+  Tcl_Interp *interp = p->interp;
+  int iOpt = 0;
+  int rc = TCL_OK;
+
+  rc = Tcl_GetIndexFromObj(interp, pOpt, azOpt, "option", 0, &iOpt);
+  if( rc!=TCL_OK ) return rc;
+
+  switch( iOpt ){
+    case 0: assert( 0==strcmp(azOpt[iOpt], "-nsecond") ); {
+      if( pVal ){
+        int nSec = 0;
+        rc = Tcl_GetIntFromObj(interp, pVal, &nSec);
+        if( rc!=TCL_OK ) return TCL_ERROR;
+        p->nSecond = nSec;
+      }
+      Tcl_SetObjResult(interp, Tcl_NewIntObj(p->nSecond));
+      break;
+    }
+    case 1: assert( 0==strcmp(azOpt[iOpt], "-ntransaction") ); {
+      if( pVal ){
+        int nTrans = 0;
+        rc = Tcl_GetIntFromObj(interp, pVal, &nTrans);
+        if( rc!=TCL_OK ) return TCL_ERROR;
+        p->nTrans = nTrans;
+      }
+      Tcl_SetObjResult(interp, Tcl_NewIntObj(p->nTrans));
+      break;
+    }
+    case 2: assert( 0==strcmp(azOpt[iOpt], "-sqlconfig") ); {
+      if( pVal ){
+        if( p->pSqlConfig ) Tcl_DecrRefCount(p->pSqlConfig);
+        p->pSqlConfig = Tcl_DuplicateObj(pVal);
+        Tcl_IncrRefCount(p->pSqlConfig);
+      }
+      if( p->pSqlConfig ){
+        Tcl_SetObjResult(interp, p->pSqlConfig);
+      }else{
+        Tcl_ResetResult(interp);
+      }
+      break;
+    }
+    case 3: assert( 0==strcmp(azOpt[iOpt], "-nwalpage") ); {
+      if( pVal ){
+        int nWalPage = 0;
+        rc = Tcl_GetIntFromObj(interp, pVal, &nWalPage);
+        if( rc!=TCL_OK ) return TCL_ERROR;
+        p->nWalPage = nWalPage;
+      }
+      Tcl_SetObjResult(interp, Tcl_NewIntObj(p->nWalPage));
+      break;
+    }
+    case 4: assert( 0==strcmp(azOpt[iOpt], "-follower") ); {
+      if( pVal ){
+        if( p->pFollower ){
+          Tcl_DecrRefCount(p->pFollower);
+          p->pFollower = 0;
+        }
+        if( Tcl_GetCharLength(pVal)>0 ){
+          p->pFollower = Tcl_DuplicateObj(pVal);
+          Tcl_IncrRefCount(p->pFollower);
+        }
+      }
+      if( p->pFollower ){
+        Tcl_SetObjResult(interp, p->pFollower);
+      }else{
+        Tcl_ResetResult(interp);
+      }
+      break;
+    }
+    default:
+      assert( !"cannot happen" );
+  }
+
+  return rc;
+}
 
 /*
 ** Implementation of the test object command.
@@ -363,10 +525,6 @@ static int ttTestResult(TT_Test *p){
 **   $cmd run
 **   $cmd result ARRAY-NAME
 **   $cmd destroy
-**
-** Configure options are:
-**
-**   -nsecond
 */
 static int tt_cmd(
   ClientData clientData,          /* Unused */
@@ -395,60 +553,8 @@ static int tt_cmd(
         Tcl_WrongNumArgs(interp, 1, objv, "configure OPTION ?VALUE?");
         return TCL_ERROR;
       }else{
-        const char *azOpt[] = {
-          "-nsecond", "-ntransaction", "-sqlconfig", "-nwalpage", 0
-        };
-        int iOpt = 0;
-        rc = Tcl_GetIndexFromObj(interp, objv[2], azOpt, "option", 0, &iOpt);
-        if( rc!=TCL_OK ) return rc;
-
-        switch( iOpt ){
-          case 0: assert( 0==strcmp(azOpt[iOpt], "-nsecond") ); {
-            if( objc==4 ){
-              int nSec = 0;
-              rc = Tcl_GetIntFromObj(interp, objv[3], &nSec);
-              if( rc!=TCL_OK ) return TCL_ERROR;
-              p->nSecond = nSec;
-            }
-            Tcl_SetObjResult(interp, Tcl_NewIntObj(p->nSecond));
-            break;
-          }
-          case 1: assert( 0==strcmp(azOpt[iOpt], "-ntransaction") ); {
-            if( objc==4 ){
-              int nTrans = 0;
-              rc = Tcl_GetIntFromObj(interp, objv[3], &nTrans);
-              if( rc!=TCL_OK ) return TCL_ERROR;
-              p->nTrans = nTrans;
-            }
-            Tcl_SetObjResult(interp, Tcl_NewIntObj(p->nTrans));
-            break;
-          }
-          case 2: assert( 0==strcmp(azOpt[iOpt], "-sqlconfig") ); {
-            if( objc==4 ){
-              if( p->pSqlConfig ) Tcl_DecrRefCount(p->pSqlConfig);
-              p->pSqlConfig = objv[3];
-              Tcl_IncrRefCount(p->pSqlConfig);
-            }
-            if( p->pSqlConfig ){
-              Tcl_SetObjResult(interp, p->pSqlConfig);
-            }else{
-              Tcl_ResetResult(interp);
-            }
-            break;
-          }
-          case 3: assert( 0==strcmp(azOpt[iOpt], "-nwalpage") ); {
-            if( objc==4 ){
-              int nWalPage = 0;
-              rc = Tcl_GetIntFromObj(interp, objv[3], &nWalPage);
-              if( rc!=TCL_OK ) return TCL_ERROR;
-              p->nWalPage = nWalPage;
-            }
-            Tcl_SetObjResult(interp, Tcl_NewIntObj(p->nWalPage));
-            break;
-          }
-          default:
-            assert( !"cannot happen" );
-        }
+        rc = ttConfigure(p, objv[2], objc==4 ? objv[3] : 0);
+        if( rc ) return rc;
       }
       break;
     }
@@ -514,9 +620,11 @@ static void tt_del(ClientData clientData){
       if( pThread->pName ) Tcl_DecrRefCount(pThread->pName);
       if( pThread->pErr ) Tcl_DecrRefCount(pThread->pErr);
       sqlite3_close(pThread->db);
+      sqlite3_close(pThread->fdb);
     }
     if( p->pDatabase ) Tcl_DecrRefCount(p->pDatabase);
     if( p->pSqlConfig ) Tcl_DecrRefCount(p->pSqlConfig);
+    if( p->pFollower ) Tcl_DecrRefCount(p->pFollower);
     ckfree(p->aThread);
     ckfree(p);
   }
@@ -524,7 +632,6 @@ static void tt_del(ClientData clientData){
 
 /*
 ** tclcmd: sqlite_thread_test OBJ-NAME DBPATH
-**
 */
 static int sqlite_thread_test(
   ClientData clientData,          /* Unused */

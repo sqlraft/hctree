@@ -322,21 +322,3 @@ void sqlite3_hct_journal_hashentry(
   MD5Final(pHash, &ctx);
 }
 
-/*
-** Update the hash in pHash based on the contents of the nul-terminated
-** string passed as the second argument. If the string is zero bytes in
-** length, then the value stored in buffer pHash is unmodified.
-*/
-void sqlite3_hct_journal_hashschema(void *pHash, const char *zSchema){
-  int nSchema = sqlite3Strlen30(zSchema);
-  if( nSchema>0 ){
-    MD5Context ctx;
-    MD5Init(&ctx);
-    MD5Update(&ctx, pHash, SQLITE_HCT_JOURNAL_HASHSIZE);
-    MD5Update(&ctx, (const u8*)zSchema, nSchema);
-    MD5Final(pHash, &ctx);
-  }
-}
-
-
-

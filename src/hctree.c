@@ -1217,6 +1217,7 @@ static int btreeFlushToDisk(HBtree *p){
   u64 iTid = 0;
   u64 iCid = 0;
   int bTmapScan = 0;
+  int bCustomValid = 0;           /* True if xValidate() was invoked */
 
   /* Write a log file for this transaction. The TID field is still set
   ** to zero at this point.  */
@@ -1284,9 +1285,7 @@ static int btreeFlushToDisk(HBtree *p){
         p->pHctJrnl,
         p->db,
         (Schema*)p->pSchema,
-        iCid, iTid,
-        p->pHctTree,
-        p->pHctDb
+        iCid, iTid, &bCustomValid
       );
     }
   }
@@ -1298,7 +1297,9 @@ static int btreeFlushToDisk(HBtree *p){
     rc = btreeFlushData(p, 1);
     if( rc==SQLITE_DONE ) rc = SQLITE_OK;
     if( iCid>0 && p->pHctJrnl ){
-      rc = sqlite3HctJrnlWriteEmpty(p->pHctJrnl, iCid, iTid);
+      rc = sqlite3HctJrnlWriteEmpty(p->pHctJrnl, iCid, iTid, 
+          (bCustomValid ? 0 : p->db)
+      );
     }
   }
 
