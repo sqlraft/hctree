@@ -206,6 +206,38 @@ static int test_hct_journal_setmode(
 }
 
 /*
+** tclcmd: sqlite3_hct_journal_snapshot DB
+*/
+static int test_hct_journal_snapshot(
+  ClientData clientData,          /* Unused */
+  Tcl_Interp *interp,             /* The TCL interpreter */
+  int objc,                       /* Number of arguments */
+  Tcl_Obj *CONST objv[]           /* Command arguments */
+){
+  sqlite3 *db = 0;
+  int rc = TCL_OK;
+  sqlite3_int64 iCid = 0;
+
+  if( objc!=2 ){
+    Tcl_WrongNumArgs(interp, 1, objv, "DB");
+    return TCL_ERROR;
+  }
+  rc = getDbPointer(interp, Tcl_GetString(objv[1]), &db);
+  if( rc!=TCL_OK ) return rc;
+
+  rc = sqlite3_hct_journal_snapshot(db, &iCid);
+  if( rc==SQLITE_OK ){
+    Tcl_SetObjResult(interp, Tcl_NewWideIntObj(iCid));
+  }else{
+    const char *zErr = sqlite3_errmsg(db);
+    Tcl_ResetResult(interp);
+    Tcl_AppendResult(interp, sqlite3ErrName(rc), " ", zErr, (char*)0);
+    rc = TCL_ERROR;
+  }
+  return rc;
+}
+
+/*
 ** tclcmd: sqlite3_hct_journal_write DB CID SCHEMA DATA SCHEMA_VERSION
 */
 static int test_hct_journal_write(
@@ -254,6 +286,7 @@ int SqliteHctTest_Init(Tcl_Interp *interp){
     { "sqlite3_hct_journal_mode",            test_hct_journal_mode },
     { "sqlite3_hct_journal_setmode",         test_hct_journal_setmode },
     { "sqlite3_hct_journal_write",           test_hct_journal_write },
+    { "sqlite3_hct_journal_snapshot",        test_hct_journal_snapshot },
   };
   int ii = 0;
 

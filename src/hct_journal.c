@@ -590,6 +590,11 @@ int sqlite3HctJrnlWriteEmpty(
     sqlite3HctDbJournalRbMode(pJrnl->pDb, 1);
     rc = hctJrnlWriteRecord(pJrnl, iCid, "", 0, 0, 0, iTid);
     sqlite3HctDbJournalRbMode(pJrnl->pDb, 0);
+
+    /* If argument db is not NULL and there is a custom validation hook
+    ** configured, invoke it now. This is just to propagate the empty
+    ** transaction to any follower databases, not to actually validate
+    ** an empty transaction - the return code is ignored.  */
     if( rc==SQLITE_OK && db && db->xValidate ){
       (void)db->xValidate(db->pValidateArg, iCid, "", 0, 0, 0);
     }
@@ -1460,6 +1465,25 @@ u64 sqlite3HctJournalSnapshot(HctJournal *pJrnl){
   }
   return iRet;
 }
+
+/*
+** Set output variable (*piCid) to the CID of the newest available 
+** database snapshot. Return SQLITE_OK if successful, or an SQLite
+** error code if something goes wrong.
+*/
+int sqlite3_hct_journal_snapshot(sqlite3 *db, sqlite3_int64 *piCid){
+  int rc = SQLITE_OK;
+  HctJournal *pJrnl = 0;
+
+  rc = hctJrnlFind(db, &pJrnl);
+  if( rc==SQLITE_OK ){
+    *piCid = (i64) sqlite3HctJournalSnapshot(pJrnl);
+  }else{
+    *piCid = 0;
+  }
+  return rc;
+}
+
 
 static u64 hctJournalFindLastWrite(
   int *pRc,                       /* IN/OUT: Error code */

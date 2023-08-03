@@ -93,10 +93,11 @@ proc do_perm_test {tn sql} {
 
   hct_copy_db save.db test.db2
   sqlite3 db2 test.db2
-  lappend lStateSave [hct_db_contents db2]
+  set aSnap($cid1) [hct_db_contents db2]
   foreach t $tlist {
     sqlite3_hct_journal_write db2 {*}$T($t)
-    lappend lStateSave [hct_db_contents db2]
+    set cid [lindex $T($t) 0]
+    set aSnap($cid) [hct_db_contents db2]
   }
   db2 close
 
@@ -106,7 +107,8 @@ proc do_perm_test {tn sql} {
     sqlite3 db2 test.db2
 
     set nBusy 0
-    set lState $lStateSave
+    set iSnap $cid1               ;# Currently visible snapshot for db2
+
     while {[llength $p]>0} {
       set t [lindex $p 0]
       set p [lrange $p 1 end]
@@ -121,12 +123,16 @@ proc do_perm_test {tn sql} {
         error $res
       }
 
-      set contents [hct_db_contents db2]
-      set iThis [lsearch -exact $lState $contents]
-      if {$iThis<0} {
-        error "bad state - got $iThis"
+      set iNewSnap [sqlite3_hct_journal_snapshot db2]
+      if {$iNewSnap<$iSnap} {
+        error "snapshot regressed from $iSnap to $iNewSnap"
       }
-      set lState [lrange $lState $iThis end]
+      set iSnap $iNewSnap
+
+      set contents [hct_db_contents db2]
+      if {$contents != $aSnap($iSnap)} {
+        error "bad snapshot $iSnap - got $iThis"
+      }
     }
 
     db eval { 
