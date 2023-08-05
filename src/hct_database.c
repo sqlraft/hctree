@@ -765,7 +765,7 @@ static void hctPutU32(u8 *a, u32 val){
 */
 static int hctDbTidIsVisible(HctDatabase *pDb, u64 iTid){
 
-  if( iTid<=pDb->iLocalMinTid ) return 1;
+  if( (iTid & HCT_TID_MASK)<=pDb->iLocalMinTid ) return 1;
   while( 1 ){
     u64 eState = 0;
     u64 iCid = hctDbTMapLookup(pDb, (iTid & HCT_TID_MASK), &eState);
@@ -5057,9 +5057,6 @@ static int hctDbInsert(
   u8 *aTarget;                    /* Page to write new entry to */
   HctDbInsertOp op = {0,0,0,0,0,0,0,0,0,0,0};
   int bUpdateInPlace = 0;
-
-static int nCall = 0;
-nCall++;
 
   p->nWriteKey++;
 

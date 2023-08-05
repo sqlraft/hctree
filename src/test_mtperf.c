@@ -53,6 +53,8 @@
 **         of the commit mutex, assuming one is used.
 **
 **   -follower PATH
+**
+**   -truncate INTEGER
 */
 
 #include <tcl.h>
@@ -107,6 +109,7 @@ struct TT_Thread {
   FastPrng prng;
   int bDoCheckpoint;
   int bCheckpointer;
+  int iTruncate;
 
   int nStep;
   TT_Step *aStep;
@@ -122,6 +125,10 @@ struct TT_Thread {
   pthread_t tid;                  /* Thread id from pthread_create() */
 };
 
+
+/*
+** nJrnlTruncate:
+*/
 struct TT_Test {
   Tcl_Obj *pDatabase;             /* Path (or URI) to test database */
   Tcl_Interp *interp;
@@ -129,6 +136,7 @@ struct TT_Test {
   int nSecond;                    /* Number of seconds to run for */
   int nThread;                    /* Number of entries in aThread[] */
   int nWalPage;                   /* Target size of wal files in pages */
+  int nJrnlTruncate;              /* Truncate journal to this much */
   Tcl_Obj *pSqlConfig;            /* SQL script to configure db handles */
   Tcl_Obj *pFollower;             /* Path to follower database */
   TT_Thread *aThread;
@@ -327,6 +335,7 @@ static void *ttThreadMain(void *pArg){
           }
         }
       }
+
       if( rc!=SQLITE_OK ) break;
     }
 
@@ -344,6 +353,12 @@ static void *ttThreadMain(void *pArg){
       );
       break;
     }
+
+    if( rc==SQLITE_OK && pThread->iTruncate ){
+      sqlite3_hct_journal_truncate(pThread->fdb, pThread->iTruncate);
+      sqlite3_hct_journal_truncate(pThread->db, pThread->iTruncate);
+      pThread->iTruncate = 0;
+    }
   }
 
   return 0;
@@ -359,10 +374,17 @@ static int ttValidationHook(
   TT_Thread *pThread = (TT_Thread*)pCopyOfArg;
   sqlite3 *fdb = pThread->fdb;
   int rc = SQLITE_OK;
+  int nJrnlTruncate = pThread->pTest->nJrnlTruncate;
+
   rc = sqlite3_hct_journal_write(fdb, iCid, zSchema, pData, nData, iSchemaCid);
   if( rc!=SQLITE_OK ){
     sqlite3_hct_journal_write(fdb, iCid, "", 0, 0, 0);
   }
+
+  if( nJrnlTruncate && (iCid % nJrnlTruncate)==0 ){
+    pThread->iTruncate = (iCid - nJrnlTruncate);
+  }
+
   return rc;
 }
 
@@ -439,7 +461,8 @@ static int ttTestResult(TT_Test *p){
 
 static int ttConfigure(TT_Test *p, Tcl_Obj *pOpt, Tcl_Obj *pVal){
   const char *azOpt[] = {
-    "-nsecond", "-ntransaction", "-sqlconfig", "-nwalpage", "-follower", 0
+    "-nsecond", "-ntransaction", "-sqlconfig", "-nwalpage", "-follower", 
+    "-jtruncate", 0
   };
   Tcl_Interp *interp = p->interp;
   int iOpt = 0;
@@ -508,6 +531,18 @@ static int ttConfigure(TT_Test *p, Tcl_Obj *pOpt, Tcl_Obj *pVal){
       }else{
         Tcl_ResetResult(interp);
       }
+      break;
+    }
+    case 5: assert( 0==strcmp(azOpt[iOpt], "-jtruncate") ); {
+      if( pVal ){
+        int nJrnlTruncate = 0;
+        rc = Tcl_GetIntFromObj(interp, pVal, &nJrnlTruncate);
+        if( rc!=TCL_OK ) return TCL_ERROR;
+        p->nJrnlTruncate = nJrnlTruncate;
+      }
+      Tcl_SetObjResult(interp, Tcl_NewIntObj(p->nJrnlTruncate));
+      break;
+      
       break;
     }
     default:

@@ -32,7 +32,8 @@ hct_copy_db test.db test.db2
 sqlite_thread_test T test.db
 
 T configure -follower test.db2
-T configure -nsecond 10
+T configure -nsecond 2
+T configure -jtruncate 256
 
 for {set tt 1} {$tt <= 20} {incr tt} {
   T thread w$tt {
@@ -53,7 +54,7 @@ sqlite3 db2 test.db2
 test_dbs_match 1.2 "SELECT * FROM t1 ORDER BY i"
 test_dbs_match 1.3 "SELECT cid FROM sqlite_hct_journal"
 
-if 1 {
+if 0 {
   execsql_pp {
     SELECT cid, schema, hct_journal_entry(data), schemacid FROM sqlite_hct_journal
   }

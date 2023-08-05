@@ -433,13 +433,14 @@ int sqlite3HctTMapBegin(HctTMapClient *pClient, u64 iSnapshot, HctTMap **ppMap){
   u64 iEof = pMap->m.iFirstTid + pMap->m.nMap*HCT_TMAP_PAGESIZE;
 
   while( 1 ){
-    u64 iOrigLockValue = pClient->iLockValue;
+    u64 iOrigLockValue = HctAtomicLoad(&pClient->iLockValue);
     u64 iLockValue;
 
     /* Find the new "safe-tid" value */
     u64 iSafe = (iOrigLockValue & HCT_TMAP_CID_MASK);
-    if( iSafe<pClient->pServer->iMinMinTid ){
-      iSafe = pClient->pServer->iMinMinTid;
+    u64 iMinMinTid = HctAtomicLoad(&pClient->pServer->iMinMinTid);
+    if( iSafe<iMinMinTid ){
+      iSafe = iMinMinTid;
     }
 
     while( iSafe<(iEof-1) ){
@@ -626,7 +627,7 @@ void sqlite3HctTMapScan(HctTMapClient *p){
 
     iSafe = MIN(iSafe, iTid);
   }
-  p->pServer->iMinMinTid = iSafe;
+  HctAtomicStore(&p->pServer->iMinMinTid, iSafe);
   LEAVE_TMAP_MUTEX(p);
 }
 

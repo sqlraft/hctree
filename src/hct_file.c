@@ -383,7 +383,7 @@ static u64 hctFilePagemapGetSafe(HctMapping *p, u32 iSlot){
 static u64 hctFileAtomicIncr(HctFile *pFile, u64 *pPtr, int nIncr){
   u64 iOld;
   while( 1 ){
-    iOld = *pPtr;
+    iOld = HctAtomicLoad(pPtr);
     pFile->stats.nIncrAttempt++;
     if( hctBoolCompareAndSwap64(pPtr, iOld, iOld+nIncr) ) return iOld+nIncr;
     pFile->stats.nIncrFail++;
@@ -397,7 +397,7 @@ static u64 hctFilePagemapIncr(HctFile *pFile, u32 iSlot, int nIncr){
   u64 *pPtr = hctPagemapPtr(pFile->pMapping, iSlot);
   u64 iOld;
   while( 1 ){
-    iOld = *pPtr;
+    iOld = HctAtomicLoad(pPtr);
     pFile->stats.nIncrAttempt++;
     if( hctBoolCompareAndSwap64(pPtr, iOld, iOld+nIncr) ) return iOld+nIncr;
     pFile->stats.nIncrFail++;
