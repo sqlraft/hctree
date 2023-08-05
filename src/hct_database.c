@@ -522,10 +522,10 @@ static int hctSqliteBusy(void){
 static u64 hctDbTMapLookup(HctDatabase *pDb, u64 iTid, u64 *peState){
   u64 iVal = 0;
   HctTMap *pTmap = pDb->pTmap;
-  if( iTid<pTmap->iFirstTid ){
-    *peState = HCT_TMAP_COMMITTED;
-  }else if( iTid==LARGEST_TID ){
+  if( iTid==LARGEST_TID ){
     *peState = HCT_TMAP_ROLLBACK;
+  }else if( iTid<pTmap->iFirstTid ){
+    *peState = HCT_TMAP_COMMITTED;
   }else{
     int iMap = (iTid - pTmap->iFirstTid) / HCT_TMAP_PAGESIZE;
 
@@ -782,7 +782,7 @@ static int hctDbTidIsVisible(HctDatabase *pDb, u64 iTid){
       return 1;
     }
     assert( eState==HCT_TMAP_VALIDATING );
-    if( iCid>pDb->iSnapshotId ){
+    if( iCid>pDb->iSnapshotId || iTid==pDb->iTid ){
       return 0;
     }
   }
@@ -799,7 +799,7 @@ static int hctDbTidIsVisible(HctDatabase *pDb, u64 iTid){
 ** false if the write should proceed.
 */
 static int hctDbTidIsConflict(HctDatabase *pDb, u64 iTid){
-  if( iTid==pDb->iTid || iTid<=pDb->iLocalMinTid ){
+  if( iTid==pDb->iTid || iTid<=pDb->iLocalMinTid || iTid==LARGEST_TID ){
     return 0;
   }else{
     u64 eState = 0;
@@ -5544,8 +5544,8 @@ int sqlite3HctDbStartRecovery(HctDatabase *pDb, int iStage){
     /* During recovery the connection should read the latest version of
     ** the db - no exceptions. Set these two to the largest possible 
     ** values to ensure that this happens.  */
-    pDb->iSnapshotId = LARGEST_TID;
-    pDb->iLocalMinTid = LARGEST_TID;
+    pDb->iSnapshotId = LARGEST_TID-1;
+    pDb->iLocalMinTid = LARGEST_TID-1;
   }
   return (pDb->eMode==HCT_MODE_ROLLBACK);
 }

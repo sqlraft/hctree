@@ -41,6 +41,8 @@ int sqlite3_hct_journal_write(
   sqlite3_int64 iSchemaCid
 );
 
+int sqlite3_hct_journal_truncate(sqlite3 *db, sqlite3_int64 iMinCid);
+
 /* 
 ** Candidate values for second arg to sqlite3_hct_journal_setmode() 
 */

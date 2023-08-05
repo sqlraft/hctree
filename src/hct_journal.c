@@ -1477,13 +1477,147 @@ int sqlite3_hct_journal_snapshot(sqlite3 *db, sqlite3_int64 *piCid){
 
   rc = hctJrnlFind(db, &pJrnl);
   if( rc==SQLITE_OK ){
-    *piCid = (i64) sqlite3HctJournalSnapshot(pJrnl);
+    *piCid = (i64)sqlite3HctJournalSnapshot(pJrnl);
   }else{
     *piCid = 0;
   }
   return rc;
 }
 
+static sqlite3_stmt *hctJrnlPrepare(int *pRc, sqlite3 *db, const char *zSql){
+  sqlite3_stmt *pStmt = 0;
+  if( *pRc==SQLITE_OK ){
+    *pRc = sqlite3_prepare_v2(db, zSql, -1, &pStmt, 0);
+  }
+  return pStmt;
+}
+
+static void hctJrnlFinalize(int *pRc, sqlite3_stmt *pStmt){
+  int rc = sqlite3_finalize(pStmt);
+  if( *pRc==SQLITE_OK ){
+    *pRc = rc;
+  }
+}
+
+int sqlite3_hct_journal_truncate(sqlite3 *db, i64 iMinCid){
+  int rc = SQLITE_OK;
+  HctJournal *pJrnl = 0;
+  sqlite3_stmt *pSelJrnl = 0;
+  sqlite3_stmt *pSelBaseline = 0;
+  sqlite3_stmt *pDelete = 0;
+  sqlite3_stmt *pUpdate = 0;
+
+  rc = hctJrnlFind(db, &pJrnl);
+  if( rc==SQLITE_OK && 0==sqlite3_get_autocommit(db) ){
+    rc = SQLITE_ERROR;
+  }
+
+  if( rc==SQLITE_OK 
+   && pJrnl->pServer->eMode==SQLITE_HCT_JOURNAL_MODE_FOLLOWER 
+  ){
+    u64 iCid = sqlite3HctJournalSnapshot(pJrnl);
+    if( iCid<iMinCid ){
+      rc = SQLITE_RANGE;
+    }
+  }
+
+  if( rc==SQLITE_OK ){
+    pJrnl->bInWrite = 1;
+    rc = sqlite3_exec(db, "BEGIN CONCURRENT", 0, 0, 0);
+  }
+
+  pSelBaseline = hctJrnlPrepare(&rc, db, 
+      "SELECT cid, schemacid, hash FROM sqlite_hct_baseline"
+  );
+  pSelJrnl = hctJrnlPrepare(&rc, db, 
+      "SELECT cid, schemacid, hash FROM sqlite_hct_journal WHERE cid<? "
+      "ORDER BY cid ASC"
+  );
+  pDelete = hctJrnlPrepare(&rc, db, 
+      "DELETE FROM sqlite_hct_journal WHERE cid<?"
+  );
+  pUpdate = hctJrnlPrepare(&rc, db, 
+      "UPDATE sqlite_hct_baseline SET cid=?, schemacid=?, hash=?"
+  );
+
+  if( rc==SQLITE_OK ){
+    i64 iCid = 0;
+    i64 iSchemaCid = 0;
+    u8 aHash[SQLITE_HCT_JOURNAL_HASHSIZE];
+    int nBaseHash = 0;
+    
+    memset(aHash, 0, sizeof(aHash));
+    if( sqlite3_step(pSelBaseline)==SQLITE_ROW ){
+      const u8 *aBaseHash = (const u8*)sqlite3_column_blob(pSelBaseline, 2);
+      nBaseHash = sqlite3_column_bytes(pSelBaseline, 2);
+      memcpy(aHash, aBaseHash, MIN(nBaseHash, sizeof(aHash)));
+      iCid = sqlite3_column_int64(pSelBaseline, 0);
+      iSchemaCid = sqlite3_column_int64(pSelBaseline, 1);
+    }
+    if( nBaseHash!=SQLITE_HCT_JOURNAL_HASHSIZE ){
+      rc = SQLITE_CORRUPT_BKPT;
+    }else{
+      rc = sqlite3_finalize(pSelBaseline);
+      pSelBaseline = 0;
+      sqlite3_bind_int64(pSelJrnl, 1, iMinCid);
+    }
+    while( rc==SQLITE_OK && SQLITE_ROW==sqlite3_step(pSelJrnl) ){
+      i64 iJrnlSchemaCid = sqlite3_column_int64(pSelJrnl, 1);
+      int nJrnlHash = sqlite3_column_bytes(pSelJrnl, 2);
+      const u8 *aJrnlHash = (const u8*)sqlite3_column_blob(pSelJrnl, 2);
+      iCid = sqlite3_column_int64(pSelJrnl, 0);
+
+      if( nJrnlHash!=SQLITE_HCT_JOURNAL_HASHSIZE ){
+        rc = SQLITE_CORRUPT_BKPT;
+      }else{
+        sqlite3_hct_journal_hash(aHash, aJrnlHash);
+      }
+      iSchemaCid = MAX(iSchemaCid, iJrnlSchemaCid);
+    }
+    if( rc==SQLITE_OK ){
+      rc = sqlite3_finalize(pSelJrnl);
+      pSelJrnl = 0;
+    }
+
+    if( rc==SQLITE_OK ){
+      sqlite3_bind_int64(pDelete, 1, iMinCid);
+      sqlite3_step(pDelete);
+      rc = sqlite3_finalize(pDelete);
+      pDelete = 0;
+    }
+    if( rc==SQLITE_OK ){
+      sqlite3_bind_int64(pUpdate, 1, iCid);
+      sqlite3_bind_int64(pUpdate, 2, iSchemaCid);
+      sqlite3_bind_blob(pUpdate, 3, aHash, SQLITE_HCT_JOURNAL_HASHSIZE, 0);
+      sqlite3_step(pUpdate);
+      rc = sqlite3_finalize(pUpdate);
+      pUpdate = 0;
+    }
+  }
+
+  assert( rc!=SQLITE_OK || sqlite3_get_autocommit(db)==0 );
+  if( sqlite3_get_autocommit(db)==0 ){
+    if( rc==SQLITE_OK ){
+      rc = sqlite3HctDbStartWrite(pJrnl->pDb, &pJrnl->iWriteTid);
+      pJrnl->iWriteCid = 1;
+    }
+    if( rc==SQLITE_OK ){
+      rc = sqlite3_exec(db, "COMMIT", 0, 0, 0);
+    }
+    if( rc!=SQLITE_OK ){
+      sqlite3_exec(db, "ROLLBACK", 0, 0, 0);
+    }
+  }
+
+  hctJrnlFinalize(&rc, pSelJrnl);
+  hctJrnlFinalize(&rc, pSelBaseline);
+  hctJrnlFinalize(&rc, pDelete);
+  hctJrnlFinalize(&rc, pUpdate);
+  pJrnl->bInWrite = 0;
+  pJrnl->iWriteTid = 0;
+  pJrnl->iWriteCid = 0;
+  return rc;
+}
 
 static u64 hctJournalFindLastWrite(
   int *pRc,                       /* IN/OUT: Error code */

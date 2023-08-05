@@ -978,7 +978,7 @@ int sqlite3HctBtreeBeginTrans(Btree *pBt, int wrflag, int *pSchemaVersion){
     rc = sqlite3HctDbStartRead(p->pHctDb, p->pHctJrnl);
   }
 
-  if( pSchemaVersion ){
+  if( rc==SQLITE_OK && pSchemaVersion ){
     sqlite3HctBtreeGetMeta((Btree*)p, 1, (u32*)pSchemaVersion);
     sqlite3HctDbTransIsConcurrent(p->pHctDb, p->db->bConcurrent);
   }
