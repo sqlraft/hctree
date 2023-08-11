@@ -919,7 +919,6 @@ int sqlite3HctJrnlRecovery(HctJournal *pJrnl, HctDatabase *pDb){
   i64 iMaxCid = 0;                
   i64 iSchemaCid = 0;
 
-
   /* Read the contents of the sqlite_hct_baseline table. */
   rc = hctJrnlReadBaseline(pJrnl, &base);
 
@@ -1507,11 +1506,14 @@ int sqlite3_hct_journal_truncate(sqlite3 *db, i64 iMinCid){
   sqlite3_stmt *pDelete = 0;
   sqlite3_stmt *pUpdate = 0;
 
-  rc = hctJrnlFind(db, &pJrnl);
-  if( rc==SQLITE_OK && 0==sqlite3_get_autocommit(db) ){
-    rc = SQLITE_ERROR;
+  if( 0==sqlite3_get_autocommit(db) ){
+    sqlite3ErrorWithMsg(db, SQLITE_ERROR, 
+        "cannot truncate journal from within a transaction"
+    );
+    return SQLITE_ERROR;
   }
 
+  rc = hctJrnlFind(db, &pJrnl);
   if( rc==SQLITE_OK 
    && pJrnl->pServer->eMode==SQLITE_HCT_JOURNAL_MODE_FOLLOWER 
   ){
@@ -1618,6 +1620,63 @@ int sqlite3_hct_journal_truncate(sqlite3 *db, i64 iMinCid){
   pJrnl->iWriteCid = 0;
   return rc;
 }
+
+/*
+** Write empty records for any missing journal entries with cid values
+** less than or equal to iCid.
+*/
+int sqlite3_hct_journal_patchto(sqlite3 *db, sqlite3_int64 iMaxCid){
+  int rc = SQLITE_OK;
+  HctJournal *pJrnl = 0;
+  sqlite3_stmt *pSel = 0;
+
+  if( 0==sqlite3_get_autocommit(db) ){
+    sqlite3ErrorWithMsg(db, SQLITE_ERROR, 
+        "cannot patch journal from within a transaction"
+    );
+    return SQLITE_ERROR;
+  }
+  if( pJrnl->pServer->eMode==SQLITE_HCT_JOURNAL_MODE_LEADER ){
+    sqlite3ErrorWithMsg(db, SQLITE_ERROR, 
+        "cannot patch journal in leader database"
+    );
+    return SQLITE_ERROR;
+  }
+
+  rc = hctJrnlFind(db, &pJrnl);
+  pSel = hctJrnlPrepare(&rc, db, 
+      "SELECT cid FROM sqlite_hct_journal WHERE data IS NULL AND cid<("
+      "  SELECT max(cid) FROM sqlite_hct_journal"
+      ") AND cid<=?"
+  );
+  if( rc==SQLITE_OK ){
+    pJrnl->bInWrite = 1;
+    sqlite3_bind_int64(pSel, 1, iMaxCid);
+    rc = sqlite3_exec(db, "BEGIN CONCURRENT", 0, 0, 0);
+  }
+  while( rc==SQLITE_OK && SQLITE_ROW==sqlite3_step(pSel) ){
+    u64 iCid = sqlite3_column_int64(pSel, 0);
+    rc = hctJrnlWriteRecord(pJrnl, iCid, "", 0, 0, 0, 0);
+  }
+  hctJrnlFinalize(&rc, pSel);
+
+  if( rc==SQLITE_OK ){
+    rc = sqlite3HctDbStartWrite(pJrnl->pDb, &pJrnl->iWriteTid);
+    pJrnl->iWriteCid = 1;
+  }
+  if( rc==SQLITE_OK ){
+    rc = sqlite3_exec(db, "COMMIT", 0, 0, 0);
+  }
+  if( rc!=SQLITE_OK ){
+    sqlite3_exec(db, "ROLLBACK", 0, 0, 0);
+  }
+
+  pJrnl->bInWrite = 0;
+  pJrnl->iWriteTid = 0;
+  pJrnl->iWriteCid = 0;
+  return rc;
+}
+
 
 static u64 hctJournalFindLastWrite(
   int *pRc,                       /* IN/OUT: Error code */

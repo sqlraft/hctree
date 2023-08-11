@@ -77,14 +77,14 @@ by the sqlite3\_hct\_journal\_write() call:
       cid INTEGER PRIMARY KEY,
       schema TEXT,
       data BLOB,
-      schema_version BLOB,
+      schemacid INTEGER,
       hash BLOB,
       tid INTEGER,
       validcid INTEGER
     );
     CREATE TABLE sqlite_hct_baseline(
       cid INTEGER,
-      schema_version BLOB,
+      schemacid INTEGER,
       hash BLOB
     );
 ```
