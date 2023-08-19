@@ -28,51 +28,28 @@ Leader/Follower Replication Details
 This page builds on the [speculations here](hctree_bedrock.md).
 
 <ol>
-  <li> [Configuring a Database For Replication](#configuring)
+  <li> [Replicated Database Schema](#tables)
+  <li> [Initializing a Replicated Database](#initializing)
+  <li> [Selecting Leader/Follower Mode](#mode)
   <li> [Automatic Journalling For Leaders](#leaders)
   <li> [Applying Changes To Follower Databases](#followers)
-  <li> [Selecting Leader/Follower Mode](#mode)
-  <li> [Custom Validation Callback](#callback)
+  <li> [Validation Callback For Leader Nodes](#callback)
   <li> [Truncating the Journal Table](#truncating)
   <li> [Hash and Synchronization Related Functions](#hashes)
   <li> [Application Programming Notes](#applications)
-  <li> [Data Formats](#formats)
+  <li> [Table Details](#table_details)
+  <li> [Data Format](#dataformat)
 </ol>
 
-<a name=configuring></a>
-1.\ Configuring a Database For Replication
-------------------------------------------
+<a name=tables></a>
+1.\ Replicated Database Schema
+------------------------------
 
-To participate in leader/follower replication, a database must be configured
-by calling the following function:
-
-```
-    /*
-    ** Initialize the main database for replication. Return SQLITE_OK if
-    ** successful. Otherwise, return an SQLite error code and leave an
-    ** English language error message in the db handle for sqlite3_errmsg().
-    */
-    int sqlite3_hct_journal_init(sqlite3 *db);
-```
-
-When this API is called, the following must be true:
-
-  *  The database must be completely empty (contain zero tables),
-  *  The connection passed as the argument must be the only connection
-     open on the database, and
-  *  There must not be an open transaction on the database connection.
-
-Some attempt is made to verify the three conditions above, but race conditions
-are possible. For example, if another thread opens a connection to the 
-database while sqlite3\_hct\_journal\_init() is being called, database
-corruption may follow.
-
-The "replication" setting is persistent - this API function must only be
-called once, not every time the database is opened. In practice, a database
-suports replication if it contains the following tables (which are created
-by the sqlite3\_hct\_journal\_write() call:
+A replicated database, one that supports leader/follower replication, 
+contains the following two system tables:
 
 ```
+    -- The "journal" table.
     CREATE TABLE sqlite_hct_journal(
       cid INTEGER PRIMARY KEY,
       schema TEXT,
@@ -82,6 +59,8 @@ by the sqlite3\_hct\_journal\_write() call:
       tid INTEGER,
       validcid INTEGER
     );
+
+    -- The "baseline" table.
     CREATE TABLE sqlite_hct_baseline(
       cid INTEGER,
       schemacid INTEGER,
@@ -89,36 +68,10 @@ by the sqlite3\_hct\_journal\_write() call:
     );
 ```
 
-The journal table is initially empty. The baseline table initially contains a
-single row, populated as if: 
-
-```
-    INSERT INTO sqlite_hct_baseline VALUES(
-        0,                        -- cid
-        zeroblob(16),             -- schema_version
-        zeroblob(16)              -- hash
-    );
-```
-
-where 16 is the size in bytes of the fixed-size &lt;algorithm-name&gt;
-hashes used in the journal and baseline tables:
-
-```
-    #define SQLITE_HCT_JOURNAL_HASHSIZE 16
-```
-
-The journal and baseline tables may be read like any other database table
-using SQL SELECT statements, but it is an error (SQLITE\_READONLY) to attempt
-to write to them directly. They may only be modified indirectly, using the
-interfaces described in the following sections.
-
-<a name=leaders></a>
-2.\ Automatic Journalling For Leaders
--------------------------------------
-
-By default, whenever a transaction is committed to a database configured
-for replication, an entry is automatically added to the journal table.
-The three most interesting columns of the journal table entry are:
+By default, the sqlite\_hct\_journal table - hereafter the "journal table" -
+contains one entry for each transaction that has been written to the database
+since the beginning of time. The four most interesting columns of the journal
+table entry are:
 
   *  **cid**: The "Commit ID" of the transaction. A commit ID is assigned
      to each transaction, in incrementing order, starting from 1. Commit IDs
@@ -135,132 +88,105 @@ The three most interesting columns of the journal table entry are:
      made by the transaction. Or, if the transaction did not modify any data,
      a 0 byte blob.
 
-Logically, the current state of the database may be reconstructed by starting
-with an empty database, and then for each journal table entry, in order of
-ascending "cid":
+  *  **schemacid**: This integer field identifies the CID value of the last
+     transaction to modify the database schema that this transaction was
+     executed against. Because schema transations are serialized in hctree - no
+     other transaction may execute concurrently with a transaction that modifies
+     the database schema - this completely identifies the version of the schema
+     that the transaction must be executed against.
+
+The current state of the database may be reconstructed by starting with an
+empty database, and then for each journal table entry, in order of ascending
+"cid":
 
   1.  Executing the "schema" SQL script, and then
   2.  Updating the database tables according to the contents of the "data"
       field.
 
-During step (2), no trigger or foreign key processing is performed. The 
-effects of these are already accounted for in the contents of the data
-field.
+The journal and baseline tables may be read like any other database table
+using SQL SELECT statements. However they behave differently with respect
+to transaction isolation. Specifically, all data committed to the journal
+or baseline table becomes instantly visible to all SQL clients, even if
+the transaction is not included in the client's snapshot.
 
-In some cases, when a commit fails during transaction validation (after a
-CID has been allocated), an entry is written to the journal table even though
-the transaction has been rolled back. In this case both the "schema" and
-"data" fields are 0 bytes in size.
+It is an error (SQLITE\_READONLY) to attempt to write to the journal or
+baseline table directly. They may only be modified indirectly, using the
+interfaces described in the following sections.
 
-The columns of a journal table entry are populated as follows:
+<b>Truncated Journals</b>
 
-<table width=80% align=center cellpadding=5 border=1>
-<tr><th align=left> Column <th align=left> Contents
-<tr><td> cid 
-    <td> The integer CID (Commit ID) value assigned to the transaction. CID
-         values are assigned in contiguous incrementing order.
-<tr><td> schema
-    <td> If the transaction made any modifications to the database schema,
-         then this field contains an SQL script to recreate them. If the
-         transaction did not modify the database schema at all, then this
-         field is set to a string zero characters in length.
-<tr><td> data
-    <td> This field contains a blob that encodes the changes made to table
-         contents by the transaction in a key-value format - where keys are
-         the PRIMARY KEY field values of affected tables, and the values are
-         either the new row data for the row, or a tombstone marker signifying
-         a delete. See TODO for details.
-<tr><td> schema\_version 
-    <td> A hash value. If the current row contains an empty "schema" column,
-         then this column is populated with a copy of the schema\_version 
-         value for the previous transaction. Or, if the current row contains
-         schema modifications, then this column contains a hash of the
-         schema\_version of the previous transaction and the contents of
-         the "schema" column. In other words, this column contains a hash
-         of all non-empty schema columns in the journal table.
-<tr><td> hash 
-    <td> Hash of fields "cid", "schema_version", "schema" and "data".
-<tr><td> tid 
-    <td> The integer TID (Transaction ID) value used internally for the
-         transaction by the local hctree node. This is used internally and
-         it not duplicated between leader and follower database nodes.
-<tr><td> validcid 
-    <td> This is used internally and is not copied between leader and follower
-         database nodes.  
-</table>
+In practice, storing data for every transaction executed during the lifetime
+of a database would soon become cumbersome. The API allows the journal to
+be <a href=#truncating>truncated</a>. Truncating the journal atomically:
 
-<a name=followers></a>
-3.\ Applying Changes To Follower Databases
-------------------------------------------
+  *  Removes a contiguous set of the oldest entries from the journal 
+     table, and
+  *  Updates the baseline table.
 
-To copy a journal entry from one database to another, the first 4 fields of
-the journal entry must be passed to the following API:
+The baseline table always contains a single row, summarizing all transactions
+that have been removed from the journal table in the lifetime of the
+database. Initally, the baseline table is populated as if:
+```
+    INSERT INTO sqlite_hct_baseline(0, 0, zeroblob(16));
+```
+Generally, the columns of the single row in the baseline table are populated 
+as follows:
+
+  *  **cid**: The CID of the last (newest) entry removed from the journal
+              table.
+
+  *  **schemacid**: The largest schemacid value for any entry removed from the
+              journal table.
+
+  *  **hash**: A cryptographic hash calculated based on the "cid", "schema",
+               "data" and "schemacid" values of all entries removed from the
+               journal table so far.
+
+
+<a name=holes></a>
+<b>Holes in the Journal</b>
+
+Because transactions may be executed concurrently on both leader and 
+follower nodes, a transaction with CID value C may be added to the journal
+table before transaction C-1. This means that in general, a journal may
+contain something other than a contiguous set of CID values starting from
+(baseline.cid+1). In this case, the missing entries are refered to as 
+"holes in the journal".
+
+
+<a name=initializing></a>
+2.\ Initializing a Replicated Database
+--------------------------------------
+
+To participate in leader/follower replication, a database must be configured
+by calling the following function:
+
 ```
     /*
-    ** Write a transaction into the database.
+    ** Initialize the main database for replication. Return SQLITE_OK if
+    ** successful. Otherwise, return an SQLite error code and leave an
+    ** English language error message in the db handle for sqlite3_errmsg().
     */
-    int sqlite3_hct_journal_write(
-        sqlite3 *db,                   /* Write to "main" db of this handle */
-        i64 iCid,
-        const char *zSchema,
-        const void *pData, int nData,
-        const void *pSchemaVersion
-    );
+    int sqlite3_hct_journal_init(sqlite3 *db);
 ```
-If successful, a single call to sqlite3\_hct\_journal\_write() atomically
-updates both the journal table and, according to the zSql and pData/nData
-arguments, the database itself.
 
-If the journal table already contains an entry with "cid" value iCid, then
-the call fails with an SQLITE\_CONSTRAINT error. Or, if the pSchemaVersion
-hash is not compatible with the current contents of the journal, this call 
-also fails with SQLITE\_CONSTRAINT.
+This API call creates the journal and baseline tables in the database, and
+adds the initial row to the baseline table.
 
-**Concurrency**
+When this API is called, the following must be true:
 
-Each entry of the journal table represents a transaction. The contents of a
-journal table, sorted in CID order, may be looked at as a series of groups of
-transactions, where all members of a group have the same value for the
-schema\_version column. A group consists of:
+  *  The database must be completely empty (contain zero tables),
+  *  The connection passed as the argument must be the only connection
+     open on the database, and
+  *  There must not be an open transaction on the database connection.
 
-  *   An entry with "sql" set to other than an empty string (i.e. a
-      transaction that modifies the schema - a "schema transaction").
-  *   Zero or more transactions that do not modify the db schema.
-
-A schema transaction may not be applied concurrently with any other entry.
-Before the schema transaction with cid=C can be applied, all transactions with
-cid values less than C must have been completed. And schema transaction C must
-have completed before any transaction with a cid value greater than C can be
-applied. Any call to sqlite3\_hct\_journal\_write() that violates these
-ordering rules fails with an SQLITE\_SCHEMA error. The application should
-interpret this as "try that one again later".
-
-However, within a group, transactions may be applied in any order, using any
-number of threads (each with its own db handle).
-
-<a name=snapshots></a>
-**Snapshot Availability**
-
-In a distributed system, it may be desired not to run a query on a follower
-node until a certain transaction from the leader node has been propagated
-and made available on the follower. For example, if a single client performs
-a database write followed by a database read, then the results of the write
-should be visible to the read, even if the read is performed on a follower
-node.
-```
-    /*
-    ** Set output variable (*piCid) to the CID of the newest available 
-    ** database snapshot. Return SQLITE_OK if successful, or an SQLite
-    ** error code if something goes wrong.
-    */
-    int sqlite3_hct_journal_snapshot(sqlite3 *db, i64 *piCid);
-```
-In practice, the available snapshot S is the largest value for which all
-journal entries with CID values S or smaller are already present in the
-journal table.
+Some attempt is made to verify the three conditions above, but race conditions
+are possible. For example, if another thread opens a connection to the 
+database while sqlite3\_hct\_journal\_init() is being called, database
+corruption may follow.
 
 <a name=mode></a>
-4.\ Selecting Leader/Follower Mode
+3.\ Selecting Leader/Follower Mode
 ------------------------------------
 
 Each replication-enabled database opened by a process is at all times in 
@@ -270,8 +196,9 @@ an error to call the sqlite3\_hct\_journal\_write() or
 sqlite3\_hct\_journal\_snapshot() interfaces.
 
 The LEADER/FOLLOWER setting is per-database, not per-database handle. If a
-process has multiple handles open on a replication enabled database, then all
-handles share a single LEADER/FOLLOWER setting.
+process has multiple handles open on the same replication enabled database,
+then all handles share a single LEADER/FOLLOWER setting. Modifying the setting
+via one handle modifies it for them all.
 
 ```
     #define SQLITE_HCT_JOURNAL_MODE_FOLLOWER 0
@@ -312,15 +239,101 @@ journal</a>. A database in leader mode may be changed to FOLLOWER mode at
 any time using the API.
 
 
+<a name=leaders></a>
+4.\ Automatic Journalling For Leader Nodes
+------------------------------------------
+
+By default, whenever a transaction is committed to a database configured
+for replication in LEADER mode, an entry is automatically added to the journal
+table. 
+
+In some cases, when a commit fails during transaction validation (after a
+CID has been allocated), an entry is written to the journal table even though
+the transaction has been rolled back. In this case both the "schema" and
+"data" fields are 0 bytes in size.
+
+
+
+
+<a name=followers></a>
+5.\ Applying Changes To Follower Databases
+------------------------------------------
+
+To copy a journal entry from one database to another, the first 4 fields of
+the journal entry must be passed to the following API:
+```
+    /*
+    ** Write a transaction into the database.
+    */
+    int sqlite3_hct_journal_write(
+        sqlite3 *db,                   /* Write to "main" db of this handle */
+        i64 iCid,
+        const char *zSchema,
+        const void *pData, int nData,
+        i64 iSchemaCid
+    );
+```
+If successful, a single call to sqlite3\_hct\_journal\_write() atomically
+updates both the journal table and, according to the zSql and pData/nData
+arguments, the database itself.
+
+If the journal table already contains an entry with "cid" value iCid, then
+the call fails with an SQLITE\_CONSTRAINT error. Or, if the pSchemaVersion
+hash is not compatible with the current contents of the journal, this call 
+also fails with SQLITE\_CONSTRAINT.
+
+**Concurrency**
+
+Each entry of the journal table represents a transaction. The contents of a
+journal table, sorted in CID order, may be looked at as a series of groups of
+transactions, where all members of a group have the same value for the
+schemacid column. A group consists of:
+
+  *   An entry with "schema" set to other than an empty string (i.e. a
+      transaction that modifies the schema - a "schema transaction").
+  *   Zero or more transactions that do not modify the db schema.
+
+A schema transaction may not be applied concurrently with any other entry.
+Before the schema transaction with cid=C can be applied, all transactions with
+cid values less than C must have been completed. And schema transaction C must
+have completed before any transaction with a cid value greater than C can be
+applied. Any call to sqlite3\_hct\_journal\_write() that violates these
+ordering rules fails with an SQLITE\_SCHEMA error. The application should
+interpret this as "try that one again later".
+
+However, within a group, transactions may be applied in any order, using any
+number of threads (each with its own db handle).
+
+<a name=snapshots></a>
+**Snapshot Availability**
+
+In a distributed system, it may be desired not to run a query on a follower
+node until a certain transaction from the leader node has been propagated
+and made available on the follower. For example, if a single client performs
+a database write followed by a database read, then the results of the write
+should be visible to the read, even if the read is performed on a follower
+node.
+```
+    /*
+    ** Set output variable (*piCid) to the CID of the newest available 
+    ** database snapshot. Return SQLITE_OK if successful, or an SQLite
+    ** error code if something goes wrong.
+    */
+    int sqlite3_hct_journal_snapshot(sqlite3 *db, i64 *piCid);
+```
+In practice, the available snapshot S is the largest value for which all
+journal entries with CID values S or smaller are already present in the
+journal table.
+
+
 <a name=callback></a>
-5.\ Custom Validation Callback
-------------------------------
+6.\ Validation Callback for Leader Nodes
+----------------------------------------
 
 The sqlite3\_hct\_journal\_validation\_hook() API is used to register a
 custom validation callback with a database handle. If one is registered,
 the custom validation callback is invoked each time a transaction is commited
-to an hctree database with replication enabled - either using normal SQL
-statements, or by calling the sqlite3\_hct\_journal\_write() function.
+to an hctree database in LEADER mode.
 
 More specifically, the validation hook is invoked after all new keys have 
 already been written into the database, and after internal transaction
@@ -348,7 +361,7 @@ validation had failed.
             i64 iCid
             const char *zSchema,
             const void *pData, int nData,
-            const void *pSchemaVersion
+            i64 iSchemaCid
         )
     );
 ```
@@ -360,19 +373,16 @@ inserted into the journal table for the transaction, assuming it is committed.
 
 The custom validation hook may be used for two purposes:
 
-  1.  On leader nodes, as an efficient way to obtain the 4 values that must be
-      propagated to follower nodes for each transaction, and
+  1.  As an efficient way to obtain the 4 values that must be propagated to
+      follower nodes for each transaction, and
 
   2.  To perform custom validation. An example of custom validation that might
       be required in a leader-follower system is that some transactions may 
       require that they be propagated to follower nodes before they can be
       committed.
 
-The custom validation hook is invoked for both transactions performed using
-the ordinary SQL interfaces and for transactions written into the database
-using API function sqlite3\_hct\_journal\_write(). For the purposes of 
-<a href=snapshots>snapshot availability</a>, while the validation hook is
-running for transaction T:
+For the purposes of <a href=snapshots>snapshot availability</a>, while the
+validation hook is running for transaction T:
 
   *  The transaction counts as committed in the sense that, assuming all
      other conditions are met, transactions with CID values greater than
@@ -384,7 +394,7 @@ running for transaction T:
      back.
 
 <a name=truncating></a>
-6.\ Truncating the Journal Table
+7.\ Truncating the Journal Table
 --------------------------------
 
 In order to avoid the journal table from growing indefinitely, old entries 
@@ -392,18 +402,6 @@ may be deleted from it - on a FIFO basis only - once it is possible that they
 will no longer be required for synchronization. The contents of the 
 baseline table, always a single row, summarizes those journal entries 
 already deleted from the journal table.
-
-<table width=80% align=center cellpadding=5 border=1>
-<tr><th align=left> Column <th align=left> Contents
-<tr><td> cid
-    <td> The CID of the last journal entry deleted. All journal entries
-         with CID values between 1 and this value, contiguous, have
-         been deleted from the journal table. 
-<tr><td> hash
-    <td> A hash of the "hash" fields for all deleted journal entries.
-<tr><td> schema\_version
-    <td> The schema_version value of the last journal entry deleted.
-</table>
 
 Instead, there is a C API to atomically remove rows from the journal table
 and update the baseline table:
@@ -417,46 +415,42 @@ and update the baseline table:
 ```
 
 <a name=hashes></a>
-7.\ Hash and Synchronization Related Functions
+8.\ Hash and Synchronization Related Functions
 ----------------------------------------------
 
 Synchronization between nodes is largely left to the application. The contents
 of a journal table may be read using ordinary SQL queries, and missing
 transactions applied to databases using the usual 
-sqlite3\_hct\_journal\_write() interface described above.
+sqlite3\_hct\_journal\_write() interface described above. This section
+describes the provided APIs for:
 
-From the point of view of readers, the sqlite\_hct\_journal and
-sqlite\_hct\_baseline tables do not follow the same rules for consistency
-or isolation as other tables. New journal entries created by SQL transactions
-become visible to readers as soon as the creating transaction is committed or
-rolled back. Similarly, the effects of sqlite3_hct_journal_write() and
-sqlite3_hct_journal_truncate() calls are immediately visible to all readers.
+  *  Calculating hash values compatible with those written to the baseline
+     table by the <a href=truncating>sqlite3\_hct\_journal\_truncate()</a>
+     API. These are required to determine that it really is possible to
+     synchronize two nodes.
 
+  *  Dealing with holes in the journal after node synchronization is 
+     complete - when the missing transactions are completely lost and 
+     cannot be found anywhere in the system.
+
+Further nodes on how these functions might be used to implement node
+synchronization may be <a href=#leader_failure>found here</a>.
 
 <b>Calculating Hashes</b>
 
-The following function may be used to calculate hash values compatible with
-those stored by the system in the "hash" column of the sqlite\_hct\_baseline
-table.
-```
-    /*
-    ** Both arguments are assumed to point to SQLITE_HCT_JOURNAL_HASHSIZE
-    ** byte buffers. This function updates the hash stored in buffer pHash
-    ** based on the contents of buffer pData.
-    */
-    void sqlite3_hct_journal_hash(void *pHash, const void *pData);
-```
-When it truncates entries from the start of the journal table, the
-sqlite3\_hct\_journal\_truncate() effectively starts with the hash value
-from the baseline table in buffer pHash, then calls
-sqlite3\_hct\_journal\_hash() on the hash column of each entry being deleted
-from the sqlite\_hct\_journal table, in ascending order of CID. The final
-value of buffer pHash is then stored in the baseline table as part of the
-new baseline record.
+The hash value stored in the baseline table is a SQLITE\_HCT\_JOURNAL\_HASHSIZE
+(16) bytes in size. It may be calculated as follows:
 
-The value of the hash column of a journal table entry may be calculated based
-on the four values that define the transaction using the following API 
-function:
+  *  A hash for each transaction entry removed from the journal table
+     may be calculated using sqlite3\_hct\_journal\_hashentry(). Internally,
+     this hash is calculated using MD5.
+
+  *  The baseline hash is the XOR of the hashes for all entries deleted
+     from the journal table. 
+
+The following function may be used to calculate a hash for a single journal
+table entry, based on the values of the "cid", "schema", "data" and "validcid"
+columns:
 ```
     /*
     ** It is assumed that buffer pHash points to a buffer
@@ -468,28 +462,29 @@ function:
         i64 iCid,
         const char *zSchema,
         const void *pData, int nData,
-        const void *pSchemaVersion
+        i64 iSchemaCid
     );
 ```
 
-A schema version may be calculated based on the previous schema version and
-the SQL script in the "schema" column of a journal entry:
+The following function may be used to calculate hash values compatible with
+those stored by the system in the "hash" column of the sqlite\_hct\_baseline
+table.
 ```
     /*
-    ** Update the hash in pHash based on the contents of the nul-terminated
-    ** string passed as the second argument. If the string is zero bytes in
-    ** length, then the value stored in buffer pHash is unmodified.
+    ** Both arguments are assumed to point to SQLITE_HCT_JOURNAL_HASHSIZE
+    ** byte buffers. This function calculates the XOR of the two buffers
+    ** and overwrites the contents of buffer pHash with it.
     */
-    void sqlite3_hct_journal_hashschema(void *pHash, const char *zSchema);
+    void sqlite3_hct_journal_xor(void *pHash, const void *pData);
 ```
 
-<a name=holes></a>
-<b>Plugging Journal Holes</b>
+<a name=rollback></a>
+<b>Dealing With Holes in the Journal</b>
 
 If a journal table is "missing" entries - that is it does not contain only
-entries with a contiguous set of CID values starting from 
-(baseline.cid+1) - it is said to contain "holes". So long as a journal contains
-holes, the following are true:
+entries with a contiguous set of CID values starting from (baseline.cid+1) - 
+it is said to contain "holes". So long as a journal contains holes, the
+following are true:
 
   *  No data associated with journal entries that follow the first hole in
      the journal will be visible to readers
@@ -497,25 +492,272 @@ holes, the following are true:
   *  It is not possible to switch the database from FOLLOWER to LEADER mode
      while holes exist.
 
-Calling the following API writes empty entries (entries containing no data or
-schema modifications) to the journal table into all holes up to and including
-cid=iCid.
+By default, the following API rolls back all transactions that occur
+following the first hole in the journal, and removes the corresponding 
+entries from the sqlite\_hct\_journal table:
+
 ```
     /*
-    ** Write empty records for any missing journal entries with cid values
-    ** less than or equal to iCid.
+    ** Rollback transactions added using sqlite3_hct_journal_write().
     */
-    int sqlite3_hct_journal_patchto(sqlite3 *db, i64 iCid);
+    int sqlite3_hct_journal_rollback(sqlite3 *db, int flags);
+
+    /* 
+    ** Flags for sqlite3_hct_journal_rollback()
+    */
+    #define SQLITE_HCT_ROLLBACK_PRESERVE 0x0001
 ```
 
+This might seem dramatic - it involves discarding transactions after all - but
+is necessary under some circumstances. Suppose a failure in the system leaves
+a follower node with transactions 1, 2, 3 and 5, but not 4. In this state
+transaction 5 must be discarded, as it may depend on transaction 4 - without
+transaction 4, transactions 1, 2, 3 and 5 may not constitute a valid database
+state. This is true even if the application logic does not appear to demand
+rigorous consistency. If, for example:
+
+```
+    -- Initial database state
+    CREATE TABLE t1(a INTEGER PRIMARY KEY, b TEXT UNIQUE);
+    INSERT INTO t1 VALUES(101, 'abc');
+
+    DELETE FROM t1 WHERE a=101;         -- transaction 4
+    INSERT INTO t1 VALUES(102, 'abc');  -- transaction 5
+```
+
+In follower mode, sqlite3\_hct\_journal\_write() may be used to apply
+transaction 5 to the db before transaction 4. If, following a failure in
+the system, transaction 4 were lost while transaction 5 were not, the 
+database UNIQUE constraint would be violated.
+
+A better effort to preserve all transactions is made if the
+SQLITE\_HCT\_ROLLBACK\_PRESERVE flag is passed to the invocation of
+sqlite3\_hct\_journal\_rollback(). In that case, if it can be proven
+that none of the transactions that follow a hole in the journal depend
+on any transactions before the hole, then the hole is plugged with a
+NULL transaction (one that makes no modifications to the db) and the
+subsequent transactions remain in the db. In practice this should almost
+always preserve all transactions. 
+
+
 <a name=applications></a>
-8.\ Application Programming Notes
+9.\ Application Programming Notes
 ---------------------------------
 
-TODO
+This section contains a description of a simple replicated database system
+that could be constructed using the APIs above, along with observations made
+while designing and testing the same.
 
-<a name=formats></a>
-9.\ Data Formats
+<b>Normal Operation</b>
+
+Once the system is up and running, with one node elected as leader (and the
+db in LEADER mode) and all others operating as followers (with the db in
+FOLLOWER mode):
+
+  *  Write transactions are processed only on the leader node. There is a 
+     dynamic pool of writer database handles that may be used for writing.
+
+  *  There is a <a href=#callback>custom validation hook</a> registered
+     with each writer handle on the leader node. The custom validation hook
+     serializes the 4 fields required to write a transaction to a follower
+     database ("cid", "schema", "data" and "schemacid") and sends them
+     to each follower node. Which then writes the transaction to its local db 
+     using <a href=#followers>sqlite3_hct_journal_write()</a>.
+
+  *  To maximize concurrency, each writer connection on the leader node might
+     have its own dedicated follower database handle on each follower node,
+     and its own dedicated sockets connection to each follower node as well.
+
+~~~ pikchr
+linewid=0.1
+
+LEADER:   box height 1.5 width 1.5 radius 0.1
+move
+FOLLOWER: box same
+
+text at LEADER.n + (0.0,0.1) "Leader Node"
+text at FOLLOWER.n + (0.0,0.1) "Follower Node"
+
+cylinder "Leader" "DB" height 0.7 width 0.5 at LEADER.c - (0.2,0)
+cylinder "Follower" "DB" same at FOLLOWER.c + (0.2,0)
+
+down
+L1: box with ne at LEADER.ne - (0.1,0.2) height 0.2 width 0.2
+move 0.1 ; L2: box same
+move 0.1 ; L3: box same
+move 0.1 ; L4: box same
+
+down
+F1: box with nw at FOLLOWER.nw - (-0.1,0.2) height 0.2 width 0.2
+move 0.1 ; F2: box same
+move 0.1 ; F3: box same
+move 0.1 ; F4: box same
+
+arrow <-> from L1.e to F1.w
+arrow <-> from L2.e to F2.w
+arrow <-> from L3.e to F3.w
+SOCKET: arrow <-> from L4.e to F4.w
+
+right
+T1: text at LEADER.s - (0.2,0.3) "Pool of db" "connections for" "writing on leader,"
+T2: text "each with its own" "socket connection" "to the follower node,"
+T3: text "and its own" "follower connection" "replicating its" "htransactions"
+
+BTOP1: line from L1.nw-(0.1,0.0) then go 0.1 sw
+BBOT1: line from L4.sw-(0.1,0.0) then go 0.1 nw
+BMID1: line from BTOP1.sw to BBOT1.nw
+line from BMID1 to T1.n
+
+BTOP2: line from F1.ne+(0.1,0.0) then go 0.1 se
+BBOT2: line from F4.se+(0.1,0.0) then go 0.1 ne
+BMID2: line from BTOP2.se to BBOT2.ne
+line from BMID2 to T3.n
+
+line from T2.n to SOCKET.c
+
+
+
+~~~ 
+
+
+  *  Read transactions may be executed on any node (leader or follower).
+     In cases where a client executes a read transaction that must logically 
+     follow a write transaction, it may use the
+     <a href=#snapshots>sqlite3_hct_journal_snapshot()</a> API to verify
+     that the snapshot it is reading is new enough to include the required
+     write transaction (the cid of which the client obtained via the custom
+     validation hook when it was executed).
+
+<b>Adding a Node</b>
+
+A new follower node may be added to the system at any point. Before it 
+starts the new follower node must have some local database - an old version 
+of the logical db.
+
+  *  The new follower node must check that its current state really is a
+     valid historical state of the logical database to which it is connecting,
+     by comparing the contents of its <a href=#tables>sqlite_hct_baseline and 
+     sqlite_hct_journal tables</a> with those of some other node. Because
+     both the new follower and the existing node may have been updated by
+     <a href=truncating>sqlite3_hct_journal_truncate()</a> at different points,
+     <a href=hashes>sqlite3_hct_journal_hashentry()</a> and
+     <a href=hashes>sqlite3_hct_journal_xor()</a> may be useful.
+
+     To make things simpler, <a href=rollback>sqlite3_hct_journal_rollback()</a>
+     may be called before this step.
+
+     If it is found that the new follower either:
+
+       *  Has a journal entry with cid value C that is different from the
+          journal entry with cid value C belonging to the existing node, or
+
+       *  Has a journal entry with a CID value C that is larger than the
+          largest CID value in the existing nodes journal table.
+
+     then the new follower may not connect to the system. How this is dealt
+     with is out of scope here.
+
+  *  The new follower node must then obtain, by requesting it from existing
+     nodes, data (i.e.  cid, schema, data and schemacid values) for all
+     transactions required to bring the new nodes journal up to date. And
+     call <a href=followers>sqlite3_hct_journal_write()</a> for each to
+     apply it to the local database.
+
+  *  The new follower then informs the current leader of its existence, and
+     begins receiving new transactions.
+
+  *  Of course there is race-condition between the two steps above -
+     transactions may have been added to the database by the leader between
+     when the new follower received data from another node and when it
+     begins receiving updates from the leader. This is easy to 
+     resolve - if the database schema has not changed, then the system
+     may begin applying new updates as they are received from the leader
+     node before requesting any missing transactions from any node in
+     the system. If the schema has changed, then further transactions may
+     be requested from a peer node before beginning to apply the stream
+     of transactions from the leader.
+
+<a name=leader_failure></a>
+<b>Failure of Leader Node</b>
+
+When the current leader node fails or is shut down, the system must (somehow)
+elect a new leader node from the remaining followers. At this point all
+nodes in the system are in FOLLOWER mode.
+
+  *  The new leader must contact all other follower nodes, requesting any 
+     journal table entries that it is missing. These are added to the 
+     local db using sqlite3\_hct\_journal\_write().
+
+  *  Once all requested transactions are applied, the new leader calls
+     <a>sqlite3\_hct\_journal\_rollback()</a> with the PRESERVE flag
+     set. It now has the newest usable snapshot that can be recreated
+     using the transactions found in the system.
+
+  *  The leader then sends each existing follower all transactions that they
+     are missing. The follower applies these transactions to the db and then
+     calls sqlite3\_hct\_journal\_rollback() to discard any extra entries
+     in its journal table.
+
+  *  The new leader calls sqlite3\_hct\_journal\_setmode() to change to 
+     LEADER mode and begins accepting new write transactions.
+
+<b>System Startup</b>
+
+
+<a name=table_details></a>
+10.\ Table Details
+-----------------
+
+The journal table (sqlite\_hct\_journal):
+
+<table width=80% align=center cellpadding=5 border=1>
+<tr><th align=left> Column <th align=left> Contents
+<tr><td> cid 
+    <td> The integer CID (Commit ID) value assigned to the transaction. CID
+         values are assigned in contiguous incrementing order.
+<tr><td> schema
+    <td> If the transaction made any modifications to the database schema,
+         then this field contains an SQL script to recreate them. If the
+         transaction did not modify the database schema at all, then this
+         field is set to a string zero characters in length.
+<tr><td> data
+    <td> This field contains a blob that encodes the changes made to table
+         contents by the transaction in a key-value format - where keys are
+         the PRIMARY KEY field values of affected tables, and the values are
+         either the new row data for the row, or a tombstone marker signifying
+         a delete. The exact format is <a href=#dataformat>described here</a>.
+<tr><td> schemacid
+    <td> This field contains the "cid" value (an integer) corresponding to the
+         transaction that created the version of the schema that this 
+         transaction was executed. In other words, the cid of the transaction
+         that most recently modified the schema.
+<tr><td> hash 
+    <td> Hash of fields "cid", "schema", "data" and "schemacid".
+<tr><td> tid 
+    <td> The integer TID (Transaction ID) value used internally for the
+         transaction by the local hctree node. This is used internally and
+         it not duplicated between leader and follower database nodes.
+<tr><td> validcid 
+    <td> This is used internally and is not copied between leader and follower
+         database nodes.  
+</table>
+
+The baseline table (sqlite\_hct\_baseline):
+
+<table width=80% align=center cellpadding=5 border=1>
+<tr><th align=left> Column <th align=left> Contents
+<tr><td> cid
+    <td> The CID of the last journal entry deleted. All journal entries
+         with CID values between 1 and this value, contiguous, have
+         been deleted from the journal table. 
+<tr><td> hash
+    <td> A hash of the "hash" fields for all deleted journal entries.
+<tr><td> schema\_version
+    <td> The schemacid value of the last journal entry deleted.
+</table>
+
+<a name=dataformat></a>
+11.\ Data Format
 ----------------
 
 This section describes the format used by the blobs in the "data" column of
