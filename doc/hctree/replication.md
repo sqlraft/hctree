@@ -43,7 +43,7 @@ This page builds on the [speculations here](hctree_bedrock.md).
 
 <a name=tables></a>
 1.\ Replicated Database Schema
-------------------------------
+==============================
 
 A replicated database, one that supports leader/follower replication, 
 contains the following two system tables:
@@ -107,13 +107,14 @@ The journal and baseline tables may be read like any other database table
 using SQL SELECT statements. However they behave differently with respect
 to transaction isolation. Specifically, all data committed to the journal
 or baseline table becomes instantly visible to all SQL clients, even if
-the transaction is not included in the client's snapshot.
+the write transaction is not included in the client's snapshot.
 
 It is an error (SQLITE\_READONLY) to attempt to write to the journal or
 baseline table directly. They may only be modified indirectly, using the
 interfaces described in the following sections.
 
-<b>Truncated Journals</b>
+1.1. Truncated Journals
+-----------------------
 
 In practice, storing data for every transaction executed during the lifetime
 of a database would soon become cumbersome. The API allows the journal to
@@ -144,7 +145,8 @@ as follows:
 
 
 <a name=holes></a>
-<b>Holes in the Journal</b>
+1.2. Holes in the Journal
+-------------------------
 
 Because transactions may be executed concurrently on both leader and 
 follower nodes, a transaction with CID value C may be added to the journal
@@ -156,7 +158,7 @@ contain something other than a contiguous set of CID values starting from
 
 <a name=initializing></a>
 2.\ Initializing a Replicated Database
---------------------------------------
+======================================
 
 To participate in leader/follower replication, a database must be configured
 by calling the following function:
@@ -187,7 +189,7 @@ corruption may follow.
 
 <a name=mode></a>
 3.\ Selecting Leader/Follower Mode
-------------------------------------
+==================================
 
 Each replication-enabled database opened by a process is at all times in 
 either LEADER or FOLLOWER mode. In FOLLOWER mode, it is an error to attempt
@@ -236,12 +238,12 @@ FOLLOWER mode.
 It may then be changed to LEADER mode using the API. Except, the mode may
 only be changed to LEADER if there are no <a href=#holes>holes in the
 journal</a>. A database in leader mode may be changed to FOLLOWER mode at
-any time using the API.
+any time using the above API.
 
 
 <a name=leaders></a>
 4.\ Automatic Journalling For Leader Nodes
-------------------------------------------
+==================================
 
 By default, whenever a transaction is committed to a database configured
 for replication in LEADER mode, an entry is automatically added to the journal
@@ -253,11 +255,9 @@ the transaction has been rolled back. In this case both the "schema" and
 "data" fields are 0 bytes in size.
 
 
-
-
 <a name=followers></a>
 5.\ Applying Changes To Follower Databases
-------------------------------------------
+==================================
 
 To copy a journal entry from one database to another, the first 4 fields of
 the journal entry must be passed to the following API:
@@ -273,14 +273,15 @@ the journal entry must be passed to the following API:
         i64 iSchemaCid
     );
 ```
-If successful, a single call to sqlite3\_hct\_journal\_write() atomically
-updates both the journal table and, according to the zSql and pData/nData
-arguments, the database itself.
+The database must be in FOLLOWER mode when this function is called. If
+successful, a single call to sqlite3\_hct\_journal\_write() atomically updates
+both the journal table and, according to the zSql and pData/nData arguments,
+the database itself.
 
 If the journal table already contains an entry with "cid" value iCid, then
-the call fails with an SQLITE\_CONSTRAINT error. Or, if the pSchemaVersion
-hash is not compatible with the current contents of the journal, this call 
-also fails with SQLITE\_CONSTRAINT.
+the call fails with an SQLITE\_CONSTRAINT error. Or, if the iSchemaCid
+value is not compatible with the current contents of the journal, this 
+call also fails with SQLITE\_CONSTRAINT.
 
 **Concurrency**
 
@@ -301,8 +302,8 @@ applied. Any call to sqlite3\_hct\_journal\_write() that violates these
 ordering rules fails with an SQLITE\_SCHEMA error. The application should
 interpret this as "try that one again later".
 
-However, within a group, transactions may be applied in any order, using any
-number of threads (each with its own db handle).
+However, within a group, non-schema transactions may be applied in any order,
+using any number of threads (each with its own db handle).
 
 <a name=snapshots></a>
 **Snapshot Availability**
@@ -313,6 +314,11 @@ and made available on the follower. For example, if a single client performs
 a database write followed by a database read, then the results of the write
 should be visible to the read, even if the read is performed on a follower
 node.
+
+The following API may be used to query for the current snapshot available
+to readers on a follower node. If it is not new enough, the caller must
+wait until further transactions have been applied to the db via
+sqlite3\_hct\_journal\_write(), then retry this API call.
 ```
     /*
     ** Set output variable (*piCid) to the CID of the newest available 
@@ -328,7 +334,7 @@ journal table.
 
 <a name=callback></a>
 6.\ Validation Callback for Leader Nodes
-----------------------------------------
+==================================
 
 The sqlite3\_hct\_journal\_validation\_hook() API is used to register a
 custom validation callback with a database handle. If one is registered,
@@ -393,9 +399,15 @@ validation hook is running for transaction T:
      until the validation hook returns and T is either committed or rolled
      back.
 
+In cases where normal, local, validation of a transaction fails after a CID
+value has been allocated, an <a href=#leaders>entry with zero length values
+</a>for the schema and data columns is inserted into the journal table. In this
+case the validation hook is invoked with the corresponding zero length
+parameters, so that the empty transaction can be propagated to follower nodes.
+
 <a name=truncating></a>
 7.\ Truncating the Journal Table
---------------------------------
+==================================
 
 In order to avoid the journal table from growing indefinitely, old entries 
 may be deleted from it - on a FIFO basis only - once it is possible that they
@@ -403,7 +415,7 @@ will no longer be required for synchronization. The contents of the
 baseline table, always a single row, summarizes those journal entries 
 already deleted from the journal table.
 
-Instead, there is a C API to atomically remove rows from the journal table
+There is a C API to atomically remove rows from the journal table
 and update the baseline table:
 
 ```
@@ -416,7 +428,7 @@ and update the baseline table:
 
 <a name=hashes></a>
 8.\ Hash and Synchronization Related Functions
-----------------------------------------------
+==================================
 
 Synchronization between nodes is largely left to the application. The contents
 of a journal table may be read using ordinary SQL queries, and missing
@@ -426,8 +438,8 @@ describes the provided APIs for:
 
   *  Calculating hash values compatible with those written to the baseline
      table by the <a href=truncating>sqlite3\_hct\_journal\_truncate()</a>
-     API. These are required to determine that it really is possible to
-     synchronize two nodes.
+     API. These are required to determine that two nodes really do have a
+     compatible history and can be synchronized.
 
   *  Dealing with holes in the journal after node synchronization is 
      complete - when the missing transactions are completely lost and 
@@ -438,7 +450,7 @@ synchronization may be <a href=#leader_failure>found here</a>.
 
 <b>Calculating Hashes</b>
 
-The hash value stored in the baseline table is a SQLITE\_HCT\_JOURNAL\_HASHSIZE
+The hash value stored in the baseline table is SQLITE\_HCT\_JOURNAL\_HASHSIZE
 (16) bytes in size. It may be calculated as follows:
 
   *  A hash for each transaction entry removed from the journal table
@@ -446,11 +458,11 @@ The hash value stored in the baseline table is a SQLITE\_HCT\_JOURNAL\_HASHSIZE
      this hash is calculated using MD5.
 
   *  The baseline hash is the XOR of the hashes for all entries deleted
-     from the journal table. 
+     from the journal table since the beginning of time. 
 
 The following function may be used to calculate a hash for a single journal
-table entry, based on the values of the "cid", "schema", "data" and "validcid"
-columns:
+table entry, based on the values of the "cid", "schema", "data" and 
+"schemacid" columns:
 ```
     /*
     ** It is assumed that buffer pHash points to a buffer
@@ -481,10 +493,7 @@ table.
 <a name=rollback></a>
 <b>Dealing With Holes in the Journal</b>
 
-If a journal table is "missing" entries - that is it does not contain only
-entries with a contiguous set of CID values starting from (baseline.cid+1) - 
-it is said to contain "holes". So long as a journal contains holes, the
-following are true:
+If a journal <a href=#holes>contains holes</a>, the following are true:
 
   *  No data associated with journal entries that follow the first hole in
      the journal will be visible to readers
@@ -492,21 +501,53 @@ following are true:
   *  It is not possible to switch the database from FOLLOWER to LEADER mode
      while holes exist.
 
-By default, the following API rolls back all transactions that occur
-following the first hole in the journal, and removes the corresponding 
-entries from the sqlite\_hct\_journal table:
+The best way to deal with holes in the journal is to fill them in by calling
+sqlite3\_hct\_journal\_write() with values corresponding to the missing
+transactions obtained from elsewhere in the system. That way no data is
+lost. This API provides an alternative for when the missing transactions
+cannot be found anywhere in the system.
 
 ```
     /*
     ** Rollback transactions added using sqlite3_hct_journal_write().
     */
-    int sqlite3_hct_journal_rollback(sqlite3 *db, int flags);
+    int sqlite3_hct_journal_rollback(sqlite3 *db, i64 iCid);
 
     /* 
-    ** Flags for sqlite3_hct_journal_rollback()
+    ** Special values that may be passed as second argument to
+    ** sqlite3_hct_journal_rollback().
     */
-    #define SQLITE_HCT_ROLLBACK_PRESERVE 0x0001
+    #define SQLITE_HCT_ROLLBACK_MAXIMUM   0
+    #define SQLITE_HCT_ROLLBACK_PRESERVE -1
 ```
+
+The second argument passed to sqlite3\_hct\_journal\_rollback() must be either:
+
+  *  A value greater than or equal to the CID of the first hole (missing
+     transaction) in the journal. In this case all transactions with a CID
+     greater than or equal to the specified value are rolled back and removed
+     from the journal table.
+
+  *  The value SQLITE\_HCT\_ROLLBACK\_MAXIMUM. This is equivalent to passing
+     the CID of the first hole in the journal. All transactions following the
+     first hole in the journal are rolled back and removed from the journal
+     table.
+
+  *  The value SQLITE\_HCT\_ROLLBACK\_PRESERVE. Calling
+     sqlite3\_hct\_journal\_rollback() may rollback as many transactions as
+     SQLITE\_HCT\_ROLLBACK\_MAXIMUM, except that if it can be proven that
+     none of the transactions following a hole may not depend on the
+     missing transaction, then the hole is filled in with a zero-entry (one
+     with zero length values for both the data and schema fields). In other
+     words, calling sqlite3\_hct\_journal\_rollback() this way makes a best
+     effort to preserve as many transactions as possible, while still leaving
+     the journal table without holes.
+
+It is not possible to use this API to rollback further than the first hole in
+the journal. This is because hctree does not guarantee that the information
+required to do such a rollback is still present in the database file.
+
+<b>Example of why this is Necessary</b>
 
 This might seem dramatic - it involves discarding transactions after all - but
 is necessary under some circumstances. Suppose a failure in the system leaves
@@ -530,23 +571,16 @@ transaction 5 to the db before transaction 4. If, following a failure in
 the system, transaction 4 were lost while transaction 5 were not, the 
 database UNIQUE constraint would be violated.
 
-A better effort to preserve all transactions is made if the
-SQLITE\_HCT\_ROLLBACK\_PRESERVE flag is passed to the invocation of
-sqlite3\_hct\_journal\_rollback(). In that case, if it can be proven
-that none of the transactions that follow a hole in the journal depend
-on any transactions before the hole, then the hole is plugged with a
-NULL transaction (one that makes no modifications to the db) and the
-subsequent transactions remain in the db. In practice this should almost
-always preserve all transactions. 
-
-
 <a name=applications></a>
 9.\ Application Programming Notes
----------------------------------
+==================================
 
 This section contains a description of a simple replicated database system
 that could be constructed using the APIs above, along with observations made
-while designing and testing the same.
+while designing and testing the same. This is not (unfortunately) a
+comprehensive set of instructions for building a high-concurrency replicated
+database. It is intended only to illustrate the roles that the APIs described
+above are expected to play in such a system.
 
 <b>Normal Operation</b>
 
@@ -643,70 +677,103 @@ of the logical db.
      <a href=hashes>sqlite3_hct_journal_hashentry()</a> and
      <a href=hashes>sqlite3_hct_journal_xor()</a> may be useful.
 
-     To make things simpler, <a href=rollback>sqlite3_hct_journal_rollback()</a>
-     may be called before this step.
-
      If it is found that the new follower either:
 
        *  Has a journal entry with cid value C that is different from the
           journal entry with cid value C belonging to the existing node, or
 
-       *  Has a journal entry with a CID value C that is larger than the
-          largest CID value in the existing nodes journal table.
+       *  Has any journal entries that the existing node does not have.
 
      then the new follower may not connect to the system. How this is dealt
      with is out of scope here.
 
+     To make things simpler, <a href=#rollback>
+     sqlite3\_hct\_journal\_rollback</a>(SQLITE_HCT_ROLLBACK_MAXIMUM) may be 
+     called before this step. This does not risk losing data, as it is
+     not possible for the new follower to join the system if it has
+     transactions in its journal that are not also held by other nodes in
+     the system at the point when it joins. Depending on the history of the
+     node, it may even reduce the chances of the node having an incompatible
+     transaction in its journal.
+
   *  The new follower node must then obtain, by requesting it from existing
      nodes, data (i.e.  cid, schema, data and schemacid values) for all
      transactions required to bring the new nodes journal up to date. And
-     call <a href=followers>sqlite3_hct_journal_write()</a> for each to
+     call <a href=#followers>sqlite3_hct_journal_write()</a> for each to
      apply it to the local database.
 
   *  The new follower then informs the current leader of its existence, and
      begins receiving new transactions.
 
   *  Of course there is race-condition between the two steps above -
-     transactions may have been added to the database by the leader between
-     when the new follower received data from another node and when it
+     transactions may be added to the database by the leader between
+     when the new follower receives data from another node and when it
      begins receiving updates from the leader. This is easy to 
-     resolve - if the database schema has not changed, then the system
-     may begin applying new updates as they are received from the leader
-     node before requesting any missing transactions from any node in
-     the system. If the schema has changed, then further transactions may
-     be requested from a peer node before beginning to apply the stream
-     of transactions from the leader.
+     resolve by reversing the order of the two steps - so that the new
+     follower subscribes to the stream of new transactions from the leader
+     node before it requests missing transactions from a peer node.
+
+     If there have been no schema changes, then the new transactions may
+     be applied to the database as soon as they are received - without waiting
+     for the missing transactions from the peer node. Or, if there are one
+     or more schema changes to apply, new transactions may be buffered in
+     memory.
 
 <a name=leader_failure></a>
 <b>Failure of Leader Node</b>
 
 When the current leader node fails or is shut down, the system must (somehow)
 elect a new leader node from the remaining followers. At this point all
-nodes in the system are in FOLLOWER mode.
+nodes in the system (including the new leader) are in FOLLOWER mode.
 
   *  The new leader must contact all other follower nodes, requesting any 
      journal table entries that it is missing. These are added to the 
-     local db using sqlite3\_hct\_journal\_write().
+     local db using <a href=#followers>sqlite3\_hct\_journal\_write()</a>.
 
-  *  Once all requested transactions are applied, the new leader calls
-     <a>sqlite3\_hct\_journal\_rollback()</a> with the PRESERVE flag
-     set. It now has the newest usable snapshot that can be recreated
-     using the transactions found in the system.
+  *  At this point the new leader has accumulated all transactions in
+     the system. It then calls <a href=#rollback>
+     sqlite3\_hct\_journal\_rollback</a>(SQLITE_HCT_ROLLBACK_PRESERVE) to
+     remove any holes in the journal. The result is a journal with no holes
+     that culminates in the newest database snapshot that could be
+     reconstructed from the transactions found in the system following the
+     failure of the old leader node.
 
   *  The leader then sends each existing follower all transactions that they
-     are missing. The follower applies these transactions to the db and then
-     calls sqlite3\_hct\_journal\_rollback() to discard any extra entries
-     in its journal table.
+     are missing. The follower first calls <a href=#rollback>
+     sqlite3\_hct\_journal\_rollback</a>(_maxcid_+1), where _maxcid_ is the
+     largest CID value in the new leaders reconstructed journal table. It
+     then applies all transactions sent by the leader using 
+     <a href=#followers>sqlite3_hct_journal_write()</a>. At this point, the
+     followers journal (and therefore database) is identical to the new
+     leaders.
 
-  *  The new leader calls sqlite3\_hct\_journal\_setmode() to change to 
-     LEADER mode and begins accepting new write transactions.
+  *  The new leader calls <a href=#mode>sqlite3\_hct\_journal\_setmode()</a>
+     to change to LEADER mode and begins accepting new write transactions.
 
 <b>System Startup</b>
 
+System startup or restart of a system consisting of multiple nodes, all
+with potentially complementary or conflicting journals, may be a
+complicated thing. However, a simple approach could be to:
+
+  *  Require the user to nominate the first node to start - the initial 
+     leader node.
+
+  *  This initial leader starts, calls <a href=#rollback>
+     sqlite3\_hct\_journal\_rollback</a>(SQLITE\_HCT\_ROLLBACK\_PRESERVE)
+     to make its journal usable, and declares itself leader of a single node
+     system.
+
+  *  The initial leader node begins accepting connections from new follower
+     nodes, using the procedure described above.
+
+Of course, this simple approach could lead to connection errors if any
+follower nodes have transactions in their journals that the initial leader
+does not have. Various approaches could be developed to account for this.
 
 <a name=table_details></a>
 10.\ Table Details
------------------
+==================
 
 The journal table (sqlite\_hct\_journal):
 
@@ -758,7 +825,7 @@ The baseline table (sqlite\_hct\_baseline):
 
 <a name=dataformat></a>
 11.\ Data Format
-----------------
+================
 
 This section describes the format used by the blobs in the "data" column of
 sqlite\_hct\_journal. Each blob consists of a series of entries. Each entry

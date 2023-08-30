@@ -1,5 +1,5 @@
-C Updates\sto\sreplication.md.
-D 2023-08-19T21:07:53.761
+C Update\sreplication.md\swith\snew\sanalysis.
+D 2023-08-30T17:30:03.366
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -44,7 +44,7 @@ F doc/hctree/index.html 46105aae0ab24595bd6f2ce9aeb9352d892d6c23d9fc8d9bcec9274e
 F doc/hctree/mkthreadtest.tcl 58b1c401b35dcabd978f5a9663376a5beee441bdd9d1e49536772dbd68086876
 F doc/hctree/pagetest.c 023b04fc4ceb8e6cffad66c2221472f68dc69a88282109c8235f57ebf945ad25
 F doc/hctree/perftest1.tcl f805fe08a9660c62145aa69b09cd1158243c52229cf300cde0df6df271ddfa1b
-F doc/hctree/replication.md 7a380619f1d83a3a6fe145be39d3161d52b829379ddeb818eaa180ee9aa517b9
+F doc/hctree/replication.md 5d08ec002047268d790797f5e1f0706927324af6cfb673b321758f52cbf00d64
 F doc/hctree/slides.html 763e1e5b40201595f0924a589c8e6e9a7ca3ca593ed0045d372e66e12ece7aef
 F doc/hctree/slides.wiki 4151889c5485fecd8a71d5d0089645998a2db5ebc3360b570f763e59effed60c
 F doc/hctree/testing.wiki 398878d3636512df24cdd4650e87423163ecc9bc371d40e5876237a42f8b59e1
@@ -2140,8 +2140,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P 7fae94286f8b18fea599d8f3b58e5c314310d0fa4250b381c08163e1d210924f
-R 84a653a105cb2a2550bb2a50d43e5588
+P ec55c938977013d590ab2c17dccdca9528b9b50ca88c2fea1d40d75d9eb3757c
+R e5a0731dd716690e8277a1da7f310aa8
 U dan
-Z 46bd29d7721bfe7b2af25b97ee1f300f
+Z 711d0facbd92ebf189da9fa41b619cf3
 # Remove this line to create a well-formed Fossil manifest.
