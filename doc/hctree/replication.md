@@ -547,6 +547,7 @@ It is not possible to use this API to rollback further than the first hole in
 the journal. This is because hctree does not guarantee that the information
 required to do such a rollback is still present in the database file.
 
+<a name=rollback_example></a>
 <b>Example of why this is Necessary</b>
 
 This might seem dramatic - it involves discarding transactions after all - but
@@ -828,22 +829,27 @@ The baseline table (sqlite\_hct\_baseline):
 ================
 
 This section describes the format used by the blobs in the "data" column of
-sqlite\_hct\_journal. Each blob consists of a series of entries. Each entry
-begins with either 'T', 'I' or 'D'. The format of the rest of the entry 
-depends on its type. As follows:
+sqlite\_hct\_journal.
+
+If the entry does not modify any table rows, then the data blob is zero
+bytes in size. Otherwise, it consists of an 8-byte big-endian CID value
+identifying the database snapshot against which the transaction was 
+originally run, followed by a series of entries. Each entry begins with 
+either 'T', or else an upper or lower-case 'I' or 'D'. The format of the rest
+of the entry depends on its type. As follows:
 
 <table width=80% align=center cellpadding=5 border=1>
 <tr><th align=left> Character <th align=left> Type <th align=left> Format
 <tr><td> 'T'
     <td> New table.
-    <td> Nul-terminated table name.
+    <td> Nul-terminated UTF-8 table name.
 <tr><td> 'i'
     <td> Insert on table with IPK or no PK.
     <td> A varint containing the rowid value. Followed by an SQLite format
          record containing the other record fields.
 <tr><td> 'I'
     <td> Insert on table with explicit non-INTEGER PK.
-    <td> an SQLite format record.
+    <td> An SQLite format record.
 <tr><td> 'd'
     <td> Delete by rowid.
     <td> A varint containing the rowid to delete

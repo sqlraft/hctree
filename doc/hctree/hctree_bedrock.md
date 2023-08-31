@@ -261,27 +261,24 @@ line from last text.n to ICIDLASTCONT2.s thin
 One more rule:
 
 When a new, fully-synchronized, leader takes over and begins accepting write
-requests, if there are any missing journal entries in its local journal, these
-must be populated with empty transactions before proceeding. And followers must
-be instructed to do the same.
+requests, if there are any missing journal entries in its local journal -
+holes in the journal - these must be dealt with before proceeding. There are
+two ways to do so:
 
-This is necessary because, in a system that allows concurrent commits, there may
-be missing journal entries even following synchronization. And if by some
-strange property of the network we later synchronize with a node that has data
-for the missing entry, adding it retrospectively to the running database would
-break all sorts of ACID rules. In this case the database has forked and the two
-nodes must disconnect.
+  *  If it can be proven that none of the transactions that follow the
+     hole in the journal could have depended on the missing transaction,
+     then the journal hole can be filled in with an empty transaction (one
+     that modifies no rows or schema entries).
 
-Really, this is just a generalization of something bedrock does already.
-Currently, when a new fully-synchronized leader stands up, it assumes that the
-last transaction in its journal (the one with CID=*iCidLast*) is the last
-transaction in the distributed system. It assumes that (*iCidLast*+1) does not
-exist anywhere and uses CID=*iCidLast*+1 for its next transaction. If this
-assumption proves false and at some point in the future a node with a
-CID=*iCidLast*+1 transaction in its journal, the database is deemed to have
-forked and the new node is disconnected. Assuming any missing journal entries
-are empty transactions generalizes this behaviour - the leader assuming it has
-complete information when it stands up - for the new journal format.
+  *  Otherwise, the transaction entries that follow the hole in the journal
+     must be removed from the journal table and rolled back from the databse.
+
+Follower nodes must of course be instructed to do the same.
+
+The second of the above two options seems dramatic. It discards data, after
+all. However, it is necessary to guarantee that the database snapshot following
+the change-of-leader is consistent both internally and with the application
+logic. <a href=replication.md#rollback_example>More detail here.</a>
 
 <a name=catchup></a>
 2.\ Node Catchup
