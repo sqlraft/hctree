@@ -1622,6 +1622,50 @@ int sqlite3_hct_journal_truncate(sqlite3 *db, i64 iMinCid){
 }
 
 /*
+** Rollback transactions that follow the first hole in the journal.
+*/
+int sqlite3_hct_journal_rollback(sqlite3 *db, sqlite3_int64 iCid){
+  int rc = SQLITE_OK;
+  HctJournal *pJrnl = 0;
+
+  rc = hctJrnlFind(db, &pJrnl);
+  if( rc!=SQLITE_OK ) return rc;
+
+  /*
+  ** 1. Find the location of the first hole in the journal.
+  **
+  ** 2. Loop through journal entries, from the newest back to the
+  **    first hole in the journal.
+  **
+  ** 3. Work through each of the transactions identified in step (1).
+  **    For each, write a log file, make the required modifications to
+  **    the db and journal file, then delete the log file.
+  */
+
+  /* Cannot call this with an open transaction. */
+  if( 0==sqlite3_get_autocommit(db) ){
+    sqlite3ErrorWithMsg(db, SQLITE_ERROR, 
+        "cannot rollback journal from within a transaction"
+    );
+    return SQLITE_ERROR;
+  }
+
+  /* Cannot call this in LEADER mode. */
+  if( pJrnl->pServer->eMode==SQLITE_HCT_JOURNAL_MODE_LEADER ){
+    sqlite3ErrorWithMsg(db, SQLITE_ERROR, 
+        "cannot rollback journal in leader database"
+    );
+    return SQLITE_ERROR;
+  }
+
+  /* Find the location of the first hole in the journal */
+  assert( !"todo" );
+
+  return SQLITE_OK;
+
+}
+
+/*
 ** Write empty records for any missing journal entries with cid values
 ** less than or equal to iCid.
 */

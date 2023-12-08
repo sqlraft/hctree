@@ -63,6 +63,18 @@ int sqlite3_hct_journal_mode(sqlite3 *db);
 int sqlite3_hct_journal_setmode(sqlite3 *db, int eMode);
 
 /*
+** Rollback transactions that follow the first hole in the journal.
+*/
+int sqlite3_hct_journal_rollback(sqlite3 *db, sqlite3_int64 iCid);
+
+/* 
+** Special values that may be passed as second argument to
+** sqlite3_hct_journal_rollback().
+*/
+#define SQLITE_HCT_ROLLBACK_MAXIMUM   0
+#define SQLITE_HCT_ROLLBACK_PRESERVE -1
+
+/*
 ** Write empty records for any missing journal entries with cid values
 ** less than or equal to iCid.
 */
