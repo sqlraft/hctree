@@ -1060,12 +1060,22 @@ void sqlite3HctJournalClose(HctJournal *pJrnl){
   sqlite3_free(pJrnl);
 }
 
-int sqlite3HctJournalIsReadonly(HctJournal *pJrnl, u64 iTable){
-  return (pJrnl && pJrnl->bInWrite==0 && (
-       pJrnl->pServer->eMode==SQLITE_HCT_JOURNAL_MODE_FOLLOWER
-    || pJrnl->iJrnlRoot==iTable 
-    || pJrnl->iBaseRoot==iTable
-  ));
+/*
+** See description in hctJrnlInt.h.
+*/
+int sqlite3HctJournalIsReadonly(
+  HctJournal *pJrnl, 
+  u64 iTable,
+  int *pbNosnap
+){
+  if( pJrnl ){
+    int bNosnap = (pJrnl->iJrnlRoot==iTable || pJrnl->iBaseRoot==iTable);
+    *pbNosnap = bNosnap;
+    return (pJrnl->bInWrite==0 && (
+        bNosnap || pJrnl->pServer->eMode==SQLITE_HCT_JOURNAL_MODE_FOLLOWER
+    ));
+  }
+  return 0;
 }
 
 /*

@@ -118,6 +118,7 @@ struct HctDbCsr {
   KeyInfo *pKeyInfo;
   UnpackedRecord *pRec;
   int eDir;                       /* Direction cursor will step after Seek() */
+  int bNosnap;                    /* The "no-snapshot" flag */
 
   u8 *aRecord;                    /* Record in allocated memory */
   int nRecord;                    /* Size of aRecord[] in bytes */
@@ -763,7 +764,7 @@ static void hctPutU32(u8 *a, u32 val){
 ** Return true if TID iTid maps to a commit-id visible to the current
 ** client. Or false otherwise.
 */
-static int hctDbTidIsVisible(HctDatabase *pDb, u64 iTid){
+static int hctDbTidIsVisible(HctDatabase *pDb, u64 iTid, int bNosnap){
 
   if( (iTid & HCT_TID_MASK)<=pDb->iLocalMinTid ) return 1;
   while( 1 ){
@@ -776,7 +777,7 @@ static int hctDbTidIsVisible(HctDatabase *pDb, u64 iTid){
       return 0;
     }
     if( eState==HCT_TMAP_COMMITTED ){
-      if( iCid>pDb->iSnapshotId ){
+      if( bNosnap==0 && iCid>pDb->iSnapshotId ){
         return 0;
       }
       return 1;
@@ -884,7 +885,7 @@ int sqlite3HctDbGetMeta(HctDatabase *pDb, u8 *aBuf, int nBuf){
          || flags==(HCTDB_HAS_RANGEOLD|HCTDB_HAS_RANGETID|HCTDB_HAS_TID) 
     );
     if( (flags & HCTDB_HAS_RANGEOLD)
-     && 0==hctDbTidIsVisible(pDb, hctGetU64(&pg.aOld[iOff])) 
+     && 0==hctDbTidIsVisible(pDb, hctGetU64(&pg.aOld[iOff]), 0) 
     ){
       u32 iOld = hctGetU32(&pg.aOld[iOff+8+8]);
       if( iOld==0 ) break;
@@ -2109,7 +2110,7 @@ static int hctDbFollowRangeOld(
   if( iRangeTidValue>pDb->iLocalMinTid ){
     bRet = 1;
     if( iDoNotMergeTid!=iRangeTidValue ){
-      bMerge = (0==hctDbTidIsVisible(pDb, pPtr->iRangeTid));
+      bMerge = (0==hctDbTidIsVisible(pDb, pPtr->iRangeTid, 0));
     }
   }else if( (pPtr->iFollowTid & HCT_TID_MASK)>pDb->iLocalMinTid ){
     bRet = 1;
@@ -2318,7 +2319,7 @@ static void hctDbCsrDescendRange(
             pCsr->pDb, pCsr->pKeyInfo, 0, aParent, iPCell, &pNew->lowkey
         );
         hctDbCellGetByIdx(pCsr->pDb, aParent, iPCell, &pcell);
-        if( hctDbTidIsVisible(pCsr->pDb, pcell.iTid)==0 ){
+        if( hctDbTidIsVisible(pCsr->pDb, pcell.iTid, 0)==0 ){
           hctDbDecrementKey(&pNew->lowkey);
         }
       }
@@ -2398,7 +2399,7 @@ static int hctDbCurrentIsVisible(HctDbCsr *pCsr){
   hctMemcpy(&iTid, &aPg[p->iOff], sizeof(u64));
   if( pCsr->pDb->iTid==iTid && pCsr->pDb->eMode==HCT_MODE_VALIDATE ) return 1;
 
-  return hctDbTidIsVisible(pCsr->pDb, iTid);
+  return hctDbTidIsVisible(pCsr->pDb, iTid, pCsr->bNosnap);
 }
 
 /*
@@ -5017,7 +5018,7 @@ static int hctDbWriteWriteConflict(
             if( bMerge ){
               HctDbCell cell;
               hctDbCellGetByIdx(pDb, aOld, iCell, &cell);
-              if( hctDbTidIsVisible(pDb, cell.iTid) ) rc = HCT_SQLITE_BUSY;
+              if( hctDbTidIsVisible(pDb, cell.iTid, 0) ) rc = HCT_SQLITE_BUSY;
             }
             sqlite3HctFilePageRelease(&pg);
             break;
@@ -5698,6 +5699,13 @@ int sqlite3HctDbCsrOpen(
   }
   *ppCsr = p;
   return rc;
+}
+
+/*
+** Set the "no-snapshot" flag on the cursor passed as the first argument.
+*/
+void sqlite3HctDbCsrNosnap(HctDbCsr *pCsr, int bNosnap){
+  if( pCsr ) pCsr->bNosnap = bNosnap;
 }
 
 /*

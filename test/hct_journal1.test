@@ -14,14 +14,6 @@ set testdir [file dirname $argv0]
 source $testdir/tester.tcl
 set testprefix hct_journal1
 
-proc catch_hct_journal_init {db} {
-  set rc [sqlite3_hct_journal_init db]
-  if {$rc!="SQLITE_OK"} {
-    return [list 1 [sqlite3_errmsg db]]
-  }
-  return "0 {}"
-}
-
 hct_reset_db
 do_execsql_test 1.0 {
   CREATE TABLE t1(a);
@@ -109,7 +101,6 @@ do_execsql_test 2.1 {
 
 db close
 sqlite3 db test.db
-breakpoint
 sqlite3_hct_journal_setmode db LEADER
 
 do_execsql_test 2.2 {
@@ -124,6 +115,7 @@ sqlite3 db2 test.db
 do_execsql_test -db db2 2.4 {
   INSERT INTO t1 VALUES(5, 6);
 }
+db2 close
 
 do_execsql_test 2.5 {
   SELECT cid FROM sqlite_hct_journal
@@ -213,6 +205,41 @@ sqlite3_hct_journal_setmode db LEADER
 do_execsql_test 4.1 {
   INSERT INTO t4 VALUES(3, 4);
 }
+
+#-------------------------------------------------------------------------
+hct_reset_db
+catch_hct_journal_init db
+sqlite3_hct_journal_setmode db LEADER
+
+do_execsql_test 5.0 {
+  CREATE TABLE t1(a INTEGER PRIMARY KEY, b);          -- cid=7
+  INSERT INTO t1 VALUES(1, 'one');                    -- cid=8
+  INSERT INTO t1 VALUES(2, 'two');                    -- cid=9
+  INSERT INTO t1 VALUES(3, 'three');                  -- cid=10
+  INSERT INTO t1 VALUES(4, 'four');                   -- cid=11
+  INSERT INTO t1 VALUES(5, 'five');                   -- cid=12
+}
+
+forcedelete test.db2
+sqlite3 db2 file:test.db2?hctree=1 -uri 1
+catch_hct_journal_init db2
+
+do_test 5.1 {
+  db eval { 
+    SELECT cid, schema, data, schemacid FROM sqlite_hct_journal 
+    WHERE cid IN (7, 8, 11, 12);
+  } {
+    set rc [sqlite3_hct_journal_write db2 $cid $schema $data $schemacid]
+  }
+} {}
+
+do_execsql_test -db db2 5.2 {
+  SELECT * FROM t1;
+} {1 one}
+
+do_execsql_test -db db2 5.3 {
+  SELECT cid FROM sqlite_hct_journal
+} {7 8 11 12}
 
 finish_test
 

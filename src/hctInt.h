@@ -201,6 +201,8 @@ void sqlite3HctDbJournalRbMode(HctDatabase*,int);
 int sqlite3HctDbCsrOpen(HctDatabase*, struct KeyInfo*, u32 iRoot, HctDbCsr**);
 void sqlite3HctDbCsrClose(HctDbCsr *pCsr);
 
+void sqlite3HctDbCsrNosnap(HctDbCsr *pCsr, int bNosnap);
+
 void sqlite3HctDbCsrDir(HctDbCsr*, int eDir);
 int sqlite3HctDbCsrSeek(HctDbCsr*, UnpackedRecord*, i64 iKey, int *pRes);
 

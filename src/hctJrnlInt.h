@@ -53,11 +53,15 @@ int sqlite3HctJrnlRecovery(HctJournal *pJrnl, HctDatabase *pDb);
 int sqlite3HctJrnlInit(sqlite3 *db);
 
 /*
-** Return non-zero if (a) argument pJrnl is not NULL, and (b) argument iTable
-** is the logical root page of either the journal or baseline table 
-** represented by pJrnl.
+** Return non-zero if (1) argument pJrnl is not NULL, and either (2a) argument 
+** iTable is the logical root page of either the journal or baseline table 
+** represented by pJrnl, or (2b) the connection is in follower mode.
+**
+** Before returning, set output variable (*pbNosnap) to non-zero if condition
+** (2a) was true. To indicate that the table does not use snapshots - all
+** committed rows are visible.
 */
-int sqlite3HctJournalIsReadonly(HctJournal *pJrnl, u64 iTable);
+int sqlite3HctJournalIsReadonly(HctJournal *pJrnl, u64 iTable, int *pbNosnap);
 
 int sqlite3HctJrnlRollbackEntry(HctJournal *pJrnl, i64 iTid);
 

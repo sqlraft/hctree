@@ -89,13 +89,13 @@ do_execsql_test 2.0 {
 } {7 8 9 10 11 12}
 
 
-foreach {tn cid lCid} {
-  1     7   {7}
-  2     8   {7 8}
-  3     10   {7 8}
-  4     12   {7 8}
-  5     11   {7 8}
-  6      9   {7 8 9 10 11 12}
+foreach {tn cid lCid lB} {
+  1     7    {7}                 {}
+  2     8    {7 8}               {one}
+  3     10   {7 8 10}            {one}
+  4     12   {7 8 10 12}         {one}
+  5     11   {7 8 10 11 12}      {one}
+  6      9   {7 8 9 10 11 12}    {one two three four five}
 } {
   do_test 2.1.$tn.1 {
     db eval { SELECT * FROM sqlite_hct_journal WHERE cid = $cid } x {}
@@ -105,6 +105,10 @@ foreach {tn cid lCid} {
   do_execsql_test -db db2 2.1.$tn.2 {
     SELECT cid FROM sqlite_hct_journal
   } $lCid
+
+  do_execsql_test -db db2 2.1.$tn.3 {
+    SELECT b FROM t1
+  } $lB
 }
 
 proc test_dbs_match {tn sql} {

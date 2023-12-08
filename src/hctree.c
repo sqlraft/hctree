@@ -1575,6 +1575,8 @@ int sqlite3HctBtreeCursor(
   HBtCursor *const pCur = (HBtCursor*)pCursor;
   HBtree *const p = (HBtree*)pBt;
   int rc = SQLITE_OK;
+  int bNosnap = 0;
+  int bReadonly = sqlite3HctJournalIsReadonly(p->pHctJrnl, iTable, &bNosnap);
 
   assert( p->eTrans!=SQLITE_TXN_NONE );
   assert( p->eTrans!=SQLITE_TXN_ERROR );
@@ -1584,7 +1586,7 @@ int sqlite3HctBtreeCursor(
   /* If this is an attempt to open a read/write cursor on either the
   ** sqlite_hct_journal or sqlite_hct_baseline tables, return an error
   ** immediately.  */
-  if( wrFlag && sqlite3HctJournalIsReadonly(p->pHctJrnl, iTable) ){
+  if( wrFlag && bReadonly ){
     return SQLITE_READONLY;
   }
 
@@ -1595,6 +1597,7 @@ int sqlite3HctBtreeCursor(
     for(ii=0; ii<p->nSchemaOp && p->aSchemaOp[ii].pgnoRoot!=iTable; ii++);
     if( ii==p->nSchemaOp ){
       rc = sqlite3HctDbCsrOpen(p->pHctDb, pKeyInfo, iTable, &pCur->pHctDbCsr);
+      sqlite3HctDbCsrNosnap(pCur->pHctDbCsr, bNosnap);
     }
   }
   if( rc==SQLITE_OK ){
