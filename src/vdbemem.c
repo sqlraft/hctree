@@ -336,12 +336,12 @@ void sqlite3VdbeMemZeroTerminateIfAble(Mem *pMem){
       pMem->flags |= MEM_Term;
       return;
     }
-    if( pMem->xDel==(void(*)(void*))sqlite3RCStrUnref ){
+    if( pMem->xDel==sqlite3RCStrUnref ){
       /* Blindly assume that all RCStr objects are zero-terminated */
       pMem->flags |= MEM_Term;
       return;
     }
-  }else if( pMem->szMalloc>0 && pMem->szMalloc >= pMem->n+1 ){
+  }else if( pMem->szMalloc >= pMem->n+1 ){
     pMem->z[pMem->n] = 0;
     pMem->flags |= MEM_Term;
     return;
@@ -1515,7 +1515,7 @@ static int valueFromFunction(
 #endif
   assert( pFunc );
   if( (pFunc->funcFlags & (SQLITE_FUNC_CONSTANT|SQLITE_FUNC_SLOCHNG))==0
-   || (pFunc->funcFlags & SQLITE_FUNC_NEEDCOLL)
+   || (pFunc->funcFlags & (SQLITE_FUNC_NEEDCOLL|SQLITE_FUNC_RUNONLY))!=0
   ){
     return SQLITE_OK;
   }
@@ -1716,6 +1716,7 @@ static int valueFromExpr(
     if( pVal ){
       pVal->flags = MEM_Int;
       pVal->u.i = pExpr->u.zToken[4]==0;
+      sqlite3ValueApplyAffinity(pVal, affinity, enc);
     }
   }
 

@@ -1657,7 +1657,7 @@ globalThis.sqlite3InitModule = sqlite3InitModule;
         .assert('number'===typeof rc[0])
         .assert(rc[0]|0 === rc[0] /* is small integer */);
     })
-  ////////////////////////////////////////////////////////////////////////
+    ////////////////////////////////////////////////////////////////////////
     .t({
       name: 'sqlite3_js_db_export()',
       predicate: ()=>true,
@@ -1671,13 +1671,12 @@ globalThis.sqlite3InitModule = sqlite3InitModule;
       }
     }/*sqlite3_js_db_export()*/)
     .t({
-      name: 'sqlite3_js_vfs_create_file() with db in default VFS',
+      name: 'sqlite3_js_posix_create_file()',
       predicate: ()=>true,
       test: function(sqlite3){
         const db = this.db;
-        const pVfs = capi.sqlite3_js_db_vfs(db);
-        const filename = "sqlite3_js_vfs_create_file().db";
-        capi.sqlite3_js_vfs_create_file(pVfs, filename, this.dbExport);
+        const filename = "sqlite3_js_posix_create_file.db";
+        capi.sqlite3_js_posix_create_file(filename, this.dbExport);
         delete this.dbExport;
         const db2 = new sqlite3.oo1.DB(filename,'r');
         try {
@@ -1686,10 +1685,10 @@ globalThis.sqlite3InitModule = sqlite3InitModule;
           T.assert(n>0 && db2.selectValue(sql) === n);
         }finally{
           db2.close();
-          wasm.sqlite3_wasm_vfs_unlink(pVfs, filename);
+          wasm.sqlite3_wasm_vfs_unlink(0, filename);
         }
       }
-    }/*sqlite3_js_vfs_create_file()*/)
+    }/*sqlite3_js_posix_create_file()*/)
 
   ////////////////////////////////////////////////////////////////////
     .t({
@@ -2606,28 +2605,6 @@ globalThis.sqlite3InitModule = sqlite3InitModule;
         }
       }
     }/*kvvfs sanity checks*/)
-    .t({
-      name: 'kvvfs sqlite3_js_vfs_create_file()',
-      predicate: ()=>"kvvfs does not currently support this",
-      test: function(sqlite3){
-        let db;
-        try {
-          db = new this.JDb(this.kvvfsDbFile);
-          const exp = capi.sqlite3_js_db_export(db);
-          db.close();
-          this.kvvfsUnlink();
-          capi.sqlite3_js_vfs_create_file("kvvfs", this.kvvfsDbFile, exp);
-          db = new this.JDb(filename);
-          T.assert(6 === db.selectValue('select count(*) from kvvfs'));
-        }finally{
-          db.close();
-          this.kvvfsUnlink();
-        }
-        delete this.kvvfsDbFile;
-        delete this.kvvfsUnlink;
-        delete this.JDb;
-      }
-   }/*kvvfs sqlite3_js_vfs_create_file()*/)
   ;/* end kvvfs tests */
 
   ////////////////////////////////////////////////////////////////////////
@@ -2645,13 +2622,17 @@ globalThis.sqlite3InitModule = sqlite3InitModule;
         T.assert( 0 === rc /*void pointer*/ );
 
         // Commit hook...
+        T.assert( 0!=capi.sqlite3_get_autocommit(db) );
         db.exec("BEGIN; SELECT 1; COMMIT");
         T.assert(0 === countCommit,
                  "No-op transactions (mostly) do not trigger commit hook.");
         db.exec("BEGIN EXCLUSIVE; SELECT 1; COMMIT");
         T.assert(1 === countCommit,
                  "But EXCLUSIVE transactions do.");
-        db.transaction((d)=>{d.exec("create table t(a)");});
+        db.transaction((d)=>{
+          T.assert( 0==capi.sqlite3_get_autocommit(db) );
+          d.exec("create table t(a)");
+        });
         T.assert(2 === countCommit);
 
         // Rollback hook:
@@ -2907,7 +2888,7 @@ globalThis.sqlite3InitModule = sqlite3InitModule;
     .t({
       name: 'OPFS db sanity checks',
       test: async function(sqlite3){
-        const filename = this.opfsDbFile = 'sqlite3-tester1.db';
+        const filename = this.opfsDbFile = '/dir/sqlite3-tester1.db';
         const pVfs = this.opfsVfs = capi.sqlite3_vfs_find('opfs');
         T.assert(pVfs);
         const unlink = this.opfsUnlink =
@@ -2935,22 +2916,42 @@ globalThis.sqlite3InitModule = sqlite3InitModule;
       }
     }/*OPFS db sanity checks*/)
     .t({
-      name: 'OPFS export/import',
+      name: 'OPFS import',
       test: async function(sqlite3){
         let db;
         try {
           const exp = this.opfsDbExport;
+          const filename = this.opfsDbFile;
           delete this.opfsDbExport;
-          capi.sqlite3_js_vfs_create_file("opfs", this.opfsDbFile, exp);
-          const db = new sqlite3.oo1.OpfsDb(this.opfsDbFile);
-          T.assert(6 === db.selectValue('select count(*) from p'));
+          this.opfsImportSize = await sqlite3.oo1.OpfsDb.importDb(filename, exp);
+          db = new sqlite3.oo1.OpfsDb(this.opfsDbFile);
+          T.assert(6 === db.selectValue('select count(*) from p')).
+            assert( this.opfsImportSize == exp.byteLength );
+          db.close();
+          this.opfsUnlink(filename);
+          T.assert(!(await sqlite3.opfs.entryExists(filename)));
+          // Try again with a function as an input source:
+          let cursor = 0;
+          const blockSize = 512, end = exp.byteLength;
+          const reader = async function(){
+            if(cursor >= exp.byteLength){
+              return undefined;
+            }
+            const rv = exp.subarray(cursor, cursor+blockSize>end ? end : cursor+blockSize);
+            cursor += blockSize;
+            return rv;
+          };
+          this.opfsImportSize = await sqlite3.oo1.OpfsDb.importDb(filename, reader);
+          db = new sqlite3.oo1.OpfsDb(this.opfsDbFile);
+          T.assert(6 === db.selectValue('select count(*) from p')).
+            assert( this.opfsImportSize == exp.byteLength );
         }finally{
           if(db) db.close();
         }
       }
     }/*OPFS export/import*/)
     .t({
-      name: 'OPFS utility APIs and sqlite3_js_vfs_create_file()',
+      name: '(Internal-use) OPFS utility APIs',
       test: async function(sqlite3){
         const filename = this.opfsDbFile;
         const pVfs = this.opfsVfs;
@@ -2959,8 +2960,6 @@ globalThis.sqlite3InitModule = sqlite3InitModule;
         delete this.opfsDbFile;
         delete this.opfsVfs;
         delete this.opfsUnlink;
-        unlink();
-        // Sanity-test sqlite3_js_vfs_create_file()...
         /**************************************************************
            ATTENTION CLIENT-SIDE USERS: sqlite3.opfs is NOT intended
            for client-side use. It is only for this project's own
@@ -2968,39 +2967,19 @@ globalThis.sqlite3InitModule = sqlite3InitModule;
            any time.
         ***************************************************************/
         const opfs = sqlite3.opfs;
-        const fSize = 1379;
+        const fSize = this.opfsImportSize;
+        delete this.opfsImportSize;
         let sh;
         try{
-          T.assert(!(await opfs.entryExists(filename)));
-          capi.sqlite3_js_vfs_create_file(
-            pVfs, filename, null, fSize
-          );
           T.assert(await opfs.entryExists(filename));
-          let fh = await opfs.rootDirectory.getFileHandle(filename);
+          const [dirHandle, filenamePart] = await opfs.getDirForFilename(filename, false);
+          const fh = await dirHandle.getFileHandle(filenamePart);
           sh = await fh.createSyncAccessHandle();
           T.assert(fSize === await sh.getSize());
           await sh.close();
           sh = undefined;
           unlink();
           T.assert(!(await opfs.entryExists(filename)));
-
-          const ba = new Uint8Array([1,2,3,4,5]);
-          capi.sqlite3_js_vfs_create_file(
-            "opfs", filename, ba
-          );
-          T.assert(await opfs.entryExists(filename));
-          fh = await opfs.rootDirectory.getFileHandle(filename);
-          sh = await fh.createSyncAccessHandle();
-          T.assert(ba.byteLength === await sh.getSize());
-          await sh.close();
-          sh = undefined;
-          unlink();
-
-          T.mustThrowMatching(()=>{
-            capi.sqlite3_js_vfs_create_file(
-              "no-such-vfs", filename, ba
-            );
-          }, "SQLITE_NOTFOUND: Unknown sqlite3_vfs name: no-such-vfs");
         }finally{
           if(sh) await sh.close();
           unlink();
@@ -3081,8 +3060,9 @@ globalThis.sqlite3InitModule = sqlite3InitModule;
           const dbytes = u1.exportFile(dbName);
           T.assert(dbytes.length >= 4096);
           const dbName2 = '/exported.db';
-          u1.importDb(dbName2, dbytes);
-          T.assert( 2 == u1.getFileCount() );
+          let nWrote = u1.importDb(dbName2, dbytes);
+          T.assert( 2 == u1.getFileCount() )
+            .assert( dbytes.byteLength == nWrote );
           let db2 = new u1.OpfsSAHPoolDb(dbName2);
           T.assert(db2 instanceof sqlite3.oo1.DB)
             .assert(3 === db2.selectValue('select count(*) from t'));
@@ -3091,6 +3071,25 @@ globalThis.sqlite3InitModule = sqlite3InitModule;
             .assert(false === u1.unlink(dbName2))
             .assert(1 === u1.getFileCount())
             .assert(1 === u1.getFileNames().length);
+          // Try again with a function as an input source:
+          let cursor = 0;
+          const blockSize = 1024, end = dbytes.byteLength;
+          const reader = async function(){
+            if(cursor >= dbytes.byteLength){
+              return undefined;
+            }
+            const rv = dbytes.subarray(cursor, cursor+blockSize>end ? end : cursor+blockSize);
+            cursor += blockSize;
+            return rv;
+          };
+          nWrote = await u1.importDb(dbName2, reader);
+          T.assert( 2 == u1.getFileCount() );
+          db2 = new u1.OpfsSAHPoolDb(dbName2);
+          T.assert(db2 instanceof sqlite3.oo1.DB)
+            .assert(3 === db2.selectValue('select count(*) from t'));
+          db2.close();
+          T.assert(true === u1.unlink(dbName2))
+            .assert(dbytes.byteLength == nWrote);
         }
 
         T.assert(true === u1.unlink(dbName))
@@ -3103,7 +3102,7 @@ globalThis.sqlite3InitModule = sqlite3InitModule;
         const conf2 = JSON.parse(JSON.stringify(sahPoolConfig));
         conf2.name += '-test2';
         const POther = await inst(conf2);
-        log("Installed second SAH instance as",conf2.name);
+        //log("Installed second SAH instance as",conf2.name);
         T.assert(0 === POther.getFileCount())
           .assert(true === await POther.removeVfs());
 
@@ -3236,4 +3235,3 @@ globalThis.sqlite3InitModule = sqlite3InitModule;
     TestUtil.runTests(sqlite3);
   });
 })(self);
-

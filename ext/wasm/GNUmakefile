@@ -179,7 +179,6 @@ SQLITE_OPT = \
   -DSQLITE_OMIT_DEPRECATED \
   -DSQLITE_OMIT_UTF16 \
   -DSQLITE_OMIT_SHARED_CACHE \
-  -DSQLITE_OMIT_WAL \
   -DSQLITE_THREADSAFE=0 \
   -DSQLITE_TEMP_STORE=2 \
   -DSQLITE_OS_KV_OPTIONAL=1 \
@@ -187,6 +186,12 @@ SQLITE_OPT = \
   -DSQLITE_USE_URI=1 \
   -DSQLITE_WASM_ENABLE_C_TESTS \
   -DSQLITE_C=$(sqlite3.c)
+#SQLITE_OPT += -DSQLITE_DEBUG
+# Enabling SQLITE_DEBUG will break sqlite3_wasm_vfs_create_file()
+# (and thus sqlite3_js_vfs_create_file()). Those functions are
+# deprecated and alternatives are in place, but this crash behavior
+# can be used to find errant uses of sqlite3_js_vfs_create_file()
+# in client code.
 
 .NOTPARALLEL: $(sqlite3.h)
 $(sqlite3.h):
@@ -241,10 +246,10 @@ endif
 # embedding in the JS files and in building the distribution zip file.
 # It must NOT be in $(dir.tmp) because we need it to survive the
 # cleanup process for the dist build to work properly.
-bin.version-info := $(dir.wasm)/version-info
-$(bin.version-info): $(dir.wasm)/version-info.c $(sqlite3.h) $(MAKEFILE)
-	$(CC) -O0 -I$(dir $(sqlite3.c)) -o $@ $<
-DISTCLEAN_FILES += $(bin.version-info)
+bin.version-info := $(dir.top)/version-info
+.NOTPARALLEL: $(bin.version-info)
+$(bin.version-info): $(dir.tool)/version-info.c $(sqlite3.h) $(dir.top)/Makefile
+	$(MAKE) -C $(dir.top) version-info
 
 # bin.stripcomments is used for stripping C/C++-style comments from JS
 # files. The JS files contain large chunks of documentation which we
@@ -451,13 +456,6 @@ emcc.exportedRuntimeMethods := \
 emcc.jsflags += $(emcc.exportedRuntimeMethods)
 emcc.jsflags += -sUSE_CLOSURE_COMPILER=0
 emcc.jsflags += -sIMPORTED_MEMORY
-#emcc.jsflags += -sASYNCIFY=2
-# ^^^ ASYNCIFY=2 is for experimental JSPI support
-# (https://v8.dev/blog/jspi), but enabling it causes the lib-level
-# init code to throw inexplicable complaints about C-level function
-# signatures not matching what we expect them to be. JSPI requires, as of
-# this writing, requires an experimental Chrome flag:
-# chrome://flags/#enable-experimental-webassembly-stack-switching
 emcc.jsflags += -sSTRICT_JS=0
 # STRICT_JS disabled due to:
 #   https://github.com/emscripten-core/emscripten/issues/18610
@@ -840,11 +838,11 @@ sqlite3-worker1-bundler-friendly.js := $(dir.dout)/sqlite3-worker1-bundler-frien
 sqlite3-worker1-promiser-bundler-friendly.js := $(dir.dout)/sqlite3-worker1-promiser-bundler-friendly.js
 $(eval $(call C-PP.FILTER,$(sqlite3-worker1.js.in),$(sqlite3-worker1.js)))
 $(eval $(call C-PP.FILTER,$(sqlite3-worker1.js.in),$(sqlite3-worker1-bundler-friendly.js),\
-    $(c-pp.D.bundler-friendly)))
+    $(c-pp.D.sqlite3-bundler-friendly)))
 $(eval $(call C-PP.FILTER,$(sqlite3-worker1-promiser.js.in),$(sqlite3-worker1-promiser.js)))
 $(eval $(call C-PP.FILTER,$(sqlite3-worker1-promiser.js.in),\
     $(sqlite3-worker1-promiser-bundler-friendly.js),\
-    $(c-pp.D.bundler-friendly)))
+    $(c-pp.D.sqlite3-bundler-friendly)))
 $(sqlite3-bundler-friendly.mjs): $(sqlite3-worker1-bundler-friendly.js) \
     $(sqlite3-worker1-promiser-bundler-friendly.js)
 $(sqlite3.js) $(sqlite3.mjs): $(sqlite3-worker1.js) $(sqlite3-worker1-promiser.js)
@@ -856,7 +854,7 @@ dir.sql := sql
 speedtest1 := ../../speedtest1
 speedtest1.c := ../../test/speedtest1.c
 speedtest1.sql := $(dir.sql)/speedtest1.sql
-speedtest1.cliflags := --size 25 --big-transactions
+speedtest1.cliflags := --size 10 --big-transactions
 $(speedtest1):
 	$(MAKE) -C ../.. speedtest1
 $(speedtest1.sql): $(speedtest1) $(MAKEFILE)
@@ -1041,8 +1039,7 @@ endif
 # Push files to public wasm-testing.sqlite.org server
 wasm-testing.include = *.js *.mjs *.html \
   ./tests \
-  batch-runner.list \
-  $(dir.dout) $(dir.sql) $(dir.common) $(dir.fiddle) $(dir.jacc)
+  $(dir.dout) $(dir.common) $(dir.fiddle) $(dir.jacc)
 wasm-testing.exclude = sql/speedtest1.sql
 wasm-testing.dir     = /jail/sites/wasm-testing
 wasm-testing.dest   ?= wasm-testing:$(wasm-testing.dir)

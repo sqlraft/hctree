@@ -772,8 +772,43 @@ globalThis.sqlite3ApiBootstrap = function sqlite3ApiBootstrap(
     isSharedTypedArray,
     toss: function(...args){throw new Error(args.join(' '))},
     toss3,
-    typedArrayPart
-  };
+    typedArrayPart,
+    /**
+       Given a byte array or ArrayBuffer, this function throws if the
+       lead bytes of that buffer do not hold a SQLite3 database header,
+       else it returns without side effects.
+
+       Added in 3.44.
+    */
+    affirmDbHeader: function(bytes){
+      if(bytes instanceof ArrayBuffer) bytes = new Uint8Array(bytes);
+      const header = "SQLite format 3";
+      if( header.length > bytes.byteLength ){
+        toss3("Input does not contain an SQLite3 database header.");
+      }
+      for(let i = 0; i < header.length; ++i){
+        if( header.charCodeAt(i) !== bytes[i] ){
+          toss3("Input does not contain an SQLite3 database header.");
+        }
+      }
+    },
+    /**
+       Given a byte array or ArrayBuffer, this function throws if the
+       database does not, at a cursory glance, appear to be an SQLite3
+       database. It only examines the size and header, but further
+       checks may be added in the future.
+
+       Added in 3.44.
+    */
+    affirmIsDb: function(bytes){
+      if(bytes instanceof ArrayBuffer) bytes = new Uint8Array(bytes);
+      const n = bytes.byteLength;
+      if(n<512 || n%512!==0) {
+        toss3("Byte array size",n,"is invalid for an SQLite3 db.");
+      }
+      util.affirmDbHeader(bytes);
+    }
+  }/*util*/;
 
   Object.assign(wasm, {
     /**
@@ -1100,7 +1135,23 @@ globalThis.sqlite3ApiBootstrap = function sqlite3ApiBootstrap(
       return 1===n
         ? wasm.pstack.alloc(safePtrSize ? 8 : wasm.ptrSizeof)
         : wasm.pstack.allocChunks(n, safePtrSize ? 8 : wasm.ptrSizeof);
+    },
+
+    /**
+       Records the current pstack position, calls the given function,
+       passing it the sqlite3 object, then restores the pstack
+       regardless of whether the function throws. Returns the result
+       of the call or propagates an exception on error.
+
+       Added in 3.44.
+    */
+    call: function(f){
+      const stackPos = wasm.pstack.pointer;
+      try{ return f(sqlite3) } finally{
+        wasm.pstack.restore(stackPos);
+      }
     }
+
   })/*wasm.pstack*/;
   Object.defineProperties(wasm.pstack, {
     /**
@@ -1357,6 +1408,74 @@ globalThis.sqlite3ApiBootstrap = function sqlite3ApiBootstrap(
   };
 
   /**
+     If the current environment supports the POSIX file APIs, this routine
+     creates (or overwrites) the given file using those APIs. This is
+     primarily intended for use in Emscripten-based builds where the POSIX
+     APIs are transparently proxied by an in-memory virtual filesystem.
+     It may behave diffrently in other environments.
+
+     The first argument must be either a JS string or WASM C-string
+     holding the filename. Note that this routine does _not_ create
+     intermediary directories if the filename has a directory part.
+
+     The 2nd argument may either a valid WASM memory pointer, an
+     ArrayBuffer, or a Uint8Array. The 3rd must be the length, in
+     bytes, of the data array to copy. If the 2nd argument is an
+     ArrayBuffer or Uint8Array and the 3rd is not a positive integer
+     then the 3rd defaults to the array's byteLength value.
+
+     Results are undefined if data is a WASM pointer and dataLen is
+     exceeds data's bounds.
+
+     Throws if any arguments are invalid or if creating or writing to
+     the file fails.
+
+     Added in 3.43 as an alternative for the deprecated
+     sqlite3_js_vfs_create_file().
+  */
+  capi.sqlite3_js_posix_create_file = function(filename, data, dataLen){
+    let pData;
+    if(data && wasm.isPtr(data)){
+      pData = data;
+    }else if(data instanceof ArrayBuffer || data instanceof Uint8Array){
+      pData = wasm.allocFromTypedArray(data);
+      if(arguments.length<3 || !util.isInt32(dataLen) || dataLen<0){
+        dataLen = data.byteLength;
+      }
+    }else{
+      SQLite3Error.toss("Invalid 2nd argument for sqlite3_js_posix_create_file().");
+    }
+    try{
+      if(!util.isInt32(dataLen) || dataLen<0){
+        SQLite3Error.toss("Invalid 3rd argument for sqlite3_js_posix_create_file().");
+      }
+      const rc = wasm.sqlite3_wasm_posix_create_file(filename, pData, dataLen);
+      if(rc) SQLite3Error.toss("Creation of file failed with sqlite3 result code",
+                               capi.sqlite3_js_rc_str(rc));
+    }finally{
+       wasm.dealloc(pData);
+    }
+  };
+
+  /**
+     Deprecation warning: this function does not work properly in
+     debug builds of sqlite3 because its out-of-scope use of the
+     sqlite3_vfs API triggers assertions in the core library.  That
+     was unfortunately not discovered until 2023-08-11. This function
+     is now deprecated and should not be used in new code.
+
+     Alternative options:
+
+     - "unix" VFS and its variants can get equivalent functionality
+       with sqlite3_js_posix_create_file().
+
+     - OPFS: use either sqlite3.oo1.OpfsDb.importDb(), for the "opfs"
+       VFS, or the importDb() method of the PoolUtil object provided
+       by the "opfs-sahpool" OPFS (noting that its VFS name may differ
+       depending on client-side configuration). We cannot proxy those
+       from here because the former is necessarily asynchronous and
+       the latter requires information not available to this function.
+
      Creates a file using the storage appropriate for the given
      sqlite3_vfs.  The first argument may be a VFS name (JS string
      only, NOT a WASM C-string), WASM-managed `sqlite3_vfs*`, or
@@ -1402,9 +1521,13 @@ globalThis.sqlite3ApiBootstrap = function sqlite3ApiBootstrap(
        VFS nor the WASM environment imposes requirements which break it.
 
      - "opfs": uses OPFS storage and creates directory parts of the
-       filename.
+       filename. It can only be used to import an SQLite3 database
+       file and will fail if given anything else.
   */
   capi.sqlite3_js_vfs_create_file = function(vfs, filename, data, dataLen){
+    config.warn("sqlite3_js_vfs_create_file() is deprecated and",
+                "should be avoided because it can lead to C-level crashes.",
+                "See its documentation for alternative options.");
     let pData;
     if(data){
       if(wasm.isPtr(data)){
@@ -1432,9 +1555,29 @@ globalThis.sqlite3ApiBootstrap = function sqlite3ApiBootstrap(
       if(rc) SQLite3Error.toss("Creation of file failed with sqlite3 result code",
                                capi.sqlite3_js_rc_str(rc));
     }finally{
-      wasm.dealloc(pData);
+       wasm.dealloc(pData);
     }
   };
+
+  /**
+     Converts SQL input from a variety of convenient formats
+     to plain strings.
+
+     If v is a string, it is returned as-is. If it is-a Array, its
+     join("") result is returned.  If is is a Uint8Array, Int8Array,
+     or ArrayBuffer, it is assumed to hold UTF-8-encoded text and is
+     decoded to a string. If it looks like a WASM pointer,
+     wasm.cstrToJs(sql) is returned. Else undefined is returned.
+
+     Added in 3.44
+  */
+  capi.sqlite3_js_sql_to_string = (sql)=>{
+    if('string' === typeof sql){
+      return sql;
+    }
+    const x = flexibleString(v);
+    return x===v ? undefined : x;
+  }
 
   if( util.isUIThread() ){
     /* Features specific to the main window thread... */
@@ -1645,7 +1788,8 @@ globalThis.sqlite3ApiBootstrap = function sqlite3ApiBootstrap(
          do not.
       */
       tgt.push(capi.sqlite3_value_to_js(
-        wasm.peekPtr(pArgv + (wasm.ptrSizeof * i))
+        wasm.peekPtr(pArgv + (wasm.ptrSizeof * i)),
+        throwIfCannotConvert
       ));
     }
     return tgt;

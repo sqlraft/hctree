@@ -188,6 +188,7 @@ globalThis.sqlite3ApiBootstrap.initializers.push(function(sqlite3){
     ["sqlite3_file_control", "int", "sqlite3*", "string", "int", "*"],
     ["sqlite3_finalize", "int", "sqlite3_stmt*"],
     ["sqlite3_free", undefined,"*"],
+    ["sqlite3_get_autocommit", "int", "sqlite3*"],
     ["sqlite3_get_auxdata", "*", "sqlite3_context*", "int"],
     ["sqlite3_initialize", undefined],
     /*["sqlite3_interrupt", undefined, "sqlite3*"
@@ -608,6 +609,7 @@ globalThis.sqlite3ApiBootstrap.initializers.push(function(sqlite3){
     ["sqlite3_wasm_db_vfs", "sqlite3_vfs*", "sqlite3*","string"],
     ["sqlite3_wasm_vfs_create_file", "int",
      "sqlite3_vfs*","string","*", "int"],
+    ["sqlite3_wasm_posix_create_file", "int", "string","*", "int"],
     ["sqlite3_wasm_vfs_unlink", "int", "sqlite3_vfs*","string"]
   ];
 
@@ -887,9 +889,9 @@ globalThis.sqlite3ApiBootstrap.initializers.push(function(sqlite3){
      consistency with non-special-case wrappings.
   */
   const __dbArgcMismatch = (pDb,f,n)=>{
-    return sqlite3.util.sqlite3_wasm_db_error(pDb, capi.SQLITE_MISUSE,
-                                              f+"() requires "+n+" argument"+
-                                              (1===n?"":'s')+".");
+    return util.sqlite3_wasm_db_error(pDb, capi.SQLITE_MISUSE,
+                                      f+"() requires "+n+" argument"+
+                                      (1===n?"":'s')+".");
   };
 
   /** Code duplication reducer for functions which take an encoding

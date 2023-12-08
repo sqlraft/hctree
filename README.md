@@ -41,11 +41,10 @@ email to drh at sqlite dot org.
 The SQLite source code is in the public domain.  See
 <https://sqlite.org/copyright.html> for details. 
 
-Because SQLite is in the public domain,
-we cannot accept pull requests, because
-if we did accept a pull request, the changes in that pull request would
-carry a copyright and the SQLite source code would no longer be fully in
-the public domain.
+Because SQLite is in the public domain, we do not normally accept pull
+requests, because if we did take a pull request, the changes in that
+pull request might carry a copyright and the SQLite source code would
+then no longer be fully in the public domain.
 
 ## Obtaining The SQLite Source Code
 
@@ -104,9 +103,9 @@ For example:
         mkdir bld                ;#  Build will occur in a sibling directory
         cd bld                   ;#  Change to the build directory
         ../sqlite/configure      ;#  Run the configure script
-        make                     ;#  Run the makefile.
+        make                     ;#  Builds the "sqlite3" command-line tool
         make sqlite3.c           ;#  Build the "amalgamation" source file
-        make test                ;#  Run some tests (requires Tcl)
+        make devtest             ;#  Run some tests (requires Tcl)
 
 See the makefile for additional targets.
 
@@ -116,32 +115,33 @@ script does not work out for you, there is a generic makefile named
 can copy and edit to suit your needs.  Comments on the generic makefile
 show what changes are needed.
 
-## Using MSVC for Windows systems
+## Compiling for Windows Using MSVC
 
 On Windows, all applicable build products can be compiled with MSVC.
-First open the command prompt window associated with the desired compiler
-version (e.g. "Developer Command Prompt for VS2013").  Next, use NMAKE
-with the provided "Makefile.msc" to build one of the supported targets.
+You will also need a working installation of TCL.
+See the [compile-for-windows.md](doc/compile-for-windows.md) document for
+additional information about how to install MSVC and TCL and configure your
+build environment.
 
-For example, from the parent directory of the source subtree named "sqlite":
+If you want to run tests, you need to let SQLite know the location of your
+TCL library, using a command like this:
 
-        mkdir bld
-        cd bld
-        nmake /f ..\sqlite\Makefile.msc TOP=..\sqlite
-        nmake /f ..\sqlite\Makefile.msc sqlite3.c TOP=..\sqlite
-        nmake /f ..\sqlite\Makefile.msc sqlite3.dll TOP=..\sqlite
-        nmake /f ..\sqlite\Makefile.msc sqlite3.exe TOP=..\sqlite
-        nmake /f ..\sqlite\Makefile.msc test TOP=..\sqlite
+        set TCLDIR=c:\Tcl
 
-There are several build options that can be set via the NMAKE command
-line.  For example, to build for WinRT, simply add "FOR_WINRT=1" argument
-to the "sqlite3.dll" command line above.  When debugging into the SQLite
-code, adding the "DEBUG=1" argument to one of the above command lines is
-recommended.
+SQLite uses "tclsh.exe" as part of the build process, and so that utility
+program will need to be somewhere on your %PATH%.  The finished SQLite library
+does not contain any TCL code, but it does use TCL to help with the build process
+and to run tests.
 
-SQLite does not require [Tcl](http://www.tcl.tk/) to run, but a Tcl installation
-is required by the makefiles (including those for MSVC).  SQLite contains
-a lot of generated code and Tcl is used to do much of that code generation.
+Build using Makefile.msc.  Example:
+
+        nmake /f Makefile.msc
+        nmake /f Makefile.msc sqlite3.c
+        nmake /f Makefile.msc devtest
+        nmake /f Makefile.msc releasetest
+ 
+There are many other makefile targets.  See comments in Makefile.msc for
+details.
 
 ## Source Code Tour
 
@@ -159,7 +159,7 @@ extension and only later escaped to the wild as an independent library.)
 
 Test scripts and programs are found in the **test/** subdirectory.
 Additional test code is found in other source repositories.
-See [How SQLite Is Tested](http://www.sqlite.org/testing.html) for
+See [How SQLite Is Tested](https://www.sqlite.org/testing.html) for
 additional information.
 
 The **ext/** subdirectory contains code for extensions.  The
@@ -183,7 +183,7 @@ manually-edited files and automatically-generated files.
 
 The SQLite interface is defined by the **sqlite3.h** header file, which is
 generated from src/sqlite.h.in, ./manifest.uuid, and ./VERSION.  The
-[Tcl script](http://www.tcl.tk) at tool/mksqlite3h.tcl does the conversion.
+[Tcl script](https://www.tcl.tk) at tool/mksqlite3h.tcl does the conversion.
 The manifest.uuid file contains the SHA3 hash of the particular check-in
 and is used to generate the SQLITE\_SOURCE\_ID macro.  The VERSION file
 contains the current SQLite version number.  The sqlite3.h header is really
@@ -250,14 +250,14 @@ individual source file exceeds 32K lines in length.
 ## How It All Fits Together
 
 SQLite is modular in design.
-See the [architectural description](http://www.sqlite.org/arch.html)
+See the [architectural description](https://www.sqlite.org/arch.html)
 for details. Other documents that are useful in
 (helping to understand how SQLite works include the
-[file format](http://www.sqlite.org/fileformat2.html) description,
-the [virtual machine](http://www.sqlite.org/opcode.html) that runs
+[file format](https://www.sqlite.org/fileformat2.html) description,
+the [virtual machine](https://www.sqlite.org/opcode.html) that runs
 prepared statements, the description of
-[how transactions work](http://www.sqlite.org/atomiccommit.html), and
-the [overview of the query planner](http://www.sqlite.org/optoverview.html).
+[how transactions work](https://www.sqlite.org/atomiccommit.html), and
+the [overview of the query planner](https://www.sqlite.org/optoverview.html).
 
 Years of effort have gone into optimizing SQLite, both
 for small size and high performance.  And optimizations tend to result in
@@ -353,7 +353,7 @@ hidden by also modifying the makefiles.
 
 ## Contacts
 
-The main SQLite website is [http:/sqlite.org/](http://sqlite.org/)
+The main SQLite website is [https://sqlite.org/](https://sqlite.org/)
 with geographically distributed backups at
-[http://www2.sqlite.org/](http://www2.sqlite.org) and
-[http://www3.sqlite.org/](http://www3.sqlite.org).
+[https://www2.sqlite.org/](https://www2.sqlite.org) and
+[https://www3.sqlite.org/](https://www3.sqlite.org).
