@@ -1335,7 +1335,6 @@ int sqlite3HctTreeCsrHasMoved(HctTreeCsr *pCsr){
 }
 
 int sqlite3HctTreeCsrReseek(HctTreeCsr *pCsr, int *pRes){
-  int dummy = 0;
   assert( 
       pCsr->eIncrblob==TREE_INCRBLOB_READY 
    || pCsr->eIncrblob==TREE_INCRBLOB_ABORT

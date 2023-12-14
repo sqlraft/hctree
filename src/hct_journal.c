@@ -128,7 +128,7 @@ struct HctJrnlServer {
 */
 struct HctJournal {
   u64 iJrnlRoot;                  /* Root page of journal table */
-  u64 iBaseRoot;                  /* Base page of journal table */
+  u64 iBaseRoot;                  /* Root page of base table */
   int bInWrite;
   u64 iWriteTid;
   u64 iWriteCid;
@@ -233,9 +233,12 @@ int sqlite3_hct_journal_validation_hook(
   return SQLITE_OK;
 }
 
-#define MAX_6BYTE ((((i64)0x00008000)<<32)-1)
-
+/*
+** Value iVal is to be stored as an integer in an SQLite record. This 
+** function returns the number of bytes that it will use for storage.
+*/
 static int hctJrnlIntSize(u64 iVal){
+#define MAX_6BYTE ((((i64)0x00008000)<<32)-1)
   if( iVal<=127 ) return 1;
   if( iVal<=32767 ) return 2;
   if( iVal<=8388607 ) return 3;
@@ -244,6 +247,9 @@ static int hctJrnlIntSize(u64 iVal){
   return 8;
 }
 
+/*
+** Store an (nByte*8) bit big-endian integer, value iVal, in buffer a[].
+*/
 static void hctJrnlIntPut(u8 *a, u64 iVal, int nByte){
   int i;
   for(i=1; i<=nByte; i++){
@@ -252,13 +258,19 @@ static void hctJrnlIntPut(u8 *a, u64 iVal, int nByte){
   }
 }
 
+/*
+** Return the byte value that should be stored in the SQLite record
+** header for an nSize byte integer field.
+*/
 static u8 hctJrnlIntHdr(int nSize){
   if( nSize==8 ) return 6;
   if( nSize==6 ) return 5;
   return nSize;
 }
 
-
+/*
+** Compose an SQLite record suitable for the sqlite_hct_journal table.
+*/
 static u8 *hctJrnlComposeRecord(
   u64 iCid,
   const char *zSchema,
@@ -903,6 +915,203 @@ static int hctJrnlReadBaseline(
   return rc;
 }
 
+static int hctJrnlGetJrnlShape( 
+  sqlite3 *db,
+  i64 *piLast,                    /* Out: Last entry in journal */
+  i64 *piLastCont                 /* Out: Last contiguous entry in journal */
+){
+  const char *z1 = "SELECT max(cid) FROM sqlite_hct_journal";
+  const char *z2 = "SELECT cid FROM sqlite_hct_journal ORDER BY 1 DESC";
+
+  int rc = SQLITE_OK;
+  sqlite3_stmt *pStmt = 0;
+  i64 iLast = 0;
+  i64 iLastCont = 0;
+
+  rc = sqlite3_prepare_v2(db, z1, -1, &pStmt, 0);
+  if( rc==SQLITE_OK ){
+    if( SQLITE_ROW==sqlite3_step(pStmt) ){
+      iLast = sqlite3_column_int64(pStmt, 0);
+    }
+    rc = sqlite3_finalize(pStmt);
+  }
+
+  if( rc==SQLITE_OK ){
+    rc = sqlite3_prepare_v2(db, z2, -1, &pStmt, 0);
+  }
+  if( rc==SQLITE_OK ){
+    iLastCont = iLast;
+    while( sqlite3_step(pStmt)==SQLITE_ROW ){
+      i64 iThis = sqlite3_column_int64(pStmt, 0);
+      if( iThis!=iLastCont-1 ){
+        iLastCont = iThis;
+      }
+      if( (iLast-iThis)>HCT_MAX_LEADING_WRITE*2 ) break;
+    }
+    rc = sqlite3_finalize(pStmt);
+  }
+
+  *piLast = iLast;
+  *piLastCont = iLastCont;
+  return rc;
+}
+
+static sqlite3_stmt *hctPreparePrintf(
+  int *pRc, 
+  sqlite3 *db, 
+  const char *zFmt, ...
+){
+  sqlite3_stmt *pRet = 0;
+  va_list ap;
+  char *zSql = 0;
+
+  va_start(ap, zFmt);
+  zSql = sqlite3_vmprintf(zFmt, ap);
+  va_end(ap);
+
+  if( *pRc==SQLITE_OK ){
+    if( zSql==0 ){
+      *pRc = SQLITE_NOMEM;
+    }else{
+      *pRc = sqlite3_prepare_v2(db, zSql, -1, &pRet, 0);
+    }
+  }
+  sqlite3_free(zSql);
+  return pRet;
+}
+
+/*
+** Iterator for reading a blob from the "data" column of a journal entry.
+*/
+typedef struct HctDataReader HctDataReader;
+struct HctDataReader {
+  const u8 *aData;
+  int nData;
+  int iData;
+  
+  int bEof;
+  char eType;
+
+  /* Valid for all values of eType */
+  const char *zTab;
+
+  /* For eType==HCT_TYPE_INSERT_ROWID, HCT_TYPE_DELETE_ROWID */
+  i64 iRowid;
+
+  /* For eType==HCT_TYPE_INSERT_ROWID */
+  int nRecord;
+  const u8 *aRecord;
+};
+
+#define HCT_TYPE_TABLE        'T'
+#define HCT_TYPE_INSERT_ROWID 'i'
+#define HCT_TYPE_DELETE_ROWID 'd'
+
+static int hctDataReaderNext(HctDataReader *p){
+  if( p->iData>=p->nData ){
+    p->bEof = 1;
+  }else{
+    p->eType = (char)(p->aData[p->iData++]);
+    switch( p->eType ){
+      case 'T': {
+        p->zTab = (const char*)&p->aData[p->iData];
+        p->iData += sqlite3Strlen30(p->zTab) + 1;
+        break;
+      }
+
+      case 'd': {
+        p->iData += sqlite3GetVarint(&p->aData[p->iData], (u64*)&p->iRowid);
+        break;
+      }
+
+      case 'i': {
+        p->iData += sqlite3GetVarint(&p->aData[p->iData], (u64*)&p->iRowid);
+        p->iData += getVarint32(&p->aData[p->iData], p->nRecord);
+        p->aRecord = &p->aData[p->iData];
+        p->iData += p->nRecord;
+        break;
+      }
+
+      default: {
+        return SQLITE_CORRUPT_BKPT;
+      }
+    }
+  }
+
+  return SQLITE_OK;
+}
+
+/*
+** Initialize an HctDataReader object to iterate through the nData byte 
+** 'data' blob in buffer pData. Leave the iterator pointing at the first
+** entry in the blob.
+*/
+static int hctDataReaderInit(const void *pData, int nData, HctDataReader *pRdr){
+  memset(pRdr, 0, sizeof(*pRdr));
+  pRdr->aData = (const u8*)pData;
+  pRdr->nData = nData;
+  return hctDataReaderNext(pRdr);
+}
+
+int sqlite3HctJrnlSavePhysical( 
+  sqlite3 *db,
+  HctJournal *pJrnl, 
+  int (*xSave)(void*, i64 iPhys), 
+  void *pSave
+){
+  const char *zSql = "SELECT data FROM sqlite_hct_journal WHERE cid>?";
+  int rc = SQLITE_OK;
+  i64 iLast = 0;
+  i64 iLastCont = 0;
+  sqlite3_stmt *pStmt = 0;
+
+  rc = hctJrnlGetJrnlShape(db, &iLast, &iLastCont);
+  if( rc==SQLITE_OK ){
+    rc = sqlite3_prepare_v2(db, zSql, -1, &pStmt, 0);
+  }
+  if( rc==SQLITE_OK ){
+    sqlite3_bind_int64(pStmt, 1, iLastCont);
+    while( rc==SQLITE_OK && sqlite3_step(pStmt)==SQLITE_ROW ){
+      const void *pData = sqlite3_column_blob(pStmt, 0);
+      int nData = sqlite3_column_bytes(pStmt, 0);
+      sqlite3_stmt *pQuery = 0;
+      HctDataReader rdr;
+
+      sqlite3HctDbSetSavePhysical(pJrnl->pDb, xSave, pSave);
+      for(rc=hctDataReaderInit(pData, nData, &rdr);
+          rc==SQLITE_OK && rdr.bEof==0;
+          rc=hctDataReaderNext(&rdr)
+      ){
+        switch( rdr.eType ){
+          case HCT_TYPE_TABLE: {
+            rc = sqlite3_finalize(pQuery);
+            pQuery = hctPreparePrintf(
+                &rc, db, "SELECT * FROM %Q WHERE _rowid_=?", rdr.zTab
+            );
+            break;
+          }
+
+          case HCT_TYPE_INSERT_ROWID:
+          case HCT_TYPE_DELETE_ROWID: {
+            sqlite3_bind_int64(pQuery, 1, rdr.iRowid);
+            sqlite3_step(pQuery);
+            rc = sqlite3_reset(pQuery);
+            break;
+          }
+
+          default: assert( 0 );
+        }
+        if( rc ) break;
+      }
+      sqlite3HctDbSetSavePhysical(pJrnl->pDb, 0, 0);
+      sqlite3_finalize(pQuery);
+    }
+    rc = sqlite3_finalize(pStmt);
+  }
+
+  return rc;
+}
+
 /*
 ** Do special recovery (startup) processing for replication-enabled databases.
 ** This function is called during stage 1 recovery - after any log files have
@@ -1069,10 +1278,11 @@ int sqlite3HctJournalIsReadonly(
   int *pbNosnap
 ){
   if( pJrnl ){
+    HctJrnlServer *p = pJrnl->pServer;
     int bNosnap = (pJrnl->iJrnlRoot==iTable || pJrnl->iBaseRoot==iTable);
     *pbNosnap = bNosnap;
     return (pJrnl->bInWrite==0 && (
-        bNosnap || pJrnl->pServer->eMode==SQLITE_HCT_JOURNAL_MODE_FOLLOWER
+        bNosnap || !p || p->eMode==SQLITE_HCT_JOURNAL_MODE_FOLLOWER
     ));
   }
   return 0;
@@ -1457,7 +1667,7 @@ u64 sqlite3HctJournalSnapshot(HctJournal *pJrnl){
   u64 iRet = 0;
   if( pJrnl ){
     HctJrnlServer *pServer = pJrnl->pServer;
-    if( pServer->eMode==SQLITE_HCT_JOURNAL_MODE_FOLLOWER ){
+    if( pServer && pServer->eMode==SQLITE_HCT_JOURNAL_MODE_FOLLOWER ){
       u64 iTest = 0;
       u64 iValid = 0;
       iRet = HctAtomicLoad(&pServer->iSnapshot);
@@ -1675,63 +1885,6 @@ int sqlite3_hct_journal_rollback(sqlite3 *db, sqlite3_int64 iCid){
 
 }
 
-/*
-** Write empty records for any missing journal entries with cid values
-** less than or equal to iCid.
-*/
-int sqlite3_hct_journal_patchto(sqlite3 *db, sqlite3_int64 iMaxCid){
-  int rc = SQLITE_OK;
-  HctJournal *pJrnl = 0;
-  sqlite3_stmt *pSel = 0;
-
-  if( 0==sqlite3_get_autocommit(db) ){
-    sqlite3ErrorWithMsg(db, SQLITE_ERROR, 
-        "cannot patch journal from within a transaction"
-    );
-    return SQLITE_ERROR;
-  }
-  if( pJrnl->pServer->eMode==SQLITE_HCT_JOURNAL_MODE_LEADER ){
-    sqlite3ErrorWithMsg(db, SQLITE_ERROR, 
-        "cannot patch journal in leader database"
-    );
-    return SQLITE_ERROR;
-  }
-
-  rc = hctJrnlFind(db, &pJrnl);
-  pSel = hctJrnlPrepare(&rc, db, 
-      "SELECT cid FROM sqlite_hct_journal WHERE data IS NULL AND cid<("
-      "  SELECT max(cid) FROM sqlite_hct_journal"
-      ") AND cid<=?"
-  );
-  if( rc==SQLITE_OK ){
-    pJrnl->bInWrite = 1;
-    sqlite3_bind_int64(pSel, 1, iMaxCid);
-    rc = sqlite3_exec(db, "BEGIN CONCURRENT", 0, 0, 0);
-  }
-  while( rc==SQLITE_OK && SQLITE_ROW==sqlite3_step(pSel) ){
-    u64 iCid = sqlite3_column_int64(pSel, 0);
-    rc = hctJrnlWriteRecord(pJrnl, iCid, "", 0, 0, 0, 0);
-  }
-  hctJrnlFinalize(&rc, pSel);
-
-  if( rc==SQLITE_OK ){
-    rc = sqlite3HctDbStartWrite(pJrnl->pDb, &pJrnl->iWriteTid);
-    pJrnl->iWriteCid = 1;
-  }
-  if( rc==SQLITE_OK ){
-    rc = sqlite3_exec(db, "COMMIT", 0, 0, 0);
-  }
-  if( rc!=SQLITE_OK ){
-    sqlite3_exec(db, "ROLLBACK", 0, 0, 0);
-  }
-
-  pJrnl->bInWrite = 0;
-  pJrnl->iWriteTid = 0;
-  pJrnl->iWriteCid = 0;
-  return rc;
-}
-
-
 static u64 hctJournalFindLastWrite(
   int *pRc,                       /* IN/OUT: Error code */
   HctJournal *pJrnl,              /* Journal object */
@@ -1769,10 +1922,9 @@ int sqlite3_hct_journal_write(
   u64 iSnapshotId = 0;
   Btree *pBt = db->aDb[0].pBt;
   Schema *pSchema = db->aDb[0].pSchema;
-  int ii = 0;
-  const u8 *aData = (const u8*)pData;
-  const char *zTab = 0;                   /* Table currently being written */
   u64 iRoot = 0;                          /* Root page of zTab */
+
+  HctDataReader rdr;              /* For iterating through pData/nData */
 
   rc = hctJrnlFind(db, &pJrnl);
   if( rc!=SQLITE_OK ) return rc;
@@ -1821,85 +1973,70 @@ int sqlite3_hct_journal_write(
     }
   }
 
-  while( rc==SQLITE_OK && ii<nData ){
-    char t = aData[ii++];
-    switch( t ){
-      case 'T': {
-        zTab = (const char*)&aData[ii];
-        iRoot = hctFindRootByName(pSchema, zTab);
-        if( iRoot==0 ){
-          rc = SQLITE_CORRUPT_BKPT;
-        }else{
-          ii += sqlite3Strlen30(zTab) + 1;
-        }
-        break;
-      }
-
-      case 'i': {
-        i64 iRowid = 0;
-        u64 iLastCid = 0;
-        int iPk = -1;
-        int nByte = 0;
-
-        ii += sqlite3GetVarint(&aData[ii], (u64*)&iRowid);
-        ii += getVarint32(&aData[ii], nByte);
-
-        if( sqlite3HctBtreeIsNewTable(db->aDb[0].pBt, iRoot)==0 ){
-          iLastCid = hctJournalFindLastWrite(&rc, pJrnl, iRoot, iRowid);
-        }
-        if( iLastCid<=iCid ){
-          sqlite3_stmt *pStmt = 0;
-          rc = hctJrnlGetInsertStmt(db, zTab, &iPk, &pStmt);
-
-          hctJrnlBindRecord(&rc, pStmt, &aData[ii]);
-          sqlite3_bind_int64(pStmt, iPk, iRowid);
-          if( rc==SQLITE_OK ){
-            sqlite3_step(pStmt);
-            rc = sqlite3_finalize(pStmt);
+  if( rc==SQLITE_OK ){
+    for(rc=hctDataReaderInit(pData, nData, &rdr);
+        rc==SQLITE_OK && rdr.bEof==0;
+        rc=hctDataReaderNext(&rdr)
+    ){
+      switch( rdr.eType ){
+        case HCT_TYPE_TABLE: {
+          iRoot = hctFindRootByName(pSchema, rdr.zTab);
+          if( iRoot==0 ){
+            rc = SQLITE_CORRUPT_BKPT;
           }
-        }else{
-          iValidCid = MAX(iValidCid, iLastCid);
+          break;
         }
 
-        ii += nByte;
-        break;
-      }
-
-      /* Delete by rowid */
-      case 'd': {
-        i64 iRowid = 0;
-        u64 iLastCid = 0;
-
-        ii += sqlite3GetVarint(&aData[ii], (u64*)&iRowid);
-        if( sqlite3HctBtreeIsNewTable(db->aDb[0].pBt, iRoot)==0 ){
-          iLastCid = hctJournalFindLastWrite(&rc, pJrnl, iRoot, iRowid);
+        case HCT_TYPE_INSERT_ROWID: {
+          u64 iLastCid = 0;
+          if( sqlite3HctBtreeIsNewTable(db->aDb[0].pBt, iRoot)==0 ){
+            iLastCid = hctJournalFindLastWrite(&rc, pJrnl, iRoot, rdr.iRowid);
+          }
           if( iLastCid<=iCid ){
+            int iPk = -1;
             sqlite3_stmt *pStmt = 0;
-            rc = hctJrnlGetDeleteStmt(db, zTab, &pStmt);
-            sqlite3_bind_int64(pStmt, 1, iRowid);
+            rc = hctJrnlGetInsertStmt(db, rdr.zTab, &iPk, &pStmt);
+            hctJrnlBindRecord(&rc, pStmt, rdr.aRecord);
+            sqlite3_bind_int64(pStmt, iPk, rdr.iRowid);
             if( rc==SQLITE_OK ){
               sqlite3_step(pStmt);
               rc = sqlite3_finalize(pStmt);
             }
-            if( rc==SQLITE_OK 
-             && iCid!=iSnapshotId+1 
-             && sqlite3_changes(db)==0 
-            ){
-              rc = SQLITE_BUSY;
-              zErr = sqlite3_mprintf(
-                  "change may not be applied yet (delete of future key)"
-              );
-            }
           }else{
             iValidCid = MAX(iValidCid, iLastCid);
           }
+          break;
         }
-        break;
-      }
 
-      default:
-        assert( 0 );
-        break;
+        case HCT_TYPE_DELETE_ROWID: {
+          if( sqlite3HctBtreeIsNewTable(db->aDb[0].pBt, iRoot)==0 ){
+            u64 iLastCid = 0;
+            iLastCid = hctJournalFindLastWrite(&rc, pJrnl, iRoot, rdr.iRowid);
+            if( iLastCid<=iCid ){
+              sqlite3_stmt *pStmt = 0;
+              rc = hctJrnlGetDeleteStmt(db, rdr.zTab, &pStmt);
+              sqlite3_bind_int64(pStmt, 1, rdr.iRowid);
+              if( rc==SQLITE_OK ){
+                sqlite3_step(pStmt);
+                rc = sqlite3_finalize(pStmt);
+              }
+              if( rc==SQLITE_OK 
+               && iCid!=iSnapshotId+1 
+               && sqlite3_changes(db)==0 
+              ){
+                rc = SQLITE_BUSY;
+                zErr = sqlite3_mprintf(
+                    "change may not be applied yet (delete of future key)"
+                );
+              }
+            }else{
+              iValidCid = MAX(iValidCid, iLastCid);
+            }
+          }
+          break;
+        }
+      }
+      if( rc ) break;
     }
   }
 

@@ -485,6 +485,14 @@ int sqlite3ReadSchema(Parse *pParse){
     }else if( db->noSharedCache ){
       db->mDbFlags |= DBFLAG_SchemaKnownOk;
     }
+#ifdef SQLITE_ENABLE_HCT
+    {
+      int iDb;
+      for(iDb=0; rc==SQLITE_OK && iDb<db->nDb; iDb++){
+        rc = sqlite3BtreeSchemaLoaded(db->aDb[iDb].pBt);
+      }
+    }
+#endif
   }
   return rc;
 }

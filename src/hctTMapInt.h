@@ -92,7 +92,7 @@ struct HctTMap {
 /*
 ** Create or delete a tmap server object.
 */
-int sqlite3HctTMapServerNew(u64 iFirstTid, HctTMapServer **pp);
+int sqlite3HctTMapServerNew(u64 iFirstTid, u64 iLastTid, HctTMapServer **pp);
 void sqlite3HctTMapServerFree(HctTMapServer *p);
 
 /*
@@ -146,6 +146,7 @@ void sqlite3HctTMapScan(HctTMapClient*);
 int sqlite3HctTMapRecoverySet(HctTMapClient*, u64 iTid, u64 iCid);
 void sqlite3HctTMapRecoveryFinish(HctTMapClient*, int rc);
 
+int sqlite3HctTMapServerSet(HctTMapServer *pServer, u64 iTid, u64 iCid);
 
 
 

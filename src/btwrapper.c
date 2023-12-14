@@ -26,6 +26,7 @@ struct Btree {
 
 int sqlite3HctBtreeCursorSize(void);
 int sqlite3HctBtreeOpen(sqlite3_vfs*, const char*, sqlite3*, Btree**, int, int);
+int sqlite3HctBtreeSchemaLoaded(Btree*);
 
 int sqlite3StockBtreeCursorSize(void);
 int sqlite3StockBtreeOpen(sqlite3_vfs*, const char*, sqlite3*, Btree**,int,int);
@@ -652,6 +653,14 @@ int sqlite3BtreeOpen(
 
 int sqlite3IsHct(Btree *pBt){
   return (pBt && pBt->pMethods==&hct_btree_methods);
+}
+
+int sqlite3BtreeSchemaLoaded(Btree *pBt){
+  int rc = SQLITE_OK;
+  if( sqlite3IsHct(pBt) ){
+    rc = sqlite3HctBtreeSchemaLoaded(pBt);
+  }
+  return rc;
 }
 
 

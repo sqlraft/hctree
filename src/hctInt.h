@@ -232,6 +232,12 @@ i64 sqlite3HctDbStats(sqlite3 *db, int iStat, const char **pzStat);
 
 int sqlite3HctDbCsrRollbackSeek(HctDbCsr*, UnpackedRecord*, i64, int *pOp);
 
+void sqlite3HctDbSetSavePhysical(
+  HctDatabase *pDb,
+  int (*xSave)(void*, i64 iPhys),
+  void *pSave
+);
+
 char *sqlite3HctDbRecordToText(sqlite3 *db, const u8 *aRec, int nRec);
 
 void sqlite3HctDbTMapScan(HctDatabase *pDb);

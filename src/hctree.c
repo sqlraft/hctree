@@ -236,26 +236,6 @@ void sqlite3HctBtreeCursorHintFlags(BtCursor *pCur, unsigned x){
   assert( x==BTREE_SEEK_EQ || x==BTREE_BULKLOAD || x==0 );
 }
 
-/*
-** Context object passed to hctRecoverOne().
-**
-** pBt:
-**   Btree handle for database being recovered.
-**
-** iStage:
-**   Either 0 or 1. If set to 0, then only sqlite_schema records are
-**   recovered. If it is set to 1, then all other records are recovered
-**   and the log file deleted.
-*/
-typedef struct RecoverCtx RecoverCtx;
-struct RecoverCtx {
-  HBtree *pBt;
-  int iStage;
-};
-
-#define HCT_RECOVER_STAGE0 0
-#define HCT_RECOVER_STAGE1 1
-
 typedef struct RecoverCsr RecoverCsr;
 struct RecoverCsr {
   HctDbCsr *pCsr;                 /* Cursor to read from database on disk */
@@ -353,132 +333,183 @@ static void hctRecoverDebug(
 }
 #endif
 
+/*
+** This object is used to read a log file from disk. It is manipulated using
+** the following API:
+**
+**     hctLogReaderOpen()
+**     hctLogReaderNext()
+**     hctLogReaderClose()
+**
+** Log file format consists of an 8-byte TID value followed by one or more
+** records. Each record is:
+**
+**   * 32-bit root page number,
+**   * 32-bit size of key field (nKey),
+**   * if( nKey==0 ) 64-bit rowid key,
+**   * if( nKey!=0 ) nKey byte blob key.
+*/
+typedef struct HctLogReader HctLogReader;
+struct HctLogReader {
+  u8 *aFile;                      /* Buffer containing log file contents */
+  int nFile;                      /* Size of aFile[] in bytes */
+  int iFile;                      /* Offset of next record in aFile[] */
 
-static int hctRecoverOne(void *pCtx, const char *zFile){
-  u8 *aFile = 0;
-  int nFile = 0;
-  int iFile = 0;
-  int nRead = 0;
+  i64 iTid;                       /* TID value for log file */
+  int bEof;                       /* True if reader has hit EOF */
 
-  HBtree *p = ((RecoverCtx*)pCtx)->pBt;
-  int iStage = ((RecoverCtx*)pCtx)->iStage;
+  /* Valid only if bEof==0 */
+  i64 iRoot;                      /* Root page for current entry */
+  i64 iKey;                       /* Integer key for current entry (aKey==0) */
+  int nKey;                       /* Size of aKey[] buffer */
+  u8 *aKey;                       /* Blob key for current entry */
+};
 
-  int rc = SQLITE_OK;
-  HctDatabase *pDb = p->pHctDb;
-  int fd = open(zFile, O_RDONLY);
-  struct stat sStat;
-  u64 iTid = 0;
+static void hctLogReaderNext(HctLogReader *pReader){
+  u32 aInt[2];
 
-  u32 iPrevRoot = 0;
-  RecoverCsr csr;
-
-  memset(&csr, 0, sizeof(csr));
-
-  memset(&sStat, 0, sizeof(sStat));
-  fstat(fd, &sStat);
-  nFile = (int)sStat.st_size;
-
-  if( nFile<8 ){
-    goto recover_one_done;
-  }
-  aFile = (u8*)sqlite3_malloc(nFile);
-  nRead = read(fd, aFile, nFile);
-  if( nRead!=nFile ){
-    rc = SQLITE_IOERR_READ;
-    goto recover_one_done;
-  }
-  memcpy(&iTid, aFile, sizeof(iTid));
-  iFile = (int)sizeof(iTid);
-
-  if( iTid!=0 ){
-
-    sqlite3HctDbRecoverTid(pDb, iTid);
-    while( 1 ){
-      u32 aInt[2] = {0, 0};
-      u32 iRoot = 0;              /* Root page of b-tree for this record */
-
-      u32 nKey = 0;               /* Size of key in bytes (index b-tree) */
-      i64 iKey = 0;               /* Integer key (intkey b-tree) */
-      u8 *aKey = 0;               /* Buffer containing allocation */
-
-      int op = 0;
-
-      memcpy(aInt, &aFile[iFile], sizeof(aInt));
-      iFile += sizeof(aInt);
-      iRoot = aInt[0];
-      nKey = aInt[1];
-      if( iRoot==0 ) break;
-
-      if( iRoot!=iPrevRoot ){
-        iPrevRoot = iRoot;
-        hctRecoverCursorClose(p, &csr);
-        rc = hctRecoverCursorOpen(p, iRoot, &csr);
-      }
-
-      if( (iRoot==1)==(iStage==HCT_RECOVER_STAGE0) ){
-        if( nKey ){
-          assert( csr.pRec );
-          aKey = &aFile[iFile];
-          sqlite3VdbeRecordUnpack(csr.pKeyInfo, nKey, aKey, csr.pRec);
+  if( (pReader->iFile + sizeof(aInt))>pReader->nFile ){
+    pReader->bEof = 1;
+  }else{
+    memcpy(aInt, &pReader->aFile[pReader->iFile], sizeof(aInt));
+    pReader->iRoot = (i64)aInt[0];
+    if( pReader->iRoot==0 ){
+      pReader->bEof = 1;
+    }else{
+      pReader->nKey = (int)aInt[1];
+      pReader->iFile += sizeof(aInt);
+      if( pReader->nKey==0 ){
+        pReader->aKey = 0;
+        if( pReader->iFile+sizeof(i64)>pReader->nFile ){
+          pReader->bEof = 1;
         }else{
-          assert( csr.pRec==0 );
-          memcpy(&iKey, &aFile[iFile], sizeof(iKey));
+          memcpy(&pReader->iKey, &pReader->aFile[pReader->iFile], sizeof(i64));
+          pReader->iFile += sizeof(i64);
         }
-
-        rc = sqlite3HctDbCsrRollbackSeek(csr.pCsr, csr.pRec, iKey, &op);
-        if( rc==SQLITE_OK && op!=0 ){
-          HctTreeCsr *pTCsr = csr.pTreeCsr;
-          if( op<0 ){
-            /* rollback requires deleting the key */
-            hctRecoverDebug(&csr, "delete", iKey, aKey, nKey);
-            rc = sqlite3HctTreeDeleteKey(pTCsr, csr.pRec, iKey, nKey, aKey);
-          }else if( op>0 ){
-            const u8 *aOld = 0;
-            int nOld = 0;
-            rc = sqlite3HctDbCsrData(csr.pCsr, &nOld, &aOld);
-            if( rc==SQLITE_OK ){
-              hctRecoverDebug(&csr, "insert", iKey, aOld, nOld);
-              rc = sqlite3HctTreeInsert(pTCsr, csr.pRec, iKey, nOld, aOld, 0);
-            }
-          }
+      }else{
+        pReader->iKey = 0;
+        if( pReader->iFile+pReader->nKey>pReader->nFile ){
+          pReader->bEof = 1;
+        }else{
+          pReader->aKey = &pReader->aFile[pReader->iFile];
+          pReader->iFile += pReader->nKey;
         }
       }
-
-      iFile += nKey ? nKey : sizeof(iKey);
-    }
-    hctRecoverCursorClose(p, &csr);
-  }
-
-  if( rc==SQLITE_OK && iStage==HCT_RECOVER_STAGE1 ){
-    if( p->pHctJrnl ){
-      rc = sqlite3HctJrnlRollbackEntry(p->pHctJrnl, iTid);
-    }
-    if( rc==SQLITE_OK ){
-      /* TODO!!! */
-      unlink(zFile);
     }
   }
+}
 
- recover_one_done:
-  if( fd>=0 ) close(fd);
-  sqlite3_free(aFile);
+static void hctLogReaderClose(HctLogReader *pReader){
+  sqlite3_free(pReader->aFile);
+  memset(pReader, 0, sizeof(*pReader));
+}
+
+static int hctLogReaderOpen(const char *zFile, HctLogReader *pReader){
+  int rc = SQLITE_OK;
+  int fd = -1;
+
+  memset(pReader, 0, sizeof(*pReader));
+  fd = open(zFile, O_RDONLY);
+  if( fd<0 ){
+    rc = SQLITE_IOERR;
+  }else{
+    struct stat sStat;
+
+    memset(&sStat, 0, sizeof(sStat));
+    fstat(fd, &sStat);
+    pReader->nFile = (int)sStat.st_size;
+    pReader->aFile = (u8*)sqlite3HctMalloc(&rc, pReader->nFile + 8);
+    if( pReader->aFile ){
+      int nRead = read(fd, pReader->aFile, pReader->nFile);
+      if( nRead!=pReader->nFile ){
+        rc = SQLITE_IOERR;
+      }else{
+        memcpy(&pReader->iTid, pReader->aFile, sizeof(i64));
+        pReader->iFile = sizeof(i64);
+        if( pReader->iTid==0 ){
+          pReader->bEof = 1;
+        }else{
+          hctLogReaderNext(pReader);
+        }
+      }
+    }
+
+    close(fd);
+  }
+
   return rc;
 }
 
+
 static int btreeFlushData(HBtree *p, int bRollback);
 
-static int hctRecoverLogs(HBtree *p, int iStage){
-  HctFile *pFile = sqlite3HctDbFile(p->pHctDb);
+static int hctRecoverOne(void *pCtx, const char *zFile){
+  HBtree *p = (HBtree*)pCtx;
   int rc = SQLITE_OK;
-  RecoverCtx ctx;
-  ctx.pBt = p;
-  ctx.iStage = iStage;
-  assert( iStage==0 || iStage==1 );
-  rc = sqlite3HctFileFindLogs(pFile, (void*)&ctx, hctRecoverOne);
-  if( rc==SQLITE_OK ){
-    rc = btreeFlushData(p, 0);
+  u32 iPrevRoot = 0;
+  RecoverCsr csr;
+  HctLogReader rdr;
+
+  memset(&csr, 0, sizeof(csr));
+  rc = hctLogReaderOpen(zFile, &rdr);
+  if( rc==SQLITE_OK && rdr.bEof==0 ){
+
+    assert( rdr.iTid!=0 );
+    sqlite3HctDbRecoverTid(p->pHctDb, rdr.iTid);
+    for(/* no-op */; rdr.bEof==0; hctLogReaderNext(&rdr)){
+      int op = 0;
+
+      if( rdr.iRoot!=iPrevRoot ){
+        iPrevRoot = rdr.iRoot;
+        hctRecoverCursorClose(p, &csr);
+        rc = hctRecoverCursorOpen(p, rdr.iRoot, &csr);
+      }
+
+      if( rdr.nKey ){
+        sqlite3VdbeRecordUnpack(csr.pKeyInfo, rdr.nKey, rdr.aKey, csr.pRec);
+      }
+      rc = sqlite3HctDbCsrRollbackSeek(csr.pCsr, csr.pRec, rdr.iKey, &op);
+
+      if( rc==SQLITE_OK && op!=0 ){
+        HctTreeCsr *pTCsr = csr.pTreeCsr;
+        if( op<0 ){
+          /* rollback requires deleting the key */
+          hctRecoverDebug(&csr, "delete", rdr.iKey, rdr.aKey, rdr.nKey);
+          rc = sqlite3HctTreeDeleteKey(
+              pTCsr, csr.pRec, rdr.iKey, rdr.nKey, rdr.aKey
+          );
+        }else if( op>0 ){
+          const u8 *aOld = 0;
+          int nOld = 0;
+          rc = sqlite3HctDbCsrData(csr.pCsr, &nOld, &aOld);
+          if( rc==SQLITE_OK ){
+            hctRecoverDebug(&csr, "insert", rdr.iKey, aOld, nOld);
+            rc = sqlite3HctTreeInsert(pTCsr, csr.pRec, rdr.iKey, nOld, aOld, 0);
+          }
+        }
+      }
+    }
+    hctRecoverCursorClose(p, &csr);
+
+    if( rc==SQLITE_OK && p->pHctJrnl ){
+      rc = sqlite3HctJrnlRollbackEntry(p->pHctJrnl, rdr.iTid);
+    }
+    if( rc==SQLITE_OK ){
+      rc = btreeFlushData(p, 0);
+    }
   }
+
+  if( rc==SQLITE_OK ){
+    /* TODO!!! */
+    unlink(zFile);
+  }
+  hctLogReaderClose(&rdr);
   return rc;
+}
+
+static int hctRecoverLogs(HBtree *p){
+  HctFile *pFile = sqlite3HctDbFile(p->pHctDb);
+  return sqlite3HctFileFindLogs(pFile, (void*)p, hctRecoverOne);
 }
 
 
@@ -911,36 +942,255 @@ int sqlite3HctDetectJournals(sqlite3 *db){
   return rc;
 }
 
-static int hctAttemptRecovery(HBtree *p, int iStage){
-  int rc = SQLITE_OK;
-  if( p->bRecoveryDone==0 ){
-    assert( iStage==0 || iStage==1 );
-    if( p->pHctDb && sqlite3HctDbStartRecovery(p->pHctDb, iStage) ){
-      rc = hctRecoverLogs(p, iStage);
-      if( rc==SQLITE_OK && iStage==1 ){
-        hctDetectJournals(p);
-        if( p->pHctJrnl ){
-          sqlite3HctDbRollbackMode(p->pHctDb, 0);
-          rc = sqlite3HctJrnlRecovery(p->pHctJrnl, p->pHctDb);
+typedef struct HctFreelistCtx HctFreelistCtx;
+struct HctFreelistCtx {
+  /* Physical pages that need to be preserved for log and journal rollback */
+  int nAlloc;
+  int nPg;
+  i64 *aPg;
+
+  /* Root pages in the current schema */
+  int nRootAlloc;
+  int nRoot;
+  i64 *aRoot;
+
+  HBtree *p;
+};
+
+static int hctTopDownMerge(
+  i64 *aB, 
+  int iBegin1, int iEnd1, 
+  int iBegin2, int iEnd2, 
+  i64 *aA
+){
+  int i = iBegin1;
+  int j = iBegin2;
+  int k;
+  for(k=iBegin1; i<iEnd1 || j<iEnd2; k++){
+    if( i<iEnd1 && (j>=iEnd2 || aA[i]<=aA[j]) ){
+      if( j<iEnd2 && aA[i]==aA[j] ) j++;
+      aB[k] = aA[i];
+      i++;
+    }else{
+      aB[k] = aA[j];
+      j++;
+    }
+  }
+  return k;
+}
+
+/*
+** Sort the integers in aA[] into array aB[].
+*/
+static int hctTopDownSplitMerge(i64 *aB, int iBegin, int iEnd, i64 *aA){
+  if( (iEnd-iBegin)>1 ){
+    int iMid = (iEnd + iBegin) / 2;
+    int i1 = hctTopDownSplitMerge(aA, iBegin, iMid, aB);
+    int i2 = hctTopDownSplitMerge(aA, iMid, iEnd, aB);
+    return hctTopDownMerge(aB, iBegin, i1, iMid, i2, aA);
+  }
+  return iEnd;
+}
+
+/*
+** Sort the array of aPg[] page numbers in ascending order. Discard 
+** any duplicates. 
+*/
+static void hctFreelistSort(int *pRc, HctFreelistCtx *p){
+  if( *pRc==SQLITE_OK && p->nPg>1 ){
+    i64 *aWork = (i64*)sqlite3HctMalloc(pRc, p->nPg * sizeof(i64));
+    if( aWork ){
+      memcpy(aWork, p->aPg, p->nPg * sizeof(i64));
+      p->nPg = hctTopDownSplitMerge(p->aPg, 0, p->nPg, aWork);
+      sqlite3_free(aWork);
+#ifdef SQLITE_DEBUG
+      {
+        int ii;
+        for(ii=1; ii<p->nPg; ii++){
+          assert( p->aPg[ii]>p->aPg[ii-1] );
         }
       }
-      rc = sqlite3HctDbFinishRecovery(p->pHctDb, iStage, rc);
+#endif
+    }
+  }
+}
+
+static int hctSavePhysical(void *pCtx, i64 iPhys){
+  HctFreelistCtx *p = (HctFreelistCtx*)pCtx;
+  if( p->nPg==p->nAlloc ){
+    int nNew = (p->nPg>0) ? p->nPg * 4 : 64;
+    i64 *aNew = (i64*)sqlite3_realloc(p->aPg, nNew*sizeof(i64));;
+    if( aNew==0 ) return SQLITE_NOMEM;
+    p->aPg = aNew;
+    p->nAlloc = nNew;
+  }
+  p->aPg[p->nPg++] = iPhys;
+  return SQLITE_OK;
+}
+
+static int hctScanOne(void *pCtx, const char *zFile){
+  HctFreelistCtx *p = (HctFreelistCtx*)pCtx;
+  int rc = SQLITE_OK;
+  HctLogReader rdr;
+
+  sqlite3HctDbSetSavePhysical(p->p->pHctDb, hctSavePhysical, pCtx);
+
+  rc = hctLogReaderOpen(zFile, &rdr);
+  if( rc==SQLITE_OK && rdr.bEof==0 ){
+    u32 iPrevRoot =0;
+    RecoverCsr csr;
+    memset(&csr, 0, sizeof(csr));
+    sqlite3HctDbRecoverTid(p->p->pHctDb, rdr.iTid);
+    for(/* no-op */; rc==SQLITE_OK && rdr.bEof==0; hctLogReaderNext(&rdr)){
+
+      if( rdr.iRoot!=iPrevRoot ){
+        hctRecoverCursorClose(p->p, &csr);
+        rc = hctRecoverCursorOpen(p->p, rdr.iRoot, &csr);
+      }
+
+      if( rc==SQLITE_OK ){
+        int dummy = 0;
+        if( rdr.nKey ){
+          sqlite3VdbeRecordUnpack(csr.pKeyInfo, rdr.nKey, rdr.aKey, csr.pRec);
+        }
+        rc = sqlite3HctDbCsrRollbackSeek(csr.pCsr, csr.pRec, rdr.iKey, &dummy);
+      }
     }
 
-    if( iStage==1 ){
-      hctDetectJournals(p);
-      p->bRecoveryDone = 1;
+    hctRecoverCursorClose(p->p, &csr);
+  }
+
+  sqlite3HctDbSetSavePhysical(p->p->pHctDb, 0, 0);
+  hctLogReaderClose(&rdr);
+  return rc;
+}
+
+static void hctRootpageAdd(int *pRc, HctFreelistCtx *pCtx, i64 iRoot){
+  if( *pRc==SQLITE_OK ){
+    if( pCtx->nRoot==pCtx->nRootAlloc ){
+      int nNew = (pCtx->nRoot>0) ? pCtx->nRoot * 4 : 64;
+      i64 *aNew = (i64*)sqlite3_realloc(pCtx->aRoot, nNew*sizeof(i64));;
+      if( aNew==0 ){
+        *pRc = SQLITE_NOMEM;
+        return;
+      }
+      pCtx->aRoot = aNew;
+      pCtx->nRootAlloc = nNew;
     }
+
+    pCtx->aRoot[pCtx->nRoot++] = iRoot;
+  }
+}
+
+/*
+** Assemble a list of the root pages in the current schema in the 
+** pCtx->aRoot[] array.
+*/
+static void hctRootpageList(int *pRc, HctFreelistCtx *pCtx){
+  Schema *pSchema = (Schema*)pCtx->p->pSchema;
+  HashElem *pE = 0;
+  for(pE=sqliteHashFirst(&pSchema->tblHash); pE; pE=sqliteHashNext(pE)){
+    Table *pTab = (Table*)sqliteHashData(pE);
+    Index *pIdx = 0;
+    hctRootpageAdd(pRc, pCtx, pTab->tnum);
+    for(pIdx=pTab->pIndex; pIdx; pIdx=pIdx->pNext){
+      hctRootpageAdd(pRc, pCtx, pIdx->tnum);
+    }
+  }
+}
+
+/*
+** This is called as part of recovery, before any log files are rolled back,
+** to rebuild the free-page list (or, if you like, to initialize the
+** page-manager). This involves the following:
+**
+**   1) Scanning the sqlite_hct_journal table, if any, from the first hole
+**      to the last entry to determine the list of physical database pages
+**      that will be required if sqlite3_hct_journal_rollback() is called.
+**
+**   2) Scanning each log file that will be rolled back, accumulating a 
+**      list of the physical database pages that will be required to find
+**      the "old" values required to roll them back.
+**
+**   3) Scanning the page map, checking for pages with the PHYSICAL_IN_USE
+**      flag clear. Each such page is added to the free-page list. If the
+**      page was one of those found in the scans in steps (1) or (2), then
+**      it is not available for reuse until after tid $TID, and all previous
+**      tids, have been committed. Otherwise, it is available for reuse 
+**      immediately.
+**
+**      $TID is set to the TID of the next transaction that will be written
+**      to this database (page-map entry TRANSID_EOF+1).
+**
+** This is a complicated procedure.
+*/
+static int hctRecoverFreeList(HBtree *p){
+  HctFreelistCtx ctx;
+  HctFile *pFile = sqlite3HctDbFile(p->pHctDb);
+  int rc = SQLITE_OK;
+
+  /* Scan all the log file, assembling the list of physical pages that must
+  ** be preserved in the ctx.aPg[] array.  */
+  memset(&ctx, 0, sizeof(ctx));
+  ctx.p = p;
+
+  /* If this is a replication database, scan all journal entries that may
+  ** be rolled back using a call to sqlite3_hct_journal_rollback(). Record
+  ** the set of physical pages that may be required by this call in the 
+  ** ctx.aPg[] array.  */
+  if( p->pHctJrnl ){
+    void *pCtx = (void*)&ctx;
+    rc = sqlite3HctJrnlSavePhysical(p->db, p->pHctJrnl, hctSavePhysical, pCtx);
+  }
+
+  if( rc==SQLITE_OK ){
+    sqlite3HctDbRollbackMode(p->pHctDb, 2);
+    rc = sqlite3HctFileFindLogs(pFile, (void*)&ctx, hctScanOne);
+  }
+
+  /* Sort the list of physical page numbers accumulated above. */
+  hctFreelistSort(&rc, &ctx);
+
+  /* Assemble a list of root pages. */
+  hctRootpageList(&rc, &ctx);
+
+  /* Scan the page-map, taking into account the physical pages that must
+  ** be preserved, and the set of root pages in the current db schema. */
+  if( rc==SQLITE_OK ){
+    rc = sqlite3HctFileRecoverFreelists(
+        pFile, ctx.nRoot, ctx.aRoot, ctx.nPg, ctx.aPg
+    );
+  }
+
+  sqlite3_free(ctx.aPg);
+  sqlite3_free(ctx.aRoot);
+  return rc;
+}
+
+static int hctAttemptRecovery(HBtree *p){
+  int rc = SQLITE_OK;
+  if( p->bRecoveryDone==0 ){
+    HctFile *pFile = sqlite3HctDbFile(p->pHctDb);
+    if( p->pHctDb && sqlite3HctFileStartRecovery(pFile, 0) ){
+      p->bRecoveryDone = 1;
+      rc = hctRecoverFreeList(p);
+
+      if( rc==SQLITE_OK ){
+        rc = hctRecoverLogs(p);
+      }
+
+      if( rc==SQLITE_OK && p->pHctJrnl ){
+        sqlite3HctDbRollbackMode(p->pHctDb, 0);
+        rc = sqlite3HctJrnlRecovery(p->pHctJrnl, p->pHctDb);
+      }
+      rc = sqlite3HctDbFinishRecovery(p->pHctDb, 0, rc);
+    }
+
+    p->bRecoveryDone = (rc==SQLITE_OK);
   }
 
   return rc;
 }
-
-static int hctSchemaLoaded(HBtree *p){
-  Schema *pS = (Schema*)p->pSchema;
-  return ( (pS->schemaFlags & DB_SchemaLoaded)!=0 || (pS->tblHash.count>1));
-}
-
 
 /*
 ** Attempt to start a new transaction. A write-transaction
@@ -972,8 +1222,6 @@ int sqlite3HctBtreeBeginTrans(Btree *pBt, int wrflag, int *pSchemaVersion){
 
   if( p->eTrans==SQLITE_TXN_ERROR ) return SQLITE_BUSY_SNAPSHOT;
 
-  rc = hctAttemptRecovery(p, hctSchemaLoaded(p));
-
   if( rc==SQLITE_OK ){
     rc = sqlite3HctDbStartRead(p->pHctDb, p->pHctJrnl);
   }
@@ -988,6 +1236,21 @@ int sqlite3HctBtreeBeginTrans(Btree *pBt, int wrflag, int *pSchemaVersion){
   }
   if( rc==SQLITE_OK && p->eTrans<req ){
     p->eTrans = req;
+  }
+  return rc;
+}
+
+/*
+** This is called just after the schema is loaded for b-tree pBt.
+*/
+int sqlite3HctBtreeSchemaLoaded(Btree *pBt){
+  int rc = SQLITE_OK;
+  HBtree *const p = (HBtree*)pBt;
+  if( p->bRecoveryDone==0 ){
+    rc = hctDetectJournals(p);
+    if( rc==SQLITE_OK ){
+      rc = hctAttemptRecovery(p);
+    }
   }
   return rc;
 }
@@ -1581,7 +1844,6 @@ int sqlite3HctBtreeCursor(
   assert( p->eTrans!=SQLITE_TXN_NONE );
   assert( p->eTrans!=SQLITE_TXN_ERROR );
   assert( pCur->pHctTreeCsr==0 );
-  assert( iTable==1 || iTable==2 || p->bRecoveryDone );
 
   /* If this is an attempt to open a read/write cursor on either the
   ** sqlite_hct_journal or sqlite_hct_baseline tables, return an error

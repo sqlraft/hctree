@@ -426,8 +426,10 @@ void sqlite3BtreeClearCache(Btree*);
 #ifdef SQLITE_ENABLE_HCT
 void sqlite3BtreeCursorDir(BtCursor*, int eDir);
 int sqlite3HctVtabInit(sqlite3*);
+int sqlite3BtreeSchemaLoaded(Btree *pBt);
 #else
 # define sqlite3BtreeCursorDir(a,b)
+# define sqlite3BtreeSchemaLoaded(x) SQLITE_OK
 #endif
 
 int sqlite3BtreePragma(Btree *pBtree, char **aFnctl);

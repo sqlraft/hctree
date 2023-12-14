@@ -315,6 +315,9 @@ struct HctDatabase {
   int eMode;                      /* HCT_MODE_XXX constant */
   int bConcurrent;                /* Collect validation information */
 
+  int (*xSavePhysical)(void*, i64);
+  void *pSavePhysical;
+
   HctDatabaseStats stats;
 };
 
@@ -854,6 +857,19 @@ static int hctDbOffset(int iOff, int flags){
   return iOff + aVal[ flags&0x1F ];
 }
 
+
+/*
+** Wrapper around sqlite3HctFilePageGetPhysical() that also invokes the
+** xSavePhysical callback, if one is configured.
+*/
+static int hctDbGetPhysical(HctDatabase *pDb, u32 iPg, HctFilePage *pPg){
+  int rc = sqlite3HctFilePageGetPhysical(pDb->pFile, iPg, pPg);
+  if( rc==SQLITE_OK && pDb->xSavePhysical ){
+    rc = pDb->xSavePhysical(pDb->pSavePhysical, (i64)iPg);
+  }
+  return rc;
+}
+
 /*
 ** Load the meta-data record from the database and store it in buffer aBuf
 ** (size nBuf bytes). The meta-data record is stored with rowid=0 int the
@@ -890,7 +906,7 @@ int sqlite3HctDbGetMeta(HctDatabase *pDb, u8 *aBuf, int nBuf){
       u32 iOld = hctGetU32(&pg.aOld[iOff+8+8]);
       if( iOld==0 ) break;
       sqlite3HctFilePageRelease(&pg);
-      rc = sqlite3HctFilePageGetPhysical(pDb->pFile, iOld, &pg);
+      rc = hctDbGetPhysical(pDb, iOld, &pg);
     }else{
       iOff = hctDbOffset(iOff, pLeaf->aEntry[0].flags );
       hctMemcpy(aBuf, &pg.aOld[iOff], nBuf);
@@ -1173,7 +1189,7 @@ static int hctDbLoadRecord(
 
         while( rc==SQLITE_OK && iOff<p->nSize ){
           HctFilePage ovfl;
-          rc = sqlite3HctFilePageGetPhysical(pDb->pFile, pgOvfl, &ovfl);
+          rc = hctDbGetPhysical(pDb, pgOvfl, &ovfl);
           if( rc==SQLITE_OK ){
             int nCopy = MIN(pDb->pgsz-8, p->nSize-iOff);
             hctMemcpy(&pBuf->aBuf[iOff],&ovfl.aOld[sizeof(HctDbPageHdr)],nCopy);
@@ -1251,10 +1267,10 @@ static int hctDbFanSearch(
     HctFilePage pg;
     int iTest = (i1+i2)/2;
 
-    rc = sqlite3HctFilePageGetPhysical(pDb->pFile, pFan->aPgOld1[iTest], &pg);
+    rc = hctDbGetPhysical(pDb, pFan->aPgOld1[iTest], &pg);
     while( rc==SQLITE_OK && hctPagetype(pg.aOld)==HCT_PAGETYPE_HISTORY ){
       HctDbHistoryFan *pFan = (HctDbHistoryFan*)pg.aOld;
-      rc = sqlite3HctFilePageGetPhysical(pDb->pFile, pFan->pgOld0, &pg);
+      rc = hctDbGetPhysical(pDb, pFan->pgOld0, &pg);
     }
     if( rc==SQLITE_OK ){
       int iCell = (iTest==0 ? pFan->iSplit0 : 0);
@@ -1401,10 +1417,10 @@ static void hctDbGetKeyFromPage(
     if( bLogical ){
       rc = sqlite3HctFilePageGet(pDb->pFile, iPg, &pg);
     }else{
-      rc = sqlite3HctFilePageGetPhysical(pDb->pFile, iPg, &pg);
+      rc = hctDbGetPhysical(pDb, iPg, &pg);
       while( rc==SQLITE_OK && hctPagetype(pg.aOld)==HCT_PAGETYPE_HISTORY ){
         HctDbHistoryFan *pFan = (HctDbHistoryFan*)pg.aOld;
-        rc = sqlite3HctFilePageGetPhysical(pDb->pFile, pFan->pgOld0, &pg);
+        rc = hctDbGetPhysical(pDb, pFan->pgOld0, &pg);
       }
     }
     if( rc==SQLITE_OK ){
@@ -2238,7 +2254,6 @@ static void hctDbCsrDescendRange(
   u32 iRangeOld,
   int bMerge
 ){
-  HctFile *pFile = pCsr->pDb->pFile;
   int rc = *pRc;
 
   if( rc==SQLITE_OK ){
@@ -2251,7 +2266,7 @@ static void hctDbCsrDescendRange(
 
     pNew->eRange = bMerge;
     pNew->iRangeTid = iRangeTid;
-    rc = sqlite3HctFilePageGetPhysical(pFile, iRangeOld, &pNew->pg);
+    rc = hctDbGetPhysical(pCsr->pDb, iRangeOld, &pNew->pg);
 
     if( rc==SQLITE_OK ){
       int iPar = pCsr->nRange-2;
@@ -2456,7 +2471,7 @@ static int hctDbCsrRollbackDescend(
     rc = hctDbCsrExtendRange(pCsr);
     if( rc==SQLITE_OK ){
       p = &pCsr->aRange[pCsr->nRange-1];
-      rc = sqlite3HctFilePageGetPhysical(pDb->pFile, ptr.iOld, &p->pg);
+      rc = hctDbGetPhysical(pDb, ptr.iOld, &p->pg);
     }
     if( rc==SQLITE_OK ){
       p->iRangeTid = ptr.iRangeTid & HCT_TID_MASK;
@@ -2679,6 +2694,15 @@ int sqlite3HctDbCsrSeek(
   return rc;
 }
 
+void sqlite3HctDbSetSavePhysical(
+  HctDatabase *pDb,
+  int (*xSave)(void*, i64 iPhys),
+  void *pSave
+){
+  pDb->xSavePhysical = xSave;
+  pDb->pSavePhysical = pSave;
+}
+
 int sqlite3HctDbCsrRollbackSeek(
   HctDbCsr *pCsr,                 /* Cursor to seek */
   UnpackedRecord *pRec,           /* Key for index tables */
@@ -2693,7 +2717,7 @@ int sqlite3HctDbCsrRollbackSeek(
   hctDbCsrReset(pCsr);
 
   /* At this point pDb->bRollback is set and pDb->iTid is set to the TID
-  ** of the transaction being rolled back. There are three possibilities:
+  ** of the transaction being rolled back. There are four possibilities:
   **
   **   1) The key was written by transaction pDb->iTid and there was no 
   **      previous entry. 
@@ -2814,7 +2838,7 @@ static int hctDbOverflowArrayFree(HctDatabase *pDb, HctDbOverflowArray *p){
       sqlite3HctFileClearPhysInUse(pDb->pFile, pgno, 0);
       nRem--;
       if( nRem==0 ) break;
-      rc = sqlite3HctFilePageGetPhysical(pDb->pFile, pgno, &pg);
+      rc = hctDbGetPhysical(pDb, pgno, &pg);
       assert( rc==SQLITE_OK );
       pgno = ((HctDbPageHdr*)pg.aOld)->iPeerPg;
       sqlite3HctFilePageRelease(&pg);
@@ -3198,13 +3222,23 @@ static int hctDbInsertFlushWrite(HctDatabase *pDb, HctDbWriter *p){
   return rc;
 }
 
-void sqlite3HctDbRollbackMode(HctDatabase *pDb, int bRollback){
-  assert( bRollback==0 || bRollback==1 );
-  /* assert( bRollback==1 || pDb->eMode==HCT_MODE_ROLLBACK ); */
-  assert( bRollback==0 || pDb->eMode==HCT_MODE_NORMAL );
+void sqlite3HctDbRollbackMode(HctDatabase *pDb, int eRollback){
+  assert( eRollback==0 || pDb->eMode==HCT_MODE_NORMAL );
   pDb->pa.nWriteKey = 0;
-  pDb->eMode = bRollback ? HCT_MODE_ROLLBACK : HCT_MODE_NORMAL;
+  pDb->eMode = eRollback ? HCT_MODE_ROLLBACK : HCT_MODE_NORMAL;
+  if( eRollback>1 ){
+    memset(&pDb->pa, 0, sizeof(pDb->pa));
+    hctDbPageArrayReset(&pDb->pa.writepg);
+    hctDbPageArrayReset(&pDb->pa.discardpg);
+
+    /* During recovery rollback the connection should read the latest 
+    ** version of the db - no exceptions. Set these two to the largest 
+    ** possible values to ensure that this happens.  */
+    pDb->iSnapshotId = LARGEST_TID-1;
+    pDb->iLocalMinTid = LARGEST_TID-1;
+  }
 }
+
 void sqlite3HctDbJournalRbMode(HctDatabase *pDb, int bRollback){
   assert( bRollback==0 || bRollback==1 );
   assert( bRollback==1 || pDb->eMode==HCT_MODE_JOURNALRB );
@@ -4064,7 +4098,6 @@ static int hctDbBalance(
   u8 **aPgCopy = 0;
 
   int nRem;
-  int nTotal = 0;
 
   int aPgRem[5];
   int aPgFirst[6];
@@ -5002,7 +5035,7 @@ static int hctDbWriteWriteConflict(
         aOld = pDb->pa.fanpg.aNew;
         memset(&pg, 0, sizeof(pg));
       }else{
-        rc = sqlite3HctFilePageGetPhysical(pDb->pFile, ptr.iOld, &pg);
+        rc = hctDbGetPhysical(pDb, ptr.iOld, &pg);
         aOld = pg.aOld;
       }
 
@@ -5553,87 +5586,6 @@ void sqlite3HctDbRecoverTid(HctDatabase *pDb, u64 iTid){
   pDb->iLocalMinTid = iTid-1;
 }
 
-static int hctDbRootPagelist(HctDatabase *pDb, int *pnRoot, u32 **paRoot){
-  int rc = SQLITE_OK;
-  HctDbCsr *pCsr = 0;
-  u32 *aRoot = 0;
-  int nRoot = 0;
-  int nAlloc = 0;
-
-  rc = sqlite3HctDbCsrOpen(pDb, 0, 1, &pCsr);
-  for(rc=sqlite3HctDbCsrFirst(pCsr);
-      rc==SQLITE_OK && !sqlite3HctDbCsrEof(pCsr);
-      rc=sqlite3HctDbCsrNext(pCsr)
-  ){
-    const u8 *aData = 0;
-    int nData = 0;
-    rc = sqlite3HctDbCsrData(pCsr, &nData, &aData);
-
-    if( rc==SQLITE_OK ){
-      u32 iRoot = 0;
-      u64 val = 0;
-      int ii;
-      const u8 *pHdr = aData + sqlite3GetVarint(aData, &val);
-      const u8 *pBody = &aData[val];
-
-      for(ii=0; ii<3; ii++){
-        pHdr += sqlite3GetVarint(pHdr, &val);
-        pBody += sqlite3VdbeSerialTypeLen((u32)val);
-      }
-
-      pHdr += sqlite3GetVarint(pHdr, &val);
-      switch( val ){
-        case 1:
-          iRoot = (u32)pBody[0];
-          break;
-        case 2:
-          iRoot = (((u32)pBody[0]) << 8) + pBody[1];
-          break;
-        case 3:
-          iRoot = (((u32)pBody[0]) << 16) + (((u32)pBody[1]) << 8) + pBody[2];
-          break;
-        case 4:
-          iRoot = (((u32)pBody[0]) << 24) + (((u32)pBody[1]) << 16);
-          iRoot += (((u32)pBody[2]) << 8) + pBody[3];
-          break;
-        default:
-          rc = SQLITE_CORRUPT_BKPT;
-          break;
-      }
-
-      if( nRoot==nAlloc ){
-        int nNew = nAlloc+64;
-        u32 *aNew = (u32*)sqlite3_realloc(aRoot, sizeof(u32) * nNew);
-        if( aNew==0 ){
-          rc = SQLITE_NOMEM_BKPT;
-          break;
-        }else{
-          aRoot = aNew;
-          nAlloc = nNew;
-        }
-      }
-
-      /* iRoot might be zero for a virtual table or view. */
-      if( iRoot!=0 ){
-        assert( iRoot>2 );
-        aRoot[nRoot] = iRoot;
-        nRoot++;
-      }
-    }
-  }
-
-  if( rc!=SQLITE_OK ){
-    sqlite3_free(aRoot);
-    aRoot = 0;
-    nRoot = 0;
-  }
-  sqlite3HctDbCsrClose(pCsr);
-
-  *paRoot = aRoot;
-  *pnRoot = nRoot;
-  return rc;
-}
-
 int sqlite3HctDbFinishRecovery(HctDatabase *pDb, int iStage, int rc){
   /* assert( pDb->eMode==HCT_MODE_ROLLBACK ); */
   assert( iStage==0 || iStage==1 );
@@ -5641,22 +5593,6 @@ int sqlite3HctDbFinishRecovery(HctDatabase *pDb, int iStage, int rc){
 
   pDb->iTid = 0;
   pDb->eMode = HCT_MODE_NORMAL;
-  if( rc==SQLITE_OK && iStage==1 ){
-    /* This is the second FinishRecovery() call. All log files have been
-    ** rolled back and deleted. The lower layer will now scan the 
-    ** page-map to determine the set of free physical and logical
-    ** pages. To do this it needs a list of all current root pages - in
-    ** order to identify and mark as free any orphaned trees. This
-    ** list is extracted from the tree structure with root page 1 (the
-    ** sqlite_schema table) here.  */
-    u32 *aRoot = 0;
-    int nRoot = 0;
-    rc = hctDbRootPagelist(pDb, &nRoot, &aRoot);
-    if( rc==SQLITE_OK ){
-      rc = sqlite3HctFileRecoverFreelists(pDb->pFile, nRoot, aRoot);
-      sqlite3_free(aRoot);
-    }
-  }
   pDb->iSnapshotId = 0;
   pDb->iLocalMinTid = 0;
   return sqlite3HctFileFinishRecovery(pDb->pFile, iStage, rc);
@@ -6145,7 +6081,7 @@ static int hctDbValidateIntkey(HctDatabase *pDb, HctDbCsr *pCsr){
       ** the page into the cursor. This is faster than the hctDbCsrSeek()
       ** call below.  */
       if( bEvict==0 && pOp->iLogical!=pCsr->iRoot ){
-        rc = sqlite3HctFilePageGetPhysical(pDb->pFile, iPhys, &pCsr->pg);
+        rc = hctDbGetPhysical(pDb, iPhys, &pCsr->pg);
         if( rc==SQLITE_OK ){
           pCsr->eDir = BTREE_DIR_FORWARD;
           pCsr->iCell = hctDbIntkeyLeafSearch(pCsr->pg.aOld, pOp->iFirst,&bDum);

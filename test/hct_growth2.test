@@ -20,6 +20,10 @@ hct_reset_db
 set ::LOGICAL_EOF  3
 set ::PHYSICAL_EOF 4
 
+do_execsql_test 1.0 {
+  SELECT slot, value FROM hctpgmap WHERE slot IN ($LOGICAL_EOF, $PHYSICAL_EOF)
+} [list $LOGICAL_EOF 256 $PHYSICAL_EOF 256]
+
 do_execsql_test 1.1 { 
   CREATE TABLE t1(a INTEGER PRIMARY KEY, b char(32), c char(32));
 } {}

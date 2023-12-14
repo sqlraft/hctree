@@ -713,20 +713,6 @@ static void hctFileReadHdr(
   }
 }
 
-static void hctFileWriteHdr(
-  int *pRc, 
-  void *pHdr,
-  int szPage
-){
-  if( *pRc==SQLITE_OK ){
-    /*            12345678901234567890123456789012 */
-    char *zHdr = "Hctree database version 00000001";
-    assert( strlen(zHdr)==32 );
-    memcpy(pHdr, zHdr, 32);
-    memcpy(&((u8*)pHdr)[32], &szPage, sizeof(int));
-  }
-}
-
 static void *hctFileMmapDbChunk(
   int *pRc,
   HctFileServer *p,
@@ -813,6 +799,39 @@ static void hctFileAllocateMapping(
   *pRc = rc;
 }
 
+typedef struct Uncommitted Uncommitted;
+struct Uncommitted {
+  int nAlloc;
+  int nTid;
+  i64 *aTid;
+};
+
+static int hctFileServerInitUncommitted(void *pCtx, const char *zFile){
+  int fd;
+  Uncommitted *p = (Uncommitted*)pCtx;
+  
+  fd = open(zFile, O_RDONLY);
+  if( fd>=0 ){
+    i64 iTid = 0;
+    read(fd, &iTid, sizeof(iTid));
+    close(fd);
+    if( iTid>0 ){
+      if( p->nTid==p->nAlloc ){
+        int nNew = p->nTid ? p->nTid*4 : 64;
+        i64 *aNew = sqlite3_realloc(p->aTid, nNew*sizeof(i64));
+        if( aNew==0 ){
+          return SQLITE_NOMEM;
+        }else{
+          p->aTid = aNew;
+          p->nAlloc = nNew;
+        }
+      }
+      p->aTid[p->nTid++] = iTid;
+    }
+  }
+  return SQLITE_OK;
+}
+
 static int hctFileServerInit(
   HctFileServer *p, 
   HctConfig *pConfig, 
@@ -826,6 +845,9 @@ static int hctFileServerInit(
     int nChunk = 0;               /* Number of chunks in database */
     int szPage = 0;
     int nDbFile = 0;
+
+    Uncommitted unc;
+    memset(&unc, 0, sizeof(unc));
 
     /* Open the data and page-map files */
     p->fdMap = hctFileOpen(&rc, zFile, "-pagemap");
@@ -865,8 +887,13 @@ static int hctFileServerInit(
         hctFileTruncate(&rc, p->fdMap, HCT_DEFAULT_PAGEPERCHUNK*sizeof(i64));
         szHdr = HCT_HEADER_PAGESIZE*2;
         hctFileTruncate(&rc, p->aFdDb[0], szHdr);
-        hctFileFindLogs(p, 0, hctFileServerInitUnlinkLog);
+        if( rc==SQLITE_OK ){
+          rc = hctFileFindLogs(p, 0, hctFileServerInitUnlinkLog);
+        }
       }else{
+        if( rc==SQLITE_OK ){
+          rc = hctFileFindLogs(p, (void*)&unc, hctFileServerInitUncommitted);
+        }
         hctFileOpenDataFiles(&rc, p, nDbFile);
       }
       hctFileMunmap(pHdr, HCT_HEADER_PAGESIZE*2);
@@ -898,14 +925,37 @@ static int hctFileServerInit(
 
     /* Allocate a transaction map server */
     if( rc==SQLITE_OK && p->pTMapServer==0 ){
-      u64 iFirst = 0;
+      u64 iFirst = 0;             /* First tid that will be written in tmap */
+      u64 iLast = 0;              /* Last such tid */
+      int ii;                     /* To iterate through unc.aTid[] */
+
       if( p->pMapping ){
         iFirst = hctFilePagemapGet(p->pMapping, HCT_PAGEMAP_TRANSID_EOF);
+        iFirst = (iFirst & HCT_TID_MASK) + 1;
       }else{
-        iFirst = 0;
+        iFirst = 1;
       }
-      rc = sqlite3HctTMapServerNew((iFirst & HCT_TID_MASK), &p->pTMapServer);
+
+      iLast = iFirst;
+      for(ii=0; ii<unc.nTid; ii++){
+        i64 iThis = unc.aTid[ii];
+        if( iThis<iFirst ) iFirst = iThis;
+        if( iThis>=iLast ) iLast = iThis+1;
+      }
+
+      /* Allocate the tmap-server object. Set all entries between iFirst and
+      ** iLast to (HCT_TMAP_COMMITTED, cid=1). Ensuring that the contents of
+      ** these transactions are visible to all readers. 
+      **
+      ** Then go back and set the entry for all tid values in unc.aTid[] to
+      ** (HCT_TMAP_ROLLBACK, 0) - not visible to any readers.  */
+      rc = sqlite3HctTMapServerNew(iFirst, iLast, &p->pTMapServer);
+      for(ii=0; ii<unc.nTid && rc==SQLITE_OK; ii++){
+        i64 iThis = unc.aTid[ii];
+        rc = sqlite3HctTMapServerSet(p->pTMapServer, iThis, HCT_TMAP_ROLLBACK);
+      }
     }
+    sqlite3_free(unc.aTid);
   }
   return rc;
 }
@@ -1544,7 +1594,7 @@ void hctFileFreePg(
   u32 iPg,                        /* Page number */
   int bLogical                    /* True for logical, false for physical */
 ){
-  if( pFile->eInitState==HCT_INIT_RECOVER2 ){
+  if( pFile->eInitState>=HCT_INIT_RECOVER1 ){
     sqlite3HctPManFreePg(pRc, pFile->pPManClient, iTid, iPg, bLogical);
   }
 }
@@ -1904,7 +1954,11 @@ int sqlite3HctFileFinishRecovery(HctFile *pFile, int iStage, int rc){
   return rc;
 }
 
-int sqlite3HctFileRecoverFreelists(HctFile *pFile, int nRoot, u32 *aRoot){
+int sqlite3HctFileRecoverFreelists(
+  HctFile *pFile,                 /* File to recover freelists for */
+  int nRoot, i64 *aRoot,          /* Array of root page numbers */
+  int nPhys, i64 *aPhys           /* Sorted array of phys. pages to preserve */
+){
   int rc = SQLITE_OK;
   HctFileServer *pServer = pFile->pServer;
   HctPManServer *pPManServer = pServer->pPManServer;
@@ -1914,13 +1968,15 @@ int sqlite3HctFileRecoverFreelists(HctFile *pFile, int nRoot, u32 *aRoot){
   u64 nPg2 = hctFilePagemapGet(pMapping, HCT_PAGEMAP_LOGICAL_EOF);
   u32 iPg;
   u32 nPg;
-
   u32 iPhysOff = ((HCT_HEADER_PAGESIZE*2)+pServer->szPage-1)/pServer->szPage;
+
+  int iPhys = 0;
 
   nPg1 = nPg1 & HCT_PAGEMAP_VMASK;
   nPg2 = nPg2 & HCT_PAGEMAP_VMASK;
 
-  sqlite3HctPManClientHandoff(pFile->pPManClient);
+  /* TODO: Really - page-manager must be empty at this point. Should assert()
+  ** that instead of making this call. */
   sqlite3HctPManServerReset(pPManServer);
 
   nPg = MAX((nPg1 & 0xFFFFFFFF), (nPg2 & 0xFFFFFFFF));
@@ -1940,16 +1996,23 @@ int sqlite3HctFileRecoverFreelists(HctFile *pFile, int nRoot, u32 *aRoot){
      && (iPg<=nPg1) 
      && (iPg>iPhysOff) 
     ){
-      sqlite3HctPManServerInit(&rc, pPManServer, iSafeTid, iPg, 0);
+      /* Check if page iPg is one that must be preserved. */
+      u64 iTid = iSafeTid;
+      while( iPhys<nPhys && aPhys[iPhys]<iPg ){
+        iPhys++;
+      }
+      if( iPhys<nPhys && aPhys[iPhys]==iPg ){
+        iTid = iSafeTid+1;
+      }
+      sqlite3HctPManServerInit(&rc, pPManServer, iTid, iPg, 0);
     }
+
     if( (iVal & HCT_PMF_LOGICAL_IN_USE)==0 
         && iPg<=nPg2 
         && iPg>=HCT_FIRST_LOGICAL
     ){
       sqlite3HctPManServerInit(&rc, pPManServer, iSafeTid, iPg, 1);
     }
-
-
   }
 
   return rc;

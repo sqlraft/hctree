@@ -75,12 +75,6 @@ int sqlite3_hct_journal_rollback(sqlite3 *db, sqlite3_int64 iCid);
 #define SQLITE_HCT_ROLLBACK_PRESERVE -1
 
 /*
-** Write empty records for any missing journal entries with cid values
-** less than or equal to iCid.
-*/
-int sqlite3_hct_journal_patchto(sqlite3 *db, sqlite3_int64 iCid);
-
-/*
 ** Set output variable (*piCid) to the CID of the newest available 
 ** database snapshot. Return SQLITE_OK if successful, or an SQLite
 ** error code if something goes wrong.

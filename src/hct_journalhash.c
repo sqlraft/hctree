@@ -310,7 +310,6 @@ void sqlite3_hct_journal_hashentry(
   const void *pData, int nData,
   sqlite3_int64 iSchemaCid
 ){
-  u8 aCid[8];
   MD5Context ctx;
   MD5Init(&ctx);
 

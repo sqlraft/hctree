@@ -145,7 +145,11 @@ void sqlite3HctFileDebugPrint(HctFile *pFile, const char *zFmt, ...);
 char *sqlite3HctFileLogFile(HctFile *pFile);
 int sqlite3HctFileStartRecovery(HctFile *pFile, int iStage);
 int sqlite3HctFileFinishRecovery(HctFile *pFile, int iStage, int rc);
-int sqlite3HctFileRecoverFreelists(HctFile *pFile, int nRoot, u32 *aRoot);
+int sqlite3HctFileRecoverFreelists(
+  HctFile *pFile,                 /* File to recover freelists for */
+  int nRoot, i64 *aRoot,          /* Array of root page numbers */
+  int nPhys, i64 *aPhys           /* Sorted array of phys. pages to preserve */
+);
 
 int sqlite3HctFileFindLogs(HctFile*, void*, int(*)(void*, const char*));
 

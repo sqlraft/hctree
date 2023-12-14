@@ -143,7 +143,7 @@ struct HctTMapStats {
 **   This field contains two things - a flag and a safe-tid value. The flag
 **   is set whenever a read transaction is active, and clear otherwise.
 **   The safe-tid value is set to a TID value for which itself an all smaller
-**   TID values are included in the connections transactions - current and
+**   TID values are included in the connection's transactions - current and
 **   future.
 **
 **   Pages freed by the transaction with the safe-tid value may be reused
@@ -253,9 +253,9 @@ static u64 *hctTMapFind(HctTMapFull *pMap, u64 iTid){
 ** Allocate the initial HctTMapFull object for the server passed as the
 ** only argument. This is called as part of sqlite3HctTMapServerNew().
 */
-static int hctTMapInit(HctTMapServer *p, u64 iFirstTid){
+static int hctTMapInit(HctTMapServer *p, u64 iFirstTid, u64 iLastTid){
   int rc = SQLITE_OK;
-  int nMap = 3;
+  int nMap = 0;
   int nByte = 0;
   u64 iFirst = (iFirstTid / HCT_TMAP_PAGESIZE) * HCT_TMAP_PAGESIZE;
   HctTMapFull *pNew = 0;
@@ -263,7 +263,8 @@ static int hctTMapInit(HctTMapServer *p, u64 iFirstTid){
   assert( p->pList==0 );
   assert( (iFirstTid & HCT_TMAP_CID_MASK)==iFirstTid );
 
-  nByte = sizeof(HctTMapFull) + sizeof(u64*)*3;
+  nMap = (iLastTid / HCT_TMAP_PAGESIZE) - (iFirst / HCT_TMAP_PAGESIZE) + 3;
+  nByte = sizeof(HctTMapFull) + sizeof(u64*)*nMap;
   pNew = (HctTMapFull*)sqlite3HctMalloc(&rc, nByte);
   if( pNew ){
     int i;
@@ -283,7 +284,7 @@ static int hctTMapInit(HctTMapServer *p, u64 iFirstTid){
       sqlite3_free(pNew);
     }else{
       u64 t;
-      for(t=iFirst; t<iFirstTid; t++){
+      for(t=iFirst; t<iLastTid; t++){
         u64 *pEntry = hctTMapFind(pNew, t);
         *pEntry = (u64)1 | HCT_TMAP_COMMITTED;
       }
@@ -295,7 +296,7 @@ static int hctTMapInit(HctTMapServer *p, u64 iFirstTid){
   return rc;
 }
 
-int sqlite3HctTMapServerNew(u64 iLargestTid, HctTMapServer **pp){
+int sqlite3HctTMapServerNew(u64 iFirstTid, u64 iLastTid, HctTMapServer **pp){
   int rc = SQLITE_OK;
   HctTMapServer *pNew;
 
@@ -307,8 +308,8 @@ int sqlite3HctTMapServerNew(u64 iLargestTid, HctTMapServer **pp){
     if( pNew->pMutex==0 ){
       rc = SQLITE_NOMEM_BKPT;
     }else{
-      pNew->iMinMinTid = iLargestTid;
-      rc = hctTMapInit(pNew, iLargestTid+1);
+      pNew->iMinMinTid = iFirstTid-1;
+      rc = hctTMapInit(pNew, iFirstTid, iLastTid);
     }
   }
 
@@ -319,6 +320,12 @@ int sqlite3HctTMapServerNew(u64 iLargestTid, HctTMapServer **pp){
 
   *pp = pNew;
   return rc;
+}
+
+int sqlite3HctTMapServerSet(HctTMapServer *pServer, u64 iTid, u64 iCid){
+  u64 *pEntry = hctTMapFind(pServer->pList, iTid);
+  *pEntry = iCid;
+  return SQLITE_OK;
 }
 
 /*

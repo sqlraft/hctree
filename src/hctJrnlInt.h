@@ -45,6 +45,9 @@ int sqlite3HctJrnlLog(
 */
 int sqlite3HctJrnlRecovery(HctJournal *pJrnl, HctDatabase *pDb);
 
+int sqlite3HctJrnlSavePhysical(sqlite3 *db, HctJournal *pJrnl, 
+  int (*xSave)(void*, i64 iPhys), void *pSave
+);
 
 /*
 ** Register the hct_journal_entry() SQL user-function with the database
