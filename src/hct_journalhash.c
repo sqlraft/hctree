@@ -200,7 +200,7 @@ void MD5Update(MD5Context *ctx, const unsigned char *buf, unsigned int len){
 
                 t = 64-t;
                 if (len < t) {
-                        memcpy(p, buf, len);
+                        if( len ) memcpy(p, buf, len);
                         return;
                 }
                 memcpy(p, buf, t);

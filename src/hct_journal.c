@@ -122,20 +122,25 @@ struct HctJrnlServer {
 ** There is one instance of this structure for each database handle (HBtree*)
 ** open on a replication-enabled hctree database.
 **
-** bInWrite:
+** eInWrite:
 **   Set to true while the database connection is in a call to
 **   sqlite3_hct_journal_write().
 */
 struct HctJournal {
   u64 iJrnlRoot;                  /* Root page of journal table */
   u64 iBaseRoot;                  /* Root page of base table */
-  int bInWrite;
+  int eInWrite;
   u64 iWriteTid;
   u64 iWriteCid;
+  u64 iRollbackSnapshot;
   HctDatabase *pDb;
   HctTree *pTree;
   HctJrnlServer *pServer;
 };
+
+#define HCT_JOURNAL_NONE          0
+#define HCT_JOURNAL_INWRITE       1
+#define HCT_JOURNAL_INROLLBACK    2
 
 /*
 ** Initialize the main database for replication.
@@ -598,7 +603,7 @@ int sqlite3HctJrnlWriteEmpty(
   sqlite3 *db                     /* If non-NULL, invoke custom validation */
 ){
   int rc = SQLITE_OK;
-  if( pJrnl->bInWrite==0 ){
+  if( pJrnl->eInWrite==HCT_JOURNAL_NONE ){
     sqlite3HctDbJournalRbMode(pJrnl->pDb, 1);
     rc = hctJrnlWriteRecord(pJrnl, iCid, "", 0, 0, 0, iTid);
     sqlite3HctDbJournalRbMode(pJrnl->pDb, 0);
@@ -628,7 +633,7 @@ int sqlite3HctJrnlLog(
   u64 iSchemaCid = HctAtomicLoad(&pJrnl->pServer->iSchemaCid);
 
   assert( *pbValidateCalled==0 );
-  if( pJrnl->bInWrite ) return SQLITE_OK;
+  if( pJrnl->eInWrite!=HCT_JOURNAL_NONE ) return SQLITE_OK;
 
   memset(&jrnlctx, 0, sizeof(jrnlctx));
   jrnlctx.pSchema = pSchema;
@@ -940,13 +945,15 @@ static int hctJrnlGetJrnlShape(
     rc = sqlite3_prepare_v2(db, z2, -1, &pStmt, 0);
   }
   if( rc==SQLITE_OK ){
+    i64 iPrev = iLast;
     iLastCont = iLast;
     while( sqlite3_step(pStmt)==SQLITE_ROW ){
       i64 iThis = sqlite3_column_int64(pStmt, 0);
-      if( iThis!=iLastCont-1 ){
+      if( iThis!=iPrev-1 ){
         iLastCont = iThis;
       }
       if( (iLast-iThis)>HCT_MAX_LEADING_WRITE*2 ) break;
+      iPrev = iThis;
     }
     rc = sqlite3_finalize(pStmt);
   }
@@ -1281,7 +1288,7 @@ int sqlite3HctJournalIsReadonly(
     HctJrnlServer *p = pJrnl->pServer;
     int bNosnap = (pJrnl->iJrnlRoot==iTable || pJrnl->iBaseRoot==iTable);
     *pbNosnap = bNosnap;
-    return (pJrnl->bInWrite==0 && (
+    return (pJrnl->eInWrite==HCT_JOURNAL_NONE && (
         bNosnap || !p || p->eMode==SQLITE_HCT_JOURNAL_MODE_FOLLOWER
     ));
   }
@@ -1656,7 +1663,7 @@ static int hctJrnlBindRecord(int *pRc, sqlite3_stmt *pStmt, const u8 *aData){
 u64 sqlite3HctJrnlWriteTid(HctJournal *pJrnl, u64 *piCid){
   u64 iRet = 0;
   assert( *piCid==0 );
-  if( pJrnl && pJrnl->bInWrite ){
+  if( pJrnl && pJrnl->eInWrite!=HCT_JOURNAL_NONE ){
     iRet = pJrnl->iWriteTid;
     *piCid = pJrnl->iWriteCid;
   }
@@ -1666,6 +1673,9 @@ u64 sqlite3HctJrnlWriteTid(HctJournal *pJrnl, u64 *piCid){
 u64 sqlite3HctJournalSnapshot(HctJournal *pJrnl){
   u64 iRet = 0;
   if( pJrnl ){
+    if( pJrnl->eInWrite==HCT_JOURNAL_INROLLBACK ){
+      return pJrnl->iRollbackSnapshot;
+    }
     HctJrnlServer *pServer = pJrnl->pServer;
     if( pServer && pServer->eMode==SQLITE_HCT_JOURNAL_MODE_FOLLOWER ){
       u64 iTest = 0;
@@ -1744,7 +1754,7 @@ int sqlite3_hct_journal_truncate(sqlite3 *db, i64 iMinCid){
   }
 
   if( rc==SQLITE_OK ){
-    pJrnl->bInWrite = 1;
+    pJrnl->eInWrite = HCT_JOURNAL_INWRITE;
     rc = sqlite3_exec(db, "BEGIN CONCURRENT", 0, 0, 0);
   }
 
@@ -1835,10 +1845,69 @@ int sqlite3_hct_journal_truncate(sqlite3 *db, i64 iMinCid){
   hctJrnlFinalize(&rc, pSelBaseline);
   hctJrnlFinalize(&rc, pDelete);
   hctJrnlFinalize(&rc, pUpdate);
-  pJrnl->bInWrite = 0;
+  pJrnl->eInWrite = HCT_JOURNAL_NONE;
   pJrnl->iWriteTid = 0;
   pJrnl->iWriteCid = 0;
   return rc;
+}
+
+static int hctBufferAppendInsert(
+  HctBuffer *pBuf, 
+  i64 iRowid,
+  Table *pTab, 
+  sqlite3_stmt *pQuery
+){
+  int ii;
+  int rc = SQLITE_OK;
+
+  rc = hctBufferAppend(pBuf, "REPLACE INTO %Q(_rowid_", pTab->zName);
+  for(ii=0; rc==SQLITE_OK && ii<pTab->nCol; ii++){
+    if( ii!=pTab->iPKey ){
+      rc = hctBufferAppend(pBuf, ", %Q", pTab->aCol[ii].zCnName);
+    }
+  }
+
+  if( rc==SQLITE_OK ){
+    rc = hctBufferAppend(pBuf, ") VALUES(%lld", iRowid);
+  }
+
+  for(ii=0; rc==SQLITE_OK && ii<sqlite3_column_count(pQuery); ii++){
+    rc = hctBufferAppend(pBuf, ", %s", sqlite3_column_text(pQuery, ii));
+  }
+  if( rc==SQLITE_OK ){
+    rc = hctBufferAppend(pBuf, ");\n");
+  }
+
+  return rc;
+}
+
+static sqlite3_stmt *hctGetQuoteQuery(int *pRc, sqlite3 *db, Table *pTab){
+  HctBuffer buf = {0,0,0};
+  int ii;
+  int rc = *pRc;
+  sqlite3_stmt *pRet = 0;
+  const char *zSep = "";
+
+  if( rc==SQLITE_OK ){
+    rc = hctBufferAppend(&buf, "SELECT ");
+  }
+  for(ii=0; rc==SQLITE_OK && ii<pTab->nCol; ii++){
+    if( ii!=pTab->iPKey ){
+      rc = hctBufferAppend(&buf, "%squote(x.%Q)", zSep, pTab->aCol[ii].zCnName);
+      zSep = ", ";
+    }
+  }
+  if( rc==SQLITE_OK ){
+    rc = hctBufferAppend(&buf, "FROM %Q AS x WHERE _rowid_=?", pTab->zName);
+  }
+
+  if( rc==SQLITE_OK ){
+    rc = sqlite3_prepare_v2(db, (const char*)buf.aBuf, -1, &pRet, 0);
+  }
+  sqlite3_free(buf.aBuf);
+
+  *pRc = rc;
+  return pRet;
 }
 
 /*
@@ -1847,9 +1916,14 @@ int sqlite3_hct_journal_truncate(sqlite3 *db, i64 iMinCid){
 int sqlite3_hct_journal_rollback(sqlite3 *db, sqlite3_int64 iCid){
   int rc = SQLITE_OK;
   HctJournal *pJrnl = 0;
+  i64 iLast = 0;
+  i64 iLastCont = 0;
+  sqlite3_stmt *pStmt = 0;
+  Schema *pSchema = 0;
 
   rc = hctJrnlFind(db, &pJrnl);
   if( rc!=SQLITE_OK ) return rc;
+  pSchema = db->aDb[0].pSchema;
 
   /*
   ** 1. Find the location of the first hole in the journal.
@@ -1878,11 +1952,97 @@ int sqlite3_hct_journal_rollback(sqlite3 *db, sqlite3_int64 iCid){
     return SQLITE_ERROR;
   }
 
-  /* Find the location of the first hole in the journal */
-  assert( !"todo" );
+  /* Find the location of the first hole in the journal. If there are no
+  ** holes in the journal, this call is a no-op. */
+  rc = hctJrnlGetJrnlShape(db, &iLast, &iLastCont);
+  assert( iLastCont<=iLast );
+  if( rc!=SQLITE_OK || iLastCont>=iLast ) return rc;
 
-  return SQLITE_OK;
+  /* Loop through all of the journal entries that will be rolled back.
+  ** For each, extract the primary keys from the "data" blob. Query the
+  ** current database snapshot for each of these keys, generating an SQL
+  ** script with a "REPLACE INTO" for each row present in the db and a 
+  ** "DELETE" for each not.  */
+  rc = sqlite3_prepare_v2(db, 
+      "SELECT data FROM sqlite_hct_journal WHERE cid>?", -1, &pStmt, 0
+  );
+  if( rc==SQLITE_OK ){
+    HctBuffer sql = {0, 0, 0};
+    sqlite3_bind_int64(pStmt, 1, iLastCont);
 
+    rc = hctBufferAppend(&sql, "BEGIN CONCURRENT;\n");
+    while( rc==SQLITE_OK && SQLITE_ROW==sqlite3_step(pStmt) ){
+      const void *pData = sqlite3_column_blob(pStmt, 0);
+      int nData = sqlite3_column_bytes(pStmt, 0);
+      sqlite3_stmt *pQuery = 0;
+      Table *pTab = 0;
+      HctDataReader rdr;
+
+      for(rc=hctDataReaderInit(pData, nData, &rdr);
+          rc==SQLITE_OK && rdr.bEof==0;
+          rc=hctDataReaderNext(&rdr)
+      ){
+        switch( rdr.eType ){
+          case HCT_TYPE_TABLE: {
+            pTab = (Table*)sqlite3HashFind(&pSchema->tblHash, rdr.zTab);
+            if( pTab==0 ){
+              rc = SQLITE_CORRUPT_BKPT;
+            }else{
+              rc = sqlite3_finalize(pQuery);
+              pQuery = hctGetQuoteQuery(&rc, db, pTab);
+            }
+            break;
+          }
+
+          case HCT_TYPE_INSERT_ROWID:
+          case HCT_TYPE_DELETE_ROWID: {
+            sqlite3_bind_int64(pQuery, 1, rdr.iRowid);
+            if( SQLITE_ROW==sqlite3_step(pQuery) ){
+              rc = hctBufferAppendInsert(&sql, rdr.iRowid, pTab, pQuery);
+            }else{
+              rc = hctBufferAppend(&sql, 
+                  "DELETE FROM %Q WHERE _rowid_=%lld;\n", rdr.zTab, rdr.iRowid
+              );
+            }
+            rc = sqlite3_reset(pQuery);
+            break;
+          }
+
+          default: assert( 0 );
+        }
+        if( rc ) break;
+      }
+      sqlite3_finalize(pQuery);
+    }
+    if( rc==SQLITE_OK ){
+      rc = hctBufferAppend(&sql, 
+          "DELETE FROM sqlite_hct_journal WHERE cid>%lld;\n", iLastCont
+      );
+    }
+
+    if( rc==SQLITE_OK ){
+      assert( pJrnl->eInWrite==HCT_JOURNAL_NONE );
+      pJrnl->eInWrite = HCT_JOURNAL_INROLLBACK;
+      rc = sqlite3_exec(db, (const char*)sql.aBuf, 0, 0, 0);
+      if( rc==SQLITE_OK ){
+        rc = sqlite3HctDbStartWrite(pJrnl->pDb, &pJrnl->iWriteTid);
+      }
+      if( rc==SQLITE_OK ){
+        pJrnl->iWriteCid = iLastCont;
+        pJrnl->iRollbackSnapshot = iLast;
+        rc = sqlite3_exec(db, "COMMIT", 0, 0, 0);
+      }
+      if( rc!=SQLITE_OK ){
+        sqlite3_exec(db, "ROLLBACK", 0, 0, 0);
+      }
+      pJrnl->eInWrite = HCT_JOURNAL_NONE;
+    }
+
+    sqlite3_free(sql.aBuf);
+    sqlite3_finalize(pStmt);
+  }
+
+  return rc;
 }
 
 static u64 hctJournalFindLastWrite(
@@ -1928,7 +2088,7 @@ int sqlite3_hct_journal_write(
 
   rc = hctJrnlFind(db, &pJrnl);
   if( rc!=SQLITE_OK ) return rc;
-  pJrnl->bInWrite = 1;
+  pJrnl->eInWrite = HCT_JOURNAL_INWRITE;
 
   /* Check that the journal is in follower mode */
   if( pJrnl->pServer->eMode!=SQLITE_HCT_JOURNAL_MODE_FOLLOWER ){
@@ -2098,7 +2258,7 @@ int sqlite3_hct_journal_write(
       sqlite3ErrorWithMsg(db, rc, 0);
     }
   }
-  pJrnl->bInWrite = 0;
+  pJrnl->eInWrite = HCT_JOURNAL_NONE;
   return rc;
 }
 

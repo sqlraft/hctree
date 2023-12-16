@@ -301,6 +301,30 @@ static int test_hct_journal_write(
 }
 
 /*
+** tclcmd: sqlite3_hct_journal_rollback DB MINCID
+*/
+static int test_hct_journal_rollback(
+  ClientData clientData,          /* Unused */
+  Tcl_Interp *interp,             /* The TCL interpreter */
+  int objc,                       /* Number of arguments */
+  Tcl_Obj *CONST objv[]           /* Command arguments */
+){
+  sqlite3 *db = 0;
+  int rc = TCL_OK;
+
+  if( objc!=3 ){
+    Tcl_WrongNumArgs(interp, 1, objv, "DB MINCID");
+    return TCL_ERROR;
+  }
+  rc = getDbPointer(interp, Tcl_GetString(objv[1]), &db);
+  if( rc!=TCL_OK ) return rc;
+
+  rc = sqlite3_hct_journal_rollback(db, SQLITE_HCT_ROLLBACK_MAXIMUM);
+  Tcl_SetObjResult(interp, Tcl_NewStringObj(sqlite3ErrName(rc), -1));
+  return TCL_OK;
+}
+
+/*
 ** Register commands with the TCL interpreter.
 */
 int SqliteHctTest_Init(Tcl_Interp *interp){
@@ -315,6 +339,7 @@ int SqliteHctTest_Init(Tcl_Interp *interp){
     { "sqlite3_hct_journal_write",           test_hct_journal_write },
     { "sqlite3_hct_journal_snapshot",        test_hct_journal_snapshot },
     { "sqlite3_hct_journal_truncate",        test_hct_journal_truncate },
+    { "sqlite3_hct_journal_rollback",        test_hct_journal_rollback },
   };
   int ii = 0;
 
