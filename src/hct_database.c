@@ -468,7 +468,7 @@ struct HctDbCell {
 #if 1
 __attribute__ ((noinline)) 
 static void hctMemcpy(void *a, const void *b, size_t c){
-  memcpy(a, b, c);
+  if( c ) memcpy(a, b, c);
 }
 #else
 # define hctMemcpy memcpy

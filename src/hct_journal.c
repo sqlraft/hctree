@@ -114,6 +114,7 @@ struct HctJrnlServer {
   u64 iSchemaCid;
   int eMode;
   u64 iSnapshot;
+  int nSchemaVersionIncr;
   int nCommit;
   u64 *aCommit;                   /* Array of size nCommit */
 };
@@ -1421,8 +1422,8 @@ int sqlite3_hct_journal_setmode(sqlite3 *db, int eMode){
 
   if( rc==SQLITE_OK ){
     if( eMode!=SQLITE_HCT_JOURNAL_MODE_LEADER
-        && eMode!=SQLITE_HCT_JOURNAL_MODE_FOLLOWER
-      ){
+     && eMode!=SQLITE_HCT_JOURNAL_MODE_FOLLOWER
+    ){
       return SQLITE_MISUSE_BKPT;
     }else if( pJrnl==0 ){
       sqlite3ErrorWithMsg(db, SQLITE_ERROR, "not a journaled hct database");
@@ -1438,14 +1439,21 @@ int sqlite3_hct_journal_setmode(sqlite3 *db, int eMode){
             sqlite3ErrorWithMsg(db, SQLITE_ERROR, "incomplete journal");
             rc = SQLITE_ERROR;
           }else{
+            u64 iCid = sqlite3HctJournalSnapshot(pJrnl);
             pServer->eMode = SQLITE_HCT_JOURNAL_MODE_LEADER;
+            if( iCid>0 ){
+              sqlite3HctFileSetCID(sqlite3HctDbFile(pJrnl->pDb), iCid);
+            }
           }
+          pServer->nSchemaVersionIncr++;
         }else{
           /* Switch from LEADER to FOLLOWER mode. This is always possible. */
+          void *pSchema = sqlite3HctBtreeSchema(db->aDb[0].pBt, 0, 0);
           u64 iSnapshotId = sqlite3HctFileGetSnapshotid(pFile);
           memset(pServer->aCommit, 0, pServer->nCommit*sizeof(u64));
           pServer->iSnapshot = iSnapshotId;
           pServer->eMode = SQLITE_HCT_JOURNAL_MODE_FOLLOWER;
+          sqlite3HctJournalFixSchema(pJrnl, db, pSchema);
         }
       }
     }
@@ -1454,16 +1462,75 @@ int sqlite3_hct_journal_setmode(sqlite3 *db, int eMode){
   return rc;
 }
 
-static void hctJrnlFixIndexes(Table *pTab){
+static void hctJrnlFixTable(Table *pTab){
   Index *pIdx;
   for(pIdx=pTab->pIndex; pIdx; pIdx=pIdx->pNext){
-    if( pIdx->idxType==SQLITE_IDXTYPE_UNIQUE ){
+    if( pIdx->idxType==SQLITE_IDXTYPE_UNIQUE 
+     || pIdx->idxType==SQLITE_IDXTYPE_PRIMARYKEY
+    ){
       pIdx->idxType = SQLITE_IDXTYPE_APPDEF;
     }
     pIdx->uniqNotNull = 0;
     pIdx->onError = OE_None;
   }
+
+
 }
+
+/*
+** This function is used to "fix" a schema so that it can be used in
+** a FOLLOWER mode database. Specifically:
+**
+**   * All UNIQUE indexes are marked as not-unique.
+**   * All triggers are removed from the schema.
+**   * All FK definitions are removed from the schema.
+*/
+void sqlite3HctJournalFixSchema(HctJournal *pJrnl, sqlite3 *db, void *pS){
+  HctJrnlServer *pServer = pJrnl->pServer;
+  if( pServer==0 || pServer->eMode==SQLITE_HCT_JOURNAL_MODE_FOLLOWER ){
+    Schema *pSchema = (Schema*)pS;
+    HashElem *k;
+
+    for(k=sqliteHashFirst(&pSchema->tblHash); k; k=sqliteHashNext(k)){
+      Table *pTab = (Table*)sqliteHashData(k);
+      hctJrnlFixTable(pTab);
+      while( pTab->pTrigger ){
+        Trigger *pTrig = pTab->pTrigger;
+        pTab->pTrigger = pTrig->pNext;
+        sqlite3DeleteTrigger(db, pTrig);
+      }
+      if( IsOrdinaryTable(pTab) ){
+        sqlite3FkDelete(db, pTab);
+      }
+    }
+    sqlite3HashClear(&pSchema->trigHash);
+  }
+}
+
+void sqlite3HctJournalSchemaVersion(HctJournal *pJrnl, u32 *pSchemaVersion){
+  if( pJrnl && pJrnl->pServer ){
+    *pSchemaVersion += HctAtomicLoad(&pJrnl->pServer->nSchemaVersionIncr);
+  }
+}
+
+#ifdef SQLITE_DEBUG
+/*
+** assert() that the schema associated with table pTab has been "fixed",
+** according to the definition used by sqlite3HctJournalFixSchema().
+*/
+static void assert_schema_is_fixed(Table *pTab){
+  Index *pIdx;
+  for(pIdx=pTab->pIndex; pIdx; pIdx=pIdx->pNext){
+    assert( pIdx->idxType==SQLITE_IDXTYPE_APPDEF );
+    assert( pIdx->uniqNotNull==0 );
+    assert( pIdx->onError==OE_None );
+  }
+  assert( pTab->pTrigger==0 );
+  assert( pTab->u.tab.pFKey==0 );
+}
+#else
+# define assert_schema_is_fixed(x)
+#endif
 
 static int hctJrnlGetInsertStmt(
   sqlite3 *db, 
@@ -1479,7 +1546,7 @@ static int hctJrnlGetInsertStmt(
   int ii;
 
   assert( pTab );
-  hctJrnlFixIndexes(pTab);
+  assert_schema_is_fixed(pTab);
 
   *ppStmt = 0;
   pStr = sqlite3_str_new(0);
@@ -1525,6 +1592,8 @@ static int hctJrnlGetDeleteStmt(
   const char *zRowid = "_rowid_";
 
   assert( pTab );
+  assert_schema_is_fixed(pTab);
+
   if( pTab->iPKey>=0 ){
     zRowid = pTab->aCol[pTab->iPKey].zCnName;
   }
@@ -2130,6 +2199,7 @@ int sqlite3_hct_journal_write(
       );
     }else{
       rc = sqlite3_exec(db, zSchema, 0, 0, 0);
+      sqlite3HctJournalFixSchema(pJrnl, db, sqlite3HctBtreeSchema(pBt, 0, 0));
     }
   }
 
@@ -2242,6 +2312,14 @@ int sqlite3_hct_journal_write(
     if( rc==SQLITE_OK ){
       HctJrnlServer *pServer = pJrnl->pServer;
       i64 iVal = iValidCid ? iValidCid : iCid;
+
+      /* If this transaction updated the schema, update the Server.iSchemaCid
+      ** field as well. This field is not used in FOLLOWER mode, but may be
+      ** if this process switches to LEADER later on.  */
+      if( zSchema[0] ){
+        HctAtomicStore(&pServer->iSchemaCid, iCid);
+      }
+
       HctAtomicStore(&pServer->aCommit[iCid % pServer->nCommit], iVal);
       if( HctAtomicLoad(&pServer->iSnapshot)==0 ){
         (void)HctCASBool(&pServer->iSnapshot, (u64)0, (u64)iCid);

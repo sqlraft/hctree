@@ -73,3 +73,7 @@ int sqlite3HctJrnlWriteEmpty(HctJournal *Jrnl, u64 iCid, u64 iTid, sqlite3 *db);
 u64 sqlite3HctJrnlWriteTid(HctJournal *pJrnl, u64 *piCid);
 
 u64 sqlite3HctJournalSnapshot(HctJournal *pJrnl);
+
+void sqlite3HctJournalFixSchema(HctJournal *pJrnl, sqlite3*, void *pSchema);
+
+void sqlite3HctJournalSchemaVersion(HctJournal *pJrnl, u32 *pSchemaVersion);

@@ -1252,6 +1252,9 @@ int sqlite3HctBtreeSchemaLoaded(Btree *pBt){
       rc = hctAttemptRecovery(p);
     }
   }
+  if( rc==SQLITE_OK && p->pHctJrnl ){
+    sqlite3HctJournalFixSchema(p->pHctJrnl, p->db, p->pSchema);
+  }
   return rc;
 }
 
@@ -1647,7 +1650,6 @@ int sqlite3HctBtreeCommitPhaseTwo(Btree *pBt, int bCleanup){
       p->nSchemaOp = 0;
     }
     p->eTrans = SQLITE_TXN_READ;
-    p->eMetaState = HCT_METASTATE_READ;
   }
   if( rc==SQLITE_OK ){
     hctEndTransaction(p);
@@ -2884,6 +2886,9 @@ void sqlite3HctBtreeGetMeta(Btree *pBt, int idx, u32 *pMeta){
         }
         sqlite3HctBtreeCloseCursor(pCsr);
       }
+      sqlite3HctJournalSchemaVersion(
+          p->pHctJrnl, &p->aMeta[BTREE_SCHEMA_VERSION]
+      );
     }
     *pMeta = p->aMeta[idx];
   }
