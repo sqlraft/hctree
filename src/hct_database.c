@@ -324,7 +324,6 @@ struct HctDatabase {
 #define HCT_MODE_NORMAL    0
 #define HCT_MODE_ROLLBACK  1
 #define HCT_MODE_VALIDATE  3
-#define HCT_MODE_JOURNALRB 4
 
 
 /* 
@@ -2121,7 +2120,6 @@ static int hctDbFollowRangeOld(
 
   i64 iDoNotMergeTid = (pDb->eMode==HCT_MODE_VALIDATE) ? 0 : pDb->iTid;
   assert( pDb->eMode!=HCT_MODE_ROLLBACK );
-  assert( pDb->eMode!=HCT_MODE_JOURNALRB );
 
   if( iRangeTidValue>pDb->iLocalMinTid ){
     bRet = 1;
@@ -3237,16 +3235,6 @@ void sqlite3HctDbRollbackMode(HctDatabase *pDb, int eRollback){
     pDb->iSnapshotId = LARGEST_TID-1;
     pDb->iLocalMinTid = LARGEST_TID-1;
   }
-}
-
-void sqlite3HctDbJournalRbMode(HctDatabase *pDb, int bRollback){
-  assert( bRollback==0 || bRollback==1 );
-  assert( bRollback==1 || pDb->eMode==HCT_MODE_JOURNALRB );
-  assert( bRollback==0 || pDb->eMode==HCT_MODE_NORMAL );
-  assert( bRollback==1 || pDb->eMode==HCT_MODE_JOURNALRB );
-
-  pDb->pa.nWriteKey = 0;
-  pDb->eMode = bRollback ? HCT_MODE_JOURNALRB : HCT_MODE_NORMAL;
 }
 
 i64 sqlite3HctDbNCasFail(HctDatabase *pDb){
@@ -4744,7 +4732,6 @@ static int hctDbDelete(
   HctDbCell prev;           /* Previous cell on page */
 
   assert( pOp->bFullDel==0 );
-  assert( pDb->eMode!=HCT_MODE_JOURNALRB );
 
   if( pOp->iInsert==0 && !bLeftmost ){
     /* If deleting the first key on the first page, set the eBalance flag (as 
@@ -5250,7 +5237,7 @@ static int hctDbInsert(
 
       if( p->iHeight==0 ){
         cell.iTid = pDb->iTid;
-        if( pDb->eMode==HCT_MODE_ROLLBACK || pDb->eMode==HCT_MODE_JOURNALRB ){
+        if( pDb->eMode==HCT_MODE_ROLLBACK ){
           cell.iTid |= HCT_TID_ROLLBACK_OVERRIDE;
         }
 
@@ -5429,7 +5416,6 @@ int sqlite3HctDbInsert(
 
   assert( pDb->eMode==HCT_MODE_NORMAL 
        || pDb->eMode==HCT_MODE_ROLLBACK
-       || pDb->eMode==HCT_MODE_JOURNALRB
   );
   if( pDb->eMode==HCT_MODE_ROLLBACK ){
     int op = 0;

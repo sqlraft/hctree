@@ -605,9 +605,7 @@ int sqlite3HctJrnlWriteEmpty(
 ){
   int rc = SQLITE_OK;
   if( pJrnl->eInWrite==HCT_JOURNAL_NONE ){
-    sqlite3HctDbJournalRbMode(pJrnl->pDb, 1);
     rc = hctJrnlWriteRecord(pJrnl, iCid, "", 0, 0, 0, iTid);
-    sqlite3HctDbJournalRbMode(pJrnl->pDb, 0);
 
     /* If argument db is not NULL and there is a custom validation hook
     ** configured, invoke it now. This is just to propagate the empty

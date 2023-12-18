@@ -196,7 +196,6 @@ int sqlite3HctDbEndRead(HctDatabase*);
 int sqlite3HctDbValidate(sqlite3*, HctDatabase*, u64 *piCid, int*);
 
 void sqlite3HctDbRollbackMode(HctDatabase*,int);
-void sqlite3HctDbJournalRbMode(HctDatabase*,int);
 
 int sqlite3HctDbCsrOpen(HctDatabase*, struct KeyInfo*, u32 iRoot, HctDbCsr**);
 void sqlite3HctDbCsrClose(HctDbCsr *pCsr);
