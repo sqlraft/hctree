@@ -298,16 +298,16 @@ proc mk_tables {nm} {
   foreach c [split $::cursor_apis ";"] {
     if {[string trim $c]==""} continue
     array set A [parse_signature $c]
-    append ret "  x$A(name) : sqlite3${nm}$A(name),\n"
+    append ret "  .x$A(name) = sqlite3${nm}$A(name),\n"
   }
   append ret "};\n"
 
   append ret "static const BtreeMethods ${lc}_btree_methods = {\n"
-  append ret "  pCsrMethods : &${lc}_btcursor_methods,\n"
+  append ret "  .pCsrMethods = &${lc}_btcursor_methods,\n"
   foreach c [split $::tree_apis ";"] {
     if {[string trim $c]==""} continue
     array set A [parse_signature $c]
-    append ret "  x$A(name) : sqlite3${nm}$A(name),\n"
+    append ret "  .x$A(name) = sqlite3${nm}$A(name),\n"
   }
   append ret "};\n\n"
 
