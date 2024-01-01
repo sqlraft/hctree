@@ -361,6 +361,7 @@ TESTSRC = \
   $(TOP)/src/test_wsd.c \
   $(TOP)/src/test_mtperf.c \
   $(TOP)/src/test_hct.c \
+  $(TOP)/src/test_hctserver.c \
   $(TOP)/src/test_mtcommit.c
 
 # Extensions to be statically loaded.

@@ -111,6 +111,7 @@ const char *sqlite3TestInit(Tcl_Interp *interp){
   extern int SqliteThreadTest_Init(Tcl_Interp*);
   extern int SqliteMtCommit_Init(Tcl_Interp*);
   extern int SqliteHctTest_Init(Tcl_Interp*);
+  extern int SqliteHctServerTest_Init(Tcl_Interp*);
 
   Tcl_CmdInfo cmdInfo;
 
@@ -181,6 +182,7 @@ const char *sqlite3TestInit(Tcl_Interp *interp){
   SqliteThreadTest_Init(interp);
   SqliteMtCommit_Init(interp);
   SqliteHctTest_Init(interp);
+  SqliteHctServerTest_Init(interp);
 
   Tcl_CreateObjCommand(
       interp, "load_testfixture_extensions", load_testfixture_extensions,0,0

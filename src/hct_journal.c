@@ -463,6 +463,16 @@ static void hctJrnlRecordPrefix(
   pBuf->nBuf = (aBodyOut - pBuf->aBuf);
 }
 
+static int hctBufferExtend(HctBuffer *pBuf, int nExtend){
+  i64 nDesire = pBuf->nBuf + nExtend;
+  if( pBuf->nAlloc<nDesire ){
+    i64 nNew = 256;
+    while( nNew<nDesire ) nNew = nNew*4;
+    if( sqlite3HctBufferGrow(pBuf, nNew) ) return SQLITE_NOMEM;
+  }
+  return SQLITE_OK;
+}
+
 static int hctBufferAppend(HctBuffer *pBuf, const char *zFmt, ...){
   va_list ap;
   char *zApp = 0;
@@ -473,7 +483,7 @@ static int hctBufferAppend(HctBuffer *pBuf, const char *zFmt, ...){
   va_end(ap);
 
   nApp = sqlite3Strlen30(zApp);
-  if( sqlite3HctBufferGrow(pBuf, pBuf->nBuf+nApp+1) ) return SQLITE_NOMEM;
+  if( hctBufferExtend(pBuf, nApp+1) ) return SQLITE_NOMEM;
   memcpy(&pBuf->aBuf[pBuf->nBuf], zApp, nApp+1);
   pBuf->nBuf += nApp;
   sqlite3_free(zApp);
@@ -509,7 +519,7 @@ static int hctJrnlLogTree(void *pCtx, u32 iRoot, KeyInfo *pKeyInfo){
     if( hctJrnlFindTree(pJrnl->pSchema, iRoot, &jrnltree) ){
       int nName = sqlite3Strlen30(jrnltree.zName);
   
-      rc = sqlite3HctBufferGrow(pBuf, pBuf->nBuf+1+nName+1);
+      rc = hctBufferExtend(pBuf, 1+nName+1);
       if( rc==SQLITE_OK ){
         HctTreeCsr *pCsr = 0;
   
@@ -532,7 +542,7 @@ static int hctJrnlLogTree(void *pCtx, u32 iRoot, KeyInfo *pKeyInfo){
             sqlite3HctTreeCsrData(pCsr, &nData, &aData);
             bDel = sqlite3HctTreeCsrIsDelete(pCsr);
   
-            rc = sqlite3HctBufferGrow(pBuf, pBuf->nBuf+1+9+9+nData);
+            rc = hctBufferExtend(pBuf, 1+9+9+nData);
             if( rc!=SQLITE_OK ) break;
   
             if( pKeyInfo==0 ){
@@ -883,6 +893,8 @@ static int hctJrnlReadBaseline(
 ){
   HctDbCsr *pCsr = 0;
   int rc = SQLITE_OK;
+
+  memset(pRec, 0, sizeof(HctBaselineRecord));
 
   /* Open a cursor on the baseline table */
   rc = sqlite3HctDbCsrOpen(pJrnl->pDb, 0, (u32)pJrnl->iBaseRoot, &pCsr);
