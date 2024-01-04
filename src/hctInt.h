@@ -269,6 +269,8 @@ int sqlite3HctDbCsrFindLastWrite(
   u64 *piCid                      /* Last CID to write to this key */
 );
 
+void sqlite3HctDbJrnlWriteCid(HctDatabase *pDb, u64 iVal);
+
 /*************************************************************************
 ** Interface to code in hct_file.c
 */

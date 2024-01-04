@@ -115,6 +115,8 @@ struct TestServerJob {
   int aFollower[TESTSERVER_MAX_FOLLOWER];
   int bDone;                      /* Set to true once job is finished */
   char *zErr;                     /* ckalloc()'d error message (if any) */
+
+  int bFirstLogged;
 };
 
 struct TestServer {
@@ -126,7 +128,7 @@ struct TestServer {
   int fdListen;                   /* Listening socket */
   int nJob;
   TestServerJob aJob[TESTSERVER_MAX_JOB];
-
+  int bFollower;                  /* True for follower, false for leader */
   int nMirror;
   TestServerMirror aMirror[TESTSERVER_MAX_JOB];
 };
@@ -142,6 +144,7 @@ static char *test_strdup(const char *zIn){
 }
 
 int Sqlite3_Init(Tcl_Interp *);
+int SqliteHctTest_Init(Tcl_Interp *);
 
 /*
 ** Write 32 and 64 bit integer values to the supplied buffer, respectively
@@ -198,12 +201,17 @@ static int hctServerValidateHook(
     sendInt64(&rc, fd, iSchemaCid);
     sendData(&rc, fd, (const u8*)zSchema, nSchema);
     sendData(&rc, fd, (const u8*)pData, nData);
+    if( pJob->bFirstLogged==0){
+      printf("SUB: first cid = %lld (job=%d)\n", iCid,
+          (int)(pJob - pJob->pServer->aJob)
+      );
+      pJob->bFirstLogged = 1;
+    }
   }
-  printf("transaction cid=%lld\n", iCid);
   return rc;
 }
 
-static void *hctServerThread(void *pCtx){
+static void *hctLeaderJobThread(void *pCtx){
   TestServerJob *pJob = (TestServerJob*)pCtx;
   TestServer *p = pJob->pServer;
   Tcl_Interp *interp = 0;
@@ -214,6 +222,7 @@ static void *hctServerThread(void *pCtx){
   /* Create Tcl interpreter for this job */
   interp = Tcl_CreateInterp();
   Sqlite3_Init(interp);
+  SqliteHctTest_Init(interp);
 
   /* Open the database handle */
   pOpenDb = Tcl_NewObj();
@@ -409,6 +418,8 @@ static int hctServerDoSync(
     sendInt32(&rc, newfd, nErr+1);
     sendData(&rc, newfd, (const u8*)zErr, nErr+1);
   }else{
+    i64 iThisCid = 0;
+    int bLogged = 0;
     pStmt = testServerPrepare(&rc, p, z3);
     if( rc==SQLITE_OK ) sqlite3_bind_int64(pStmt, 1, iCid);
     sendInt32(&rc, newfd, TESTSERVER_MESSAGE_SYNCREPLY);
@@ -418,12 +429,18 @@ static int hctServerDoSync(
       int nData = sqlite3_column_bytes(pStmt, 2);
       int nSz = sizeof(i64) + sizeof(i64) + nSchema+1 + nData;
 
+      iThisCid = sqlite3_column_int64(pStmt, 0);
+      if( bLogged==0 ){
+        printf("SYNC: first CID = %lld\n", iThisCid);
+        bLogged = 1;
+      }
       sendInt32(&rc, newfd, nSz);
-      sendInt64(&rc, newfd, sqlite3_column_int64(pStmt, 0));
+      sendInt64(&rc, newfd, iThisCid);
       sendInt64(&rc, newfd, sqlite3_column_int64(pStmt, 3));
       sendData(&rc, newfd, sqlite3_column_text(pStmt, 1), nSchema+1);
       sendData(&rc, newfd, sqlite3_column_blob(pStmt, 2), nData);
     }
+printf("SYNC: last CID = %lld\n", iThisCid);
     sendInt32(&rc, newfd, 0);
     testServerFinalize(&rc, pStmt);
   }
@@ -457,6 +474,7 @@ static int hctServerAccept(TestServer *p){
       /* SUB message */
       int iJob = 0;
       recvInt32(&rc, newfd, &iJob);
+printf("SUB to job %d\n", iJob);
       if( iJob<p->nJob ){
         TestServerJob *pJob = &p->aJob[iJob];
         pthread_mutex_lock(&pJob->mutex);
@@ -483,7 +501,7 @@ static int hctServerAccept(TestServer *p){
   return 0;
 }
 
-static int hctServerRun(TestServer *p){
+static int hctLeaderRun(TestServer *p){
   int ii;
   int rc = TCL_OK;
   struct pollfd fds[1];
@@ -508,7 +526,7 @@ static int hctServerRun(TestServer *p){
   for(ii=0; ii<p->nJob; ii++){
     TestServerJob *pJob = &p->aJob[ii];
     pthread_mutex_init(&pJob->mutex, 0);
-    pthread_create(&pJob->tid, NULL, hctServerThread, (void*)pJob);
+    pthread_create(&pJob->tid, NULL, hctLeaderJobThread, (void*)pJob);
   }
 
   while( 1 ){
@@ -627,11 +645,37 @@ static sqlite3 *testServerOpenDb(int *pRc, TestServer *p){
   return db;
 }
 
+/*
+** This is a wrapper around sqlite3_hct_journal_write(). It retries any 
+** attempted _write() that fails with SQLITE_BUSY.
+*/
+static int hctWriteWithRetry(
+  sqlite3 *db, 
+  i64 iCid, 
+  const char *zSchema, 
+  const u8 *aData, int nData, 
+  i64 iSchemaCid,
+  const char *zCaption
+){
+  int rc = SQLITE_OK;
+  do {
+    rc = sqlite3_hct_journal_write(db, iCid, zSchema, aData, nData, iSchemaCid);
+    #if 0
+    printf("applying %lld rc=%d err=%s (%s)\n", iCid, rc, sqlite3_errmsg(db), zCaption);
+    #endif
+    fflush(stdout);
+  }while( rc==SQLITE_BUSY );
+assert( rc==SQLITE_OK );
+  return rc;
+}
+
 static void *hctMirrorThread(void *pCtx){
   TestServerMirror *p = (TestServerMirror*)pCtx;
   u8 *aBuf = 0;
   int nAlloc = 0;
   int rc = 0;
+
+  char *zName = sqlite3_mprintf("mirror %d", (int)(p - p->pServer->aMirror));
 
   while( rc==SQLITE_OK ){
     int nThis = 0;
@@ -645,16 +689,11 @@ static void *hctMirrorThread(void *pCtx){
 
     if( rc==SQLITE_OK ){
       i64 iCid = getInt64(&aBuf[0]);
-      i64 iSCid = getInt64(&aBuf[8]);
+      i64 iSchemaCid = getInt64(&aBuf[8]);
       const char *zSchema = (const char*)&aBuf[16];
       const u8 *aData = (const u8*)&zSchema[strlen(zSchema)+1];
       int nData = nThis - (aData - aBuf);
-
-      while( 1 ){
-        rc = sqlite3_hct_journal_write(p->db, iCid, zSchema, aData,nData,iSCid);
-        printf("applying %lld (mirror) rc=%d\n", iCid, rc);
-        if( rc!=SQLITE_BUSY ) break;
-      }
+      rc = hctWriteWithRetry(p->db, iCid, zSchema, aData, nData, iSchemaCid, zName);
     }
 
   }
@@ -694,13 +733,15 @@ static void hctFollowerSyncReply(int *pRc, TestServer *p, int fd){
         rc = TCL_ERROR;
       }else{
         i64 iCid = getInt64(&aBuf[iOff+4]);
-        i64 iSCid = getInt64(&aBuf[iOff+12]);
+        i64 iSchemaCid = getInt64(&aBuf[iOff+12]);
         const char *zSchema = (const char*)&aBuf[iOff+20];
         const u8 *aData = (const u8*)&zSchema[strlen(zSchema)+1];
         int nData = nThis+4 - (aData - &aBuf[iOff]);
-        rc = sqlite3_hct_journal_write(p->db, iCid, zSchema, aData,nData,iSCid);
+        rc = hctWriteWithRetry(p->db, iCid, zSchema, aData, nData, iSchemaCid, "sync");
         if( rc!=SQLITE_OK ){
-          testServerResult(p, "error in sqlite3_hct_journal_write() - %d", rc);
+          testServerResult(p, "error in sqlite3_hct_journal_write() - %d (%s)", 
+              rc, sqlite3_errmsg(p->db)
+          );
           rc = TCL_ERROR;
         }
       }
@@ -740,6 +781,7 @@ static void hctFollowerGetVersion(
     }
   }
   testServerFinalize(&rc, pStmt);
+
   pStmt = testServerPrepare(&rc, p, z2);
   while( rc==SQLITE_OK && SQLITE_ROW==sqlite3_step(pStmt) ){
     int nJrnlHash = sqlite3_column_bytes(pStmt, 1);
@@ -748,8 +790,10 @@ static void hctFollowerGetVersion(
       rc = TCL_ERROR;
     }else{
       const u8 *aJrnlHash = sqlite3_column_blob(pStmt, 1);
+      i64 iThis = sqlite3_column_int64(pStmt, 0);
+      if( iThis!=iCid+1 && iCid!=0 ) break;
       sqlite3_hct_journal_hash(aHash, aJrnlHash);
-      iCid = sqlite3_column_int64(pStmt, 0);
+      iCid = iThis;
     }
   }
   testServerFinalize(&rc, pStmt);
@@ -768,7 +812,7 @@ static int hctFollowerDoSync(
   i64 iCid, 
   const u8 *aHash
 ){
-  int rc = TCL_OK;
+  int rc = *pRc;
   int fd = -1;
   int eReply = -1;
   int nJob = 0;
@@ -807,6 +851,7 @@ static int hctFollowerDoSync(
   }
 
   if( fd>=0 ) close(fd);
+  *pRc = rc;
   return nJob;
 }
 
@@ -819,6 +864,13 @@ static int hctFollowerRun(TestServer *p){
 
   hctFollowerGetVersion(&rc, p, &iCid, aHash); 
   nJob = hctFollowerDoSync(&rc, p, iCid, aHash);
+
+  /* Start the tcl jobs */
+  for(ii=0; ii<p->nJob; ii++){
+    TestServerJob *pJob = &p->aJob[ii];
+    pthread_mutex_init(&pJob->mutex, 0);
+    pthread_create(&pJob->tid, NULL, hctLeaderJobThread, (void*)pJob);
+  }
 
   /* Launch a thread for each job on the leader node. Connect a socket
   ** and send a SUB message for each. */
@@ -962,18 +1014,17 @@ static int hctServerCmd(
       break;
     };
     case 2: assert( 0==strcmp(azSub[iSub], "run") ); {
-      int bFollower = 0;
       int ii;
       for(ii=2; ii<objc; ii++){
         int iOpt = -1;
         rc = Tcl_GetIndexFromObj(interp, objv[ii], azRun, "OPTION", 0, &iOpt);
         if( rc!=TCL_OK ) return rc;
-        bFollower = 1;
+        p->bFollower = 1;
       }
-      if( bFollower ){
+      if( p->bFollower ){
         rc = hctFollowerRun(p);
       }else{
-        rc = hctServerRun(p);
+        rc = hctLeaderRun(p);
       }
       break;
     };

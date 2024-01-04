@@ -41,6 +41,7 @@
 #define HCT_MAX_LEADING_WRITE 1024
 
 typedef struct HctJrnlServer HctJrnlServer;
+typedef struct HctJrnlPendingHook HctJrnlPendingHook;
 
 /*
 ** One object of this type is shared by all connections to the same 
@@ -119,6 +120,13 @@ struct HctJrnlServer {
   u64 *aCommit;                   /* Array of size nCommit */
 };
 
+struct HctJrnlPendingHook {
+  u64 iCid;
+  u64 iSCid;
+  HctBuffer data;
+  HctBuffer schema;
+};
+
 /*
 ** There is one instance of this structure for each database handle (HBtree*)
 ** open on a replication-enabled hctree database.
@@ -137,11 +145,34 @@ struct HctJournal {
   HctDatabase *pDb;
   HctTree *pTree;
   HctJrnlServer *pServer;
+  HctJrnlPendingHook pending;
 };
 
 #define HCT_JOURNAL_NONE          0
 #define HCT_JOURNAL_INWRITE       1
 #define HCT_JOURNAL_INROLLBACK    2
+
+static void hctJournalSetDbError(
+  sqlite3 *db,                    /* Database on which to set error */
+  int rc,                         /* Error code */
+  const char *zFormat, ...        /* Printf() error string and arguments */
+){
+  char *zErr = 0;
+  sqlite3_mutex_enter( sqlite3_db_mutex(db) );
+  if( zFormat ){
+    va_list ap;
+    va_start(ap, zFormat);
+    zErr = sqlite3_vmprintf(zFormat, ap);
+    va_end(ap);
+  }
+  if( zErr ){
+    sqlite3ErrorWithMsg(db, rc, "%s", zErr);
+    sqlite3_free(zErr);
+  }else{
+    sqlite3ErrorWithMsg(db, rc, 0, 0);
+  }
+  sqlite3_mutex_leave( sqlite3_db_mutex(db) );
+}
 
 /*
 ** Initialize the main database for replication.
@@ -154,7 +185,7 @@ int sqlite3_hct_journal_init(sqlite3 *db){
 
   /* Test that there is not already an open transaction on this database. */
   if( sqlite3_get_autocommit(db)==0 ){
-    sqlite3ErrorWithMsg(db, SQLITE_ERROR, "open transaction on database");
+    hctJournalSetDbError(db, SQLITE_ERROR, "open transaction on database");
     return SQLITE_ERROR;
   }
 
@@ -168,7 +199,7 @@ int sqlite3_hct_journal_init(sqlite3 *db){
     rc = sqlite3_step(pTest);
     sqlite3_finalize(pTest);
     if( rc==SQLITE_DONE ){
-      sqlite3ErrorWithMsg(db, SQLITE_ERROR, "not an hct database");
+      hctJournalSetDbError(db, SQLITE_ERROR, "not an hct database");
     }else if( rc==SQLITE_ROW ){
       rc = SQLITE_OK;
     }
@@ -187,7 +218,7 @@ int sqlite3_hct_journal_init(sqlite3 *db){
     rc = sqlite3_step(pTest);
     sqlite3_finalize(pTest);
     if( rc==SQLITE_DONE ){
-      sqlite3ErrorWithMsg(db, SQLITE_ERROR, "not an empty database");
+      hctJournalSetDbError(db, SQLITE_ERROR, "not an empty database");
       rc = SQLITE_ERROR;
     }else if( rc==SQLITE_ROW ){
       rc = SQLITE_OK;
@@ -211,7 +242,7 @@ int sqlite3_hct_journal_init(sqlite3 *db){
   if( rc!=SQLITE_OK ){
     char *zErr = sqlite3_mprintf("%s", sqlite3_errmsg(db));
     sqlite3_exec(db, "ROLLBACK", 0, 0, 0);
-    sqlite3ErrorWithMsg(db, rc, "%s", zErr);
+    hctJournalSetDbError(db, rc, "%s", zErr);
     sqlite3_free(zErr);
   }else{
     rc = sqlite3HctDetectJournals(db);
@@ -380,8 +411,8 @@ typedef struct JrnlCtx JrnlCtx;
 struct JrnlCtx {
   Schema *pSchema;
   HctTree *pTree;
-  HctBuffer buf;
-  HctBuffer schema;
+  HctBuffer *pBuf;
+  HctBuffer *pSchemaSql;
 };
 
 typedef struct JrnlTree JrnlTree;
@@ -494,7 +525,7 @@ static int hctBufferAppend(HctBuffer *pBuf, const char *zFmt, ...){
 static int hctJrnlLogTree(void *pCtx, u32 iRoot, KeyInfo *pKeyInfo){
   int rc = SQLITE_OK;
   JrnlCtx *pJrnl = (JrnlCtx*)pCtx;
-  HctBuffer *pBuf = &pJrnl->buf;
+  HctBuffer *pBuf = pJrnl->pBuf;
 
   if( iRoot==HCT_TREE_SCHEMAOP_ROOT ){
     HctTreeCsr *pCsr = 0;
@@ -507,8 +538,8 @@ static int hctJrnlLogTree(void *pCtx, u32 iRoot, KeyInfo *pKeyInfo){
         int nData = 0;
         const u8 *aData = 0;
         sqlite3HctTreeCsrData(pCsr, &nData, &aData);
-        rc = hctBufferAppend(&pJrnl->schema, "%s%.*s", 
-            (pJrnl->schema.nBuf>0 ? ";" : ""), nData, (const char*)aData
+        rc = hctBufferAppend(pJrnl->pSchemaSql, "%s%.*s", 
+            (pJrnl->pSchemaSql->nBuf>0 ? ";" : ""), nData, (const char*)aData
         );
       }
       sqlite3HctTreeCsrClose(pCsr);
@@ -622,10 +653,35 @@ int sqlite3HctJrnlWriteEmpty(
     ** transaction to any follower databases, not to actually validate
     ** an empty transaction - the return code is ignored.  */
     if( rc==SQLITE_OK && db && db->xValidate ){
-      (void)db->xValidate(db->pValidateArg, iCid, "", 0, 0, 0);
+      // (void)db->xValidate(db->pValidateArg, iCid, "", 0, 0, 0);
+      pJrnl->pending.iCid = iCid;
+      pJrnl->pending.iSCid = 0;
+      pJrnl->pending.data.nBuf = 0;
+      pJrnl->pending.schema.nBuf = 0;
     }
   }
   return rc;
+}
+
+void sqlite3HctJrnlInvokeHook(HctJournal *pJrnl, sqlite3 *db){
+  if( pJrnl ){
+    HctJrnlPendingHook *pPending = &pJrnl->pending;
+    if( pPending->iCid>0 ){
+      if( db->xValidate ){
+        const char *zSchema = "";
+        if( pJrnl->pending.schema.nBuf>0 ){
+          zSchema = (const char*)pJrnl->pending.schema.aBuf;
+        }
+        (void)db->xValidate(
+            db->pValidateArg, pPending->iCid, 
+            zSchema, pPending->data.aBuf, pPending->data.nBuf, 
+            pPending->iSCid
+            );
+      }
+
+      pPending->iCid = 0;
+    }
+  }
 }
 
 int sqlite3HctJrnlLog(
@@ -638,7 +694,7 @@ int sqlite3HctJrnlLog(
 ){
   int rc = SQLITE_OK;
   JrnlCtx jrnlctx;
-  const char *zSchema = 0;
+  const char *zSchema = "";
   u64 iSchemaCid = HctAtomicLoad(&pJrnl->pServer->iSchemaCid);
 
   assert( *pbValidateCalled==0 );
@@ -647,18 +703,26 @@ int sqlite3HctJrnlLog(
   memset(&jrnlctx, 0, sizeof(jrnlctx));
   jrnlctx.pSchema = pSchema;
   jrnlctx.pTree = pJrnl->pTree;
+  jrnlctx.pBuf = &pJrnl->pending.data;
+  jrnlctx.pSchemaSql = &pJrnl->pending.schema;
+
+  jrnlctx.pBuf->nBuf = 0;
+  jrnlctx.pSchemaSql->nBuf = 0;
 
   rc = sqlite3HctTreeForeach(pJrnl->pTree, 1, (void*)&jrnlctx, hctJrnlLogTree);
-  zSchema = (jrnlctx.schema.nBuf ? (const char*)jrnlctx.schema.aBuf : "");
+  if( jrnlctx.pSchemaSql->nBuf ){
+    zSchema =(const char*)jrnlctx.pSchemaSql->aBuf;
+  }
 
   if( rc==SQLITE_OK ){
     rc = hctJrnlWriteRecord(pJrnl, iCid, zSchema, 
-        jrnlctx.buf.aBuf, jrnlctx.buf.nBuf, iSchemaCid, iTid
+        jrnlctx.pBuf->aBuf, jrnlctx.pBuf->nBuf, iSchemaCid, iTid
     );
   }
 
   /* If one is registered, invoke the validation hook */
   if( rc==SQLITE_OK && db->xValidate ){
+#if 0
     int res = db->xValidate(db->pValidateArg, iCid, zSchema, 
         jrnlctx.buf.aBuf, jrnlctx.buf.nBuf, iSchemaCid
     );
@@ -666,14 +730,15 @@ int sqlite3HctJrnlLog(
       rc = SQLITE_BUSY_SNAPSHOT;
     }
     *pbValidateCalled = 1;
+#endif
+    pJrnl->pending.iCid = iCid;
+    pJrnl->pending.iSCid = iSchemaCid;
   }
 
   if( zSchema[0] && rc==SQLITE_OK ){
     HctAtomicStore(&pJrnl->pServer->iSchemaCid, iCid);
   }
 
-  sqlite3HctBufferFree(&jrnlctx.buf);
-  sqlite3HctBufferFree(&jrnlctx.schema);
   return rc;
 }
 
@@ -1318,6 +1383,7 @@ int sqlite3HctJrnlRollbackEntry(HctJournal *pJrnl, i64 iTid){
   rc = sqlite3HctDbCsrOpen(pJrnl->pDb, 0, (u32)pJrnl->iJrnlRoot, &pCsr);
   if( rc==SQLITE_OK ){
     HctJournalRecord rec;
+    sqlite3HctDbCsrNosnap(pCsr, 1);
     for(rc=sqlite3HctDbCsrLast(pCsr);
         iDel==0 && rc==SQLITE_OK && sqlite3HctDbCsrEof(pCsr)==0;
         rc=sqlite3HctDbCsrPrev(pCsr)
@@ -1359,7 +1425,7 @@ static int hctJrnlFind(sqlite3 *db, HctJournal **ppJrnl){
   }
 
   if( rc==SQLITE_OK && pJrnl==0 ){
-    sqlite3ErrorWithMsg(db, SQLITE_ERROR, "not a journaled hct database");
+    hctJournalSetDbError(db, SQLITE_ERROR, "not a journaled hct database");
     rc = SQLITE_ERROR;
   }
 
@@ -1436,7 +1502,7 @@ int sqlite3_hct_journal_setmode(sqlite3 *db, int eMode){
     ){
       return SQLITE_MISUSE_BKPT;
     }else if( pJrnl==0 ){
-      sqlite3ErrorWithMsg(db, SQLITE_ERROR, "not a journaled hct database");
+      hctJournalSetDbError(db, SQLITE_ERROR, "not a journaled hct database");
       rc = SQLITE_ERROR;
     }else{
       HctFile *pFile = sqlite3HctDbFile(pJrnl->pDb);
@@ -1446,7 +1512,7 @@ int sqlite3_hct_journal_setmode(sqlite3 *db, int eMode){
           /* Switch from FOLLOWER to LEADER mode. This is only allowed if
           ** there are no holes in the journal.  */
           if( hctJrnlIsComplete(pJrnl)==0 ){
-            sqlite3ErrorWithMsg(db, SQLITE_ERROR, "incomplete journal");
+            hctJournalSetDbError(db, SQLITE_ERROR, "incomplete journal");
             rc = SQLITE_ERROR;
           }else{
             u64 iCid = sqlite3HctJournalSnapshot(pJrnl);
@@ -1759,7 +1825,8 @@ u64 sqlite3HctJournalSnapshot(HctJournal *pJrnl){
     if( pServer && pServer->eMode==SQLITE_HCT_JOURNAL_MODE_FOLLOWER ){
       u64 iTest = 0;
       u64 iValid = 0;
-      iRet = HctAtomicLoad(&pServer->iSnapshot);
+      u64 iSnap = HctAtomicLoad(&pServer->iSnapshot);
+      iRet = iSnap;
       for(iTest=iRet+1; 1; iTest++){
         u64 iVal = HctAtomicLoad(&pServer->aCommit[iTest % pServer->nCommit]);
         if( iVal<iTest ) break;
@@ -1768,6 +1835,19 @@ u64 sqlite3HctJournalSnapshot(HctJournal *pJrnl){
         }else{
           iValid = MAX(iVal, iValid);
         }
+      }
+
+      /* Update HctJrnlServer.iSnapshot if required */
+      if( iRet>=iSnap+16 ){
+        (void)HctCASBool(&pServer->iSnapshot, iSnap, iRet);
+      }
+
+      /* If we are in an sqlite3_hct_journal_write() call, it is fine (and
+      ** necessary) to read snapshots that are invalid to the application.
+      ** So ignore any entries in the aCommit[] array that indicate such.  */
+      if( pJrnl->eInWrite==HCT_JOURNAL_INWRITE ){
+        assert( (iTest-1)>=iRet );
+        iRet = (iTest-1);
       }
     }
   }
@@ -1816,7 +1896,7 @@ int sqlite3_hct_journal_truncate(sqlite3 *db, i64 iMinCid){
   sqlite3_stmt *pUpdate = 0;
 
   if( 0==sqlite3_get_autocommit(db) ){
-    sqlite3ErrorWithMsg(db, SQLITE_ERROR, 
+    hctJournalSetDbError(db, SQLITE_ERROR, 
         "cannot truncate journal from within a transaction"
     );
     return SQLITE_ERROR;
@@ -2017,7 +2097,7 @@ int sqlite3_hct_journal_rollback(sqlite3 *db, sqlite3_int64 iCid){
 
   /* Cannot call this with an open transaction. */
   if( 0==sqlite3_get_autocommit(db) ){
-    sqlite3ErrorWithMsg(db, SQLITE_ERROR, 
+    hctJournalSetDbError(db, SQLITE_ERROR, 
         "cannot rollback journal from within a transaction"
     );
     return SQLITE_ERROR;
@@ -2025,7 +2105,7 @@ int sqlite3_hct_journal_rollback(sqlite3 *db, sqlite3_int64 iCid){
 
   /* Cannot call this in LEADER mode. */
   if( pJrnl->pServer->eMode==SQLITE_HCT_JOURNAL_MODE_LEADER ){
-    sqlite3ErrorWithMsg(db, SQLITE_ERROR, 
+    hctJournalSetDbError(db, SQLITE_ERROR, 
         "cannot rollback journal in leader database"
     );
     return SQLITE_ERROR;
@@ -2171,13 +2251,13 @@ int sqlite3_hct_journal_write(
 
   /* Check that the journal is in follower mode */
   if( pJrnl->pServer->eMode!=SQLITE_HCT_JOURNAL_MODE_FOLLOWER ){
-    sqlite3ErrorWithMsg(db, SQLITE_ERROR, "database is not in FOLLOWER mode");
+    hctJournalSetDbError(db, SQLITE_ERROR, "database is not in FOLLOWER mode");
     return SQLITE_ERROR;
   }
 
   /* Check that there is no transaction open on the connection */
   if( rc==SQLITE_OK && sqlite3_get_autocommit(db)==0 ){
-    sqlite3ErrorWithMsg(db, SQLITE_ERROR, "open transaction on database");
+    hctJournalSetDbError(db, SQLITE_ERROR, "open transaction on database");
     return SQLITE_ERROR;
   }
 
@@ -2197,6 +2277,12 @@ int sqlite3_hct_journal_write(
       rc = SQLITE_BUSY;
       zErr = sqlite3_mprintf(
           "change may not be applied yet (requires newer schema)"
+      );
+    }else if( (iSnapshotId+HCT_MAX_LEADING_WRITE)<iCid ){
+      rc = SQLITE_BUSY;
+      zErr = sqlite3_mprintf(
+          "change may not be applied yet (leading write limit of %d)",
+          HCT_MAX_LEADING_WRITE
       );
     }
   }
@@ -2232,6 +2318,12 @@ int sqlite3_hct_journal_write(
           if( sqlite3HctBtreeIsNewTable(db->aDb[0].pBt, iRoot)==0 ){
             iLastCid = hctJournalFindLastWrite(&rc, pJrnl, iRoot, rdr.iRowid);
           }
+          if( iLastCid>iSnapshotId && iLastCid<iCid ){
+            rc = SQLITE_BUSY;
+            zErr = sqlite3_mprintf(
+                "change may not be applied yet (write/write conflict)"
+            );
+          }else
           if( iLastCid<=iCid ){
             int iPk = -1;
             sqlite3_stmt *pStmt = 0;
@@ -2252,6 +2344,12 @@ int sqlite3_hct_journal_write(
           if( sqlite3HctBtreeIsNewTable(db->aDb[0].pBt, iRoot)==0 ){
             u64 iLastCid = 0;
             iLastCid = hctJournalFindLastWrite(&rc, pJrnl, iRoot, rdr.iRowid);
+            if( iLastCid>iSnapshotId && iLastCid<iCid ){
+              rc = SQLITE_BUSY;
+              zErr = sqlite3_mprintf(
+                  "change may not be applied yet (write/write conflict)"
+              );
+            }else
             if( iLastCid<=iCid ){
               sqlite3_stmt *pStmt = 0;
               rc = hctJrnlGetDeleteStmt(db, rdr.zTab, &pStmt);
@@ -2285,6 +2383,7 @@ int sqlite3_hct_journal_write(
   ** the sqlite_hct_journal table as part of the new record.  */
   if( rc==SQLITE_OK ){
     rc = sqlite3HctDbStartWrite(pJrnl->pDb, &pJrnl->iWriteTid);
+    sqlite3HctDbJrnlWriteCid(pJrnl->pDb, iCid);
     pJrnl->iWriteCid = iCid;
   }
 
@@ -2340,13 +2439,14 @@ int sqlite3_hct_journal_write(
   if( rc!=SQLITE_OK ){
     sqlite3_exec(db, "ROLLBACK", 0, 0, 0);
     if( zErr ){
-      sqlite3ErrorWithMsg(db, rc, "%s", zErr);
+      hctJournalSetDbError(db, rc, "%s", zErr);
       sqlite3_free(zErr);
     }else{
-      sqlite3ErrorWithMsg(db, rc, 0);
+      hctJournalSetDbError(db, rc, 0);
     }
   }
   pJrnl->eInWrite = HCT_JOURNAL_NONE;
+  sqlite3HctDbJrnlWriteCid(pJrnl->pDb, 0);
   return rc;
 }
 

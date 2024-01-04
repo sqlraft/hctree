@@ -292,6 +292,10 @@ struct HctDatabaseStats {
 **   Linked list of cursors used by the current transaction. If this turns
 **   out to be a write transaction, this list is used to detect read/write
 **   conflicts.
+**
+** iJrnlWriteCid:
+**   This value is set within calls to sqlite3_hct_journal_write(). The CID
+**   of the journal entry being written to the db.
 */
 struct HctDatabase {
   HctFile *pFile;
@@ -303,6 +307,8 @@ struct HctDatabase {
   HctBalance *pBalance;           /* Space for hctDbBalance() */
 
   HctDbCsr *pScannerList;
+
+  u64 iJrnlWriteCid;
 
   HctTMap *pTmap;                 /* Transaction map (non-NULL if trans open) */
   u64 iSnapshotId;                /* Snapshot id for reading */
@@ -321,6 +327,9 @@ struct HctDatabase {
   HctDatabaseStats stats;
 };
 
+/*
+** Values for HctDatabase.eMode.
+*/
 #define HCT_MODE_NORMAL    0
 #define HCT_MODE_ROLLBACK  1
 #define HCT_MODE_VALIDATE  3
@@ -514,10 +523,10 @@ static int hctBufferSet(HctBuffer *pBuf, const u8 *aData, int nData){
 
 
 #ifdef SQLITE_DEBUG
-static int hctSqliteBusy(void){
+static int hctSqliteBusy(int iLine){
   return SQLITE_BUSY_SNAPSHOT;
 }
-# define HCT_SQLITE_BUSY hctSqliteBusy()
+# define HCT_SQLITE_BUSY hctSqliteBusy(__LINE__)
 #else
 # define HCT_SQLITE_BUSY SQLITE_BUSY_SNAPSHOT
 #endif /* SQLITE_DEBUG */
@@ -813,6 +822,10 @@ static int hctDbTidIsConflict(HctDatabase *pDb, u64 iTid){
     if( iTid & HCT_TID_ROLLBACK_OVERRIDE ){
       eState = HCT_TMAP_COMMITTED;
     }
+
+    if( eState==HCT_TMAP_COMMITTED && iCid<=pDb->iSnapshotId ) return 0;
+    if( iCid==pDb->iJrnlWriteCid ) return 0;
+    return 1;
 
     if( eState==HCT_TMAP_WRITING || eState==HCT_TMAP_VALIDATING ) return 1;
 
@@ -5081,6 +5094,8 @@ static int hctDbInsert(
 
   p->nWriteKey++;
 
+  assert( pDb->eMode==HCT_MODE_NORMAL || pDb->eMode==HCT_MODE_ROLLBACK );
+
   /* Check if any existing dirty pages need to be flushed to disk before 
   ** this key can be inserted. If they do, flush them. */
   assert( p->writepg.nPg==0 || iRoot==p->writecsr.iRoot );
@@ -5492,6 +5507,13 @@ int sqlite3HctDbStartWrite(HctDatabase *p, u64 *piTid){
   return rc;
 }
 
+/*
+** Set HctDatabase.iJrnlWriteCid.
+*/
+void sqlite3HctDbJrnlWriteCid(HctDatabase *pDb, u64 iVal){
+  pDb->iJrnlWriteCid = iVal;
+}
+
 static u64 *hctDbFindTMapEntry(HctTMap *pTmap, u64 iTid){
   int iMap, iEntry;
   assert( pTmap->iFirstTid<=iTid );
@@ -5532,10 +5554,10 @@ static void hctDbFreeCsrList(HctDbCsr *pList){
 
 int sqlite3HctDbEndRead(HctDatabase *pDb){
   HctTMapClient *pTMapClient = sqlite3HctFileTMapClient(pDb->pFile);
-  assert( (pDb->iSnapshotId==0)==(pDb->pTmap==0) );
+  // assert( (pDb->iSnapshotId==0)==(pDb->pTmap==0) );
   hctDbFreeCsrList(pDb->pScannerList);
   pDb->pScannerList = 0;
-  if( pDb->iSnapshotId ){
+  if( pDb->pTmap ){
     sqlite3HctTMapEnd(pTMapClient, pDb->iSnapshotId);
     pDb->pTmap = 0;
     pDb->iSnapshotId = 0;
@@ -5569,7 +5591,7 @@ int sqlite3HctDbStartRecovery(HctDatabase *pDb, int iStage){
 
 void sqlite3HctDbRecoverTid(HctDatabase *pDb, u64 iTid){
   pDb->iTid = iTid;
-  pDb->iLocalMinTid = iTid-1;
+  pDb->iLocalMinTid = iTid ? iTid-1 : 0;
 }
 
 int sqlite3HctDbFinishRecovery(HctDatabase *pDb, int iStage, int rc){
@@ -5976,9 +5998,7 @@ int sqlite3HctDbCsrNext(HctDbCsr *pCsr){
 int sqlite3HctDbCsrPrev(HctDbCsr *pCsr){
   int rc = SQLITE_OK;
 
-  /* Should not be called while committing, validating or doing rollback. */
-  assert( pCsr->pDb->iTid==0 && pCsr->pDb->eMode==HCT_MODE_NORMAL );
-
+  assert( pCsr->pDb->eMode==HCT_MODE_NORMAL );
   do {
     rc = hctDbCsrPrev(pCsr);
   }while( rc==SQLITE_OK && pCsr->iCell>=0 && hctDbCurrentIsVisible(pCsr)==0 );

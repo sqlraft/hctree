@@ -77,3 +77,5 @@ u64 sqlite3HctJournalSnapshot(HctJournal *pJrnl);
 void sqlite3HctJournalFixSchema(HctJournal *pJrnl, sqlite3*, void *pSchema);
 
 void sqlite3HctJournalSchemaVersion(HctJournal *pJrnl, u32 *pSchemaVersion);
+
+void sqlite3HctJrnlInvokeHook(HctJournal *pJrnl, sqlite3 *db);

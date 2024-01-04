@@ -455,6 +455,7 @@ static int hctRecoverOne(void *pCtx, const char *zFile){
   if( rc==SQLITE_OK && rdr.bEof==0 ){
 
     assert( rdr.iTid!=0 );
+    sqlite3HctDbRollbackMode(p->pHctDb, 2);
     sqlite3HctDbRecoverTid(p->pHctDb, rdr.iTid);
     for(/* no-op */; rdr.bEof==0; hctLogReaderNext(&rdr)){
       int op = 0;
@@ -491,12 +492,14 @@ static int hctRecoverOne(void *pCtx, const char *zFile){
     }
     hctRecoverCursorClose(p, &csr);
 
-    if( rc==SQLITE_OK && p->pHctJrnl ){
-      rc = sqlite3HctJrnlRollbackEntry(p->pHctJrnl, rdr.iTid);
-    }
     if( rc==SQLITE_OK ){
       rc = btreeFlushData(p, 0);
     }
+    sqlite3HctDbRollbackMode(p->pHctDb, 0);
+    if( rc==SQLITE_OK && p->pHctJrnl ){
+      rc = sqlite3HctJrnlRollbackEntry(p->pHctJrnl, rdr.iTid);
+    }
+    sqlite3HctDbRecoverTid(p->pHctDb, 0);
   }
 
   if( rc==SQLITE_OK ){
@@ -1129,8 +1132,6 @@ static int hctRecoverFreeList(HBtree *p){
   HctFile *pFile = sqlite3HctDbFile(p->pHctDb);
   int rc = SQLITE_OK;
 
-  /* Scan all the log file, assembling the list of physical pages that must
-  ** be preserved in the ctx.aPg[] array.  */
   memset(&ctx, 0, sizeof(ctx));
   ctx.p = p;
 
@@ -1143,9 +1144,12 @@ static int hctRecoverFreeList(HBtree *p){
     rc = sqlite3HctJrnlSavePhysical(p->db, p->pHctJrnl, hctSavePhysical, pCtx);
   }
 
+  /* Also scan any log files, adding the list of physical pages that must
+  ** be preserved to the ctx.aPg[] array.  */
   if( rc==SQLITE_OK ){
     sqlite3HctDbRollbackMode(p->pHctDb, 2);
     rc = sqlite3HctFileFindLogs(pFile, (void*)&ctx, hctScanOne);
+    sqlite3HctDbRollbackMode(p->pHctDb, 0);
   }
 
   /* Sort the list of physical page numbers accumulated above. */
@@ -1250,6 +1254,9 @@ int sqlite3HctBtreeSchemaLoaded(Btree *pBt){
     rc = hctDetectJournals(p);
     if( rc==SQLITE_OK ){
       rc = hctAttemptRecovery(p);
+    }
+    if( rc==SQLITE_OK ){
+      sqlite3HctDbEndRead(p->pHctDb);
     }
   }
   if( rc==SQLITE_OK && p->pHctJrnl ){
@@ -1592,6 +1599,7 @@ static int btreeFlushToDisk(HBtree *p){
     sqlite3HctDbTMapScan(p->pHctDb);
   }
 
+  sqlite3HctJrnlInvokeHook(p->pHctJrnl, p->db);
   return (rc==SQLITE_OK ? rcok : rc);
 }
 
