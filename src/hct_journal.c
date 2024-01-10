@@ -230,7 +230,7 @@ int sqlite3_hct_journal_init(sqlite3 *db){
         "PRAGMA writable_schema = 1;"
         HCT_JOURNAL_SCHEMA ";"
         HCT_BASELINE_SCHEMA ";"
-        "INSERT INTO sqlite_hct_baseline VALUES(0, 0, zeroblob(16));"
+        "INSERT INTO sqlite_hct_baseline VALUES(6, 0, zeroblob(16));"
         "PRAGMA writable_schema = 0;"
         ,0 ,0 ,0
     );
@@ -2307,6 +2307,12 @@ int sqlite3_hct_journal_write(
       switch( rdr.eType ){
         case HCT_TYPE_TABLE: {
           iRoot = hctFindRootByName(pSchema, rdr.zTab);
+          if( iRoot==0 ){
+            rc = sqlite3_exec(db, "SELECT * FROM sqlite_schema", 0, 0, 0);
+            if( rc==SQLITE_OK ){
+              iRoot = hctFindRootByName(pSchema, rdr.zTab);
+            }
+          }
           if( iRoot==0 ){
             rc = SQLITE_CORRUPT_BKPT;
           }
