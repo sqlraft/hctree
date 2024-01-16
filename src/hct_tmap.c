@@ -667,8 +667,8 @@ int sqlite3HctTMapRecoverySet(HctTMapClient *p, u64 iTid, u64 iCid){
     u64 iEof = p->pServer->pList->m.iFirstTid;
     u64 iLast = iEof + (HCT_TMAP_PAGESIZE*2);
     int nMap = 0;
-    if( iTid>(HCT_TMAP_PAGESIZE/2) ){
-      iFirst = iTid - (HCT_TMAP_PAGESIZE/2);
+    if( iTid>=HCT_TMAP_PAGESIZE ){
+      iFirst = 1 + ((iTid / HCT_TMAP_PAGESIZE) - 1) * HCT_TMAP_PAGESIZE;
     }
     nMap = ((iLast - iFirst) + HCT_TMAP_PAGESIZE-1) / HCT_TMAP_PAGESIZE;
     assert( nMap>0 );
@@ -701,7 +701,28 @@ int sqlite3HctTMapRecoverySet(HctTMapClient *p, u64 iTid, u64 iCid){
   p->iBuildMin = MIN(p->iBuildMin, iTid);
 
   while( rc==SQLITE_OK && pNew->m.iFirstTid>iTid ){
-    assert( 0 );
+    int ii;
+    HctTMapFull *pAlloc = 0;
+    int nMap = pNew->m.nMap + 1;
+
+    pAlloc = (HctTMapFull*)sqlite3HctMalloc(&rc,
+        sizeof(HctTMapFull) + nMap*sizeof(u64*)
+    );
+    pAlloc->nRef = 1;
+    pAlloc->m.nMap = nMap;
+    pAlloc->m.aaMap = (u64**)&pAlloc[1];
+    pAlloc->m.iFirstTid = pNew->m.iFirstTid - HCT_TMAP_PAGESIZE;
+    memcpy(&pAlloc->m.aaMap[1], pNew->m.aaMap, pNew->m.nMap*sizeof(u64*));
+    pAlloc->m.aaMap[0] = (u64*)sqlite3HctMalloc(&rc,
+        sizeof(u64) * HCT_TMAP_PAGESIZE
+    );
+    for(ii=0; ii<HCT_TMAP_PAGESIZE; ii++){
+      pNew->m.aaMap[0][ii] = ((u64)1 | HCT_TMAP_COMMITTED);
+    }
+
+    assert( pNew->nRef==1 );
+    sqlite3_free(pNew);
+    p->pBuild = pNew = pAlloc;
   }
 
   if( rc==SQLITE_OK ){
@@ -721,6 +742,12 @@ void sqlite3HctTMapRecoveryFinish(HctTMapClient *p, int rc){
       pNew->pNext = p->pServer->pList;
       p->pServer->pList = pNew;
       p->pServer->iMinMinTid = p->iBuildMin;
+      if( pNew->pNext ){
+        pNew->pNext->nRef--;
+        if( pNew->pNext->nRef==0 ){
+          hctTMapFreeMap(p->pServer, pNew->pNext);
+        }
+      }
     }else{
       int ii;
       for(ii=0; ii<pNew->m.nMap; ii++){

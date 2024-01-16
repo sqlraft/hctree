@@ -2242,15 +2242,17 @@ int sqlite3_hct_journal_write(
   Btree *pBt = db->aDb[0].pBt;
   Schema *pSchema = db->aDb[0].pSchema;
   u64 iRoot = 0;                          /* Root page of zTab */
+  HctJrnlServer *pServer = 0;
 
   HctDataReader rdr;              /* For iterating through pData/nData */
 
   rc = hctJrnlFind(db, &pJrnl);
   if( rc!=SQLITE_OK ) return rc;
   pJrnl->eInWrite = HCT_JOURNAL_INWRITE;
+  pServer = pJrnl->pServer;
 
   /* Check that the journal is in follower mode */
-  if( pJrnl->pServer->eMode!=SQLITE_HCT_JOURNAL_MODE_FOLLOWER ){
+  if( pServer->eMode!=SQLITE_HCT_JOURNAL_MODE_FOLLOWER ){
     hctJournalSetDbError(db, SQLITE_ERROR, "database is not in FOLLOWER mode");
     return SQLITE_ERROR;
   }
@@ -2327,7 +2329,9 @@ int sqlite3_hct_journal_write(
           if( iLastCid>iSnapshotId && iLastCid<iCid ){
             rc = SQLITE_BUSY;
             zErr = sqlite3_mprintf(
-                "change may not be applied yet (write/write conflict)"
+                "change may not be applied yet (write/write conflict"
+                " iSnapshot=%lld iLastCid=%lld iCid=%lld",
+                iSnapshotId, iLastCid, iCid
             );
           }else
           if( iLastCid<=iCid ){
@@ -2353,7 +2357,9 @@ int sqlite3_hct_journal_write(
             if( iLastCid>iSnapshotId && iLastCid<iCid ){
               rc = SQLITE_BUSY;
               zErr = sqlite3_mprintf(
-                  "change may not be applied yet (write/write conflict)"
+                  "change may not be applied yet (write/write conflict"
+                  " iSnapshot=%lld iLastCid=%lld iCid=%lld",
+                  iSnapshotId, iLastCid, iCid
               );
             }else
             if( iLastCid<=iCid ){
@@ -2425,8 +2431,8 @@ int sqlite3_hct_journal_write(
       rc = sqlite3_exec(db, "COMMIT", 0, 0, 0);
     }
     if( rc==SQLITE_OK ){
-      HctJrnlServer *pServer = pJrnl->pServer;
       i64 iVal = iValidCid ? iValidCid : iCid;
+      i64 *pPtr = &pServer->aCommit[iCid % pServer->nCommit];
 
       /* If this transaction updated the schema, update the Server.iSchemaCid
       ** field as well. This field is not used in FOLLOWER mode, but may be
@@ -2435,7 +2441,14 @@ int sqlite3_hct_journal_write(
         HctAtomicStore(&pServer->iSchemaCid, iCid);
       }
 
-      HctAtomicStore(&pServer->aCommit[iCid % pServer->nCommit], iVal);
+      assert( iVal>=iCid );
+      while( 1 ){
+        i64 iExist = *pPtr;
+        if( iExist>=iVal ) break;
+        if( HctCASBool(pPtr, iExist, iVal) ) break;
+      }
+      assert( *pPtr>=iVal );
+
       if( HctAtomicLoad(&pServer->iSnapshot)==0 ){
         (void)HctCASBool(&pServer->iSnapshot, (u64)0, (u64)iCid);
       }

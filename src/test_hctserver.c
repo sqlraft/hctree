@@ -106,6 +106,14 @@ const char *sqlite3ErrName(int);
 typedef struct TestServerJob TestServerJob;
 typedef struct TestServerMirror TestServerMirror;
 typedef struct TestServer TestServer;
+typedef struct TestBuffer TestBuffer;
+
+
+struct TestBuffer {
+  u8 *aBuf;
+  int nBuf;
+  int nAlloc;
+};
 
 struct TestServerMirror {
   TestServer *pServer;
@@ -180,30 +188,27 @@ static void putInt64(u8 *aBuf, i64 val){
   memcpy(aBuf, &val, 8);
 }
 
-static void sendInt32(int *pRc, int fd, int val){
-  if( *pRc==SQLITE_OK ){
-    u8 aBuf[4];
-    putInt32(aBuf, val);
-    if( send(fd, aBuf, sizeof(aBuf), 0)!=sizeof(aBuf) ){
+static void sendData(int *pRc, int fd, const u8 *aData, int nData){
+  int nTotal = 0;
+  while( *pRc==SQLITE_OK && nTotal<nData ){
+    ssize_t res = 0;
+    res = send(fd, &aData[nTotal], nData-nTotal, 0);
+    if( res<0 ){
       *pRc = SQLITE_IOERR;
+    }else{
+      nTotal += res;
     }
   }
+}
+static void sendInt32(int *pRc, int fd, int val){
+  u8 aBuf[4];
+  putInt32(aBuf, val);
+  sendData(pRc, fd, aBuf, sizeof(aBuf));
 }
 static void sendInt64(int *pRc, int fd, i64 val){
-  if( *pRc==SQLITE_OK ){
-    u8 aBuf[8];
-    putInt64(aBuf, val);
-    if( send(fd, aBuf, sizeof(aBuf), 0)!=sizeof(aBuf) ){
-      *pRc = SQLITE_IOERR;
-    }
-  }
-}
-static void sendData(int *pRc, int fd, const u8 *aData, int nData){
-  if( *pRc==SQLITE_OK ){
-    if( send(fd, aData, nData, 0)!=nData ){
-      *pRc = SQLITE_IOERR;
-    }
-  }
+  u8 aBuf[8];
+  putInt64(aBuf, val);
+  sendData(pRc, fd, aBuf, sizeof(aBuf));
 }
 
 
@@ -334,25 +339,6 @@ static i64 getInt64(const u8 *aBuf){
   return val;
 }
 
-static void recvInt32(int *pRc, int fd, int *piVal){
-  if( *pRc==TCL_OK ){
-    u8 aBuf[4] = {0, 0, 0, 0};
-    assert( sizeof(*piVal)==sizeof(aBuf) );
-    if( recv(fd, aBuf, sizeof(aBuf), 0)!=sizeof(aBuf) ){
-      *pRc = TCL_ERROR;
-    }
-    *piVal = getInt32(aBuf);
-  }
-}
-
-static int recvInt64(int fd, i64 *piVal){
-  u8 aBuf[8] = {0, 0, 0, 0, 0, 0, 0, 0};
-  assert( sizeof(*piVal)==sizeof(aBuf) );
-  if( recv(fd, aBuf, sizeof(aBuf), 0)!=sizeof(aBuf) ) return 1;
-  *piVal = getInt64(aBuf);
-  return 0;
-}
-
 static void recvData(int *pRc, int fd, u8 *aBuf, int nBuf){
   if( *pRc==TCL_OK ){
     int nRead = 0;
@@ -366,6 +352,31 @@ static void recvData(int *pRc, int fd, u8 *aBuf, int nBuf){
       }
     }
   }
+}
+
+static void recvInt32(int *pRc, int fd, int *piVal){
+  u8 aBuf[4] = {0, 0, 0, 0};
+  assert( sizeof(*piVal)==sizeof(aBuf) );
+  recvData(pRc, fd, aBuf, sizeof(aBuf));
+  *piVal = getInt32(aBuf);
+}
+
+static int recvInt64(int fd, i64 *piVal){
+  int rc = SQLITE_OK;
+  u8 aBuf[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+  assert( sizeof(*piVal)==sizeof(aBuf) );
+  recvData(&rc, fd, aBuf, sizeof(aBuf));
+  *piVal = getInt64(aBuf);
+  return rc;
+}
+
+static void recvDataBuf(int *pRc, int fd, int nData, TestBuffer *pBuf){
+  if( pBuf->nAlloc<nData ){
+    pBuf->aBuf = (u8*)ckrealloc(pBuf->aBuf, nData*2);
+    pBuf->nAlloc = nData*2;
+  }
+  recvData(pRc, fd, pBuf->aBuf, nData);
+  pBuf->nBuf = nData;
 }
 
 
@@ -681,9 +692,17 @@ static int hctWriteWithRetry(
   i64 iSchemaCid
 ){
   int rc = SQLITE_OK;
-  do {
+  int nBusy = 0;
+  while( 1 ){
     rc = sqlite3_hct_journal_write(db, iCid, zSchema, aData, nData, iSchemaCid);
-  }while( rc==SQLITE_BUSY );
+    if( rc!=SQLITE_BUSY ) break;
+    nBusy++;
+    if( (nBusy % 10000)==0 ){
+      printf("warning - CID %lld failed %d times (%s)\n", iCid, nBusy, sqlite3_errmsg(db));
+    }
+    usleep(1);
+  }
+  assert( rc==SQLITE_OK );
   return rc;
 }
 
@@ -723,7 +742,6 @@ static void *hctMirrorThread(void *pCtx){
 typedef struct SyncChunk SyncChunk;
 typedef struct TestFollower TestFollower;
 typedef struct TestFollowerThread TestFollowerThread;
-typedef struct TestBuffer TestBuffer;
 
 #define SYNC_BYTES_PER_CHUNK ((1<<20) - 64)
 
@@ -754,13 +772,7 @@ struct TestFollower {
   i64 iNext;
   i64 iEof;
   int nSyncDone;
-  TestFollowerThread aThread[TESTSERVER_MAX_FOLLOWER];
-};
-
-struct TestBuffer {
-  u8 *aBuf;
-  int nBuf;
-  int nAlloc;
+  TestFollowerThread aThread[TESTSERVER_MAX_JOB];
 };
 
 static void testBufferFree(TestBuffer *pBuf){
@@ -804,6 +816,12 @@ static int hctWriteSerialWithRetry(sqlite3 *db, const u8 *aChange, int nChange){
   return hctWriteWithRetry(db, iCid, zSchema, aData, nData, iSchemaCid);
 }
 
+static void hctFollowerSignal(TestFollower *pFollower){
+  pthread_mutex_lock(&pFollower->mutex);
+  pthread_cond_broadcast(&pFollower->cond);
+  pthread_mutex_unlock(&pFollower->mutex);
+}
+
 /*
 ** Called by a thread to help with applying journal entries received
 ** as part of a SYNCREPLY message.
@@ -832,10 +850,10 @@ static int hctFollowerHelpWithSync(
     pthread_mutex_lock(&pFollower->mutex);
     while( 1 ){
       iEof = pFollower->iEof;
-      pNext = (pChunk ? pChunk->pNext : pFollower->pFirst);
 
-      if( pNext || bReturn ) break;
       if( bReturn==0 && iEof>=0 && iOff>=pFollower->iEof ) break;
+      pNext = (pChunk ? pChunk->pNext : pFollower->pFirst);
+      if( pNext || bReturn ) break;
 
       /* Need to wait for the next chunk. Block on the condition variable. */
       pthread_cond_wait(&pFollower->cond, &pFollower->mutex);
@@ -844,6 +862,9 @@ static int hctFollowerHelpWithSync(
     if( pChunk ) pChunk->nRef--;
     pthread_mutex_unlock(&pFollower->mutex);
     pChunk = pNext;
+
+    assert( iOff>=iStart || (buf.nBuf==0 && pChunk==0) );
+    assert( rc==TCL_OK );
 
     if( buf.nBuf>0 ){
       int nCopy = MIN(pChunk->nChunk, iOff - iStart);
@@ -882,28 +903,47 @@ static int hctFollowerHelpWithSync(
 assert( rc==SQLITE_OK );
         }else{
           /* Case 2 - have to buffer the start of this one. */
+          int nHave = &pChunk->aChunk[pChunk->nChunk] - aChange;
           assert( buf.nBuf==0 );
-          testBufferAppend(&buf, aChange, pChunk->nChunk - (iOff - iStart + 4));
+          testBufferAppend(&buf, aChange, nHave);
         }
 
         /* If this change was the last before EOF, kick the condition variable
         ** to start any mirror threads that were not part of the sync */
         if( (iOff + 4 + nByte)==iEof ){
-          pthread_mutex_lock(&pFollower->mutex);
-          pthread_cond_broadcast(&pFollower->cond);
-          pthread_mutex_unlock(&pFollower->mutex);
+          hctFollowerSignal(pFollower);
         }
       }
 
+assert( nByte>0 && nByte<100000000 );
       iOff += (4 + nByte);
       if( bReturn==0 && iEof>=0 && iOff>=iEof ) break;
     }
 
     iStart += pChunk->nChunk;
+    assert( iOff>=iStart || (bReturn==0 && iEof>=0 && iOff>=iEof) );
   }
 
+  hctFollowerSignal(pFollower);
   testBufferFree(&buf);
   return rc;
+}
+
+static void hctFollowerCheck(TestFollower *p){
+  i64 iOff = 0;
+  i64 iStart = 0;
+  SyncChunk *pChunk = 0;
+
+  for(pChunk=p->pFirst; pChunk; pChunk=pChunk->pNext ){
+    while( iOff<(iStart+pChunk->nChunk) ){
+      int nByte = getInt32(&pChunk->aChunk[(iOff-iStart)]);
+      assert( nByte>0 );
+      iOff += (nByte+4);
+    }
+    iStart += pChunk->nChunk;
+  }
+
+  assert( iOff==iStart );
 }
 
 /*
@@ -935,7 +975,6 @@ static void hctFollowerSyncReply(
 
     if( nCarry>0 ){
       SyncChunk *pLast = pFollower->pLast;
-      printf("carry is %d\n", nCarry);
       assert( pLast );
       memcpy(pNew->aChunk, &pLast->aChunk[pLast->nChunk], nCarry);
       pNew->nChunk = nCarry;
@@ -969,7 +1008,7 @@ static void hctFollowerSyncReply(
           int nThis = getInt32(&pNew->aChunk[iOff]);
           i64 iCid = getInt64(&pNew->aChunk[iOff+4]);
           if( iCid!=iPrevCid+1 && iFirstNonContiguous<0 ){
-            iFirstNonContiguous = iOff;
+            iFirstNonContiguous = iOff + pFollower->nChunkTotal;
           }
           iOff += (4 + nThis);
           iPrevCid = iCid;
@@ -1016,8 +1055,11 @@ static void hctFollowerSyncReply(
   }
   pthread_mutex_unlock(&pFollower->mutex);
 
+  hctFollowerCheck(pFollower);
+
   if( rc==SQLITE_OK ){
   printf("iEof is at %lld\n", pFollower->iEof);
+    hctFollowerSignal(pFollower);
     rc = hctFollowerHelpWithSync(pFollower, p->db, 1);
   }
   printf("finished apply(SYNCREPLY) (%lld ms)\n", test_gettime() - tm);
@@ -1136,50 +1178,51 @@ static void *hctFollowerThread(void *pCtx){
   TestFollower *pFollower = pThread->pFollower;
   int iThread = pThread - pFollower->aThread;
 
-  /* Should this thread help with synchronization? */
+  /* If this thread should help with synchronization, invoke the
+  ** hctFollowerHelpWithSync() function now. It will not return until
+  ** it is time to start processing messages on the SUB sockets. */
   if( iThread<(pFollower->pServer->nSyncThread-1) ){
     int rc = hctFollowerHelpWithSync(pFollower, pThread->db, 0);
     assert( rc==SQLITE_OK );
   }
 
-printf("thread %d waiting to start...\n", iThread);
+  /* Wait until it is time to start processing messages on the SUB
+  ** sockets. Really, this is only required for threads that did not
+  ** participate in synchronization, but it doesn't hurt to check
+  ** for all threads.  */
   pthread_mutex_lock(&pFollower->mutex);
   while( pFollower->iEof<0 || pFollower->iNext<pFollower->iEof ){
     pthread_cond_wait(&pFollower->cond, &pFollower->mutex);
   }
   pthread_mutex_unlock(&pFollower->mutex);
-printf("thread %d starting!n", iThread);
 
+  /* If a SUB socket has been assigned to this thread, start reading
+  ** and applying changes from it now. Otherwise, the thread exits. */
   if( pThread->fd>=0 ){
     int rc = SQLITE_OK;
     int fd = pThread->fd;
     sqlite3 *db = pThread->db;
+    TestBuffer buf = {0, 0, 0};
 
-    u8 *aBuf = 0;
-    int nAlloc = 0;
-
-    printf("thread reading on fd=%d\n", fd);
     while( rc==SQLITE_OK ){
+
+      /* Read the next change from the socket. */
       int nThis = 0;
       recvInt32(&rc, fd, &nThis);
-      if( rc==SQLITE_OK && nThis>nAlloc ){
-        int nNew = (nAlloc + nThis)*2;
-        aBuf = (u8*)ckrealloc(aBuf, nNew);
-        nAlloc = nNew;
-      }
-      recvData(&rc, fd, aBuf, nThis);
+      recvDataBuf(&rc, fd, nThis, &buf);
 
+      /* Assuming no error occurred, write the change into the db. */
       if( rc==SQLITE_OK ){
-        i64 iCid = getInt64(&aBuf[0]);
-        i64 iSchemaCid = getInt64(&aBuf[8]);
-        const char *zSchema = (const char*)&aBuf[16];
+        i64 iCid = getInt64(&buf.aBuf[0]);
+        i64 iSchemaCid = getInt64(&buf.aBuf[8]);
+        const char *zSchema = (const char*)&buf.aBuf[16];
         const u8 *aData = (const u8*)&zSchema[strlen(zSchema)+1];
-        int nData = nThis - (aData - aBuf);
+        int nData = nThis - (aData - buf.aBuf);
         rc = hctWriteWithRetry(db, iCid, zSchema, aData, nData, iSchemaCid);
       }
     }
     printf("thread fd=%d finished, rc=%d\n", fd, rc);
-    ckfree(aBuf);
+    testBufferFree(&buf);
   }
 
   return 0;
@@ -1207,8 +1250,6 @@ static int hctFollowerThreadInit(TestFollower *p, int iThread){
   }
   return rc;
 }
-
-
 
 static int hctFollowerRun(TestServer *p){
   int rc = SQLITE_OK;
@@ -1280,6 +1321,15 @@ static int hctFollowerRun(TestServer *p){
     TestFollowerThread *pT = &fol.aThread[ii];
     pthread_join(pT->tid, &pDummy);
   }
+
+  /* Wait on local job threads. */
+#if 0
+  for(ii=0; p->nJob; ii++){
+    void *pVal = 0;
+    TestServerJob *pJob = &p->aJob[ii];
+    pthread_join(pJob->tid, &pVal);
+  }
+#endif
 
   return rc;
 }
