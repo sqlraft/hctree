@@ -1,5 +1,5 @@
-C Add\stestserver.md\sto\sdocument\stest_hctserver.c.
-D 2024-01-27T19:33:33.768
+C Documentation\simprovements.
+D 2024-01-27T21:15:21.524
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -49,7 +49,7 @@ F doc/hctree/replication.md 45c7df44a05c9843d70e4cf8bccf001548c1b7e13080491666fe
 F doc/hctree/slides.html 763e1e5b40201595f0924a589c8e6e9a7ca3ca593ed0045d372e66e12ece7aef
 F doc/hctree/slides.wiki 4151889c5485fecd8a71d5d0089645998a2db5ebc3360b570f763e59effed60c
 F doc/hctree/testing.wiki 398878d3636512df24cdd4650e87423163ecc9bc371d40e5876237a42f8b59e1
-F doc/hctree/testserver.md b8bb00565fae55bdd6c298bf5cfadd3fe9b5e9895afebe4a5863d87dffab7ea8
+F doc/hctree/testserver.md 1ad810082e6e5620bb5ff890b72b94086bd79dfbbf2c05d3762be6b4237c5154
 F doc/hctree/testserver_follower.tcl 9bb95df219fd50c8e3d2e44b30c57bb53c213aee6d8311ea7292d453bdd1cf33
 F doc/hctree/testserver_leader.tcl 5cdf83b88ecc64da60f1887244f1d050bef9c99a8a190733e34012fe2c5937af
 F doc/hctree/threadtest.data eb38fbd8a9742a2c6c0d3d7ec3b816476e546c909b5a40fce211e359cad175e7
@@ -2249,8 +2249,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P 5b90ea2271accb4bd555b17e8fd4635cabf3c41b552df094e5d13067d9a37fc5
-R 8e30a8c32d4ed372bc5652ac7d2a1be3
+P ee7e472554bc92aad78e40d0fd8fbb31af4aa5ccdae19613a8bc697891bd40b6
+R 89d3f6dbfee67757ec7531cddfd67163
 U dan
-Z 34f2606b7ff98b78e8dfd80da26a8aaa
+Z 06f0e49f5a7c9e88baf99225de341210
 # Remove this line to create a well-formed Fossil manifest.

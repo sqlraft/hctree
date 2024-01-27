@@ -25,6 +25,13 @@ Replication Test API
   }
 </style>
 
+<ol>
+  <li><a href=#overview>Overview</a>
+  <li><a href=#leader>Leader Scripts</a>
+  <li><a href=#follower>Follower Scripts</a>
+  <li><a href=#config>Configuration Options</a>
+</ol>
+
 There are currently no applications that use the hct <a href=replication.md>
 replication API</a>. However, this page describes a <a href=https://tcl.tk>
 Tcl</a> extension that may be used to experiment with its performance and
@@ -35,11 +42,14 @@ capabilities.
 ============
 
 The extension is built as part of the "testfixture" Tcl interpreter binary. To 
-build "testfixture", from the root directory of the source tree, run:
+build "testfixture", run the following from the root directory of the source
+tree:
 
 ```
     ./configure && make testfixture
 ```
+
+Extension code is available in the <a href=../../src/test_hctserver.c>src/test_hctserver.c</a> file in the main source tree.
 
 Using the extension to test the replication capabilities of hctree requires
 writing at least two scripts:
@@ -57,6 +67,18 @@ writing at least two scripts:
      the follower db up to date. The leader sends updates to all connected
      follower processes as transactions are committed by the configured
      Tcl jobs.
+
+There are example leader and follower scripts in the doc/hctree directory
+of the source tree. To run the test system, first build testfixture as
+described above. Then, still in the root directory of the source tree,
+run both of the following commands. The commands must be run concurrently, and
+the leader script must be started before the follower - so that the follower
+script can connect to the leader.
+
+```
+    ./testfixture ./doc/hctree/testfixture_leader.tcl
+    ./testfixture ./doc/hctree/testfixture_follower.tcl
+```
 
 When started, both leader and follower processes call 
 <a href=replication.md#rollback> sqlite3\_hct\_journal\_rollback</a> on
@@ -106,6 +128,7 @@ Node". It does not attempt to handle complicated scenarios like leader node
 failure or network partitioning. Nor does it attempt any kind of flow 
 control.
 
+<a name=leader></a>
 2.\ Leader Scripts
 ==================
 
@@ -182,6 +205,7 @@ A leader script generally does the following:
     T run
 ```
 
+<a name=follower></a>
 3.\ Follower Scripts
 ====================
 
@@ -208,7 +232,7 @@ A follower script is simpler than a leader script. It
     T run
 ```
  
-<a name=overview></a>
+<a name=config></a>
 4.\ Configuration Options
 =========================
 
