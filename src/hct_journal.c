@@ -38,7 +38,7 @@
 ** for the transaction with CID (N + HCT_MAX_LEADING_WRITE) until all 
 ** transactions with CID values of N or less have been committed.
 */
-#define HCT_MAX_LEADING_WRITE 1024
+#define HCT_MAX_LEADING_WRITE (8*1024)
 
 typedef struct HctJrnlServer HctJrnlServer;
 typedef struct HctJrnlPendingHook HctJrnlPendingHook;

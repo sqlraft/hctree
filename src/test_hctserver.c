@@ -34,13 +34,20 @@
 typedef sqlite3_int64 i64;
 typedef unsigned char u8;
 
+/*
+** Default port for leader to listen for connections on. This can be
+** overidden with -port.
+*/
 #define TESTSERVER_DEFAULT_PORT 21212
 
+/*
+** Maximum jobs and followers for a single leader process.
+*/
 #define TESTSERVER_MAX_JOB 64          /* Max number of jobs per process */
 #define TESTSERVER_MAX_FOLLOWER 16     /* Max number of follower nodes */
 
 /*
-** Message types 
+** Message Formats
 **
 **  Each message begins with a 32-bit message type - one
 **  of the TESTSERVER_MESSAGE_* values defined below. The remainder of
@@ -97,41 +104,59 @@ typedef unsigned char u8;
 #define TESTSERVER_MESSAGE_SYNCREPLY   4
 #define TESTSERVER_MESSAGE_SUBREPLY    5
 
+/*
+** Atomic read/write operators for the various integer types.
+*/
 #define TestAtomicStore(PTR,VAL) __atomic_store_n((PTR),(VAL), __ATOMIC_SEQ_CST)
 #define TestAtomicLoad(PTR)      __atomic_load_n((PTR), __ATOMIC_SEQ_CST)
 
+/* Implementation in test1.c */
 int getDbPointer(Tcl_Interp *interp, const char *zA, sqlite3 **ppDb);
-const char *sqlite3ErrName(int);
+
+/*
+** From tclsqlite.c and test_hct.c - these add the SQLite + hctree interfaces 
+** to the Tcl interpreter passed as the only argument.
+*/
+int Sqlite3_Init(Tcl_Interp *);
+int SqliteHctTest_Init(Tcl_Interp *);
 
 typedef struct TestServerJob TestServerJob;
-typedef struct TestServerMirror TestServerMirror;
 typedef struct TestServer TestServer;
+
+/* 
+** General buffer type. Used by testBufferAppend() recvDataBuf() and others.
+*/
 typedef struct TestBuffer TestBuffer;
-
-
 struct TestBuffer {
   u8 *aBuf;
   int nBuf;
   int nAlloc;
 };
 
-struct TestServerMirror {
-  TestServer *pServer;
-  pthread_t tid;
-  sqlite3 *db;
+typedef struct TestSocket TestSocket;
+struct TestSocket {
   int fd;
+  int nBuf;
+  int nBufSize;
+  u8 *aBuf;
 };
+
+
+/*
+** Each Tcl job (configured with the [testserver job] method) is represented
+** by an instance of the following structure. Stored in the 
+** TestServerJob.aJob[] array.
+*/
 struct TestServerJob {
-  TestServer *pServer;
-  Tcl_Obj *pScript;
-  pthread_t tid;
-  pthread_mutex_t mutex;
-  int nFollower;
-  int aFollower[TESTSERVER_MAX_FOLLOWER];
+  TestServer *pServer;            /* Server object */
+  Tcl_Obj *pScript;               /* Tcl script to run */
+  pthread_t tid;                  /* Thread-id of job thread */
   int bDone;                      /* Set to true once job is finished */
   char *zErr;                     /* ckalloc()'d error message (if any) */
 
-  int bFirstLogged;
+  pthread_mutex_t mutex;
+  int nFollower;
+  TestSocket aFollower[TESTSERVER_MAX_FOLLOWER];
 };
 
 /*
@@ -147,36 +172,20 @@ struct TestServer {
   Tcl_Interp *interp;             /* If error, leave error message here */
   sqlite3 *db;
   char *zPath;                    /* Copy of DBFILE argument */
+  int fdListen;                   /* Listening socket */
+  i64 iTimeout;
+
+  int nJob;
+  TestServerJob aJob[TESTSERVER_MAX_JOB];
+
+  /* Fields set by the [configure] method */
   int iPort;                      /* Tcp port to listen for connections on */
   char *zHost;                    /* Tcp host to connect to */
   int nSyncThread;                /* Number of threads helping with sync */
-  int fdListen;                   /* Listening socket */
-  int nJob;
-  TestServerJob aJob[TESTSERVER_MAX_JOB];
+  int nSecond;                    /* Number of seconds to run for */
   int bFollower;                  /* True for follower, false for leader */
-  int nMirror;
-  TestServerMirror aMirror[TESTSERVER_MAX_JOB];
+  int nSyncBytes;                 /* Bytes of data to quit syncing on */
 };
-
-static i64 test_gettime(){
-  i64 ret = 0;
-  sqlite3_vfs *pVfs = sqlite3_vfs_find(0);
-  pVfs->xCurrentTimeInt64(pVfs, &ret);
-  return ret;
-}
-
-static char *test_strdup(const char *zIn){
-  char *zRet = 0;
-  if( zIn ){
-    int nByte = strlen(zIn) + 1;
-    zRet = (char*)ckalloc(nByte);
-    memcpy(zRet, zIn, nByte);
-  }
-  return zRet;
-}
-
-int Sqlite3_Init(Tcl_Interp *);
-int SqliteHctTest_Init(Tcl_Interp *);
 
 /*
 ** Write 32 and 64 bit integer values to the supplied buffer, respectively
@@ -200,6 +209,88 @@ static void sendData(int *pRc, int fd, const u8 *aData, int nData){
     }
   }
 }
+
+static void socketFlush(int *pRc, TestSocket *p){
+  if( *pRc==TCL_OK ){
+    sendData(pRc, p->fd, p->aBuf, p->nBuf);
+  }
+  p->nBuf = 0;
+}
+static void socketSendData(int *pRc, TestSocket *p, const u8 *aData, int nData){
+  if( (p->nBuf+nData)>p->nBufSize ){
+    if( p->nBuf ) socketFlush(pRc, p);
+    if( (p->nBuf+nData)>p->nBufSize ){
+      int nNew = MAX((1<<20), nData+4);
+      p->aBuf = (u8*)ckrealloc(p->aBuf, nNew);
+      p->nBufSize = nNew;
+    }
+  }
+  assert( (p->nBuf+nData)<=p->nBufSize );
+  memcpy(&p->aBuf[p->nBuf], aData, nData);
+  p->nBuf += nData;
+}
+static void socketSendInt32(int *pRc, TestSocket *p, int val){
+  u8 aBuf[4];
+  putInt32(aBuf, val);
+  socketSendData(pRc, p, aBuf, sizeof(aBuf));
+}
+static void socketSendInt64(int *pRc, TestSocket *p, i64 val){
+  u8 aBuf[8];
+  putInt64(aBuf, val);
+  socketSendData(pRc, p, aBuf, sizeof(aBuf));
+}
+static void socketFlushAndFree(int *pRc, TestSocket *p){
+  socketFlush(pRc, p);
+  ckfree(p->aBuf);
+  p->aBuf = 0;
+  p->nBufSize = 0;
+}
+
+
+/*
+** Return the current time in ms since julian day 0.0. 
+*/
+static i64 test_gettime(){
+  i64 ret = 0;
+  sqlite3_vfs *pVfs = sqlite3_vfs_find(0);
+  pVfs->xCurrentTimeInt64(pVfs, &ret);
+  return ret;
+}
+
+static i64 hct_test_time_zero = 0;
+static void hct_test_debug_start(){
+  hct_test_time_zero = test_gettime();
+}
+static void hct_test_debug(const char *zFmt, ...){
+  i64 tm = test_gettime() - hct_test_time_zero;
+  va_list ap;
+  char *z;
+
+  va_start(ap, zFmt);
+  z = sqlite3_vmprintf(zFmt, ap);
+  va_end(ap);
+
+  printf("hct_testserver: tm=%lldms %s\n", tm, z);
+  sqlite3_free(z);
+}
+
+
+/*
+** Like strdup(). Result must be freed by ckfree().
+*/
+static char *test_strdup(const char *zIn){
+  char *zRet = 0;
+  if( zIn ){
+    int nByte = strlen(zIn) + 1;
+    zRet = (char*)ckalloc(nByte);
+    memcpy(zRet, zIn, nByte);
+  }
+  return zRet;
+}
+
+/*
+**
+*/
 static void sendInt32(int *pRc, int fd, int val){
   u8 aBuf[4];
   putInt32(aBuf, val);
@@ -224,20 +315,38 @@ static int hctServerValidateHook(
   int ii;
   int nSchema = strlen(zSchema) + 1;
   for(ii=0; ii<pJob->nFollower; ii++){
-    int fd = pJob->aFollower[ii];
-    sendInt32(&rc, fd, sizeof(i64)*2 + nSchema + nData);
-    sendInt64(&rc, fd, iCid);
-    sendInt64(&rc, fd, iSchemaCid);
-    sendData(&rc, fd, (const u8*)zSchema, nSchema);
-    sendData(&rc, fd, (const u8*)pData, nData);
-    if( pJob->bFirstLogged==0){
-      printf("SUB: first cid = %lld (job=%d)\n", iCid,
-          (int)(pJob - pJob->pServer->aJob)
-      );
-      pJob->bFirstLogged = 1;
-    }
+    TestSocket *p = &pJob->aFollower[ii];
+    socketSendInt32(&rc, p, sizeof(i64)*2 + nSchema + nData);
+    socketSendInt64(&rc, p, iCid);
+    socketSendInt64(&rc, p, iSchemaCid);
+    socketSendData(&rc, p, (const u8*)zSchema, nSchema);
+    socketSendData(&rc, p, (const u8*)pData, nData);
+    socketFlush(&rc, p);
   }
   return rc;
+}
+
+/*
+** tclcmd: hct_testserver_timeout
+*/
+static int testTimeoutCmd(
+  ClientData clientData,          /* Unused */
+  Tcl_Interp *interp,             /* The TCL interpreter */
+  int objc,                       /* Number of arguments */
+  Tcl_Obj *CONST objv[]           /* Command arguments */
+){
+  TestServer *p = (TestServer*)clientData;
+  int bRet = 0;
+  i64 iTimeout = TestAtomicLoad(&p->iTimeout);
+
+  if( objc!=1 ){
+    Tcl_WrongNumArgs(interp, 1, objv, "");
+    return TCL_ERROR;
+  }
+
+  if( iTimeout>0 && test_gettime()>=iTimeout ) bRet = 1;
+  Tcl_SetObjResult(interp, Tcl_NewIntObj(bRet));
+  return TCL_OK;
 }
 
 static void *hctLeaderJobThread(void *pCtx){
@@ -252,6 +361,10 @@ static void *hctLeaderJobThread(void *pCtx){
   interp = Tcl_CreateInterp();
   Sqlite3_Init(interp);
   SqliteHctTest_Init(interp);
+
+  Tcl_CreateObjCommand(
+      interp, "hct_testserver_timeout", testTimeoutCmd, (void*)p, 0
+  );
 
   /* Open the database handle */
   pOpenDb = Tcl_NewObj();
@@ -431,6 +544,10 @@ static int hctServerDoSync(
   int rc = SQLITE_OK;
   u8 aHash[SQLITE_HCT_JOURNAL_HASHSIZE];
 
+  TestSocket sock;
+  memset(&sock, 0, sizeof(sock));
+  sock.fd = newfd;
+
   memset(aHash, 0, sizeof(aHash));
   pStmt = testServerPrepare(&rc, p, z1);
   if( rc==SQLITE_OK && sqlite3_step(pStmt)==SQLITE_ROW ){
@@ -449,16 +566,16 @@ static int hctServerDoSync(
   if( memcmp(aHash, aXor, SQLITE_HCT_JOURNAL_HASHSIZE) ){
     const char *zErr = "incompatible database version";
     int nErr = strlen(zErr);
-    sendInt32(&rc, newfd, TESTSERVER_MESSAGE_ERROR);
-    sendInt32(&rc, newfd, nErr+1);
-    sendData(&rc, newfd, (const u8*)zErr, nErr+1);
+    socketSendInt32(&rc, &sock, TESTSERVER_MESSAGE_ERROR);
+    socketSendInt32(&rc, &sock, nErr+1);
+    socketSendData(&rc, &sock, (const u8*)zErr, nErr+1);
   }else{
     i64 iThisCid = 0;
     int bLogged = 0;
     pStmt = testServerPrepare(&rc, p, z3);
     if( rc==SQLITE_OK ) sqlite3_bind_int64(pStmt, 1, iCid);
-    sendInt32(&rc, newfd, TESTSERVER_MESSAGE_SYNCREPLY);
-    sendInt32(&rc, newfd, p->nJob);
+    socketSendInt32(&rc, &sock, TESTSERVER_MESSAGE_SYNCREPLY);
+    socketSendInt32(&rc, &sock, p->nJob);
     while( rc==SQLITE_OK && sqlite3_step(pStmt)==SQLITE_ROW ){
       int nSchema = sqlite3_column_bytes(pStmt, 1);
       int nData = sqlite3_column_bytes(pStmt, 2);
@@ -466,20 +583,21 @@ static int hctServerDoSync(
 
       iThisCid = sqlite3_column_int64(pStmt, 0);
       if( bLogged==0 ){
-        printf("SYNC: first CID = %lld\n", iThisCid);
+        hct_test_debug("SYNC: first CID = %lld", iThisCid);
         bLogged = 1;
       }
-      sendInt32(&rc, newfd, nSz);
-      sendInt64(&rc, newfd, iThisCid);
-      sendInt64(&rc, newfd, sqlite3_column_int64(pStmt, 3));
-      sendData(&rc, newfd, sqlite3_column_text(pStmt, 1), nSchema+1);
-      sendData(&rc, newfd, sqlite3_column_blob(pStmt, 2), nData);
+      socketSendInt32(&rc, &sock, nSz);
+      socketSendInt64(&rc, &sock, iThisCid);
+      socketSendInt64(&rc, &sock, sqlite3_column_int64(pStmt, 3));
+      socketSendData(&rc, &sock, sqlite3_column_text(pStmt, 1), nSchema+1);
+      socketSendData(&rc, &sock, sqlite3_column_blob(pStmt, 2), nData);
     }
-printf("SYNC: last CID = %lld (rc=%d)\n", iThisCid, rc);
-    sendInt32(&rc, newfd, 0);
+    hct_test_debug("SYNC: last CID = %lld (rc=%d)", iThisCid, rc);
+    socketSendInt32(&rc, &sock, 0);
     testServerFinalize(&rc, pStmt);
   }
 
+  socketFlushAndFree(&rc, &sock);
   close(newfd);
   return rc;
 }
@@ -509,13 +627,12 @@ static int hctServerAccept(TestServer *p){
       /* SUB message */
       int iJob = 0;
       recvInt32(&rc, newfd, &iJob);
-printf("SUB to job %d\n", iJob);
       if( iJob<p->nJob ){
         TestServerJob *pJob = &p->aJob[iJob];
         pthread_mutex_lock(&pJob->mutex);
         if( pJob->nFollower<TESTSERVER_MAX_FOLLOWER ){
           sendInt32(&rc, newfd, TESTSERVER_MESSAGE_SUBREPLY);
-          pJob->aFollower[pJob->nFollower++] = newfd;
+          pJob->aFollower[pJob->nFollower++].fd = newfd;
           newfd = -1;
         }
         pthread_mutex_unlock(&pJob->mutex);
@@ -591,7 +708,7 @@ static int hctLeaderRun(TestServer *p){
     TestServerJob *pJob = &p->aJob[ii];
     pthread_join(pJob->tid, &pVal);
     if( pJob->zErr ){
-      printf("Error in job %d: %s\n", ii, pJob->zErr);
+      hct_test_debug("Error in job %d: %s\n", ii, pJob->zErr);
     }
   }
 
@@ -697,43 +814,18 @@ static int hctWriteWithRetry(
     rc = sqlite3_hct_journal_write(db, iCid, zSchema, aData, nData, iSchemaCid);
     if( rc!=SQLITE_BUSY ) break;
     nBusy++;
-    if( (nBusy % 10000)==0 ){
-      printf("warning - CID %lld failed %d times (%s)\n", iCid, nBusy, sqlite3_errmsg(db));
+    if( nBusy>=10 ){ 
+      int nDelay = (nBusy-9)*(nBusy-9)*39;
+      usleep( MIN(nDelay, 50000) );
     }
-    usleep(1);
+    if( (nBusy % 200)==0 ){
+      hct_test_debug("warning - CID %lld failed %d times (%s)\n", 
+          iCid, nBusy, sqlite3_errmsg(db)
+      );
+    }
   }
   assert( rc==SQLITE_OK );
   return rc;
-}
-
-static void *hctMirrorThread(void *pCtx){
-  TestServerMirror *p = (TestServerMirror*)pCtx;
-  u8 *aBuf = 0;
-  int nAlloc = 0;
-  int rc = 0;
-
-  while( rc==SQLITE_OK ){
-    int nThis = 0;
-    recvInt32(&rc, p->fd, &nThis);
-    if( rc==SQLITE_OK && nThis>nAlloc ){
-      int nNew = (nAlloc + nThis)*2;
-      aBuf = (u8*)ckrealloc(aBuf, nNew);
-      nAlloc = nNew;
-    }
-    recvData(&rc, p->fd, aBuf, nThis);
-
-    if( rc==SQLITE_OK ){
-      i64 iCid = getInt64(&aBuf[0]);
-      i64 iSchemaCid = getInt64(&aBuf[8]);
-      const char *zSchema = (const char*)&aBuf[16];
-      const u8 *aData = (const u8*)&zSchema[strlen(zSchema)+1];
-      int nData = nThis - (aData - aBuf);
-      rc = hctWriteWithRetry(p->db, iCid, zSchema, aData, nData, iSchemaCid);
-    }
-  }
-
-  ckfree(aBuf);
-  return 0;
 }
 
 /*
@@ -965,8 +1057,7 @@ static void hctFollowerSyncReply(
   i64 iFirstNonContiguous = -1;
   int nCarry = 0;
 
-  i64 tm = test_gettime();
-  printf("start recv(SYNCREPLY)\n");
+  hct_test_debug("syncreply %d start", bFinalSync);
 
   while( rc==TCL_OK && bRecvDone==0 ){
     /* Allocate a new SyncChunk link */
@@ -1047,7 +1138,11 @@ static void hctFollowerSyncReply(
       ckfree(pNew);
     }
   }
-  printf("finished recv(SYNCREPLY) (%lld ms)\n", test_gettime() - tm);
+
+  hct_test_debug(
+      "syncreply %d received (%lld bytes total, %lld processed)", 
+      bFinalSync, pFollower->nChunkTotal, TestAtomicLoad(&pFollower->iNext)
+  );
 
   pthread_mutex_lock(&pFollower->mutex);
   if( bFinalSync && pFollower->iEof<0 ){
@@ -1058,11 +1153,10 @@ static void hctFollowerSyncReply(
   hctFollowerCheck(pFollower);
 
   if( rc==SQLITE_OK ){
-  printf("iEof is at %lld\n", pFollower->iEof);
     hctFollowerSignal(pFollower);
     rc = hctFollowerHelpWithSync(pFollower, p->db, 1);
   }
-  printf("finished apply(SYNCREPLY) (%lld ms)\n", test_gettime() - tm);
+  hct_test_debug("syncreply %d applied", bFinalSync);
 
   *pRc = rc;
 }
@@ -1141,29 +1235,20 @@ static int hctFollowerDoSync(
 
   recvInt32(&rc, fd, &eReply);
   if( rc==TCL_OK ){
-    switch( eReply ){
-      case TESTSERVER_MESSAGE_SYNCREPLY: {
-        recvInt32(&rc, fd, &nJob);
-        hctFollowerSyncReply(&rc, pFollower, fd, bFinalSync, iCid);
-        break;
-      }
-
-      case TESTSERVER_MESSAGE_ERROR: {
-        char *zErr = recvErrorMsg(&rc, fd);
-        testServerResult(p, "error from leader: %s", zErr);
-        ckfree(zErr);
-        rc = TCL_ERROR;
-        break;
-      }
-
-      default: {
-        testServerResult(p, 
-            "unexpected reply type to SYNC - %d (expected %d or %d)",
-            eReply, TESTSERVER_MESSAGE_SYNCREPLY, TESTSERVER_MESSAGE_ERROR
-        );
-        rc = TCL_ERROR;
-        break;
-      }
+    if( eReply==TESTSERVER_MESSAGE_SYNCREPLY ){
+      recvInt32(&rc, fd, &nJob);
+      hctFollowerSyncReply(&rc, pFollower, fd, bFinalSync, iCid);
+    }else if( eReply==TESTSERVER_MESSAGE_ERROR ){
+      char *zErr = recvErrorMsg(&rc, fd);
+      testServerResult(p, "error from leader: %s", zErr);
+      ckfree(zErr);
+      rc = TCL_ERROR;
+    }else{
+      testServerResult(p, 
+          "unexpected reply type to SYNC - %d (expected %d or %d)",
+          eReply, TESTSERVER_MESSAGE_SYNCREPLY, TESTSERVER_MESSAGE_ERROR
+      );
+      rc = TCL_ERROR;
     }
   }
 
@@ -1221,7 +1306,7 @@ static void *hctFollowerThread(void *pCtx){
         rc = hctWriteWithRetry(db, iCid, zSchema, aData, nData, iSchemaCid);
       }
     }
-    printf("thread fd=%d finished, rc=%d\n", fd, rc);
+    hct_test_debug("thread fd=%d finished, rc=%d\n", fd, rc);
     testBufferFree(&buf);
   }
 
@@ -1257,18 +1342,30 @@ static int hctFollowerRun(TestServer *p){
   u8 aHash[SQLITE_HCT_JOURNAL_HASHSIZE];
   int nJob = 0;
   int ii;
+  i64 nPrevSyncData = ((i64)1 << 60);
 
   TestFollower fol;
   hctFollowerInit(&fol, p);
 
   /* If extra sync threads are configured, launch them now. They will wait
-  ** on condition variable "sd.cond" until there is data to process */
+  ** on condition variable "fol.cond" until there is data to process */
   for(ii=0; ii<(p->nSyncThread-1); ii++){
     hctFollowerThreadInit(&fol, ii);
   }
 
-  hctFollowerGetVersion(&rc, p, &iCid, aHash); 
-  nJob = hctFollowerDoSync(&rc, &fol, 0, iCid, aHash);
+  while( rc==TCL_OK ){
+    i64 nTotal = fol.nChunkTotal;
+    hct_test_debug("start GetVersion()");
+    hctFollowerGetVersion(&rc, p, &iCid, aHash); 
+    hct_test_debug("end GetVersion()");
+    nJob = hctFollowerDoSync(&rc, &fol, 0, iCid, aHash);
+    nTotal = fol.nChunkTotal - nTotal;
+    hct_test_debug("recv %lld bytes of SYNCREPLY data", nTotal);
+    if( nTotal>nPrevSyncData || nTotal<p->nSyncBytes || p->nSyncBytes==0 ){
+      break;
+    }
+    nPrevSyncData = nTotal;
+  }
 
   /* If there are more jobs on the leader than there are sync threads, 
   ** launch some more threads now. */
@@ -1315,34 +1412,119 @@ static int hctFollowerRun(TestServer *p){
   hctFollowerGetVersion(&rc, p, &iCid, aHash); 
   nJob = hctFollowerDoSync(&rc, &fol, 1, iCid, aHash);
 
-  /* Wait on the follower threads. */
+  /* Wait on the threads handling sockets linked to jobs on the leader. */
   for(ii=0; ii<MAX(p->nSyncThread-1, nJob); ii++){
     void *pDummy = 0;
     TestFollowerThread *pT = &fol.aThread[ii];
     pthread_join(pT->tid, &pDummy);
   }
 
+  if( p->iTimeout==0 ){
+    TestAtomicStore(&p->iTimeout, 1);
+  }
+
   /* Wait on local job threads. */
-#if 0
-  for(ii=0; p->nJob; ii++){
+  for(ii=0; ii<p->nJob; ii++){
     void *pVal = 0;
     TestServerJob *pJob = &p->aJob[ii];
     pthread_join(pJob->tid, &pVal);
   }
-#endif
 
   return rc;
 }
 
-static char *testServerStrdup(const char *zIn){
-  char *zRet = 0;
-  if( zIn ){
-    int nIn = strlen(zIn) + 1;
-    zRet = ckalloc(nIn);
-    memcpy(zRet, zIn, nIn);
+/*
+** Configure the TestServer object according to the objc arguments in
+** the objv[] array.
+*/
+static int testServerConfigure(
+  TestServer *p,                  /* Test-server object */
+  int objc,                       /* Number of arguments */
+  Tcl_Obj *CONST objv[]           /* Command arguments */
+){
+  struct CfgOpt {
+    const char *zName;
+    int iType;                    /* 0==text, 1==integer, 2==boolean */
+  } aCfg[] = {
+    { "-port",        1 },        /* 0 */
+    { "-host",        0 },        /* 1 */
+    { "-syncthreads", 1 },        /* 2 */
+    { "-seconds",     1 },        /* 3 */
+    { "-follower",    2 },        /* 4 */
+    { "-syncbytes",   1 },        /* 5 */
+    { 0, 0 }
+  };
+  int rc = TCL_OK;
+  int ii;
+
+  for(ii=0; ii<objc; ii+=2){
+    int iCfg = 0;
+    int d = 0;
+    rc = Tcl_GetIndexFromObjStruct(
+        p->interp, objv[ii], aCfg, sizeof(aCfg[0]), "OPTION", 0, &iCfg
+    );
+    if( rc!=TCL_OK ) return rc;
+    switch( aCfg[iCfg].iType ){
+      case 1:
+        if( Tcl_GetIntFromObj(p->interp, objv[ii+1], &d) ) return TCL_ERROR;
+        break;
+      case 2:
+        if( Tcl_GetBooleanFromObj(p->interp, objv[ii+1], &d) ) return TCL_ERROR;
+        break;
+      default:
+        assert( iCfg==0 );
+        break;
+    }
   }
-  return zRet;
+
+  if( (objc%2)!=0 ){
+    Tcl_AppendResult(p->interp, "option requires an argument: ", 
+        Tcl_GetString(objv[objc-1]), (char*)0
+    );
+    return TCL_ERROR;
+  }
+
+  for(ii=0; ii<objc; ii+=2){
+    int iCfg = 0;
+    rc = Tcl_GetIndexFromObjStruct(
+        p->interp, objv[ii], aCfg, sizeof(aCfg[0]), "OPTION", 0, &iCfg
+    );
+    switch( iCfg ){
+      case 0: assert( 0==strcmp(aCfg[iCfg].zName, "-port") ); {
+        Tcl_GetIntFromObj(p->interp, objv[ii+1], &p->iPort);
+        break;
+      }
+      case 1: assert( 0==strcmp(aCfg[iCfg].zName, "-host") ); {
+        ckfree(p->zHost);
+        p->zHost = test_strdup(Tcl_GetString(objv[ii]));
+        break;
+      }
+      case 2: assert( 0==strcmp(aCfg[iCfg].zName, "-syncthreads") ); {
+        int nThread = 0;
+        Tcl_GetIntFromObj(p->interp, objv[ii+1], &nThread);
+        nThread = MAX(nThread, 1);
+        nThread = MIN(nThread, TESTSERVER_MAX_FOLLOWER);
+        p->nSyncThread = nThread;
+        break;
+      }
+      case 3: assert( 0==strcmp(aCfg[iCfg].zName, "-seconds") ); {
+        Tcl_GetIntFromObj(p->interp, objv[ii+1], &p->nSecond);
+        break;
+      }
+      case 4: assert( 0==strcmp(aCfg[iCfg].zName, "-follower") ); {
+        Tcl_GetBooleanFromObj(p->interp, objv[ii+1], &p->bFollower);
+        break;
+      }
+      case 5: assert( 0==strcmp(aCfg[iCfg].zName, "-syncbytes") ); {
+        Tcl_GetIntFromObj(p->interp, objv[ii+1], &p->nSyncBytes);
+        break;
+      }
+    }
+  }
+
+  return TCL_OK;
 }
+
 
 /*
 ** tclcmd: CMD SUBCMD ...ARGS...
@@ -1357,16 +1539,7 @@ static int hctServerCmd(
     "configure",   /* 0 */
     "job",         /* 1 */
     "run",         /* 2 */
-    0,
-  };
-  const char *azCfg[] = {
-    "-port",            /* 0 */
-    "-host",            /* 1 */
-    "-syncthreads",     /* 2 */
-    0,
-  };
-  const char *azRun[] = {
-    "-follower",   /* 0 */
+    "delete",      /* 3 */
     0,
   };
 
@@ -1384,43 +1557,7 @@ static int hctServerCmd(
 
   switch( iSub ){
     case 0: assert( 0==strcmp(azSub[iSub], "configure") ); {
-      int ii;
-      for(ii=2; ii<objc; ii++){
-        int iCfg = -1;
-        rc = Tcl_GetIndexFromObj(interp, objv[ii], azCfg, "OPTION", 0, &iCfg);
-        if( rc!=TCL_OK ) return rc;
-        if( ii==objc-1 ){
-          Tcl_AppendResult(
-              interp, "option requires an argument:", 
-              Tcl_GetString(objv[ii]), (char*)0
-          );
-          return TCL_ERROR;
-        }
-        ii++;
-        switch( iCfg ){
-          case 0: assert( 0==strcmp(azCfg[iCfg], "-port") ); {
-            if( Tcl_GetIntFromObj(interp, objv[ii], &p->iPort) ){
-              return TCL_ERROR;
-            }
-            break;
-          }
-          case 1: assert( 0==strcmp(azCfg[iCfg], "-host") ); {
-            ckfree(p->zHost);
-            p->zHost = testServerStrdup(Tcl_GetString(objv[ii]));
-            break;
-          }
-          case 2: assert( 0==strcmp(azCfg[iCfg], "-syncthreads") ); {
-            int nThread = 0;
-            if( Tcl_GetIntFromObj(interp, objv[ii], &nThread) ){
-              return TCL_ERROR;
-            }
-            nThread = MAX(nThread, 1);
-            nThread = MIN(nThread, TESTSERVER_MAX_FOLLOWER);
-            p->nSyncThread = nThread;
-            break;
-          }
-        }
-      }
+      rc = testServerConfigure(p, objc-2, &objv[2]);
       break;
     };
     case 1: assert( 0==strcmp(azSub[iSub], "job") ); {
@@ -1435,18 +1572,19 @@ static int hctServerCmd(
       break;
     };
     case 2: assert( 0==strcmp(azSub[iSub], "run") ); {
-      int ii;
-      for(ii=2; ii<objc; ii++){
-        int iOpt = -1;
-        rc = Tcl_GetIndexFromObj(interp, objv[ii], azRun, "OPTION", 0, &iOpt);
-        if( rc!=TCL_OK ) return rc;
-        p->bFollower = 1;
+      hct_test_debug_start();
+      if( p->nSecond ){
+        TestAtomicStore(&p->iTimeout, test_gettime() + 1000*(p->nSecond));
       }
       if( p->bFollower ){
         rc = hctFollowerRun(p);
       }else{
         rc = hctLeaderRun(p);
       }
+      break;
+    };
+    case 3: assert( 0==strcmp(azSub[iSub], "delete") ); {
+      Tcl_DeleteCommand(interp, Tcl_GetStringFromObj(objv[0], 0));
       break;
     };
     default:
@@ -1457,6 +1595,9 @@ static int hctServerCmd(
   return rc;
 }
 
+/*
+** Destructor for an object created by [hct_testserver].
+*/
 static void hctServerDel(void *pCtx){
   TestServer *p = (TestServer*)pCtx;
   if( p->fdListen>=0 ) close(p->fdListen);
@@ -1478,17 +1619,17 @@ static int test_hct_testserver(
   TestServer *p = 0;
   int rc = TCL_OK;
 
-  if( objc!=3 ){
-    Tcl_WrongNumArgs(interp, 1, objv, "NAME DBFILE");
+  if( objc<3 ){
+    Tcl_WrongNumArgs(interp, 1, objv, "NAME DBFILE ?OPTIONS?");
     return TCL_ERROR;
   }
   zCmd = Tcl_GetString(objv[1]);
 
   p = (TestServer*)ckalloc(sizeof(TestServer));
   memset(p, 0, sizeof(TestServer));
-  p->zPath = testServerStrdup(Tcl_GetString(objv[2]));
+  p->zPath = test_strdup(Tcl_GetString(objv[2]));
   p->iPort = TESTSERVER_DEFAULT_PORT;
-  p->zHost = testServerStrdup("127.0.0.1");
+  p->zHost = test_strdup("127.0.0.1");
   p->interp = interp;
   p->fdListen = -1;
 
@@ -1499,12 +1640,16 @@ static int test_hct_testserver(
   if( rc==SQLITE_OK ){
     rc = sqlite3_hct_journal_rollback(p->db, SQLITE_HCT_ROLLBACK_MAXIMUM);
   }
+  if( rc==SQLITE_OK ){
+    rc = testServerConfigure(p, objc-3, &objv[3]);
+  }
   if( rc==TCL_OK ){
     Tcl_CreateObjCommand(interp, zCmd, hctServerCmd, (void*)p, hctServerDel);
     Tcl_SetObjResult(interp, objv[1]);
   }else{
     hctServerDel((void*)p);
   }
+
   return rc;
 }
 
