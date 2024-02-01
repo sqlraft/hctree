@@ -408,7 +408,7 @@ static int ttRunTest(TT_Test *p){
         );
         return TCL_ERROR;
       }
-      sqlite3_hct_journal_validation_hook(pThread->db,pThread,ttValidationHook);
+      sqlite3_hct_journal_hook(pThread->db, pThread, ttValidationHook);
     }
   }
 

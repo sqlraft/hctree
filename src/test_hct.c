@@ -103,9 +103,9 @@ static int testValidationHook(
 }
 
 /*
-** tclcmd: sqlite3_hct_journal_validation_hook DB SCRIPT
+** tclcmd: sqlite3_hct_journal_hook DB SCRIPT
 */
-static int test_hct_journal_validation_hook(
+static int test_hct_journal_hook(
   ClientData clientData,          /* Unused */
   Tcl_Interp *interp,             /* The TCL interpreter */
   int objc,                       /* Number of arguments */
@@ -128,7 +128,7 @@ static int test_hct_journal_validation_hook(
   pNew->pScript = Tcl_DuplicateObj(objv[2]);
   Tcl_IncrRefCount(pNew->pScript);
 
-  sqlite3_hct_journal_validation_hook(db, (void*)pNew, testValidationHook);
+  sqlite3_hct_journal_hook(db, (void*)pNew, testValidationHook);
   sqlite3_create_function_v2(
       db, "_hct_journal_hook_dummy", 0, SQLITE_UTF8, (void*)pNew,
       testJournalHookDummy, 0, 0, testValidationHookDestroy
@@ -333,7 +333,7 @@ int SqliteHctTest_Init(Tcl_Interp *interp){
     Tcl_ObjCmdProc *x;
   } aCmd[] = {
     { "sqlite3_hct_journal_init",            test_hct_journal_init },
-    { "sqlite3_hct_journal_validation_hook", test_hct_journal_validation_hook },
+    { "sqlite3_hct_journal_hook", test_hct_journal_hook },
     { "sqlite3_hct_journal_mode",            test_hct_journal_mode },
     { "sqlite3_hct_journal_setmode",         test_hct_journal_setmode },
     { "sqlite3_hct_journal_write",           test_hct_journal_write },

@@ -47,7 +47,14 @@ typedef unsigned char u8;
 #define TESTSERVER_MAX_FOLLOWER 16     /* Max number of follower nodes */
 
 /*
-** Message Formats
+** The protocol used to communicate between follower and leader nodes is
+** very simple. The follower connects to the leader and sends either a
+** SYNC or SUB message as described below. The leader replies with a 
+** SYNCREPLY, SUBREPLY or ERROR message, and then closes the socket 
+** connection.
+** 
+** Message Formats (follower to leader)
+** ------------------------------------
 **
 **  Each message begins with a 32-bit message type - one
 **  of the TESTSERVER_MESSAGE_* values defined below. The remainder of
@@ -59,6 +66,9 @@ typedef unsigned char u8;
 **
 **  TESTSERVER_MESSAGE_SUB:
 **   * A 32-bit job number (jobs are numbered from 0 to (nJob-1)).
+**
+** Message Formats (leader to follower)
+** ------------------------------------
 **
 **  TESTSERVER_MESSAGE_SYNCREPLY:
 **   * A 32-bit integer containing the number of jobs.
@@ -78,6 +88,7 @@ typedef unsigned char u8;
 **   * Error string (nSz bytes, including nul-term).
 **
 ** Protocol
+** --------
 **
 **  The leader node listens on a well-known tcp/ip port for connections.
 **  To connect a follower to a leader:
@@ -110,8 +121,14 @@ typedef unsigned char u8;
 #define TestAtomicStore(PTR,VAL) __atomic_store_n((PTR),(VAL), __ATOMIC_SEQ_CST)
 #define TestAtomicLoad(PTR)      __atomic_load_n((PTR), __ATOMIC_SEQ_CST)
 
-/* Implementation in test1.c */
-int getDbPointer(Tcl_Interp *interp, const char *zA, sqlite3 **ppDb);
+/* 
+** Parameter zCmd should be the name of a Tcl database handle command 
+** created by the [sqlite3] command. This function attempts to extract the 
+** database handle and return it via output variable (*ppDb). If succesful,
+** TCL_OK is returned. Otherwise, (*ppDb) is set to NULL, an error message
+** left in interp, and TCL_ERROR returned.
+*/
+int getDbPointer(Tcl_Interp *interp, const char *zCmd, sqlite3 **ppDb);
 
 /*
 ** From tclsqlite.c and test_hct.c - these add the SQLite + hctree interfaces 
@@ -124,7 +141,7 @@ typedef struct TestServerJob TestServerJob;
 typedef struct TestServer TestServer;
 
 /* 
-** General buffer type. Used by testBufferAppend() recvDataBuf() and others.
+** General buffer type. Used by testBufferAppend(), recvDataBuf() and others.
 */
 typedef struct TestBuffer TestBuffer;
 struct TestBuffer {
@@ -133,14 +150,14 @@ struct TestBuffer {
   int nAlloc;
 };
 
+/*
+** Wrapper around a socket fd that buffers writes.
+*/
 typedef struct TestSocket TestSocket;
 struct TestSocket {
   int fd;
-  int nBuf;
-  int nBufSize;
-  u8 *aBuf;
+  TestBuffer buf;
 };
-
 
 /*
 ** Each Tcl job (configured with the [testserver job] method) is represented
@@ -188,6 +205,19 @@ struct TestServer {
 };
 
 /*
+** Like strdup(). Result must be freed by ckfree().
+*/
+static char *test_strdup(const char *zIn){
+  char *zRet = 0;
+  if( zIn ){
+    int nByte = strlen(zIn) + 1;
+    zRet = (char*)ckalloc(nByte);
+    memcpy(zRet, zIn, nByte);
+  }
+  return zRet;
+}
+
+/*
 ** Write 32 and 64 bit integer values to the supplied buffer, respectively
 */
 static void putInt32(u8 *aBuf, int val){
@@ -197,37 +227,87 @@ static void putInt64(u8 *aBuf, i64 val){
   memcpy(aBuf, &val, 8);
 }
 
+/*
+** Read 32 and 64 bit integer values from the supplied buffer, respectively
+*/
+static int getInt32(u8 *aBuf){
+  int val;
+  memcpy(&val, aBuf, 4);
+  return val;
+}
+static i64 getInt64(const u8 *aBuf){
+  i64 val;
+  memcpy(&val, aBuf, 8);
+  return val;
+}
+
+/*
+** Free the allocation managed by buffer pBuf. The structure pointed to by
+** pBuf itself is not freed.
+*/
+static void testBufferFree(TestBuffer *pBuf){
+  ckfree(pBuf->aBuf);
+  memset(pBuf, 0, sizeof(TestBuffer));
+}
+
+/*
+** Append nData bytes of data from buffer aData[] to buffer pBuf.
+*/
+static void testBufferAppend(TestBuffer *pBuf, const u8 *aData, int nData){
+  if( (pBuf->nBuf+nData)>pBuf->nAlloc ){
+    int nNew = (pBuf->nBuf + nData) * 2;
+    pBuf->aBuf = (u8*)ckrealloc(pBuf->aBuf, nNew);
+    pBuf->nAlloc = nNew;
+  }
+
+  memcpy(&pBuf->aBuf[pBuf->nBuf], aData, nData);
+  pBuf->nBuf += nData;
+}
+
+/*
+** If (*pRc) is other than TCL_OK when this is called, it is a no-op. If
+** it is TCL_OK, then an attempt to send nData bytes of data from buffer
+** aData[] on socket file-descriptor fd. If an error occurs, (*pRc)
+** is set to TCL_ERROR before returning.
+*/
 static void sendData(int *pRc, int fd, const u8 *aData, int nData){
   int nTotal = 0;
-  while( *pRc==SQLITE_OK && nTotal<nData ){
+  while( *pRc==TCL_OK && nTotal<nData ){
     ssize_t res = 0;
     res = send(fd, &aData[nTotal], nData-nTotal, 0);
     if( res<0 ){
-      *pRc = SQLITE_IOERR;
+      *pRc = TCL_ERROR;
     }else{
       nTotal += res;
     }
   }
 }
 
+/*
+** TestSocket API:
+**
+**    socketSendData()
+**    socketSendInt32()
+**    socketSendInt64()
+**    socketFlush()
+**    socketFlushAndFree()
+*/
 static void socketFlush(int *pRc, TestSocket *p){
   if( *pRc==TCL_OK ){
-    sendData(pRc, p->fd, p->aBuf, p->nBuf);
+    sendData(pRc, p->fd, p->buf.aBuf, p->buf.nBuf);
   }
-  p->nBuf = 0;
+  p->buf.nBuf = 0;
 }
 static void socketSendData(int *pRc, TestSocket *p, const u8 *aData, int nData){
-  if( (p->nBuf+nData)>p->nBufSize ){
-    if( p->nBuf ) socketFlush(pRc, p);
-    if( (p->nBuf+nData)>p->nBufSize ){
-      int nNew = MAX((1<<20), nData+4);
-      p->aBuf = (u8*)ckrealloc(p->aBuf, nNew);
-      p->nBufSize = nNew;
+  if( p->buf.nBuf+nData>p->buf.nAlloc ){
+    if( p->buf.nBuf==0 ){
+      p->buf.nAlloc = 1<<20;
+      p->buf.aBuf = ckalloc(p->buf.nAlloc);
+    }else{
+      socketFlush(pRc, p);
     }
   }
-  assert( (p->nBuf+nData)<=p->nBufSize );
-  memcpy(&p->aBuf[p->nBuf], aData, nData);
-  p->nBuf += nData;
+  testBufferAppend(&p->buf, aData, nData);
 }
 static void socketSendInt32(int *pRc, TestSocket *p, int val){
   u8 aBuf[4];
@@ -241,11 +321,8 @@ static void socketSendInt64(int *pRc, TestSocket *p, i64 val){
 }
 static void socketFlushAndFree(int *pRc, TestSocket *p){
   socketFlush(pRc, p);
-  ckfree(p->aBuf);
-  p->aBuf = 0;
-  p->nBufSize = 0;
+  testBufferFree(&p->buf);
 }
-
 
 /*
 ** Return the current time in ms since julian day 0.0. 
@@ -257,6 +334,9 @@ static i64 test_gettime(){
   return ret;
 }
 
+/*
+** Debugging output functions.
+*/
 static i64 hct_test_time_zero = 0;
 static void hct_test_debug_start(){
   hct_test_time_zero = test_gettime();
@@ -275,22 +355,6 @@ static void hct_test_debug(const char *zFmt, ...){
 }
 
 
-/*
-** Like strdup(). Result must be freed by ckfree().
-*/
-static char *test_strdup(const char *zIn){
-  char *zRet = 0;
-  if( zIn ){
-    int nByte = strlen(zIn) + 1;
-    zRet = (char*)ckalloc(nByte);
-    memcpy(zRet, zIn, nByte);
-  }
-  return zRet;
-}
-
-/*
-**
-*/
 static void sendInt32(int *pRc, int fd, int val){
   u8 aBuf[4];
   putInt32(aBuf, val);
@@ -303,7 +367,11 @@ static void sendInt64(int *pRc, int fd, i64 val){
 }
 
 
-static int hctServerValidateHook(
+
+/*
+** sqlite3_hct_journal_hook() callback for connections used by job threads.
+*/
+static int hctServerJournalHook(
   void *pCtx,
   i64 iCid,
   const char *zSchema,
@@ -349,7 +417,11 @@ static int testTimeoutCmd(
   return TCL_OK;
 }
 
-static void *hctLeaderJobThread(void *pCtx){
+/*
+** The main() routine for a Tcl job thread. Within either a leader or 
+** follower node.
+*/
+static void *hctServerJobThread(void *pCtx){
   TestServerJob *pJob = (TestServerJob*)pCtx;
   TestServer *p = pJob->pServer;
   Tcl_Interp *interp = 0;
@@ -362,6 +434,8 @@ static void *hctLeaderJobThread(void *pCtx){
   Sqlite3_Init(interp);
   SqliteHctTest_Init(interp);
 
+  /* Add the [hct_testserver_timeout] command. Returns true after the timer
+  ** configured by the -seconds option expires.  */
   Tcl_CreateObjCommand(
       interp, "hct_testserver_timeout", testTimeoutCmd, (void*)p, 0
   );
@@ -375,11 +449,15 @@ static void *hctLeaderJobThread(void *pCtx){
   rc = Tcl_EvalObjEx(interp, pOpenDb, 0);
   Tcl_DecrRefCount(pOpenDb);
 
+  /* Register the journal hook with the database handle just created. Do
+  ** this for both leader and follower nodes, even though the callback will
+  ** never be invoked for the read-only connections used on follower nodes. */
   if( rc==TCL_OK ){
     getDbPointer(interp, "db", &db);
-    sqlite3_hct_journal_validation_hook(db, pCtx, hctServerValidateHook);
+    sqlite3_hct_journal_hook(db, pCtx, hctServerJournalHook);
   }
 
+  /* Evaluate the job script and delete the intepreter */
   if( rc==TCL_OK ){
     rc = Tcl_EvalObjEx(interp, pJob->pScript, 0);
   }
@@ -387,11 +465,18 @@ static void *hctLeaderJobThread(void *pCtx){
     pJob->zErr = test_strdup(Tcl_GetStringResult(interp));
   }
   Tcl_DeleteInterp(interp);
+
+  /* Set "job done" flag before returning. */
   TestAtomicStore(&pJob->bDone, 1);
-  
   return 0;
 }
 
+/*
+** Open a listening socket on port p->iPort, interface p->zHost. If 
+** successful, leave the file-descriptor in p->fdListen and return TCL_OK.
+** Otherwise, if an error occurs, leave an error message in p->interp
+** and return TCL_ERROR.
+*/
 static int hctServerListen(TestServer *p){
   int fd = -1;
   struct sockaddr_in addr;
@@ -410,7 +495,7 @@ static int hctServerListen(TestServer *p){
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
     addr.sin_port = htons((uint16_t)p->iPort);
-    addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+    addr.sin_addr.s_addr = inet_addr(p->zHost);
   }
 
   if( rc==TCL_OK && bind(fd, (struct sockaddr*)&addr, sizeof(addr))<0 ){
@@ -437,52 +522,54 @@ static int hctServerListen(TestServer *p){
   return rc;
 }
 
-
 /*
-** Write 32 and 64 bit integer values from the supplied buffer, respectively
+** This function is a no-op if (*pRc) is not TCL_OK when it is called.
+** Otherwise, an attempt is made to read nBuf bytes of data from 
+** socket file-descriptor fd into buffer aBuf. If an error occurs,
+** (*pRc) is set to TCL_ERROR before returning.
 */
-static int getInt32(u8 *aBuf){
-  int val;
-  memcpy(&val, aBuf, 4);
-  return val;
-}
-static i64 getInt64(const u8 *aBuf){
-  i64 val;
-  memcpy(&val, aBuf, 8);
-  return val;
-}
-
-static void recvData(int *pRc, int fd, u8 *aBuf, int nBuf){
+static int recvData(int *pRc, int fd, u8 *aBuf, int nBuf){
   if( *pRc==TCL_OK ){
     int nRead = 0;
     while( nRead<nBuf ){
       int n = recv(fd, &aBuf[nRead], nBuf-nRead, 0);
       if( n<=0 ){
         *pRc = TCL_ERROR;
-        break;
+        return (n==0);
       }else{
         nRead += n;
       }
     }
   }
+  return 0;
 }
 
-static void recvInt32(int *pRc, int fd, int *piVal){
+/*
+** These functions are no-ops if (*pRc) is not TCL_OK when it is called.
+** Otherwise, an attempt is made to read a 32 or 64-bit integer from socket
+** file-descriptor fd into output variable (*piVal). If an error occurs,
+** (*pRc) is set to TCL_ERROR before returning.
+*/
+static int recvInt32(int *pRc, int fd, int *piVal){
   u8 aBuf[4] = {0, 0, 0, 0};
   assert( sizeof(*piVal)==sizeof(aBuf) );
-  recvData(pRc, fd, aBuf, sizeof(aBuf));
+  if( recvData(pRc, fd, aBuf, sizeof(aBuf)) ) return 1;
   *piVal = getInt32(aBuf);
+  return 0;
 }
-
-static int recvInt64(int fd, i64 *piVal){
-  int rc = SQLITE_OK;
+static void recvInt64(int *pRc, int fd, i64 *piVal){
   u8 aBuf[8] = {0, 0, 0, 0, 0, 0, 0, 0};
   assert( sizeof(*piVal)==sizeof(aBuf) );
-  recvData(&rc, fd, aBuf, sizeof(aBuf));
+  recvData(pRc, fd, aBuf, sizeof(aBuf));
   *piVal = getInt64(aBuf);
-  return rc;
 }
 
+/*
+** This function is a no-op if (*pRc) is not TCL_OK when it is called.
+** Otherwise, an attempt is made to read nBuf bytes of data from 
+** socket file-descriptor fd into resizable buffer pBuf. If an error
+** occurs, (*pRc) is set to TCL_ERROR before returning.
+*/
 static void recvDataBuf(int *pRc, int fd, int nData, TestBuffer *pBuf){
   if( pBuf->nAlloc<nData ){
     pBuf->aBuf = (u8*)ckrealloc(pBuf->aBuf, nData*2);
@@ -493,23 +580,35 @@ static void recvDataBuf(int *pRc, int fd, int nData, TestBuffer *pBuf){
 }
 
 
+/*
+** Finalize the statement handle passed as the second argument. If (*pRc)
+** is set to SQLITE_OK, then set (*pRc) to the return value of
+** sqlite3_finalize() before returning.
+*/
 static void testServerFinalize(int *pRc, sqlite3_stmt *pStmt){
   int rc = sqlite3_finalize(pStmt);
   if( *pRc==SQLITE_OK ) *pRc = rc;
 }
 
+/*
+** This function is a no-op if (*pRc) is not set to TCL_OK when this function
+** is called. Assuming that it is, this function attempts to prepare SQL
+** statement zSql against database handle TestServer.db. If successful,
+** the statement handle is returned. Otherwise, (*pRc) is set to TCL_ERROR,
+** an error message left in TestServer.interp and NULL returned.
+*/
 static sqlite3_stmt *testServerPrepare(
   int *pRc, 
   TestServer *p, 
   const char *zSql
 ){
   sqlite3_stmt *pRet = 0;
-  int rc = *pRc;
-  if( rc==SQLITE_OK ){
-    rc = sqlite3_prepare_v2(p->db, zSql, -1, &pRet, 0);
+  if( *pRc==TCL_OK ){
+    int rc = sqlite3_prepare_v2(p->db, zSql, -1, &pRet, 0);
     if( rc!=SQLITE_OK ){
       const char *zErr = sqlite3_errmsg(p->db);
       Tcl_AppendResult(p->interp, "sqlite3_prepare_v2(): ", zErr, (char*)0);
+      *pRc = TCL_ERROR;
     }
   }
   return pRet;
@@ -602,6 +701,10 @@ static int hctServerDoSync(
   return rc;
 }
 
+/*
+** Accept a new connection on the listening socket TestServer.fdListen and
+** handle the message sent on it.
+*/
 static int hctServerAccept(TestServer *p){
   int rc = TCL_OK;
   struct sockaddr_in address;
@@ -619,8 +722,8 @@ static int hctServerAccept(TestServer *p){
       /* SYNC message. Read the CID and xor value. */
       i64 iCid = 0;
       u8 aXor[SQLITE_HCT_JOURNAL_HASHSIZE];
-      recvInt64(newfd, &iCid);
-      recv(newfd, aXor, sizeof(aXor), 0);
+      recvInt64(&rc, newfd, &iCid);
+      recvData(&rc, newfd, aXor, sizeof(aXor));
       hctServerDoSync(p, newfd, iCid, aXor);
     }
     else if( eType==TESTSERVER_MESSAGE_SUB ){
@@ -653,6 +756,9 @@ static int hctServerAccept(TestServer *p){
   return 0;
 }
 
+/*
+** Implementation of testserver method [run] for leader nodes.
+*/
 static int hctLeaderRun(TestServer *p){
   int ii;
   int rc = TCL_OK;
@@ -667,7 +773,7 @@ static int hctLeaderRun(TestServer *p){
     return TCL_ERROR;
   }
 
-  /* Listen on the proscribed socket */
+  /* Listen for connections on the configured host and port. */
   rc = hctServerListen(p);
   if( rc!=SQLITE_OK ) return rc;
   memset(fds, 0, sizeof(fds));
@@ -678,7 +784,7 @@ static int hctLeaderRun(TestServer *p){
   for(ii=0; ii<p->nJob; ii++){
     TestServerJob *pJob = &p->aJob[ii];
     pthread_mutex_init(&pJob->mutex, 0);
-    pthread_create(&pJob->tid, NULL, hctLeaderJobThread, (void*)pJob);
+    pthread_create(&pJob->tid, NULL, hctServerJobThread, (void*)pJob);
   }
 
   while( 1 ){
@@ -715,6 +821,13 @@ static int hctLeaderRun(TestServer *p){
   return TCL_OK;
 }
 
+/*
+** Argument zFmt is a printf() style formatting string. Process it along
+** with any trailing arguments and set the result of interpreter 
+** TestServer.interp to the results. e.g.
+**
+**     testServerResult(p, "error in function: %d", rc);
+*/
 static void testServerResult(TestServer *p, const char *zFmt, ...){
   va_list ap;
   char *z;
@@ -726,6 +839,17 @@ static void testServerResult(TestServer *p, const char *zFmt, ...){
   sqlite3_free(z);
 }
 
+/*
+** This function is called in follower nodes to establish a socket
+** connection to the leader node - port TestServer.iPort of host 
+** TestServer.zHost. 
+**
+** This function is a no-op if (*pRc) is other than TCL_OK when it is 
+** called. Otherwise, an attempt is made to establish the connection.
+** If successful, the file descriptor is returned. Otherwise, (*pRc)
+** is set to TCL_ERROR, and error message is left in TestServer.interp
+** and a negative value returned.
+*/
 static int testServerConnect(int *pRc, TestServer *p){
   int rc = *pRc;
   int fd = -1;
@@ -755,12 +879,21 @@ static int testServerConnect(int *pRc, TestServer *p){
 
     if( rc!=TCL_OK && fd>=0 ){
       close(fd);
+      fd = -1;
     }
   }
   *pRc = rc;
+  assert( rc!=TCL_OK || fd>=0 );
   return fd;
 }
 
+/*
+** Read the body of a TESTSERVER_MESSAGE_ERROR message from file-descriptor
+** fd. The body of such a message consists of:
+**
+**   * A 32-bit integer, N, and
+**   * N bytes of data containing a nul-terminated error message string.
+*/
 static char *recvErrorMsg(int *pRc, int fd){
   char *aRet = 0;
   int nByte = 0;
@@ -777,9 +910,10 @@ static char *recvErrorMsg(int *pRc, int fd){
 }
 
 /*
-** Open database connection TestServer.db. If successful, TCL_OK is returned.
-** Otherwise, TCL_ERROR is returned and an error message left in
-** TestServer.interp.
+** This function is a no-op if (*pRc) is not TCL_OK when it is called. If
+** it is, open a database connection to TestServer.zPath. If successful, 
+** return the new database handle. Otherwise, (*pRc) is set to TCL_ERROR,
+** an error message is left in TestServer.interp and NULL returned.
 */
 static sqlite3 *testServerOpenDb(int *pRc, TestServer *p){
   int rc = *pRc;
@@ -802,11 +936,11 @@ static sqlite3 *testServerOpenDb(int *pRc, TestServer *p){
 ** attempted _write() that fails with SQLITE_BUSY.
 */
 static int hctWriteWithRetry(
-  sqlite3 *db, 
-  i64 iCid, 
-  const char *zSchema, 
-  const u8 *aData, int nData, 
-  i64 iSchemaCid
+  sqlite3 *db,                    /* Database handle */
+  i64 iCid,                       /* CID of journal entry */
+  const char *zSchema,            /* Schema modifications */
+  const u8 *aData, int nData,     /* Data changes */
+  i64 iSchemaCid                  /* CID of required schema */
 ){
   int rc = SQLITE_OK;
   int nBusy = 0;
@@ -831,60 +965,75 @@ static int hctWriteWithRetry(
 /*
 ** The following data structures are used while syncing.
 */
-typedef struct SyncChunk SyncChunk;
+typedef struct TestFollowerChunk TestFollowerChunk;
 typedef struct TestFollower TestFollower;
 typedef struct TestFollowerThread TestFollowerThread;
 
 #define SYNC_BYTES_PER_CHUNK ((1<<20) - 64)
 
-struct SyncChunk {
-  SyncChunk *pNext;               /* Next chunk in SYNCREPLY message */
+/*
+** When a SYNCREPLY message is being received, the data is read into a
+** linked list of the following buffers.
+*/
+struct TestFollowerChunk {
+  TestFollowerChunk *pNext;       /* Next chunk in SYNCREPLY message */
   int nRef;                       /* Current number of users of this link */
   int nChunk;                     /* Valid size of aChunk[] in bytes */
   u8 aChunk[SYNC_BYTES_PER_CHUNK];/* Payload */
 };
 
+/*
+** Each follower thread - one that exists only to process the SUBREPLY
+** data of a single connection to the leader - is represented by an
+** instance of this structure.
+*/
 struct TestFollowerThread {
   TestFollower *pFollower;
-  pthread_t tid;
-  sqlite3 *db;
-  int fd;
+  pthread_t tid;                  /* Thread id of this thread */
+  sqlite3 *db;                    /* Database handle for journal_write() */
+  int fd;                         /* Socket connection to leader node */
 };
 
 /*
 ** Object allocated on the stack of the main follower thread.
+**
+** pFirst, pLast:
+**   Linked list of chunks of SYNCREPLY data. pFirst is the first (oldest),
+**   and pLast points to the last (newest). Protected by TestFollower.mutex.
+**
+** nChunkTotal:
+**   Total data stored on all chunks in pFirst/pLast linked list. In bytes.
+**
+**   This variable is only accessed by the main follower thread, so it
+**   is not protected by any mutex.
+**
+** iNext:
+**   Offset of the next serialized journal entry within the linked list
+**   of SYNCREPLY data that no thread has yet claimed to work on. The
+**   offset is a byte offset from the start of the data (i.e. offset 0
+**   is the first byte on chunk TestFollower.pFirst).
+**
+** iEof:
+**   This variable is set only when the last of the SYNCREPLY data for
+**   the last synchronization request has been added to the pFirst/pLast
+**   list. At that point it is set to the offset of the first non-contiguous
+**   entry in the received data (i.e. the entry following the first hole).
+**   All threads but the main follower thread (the same one that calls recv()
+**   to receive the data) stop working on the synchronization data once 
+**   this point is reached. Such threads either go on to handle SUBREPLY data
+**   on a socket of their own, or else exit altogether.
 */
 struct TestFollower {
-  TestServer *pServer;
+  TestServer *pServer;            /* Pointer back to testserver object */
   pthread_mutex_t mutex;
   pthread_cond_t cond;
-  SyncChunk *pFirst;
-  SyncChunk *pLast;
+  TestFollowerChunk *pFirst;
+  TestFollowerChunk *pLast;
   i64 nChunkTotal;
   i64 iNext;
   i64 iEof;
-  int nSyncDone;
   TestFollowerThread aThread[TESTSERVER_MAX_JOB];
 };
-
-static void testBufferFree(TestBuffer *pBuf){
-  ckfree(pBuf->aBuf);
-}
-
-static void testBufferAppend(TestBuffer *pBuf, const u8 *aData, int nData){
-  if( (pBuf->nBuf+nData)>pBuf->nAlloc ){
-    int nNew = (pBuf->nBuf + nData) * 2;
-    pBuf->aBuf = (u8*)ckrealloc(pBuf->aBuf, nNew);
-    pBuf->nAlloc = nNew;
-  }
-
-  memcpy(&pBuf->aBuf[pBuf->nBuf], aData, nData);
-  pBuf->nBuf += nData;
-}
-
-
-#define TestAtomicStore(PTR,VAL) __atomic_store_n((PTR),(VAL), __ATOMIC_SEQ_CST)
-#define TestAtomicLoad(PTR)      __atomic_load_n((PTR), __ATOMIC_SEQ_CST)
 
 /*
 ** Equivalent to an atomic version of:
@@ -899,6 +1048,19 @@ static int testBoolCAS64(i64 *pPtr, i64 iOld, i64 iNew){
   return (int)__sync_bool_compare_and_swap(pPtr, iOld, iNew);
 }
 
+/*
+** Buffer aChange[], size nChange bytes, contains a journal entry serialized
+** in the manner of a SYNCREPLY or SUBREPLY message. i.e.
+**
+**     * A 64-bit "cid" value,
+**     * A 64-bit "schemacid" value,
+**     * A nul-terminated utf-8 "schema" string,
+**     * A blob of "data" for the entry.
+**
+** This function decodes the journal entry and attempts to _write() it to
+** database handle db. SQLITE_OK is returned if successful or an SQLite
+** error code if not.
+*/
 static int hctWriteSerialWithRetry(sqlite3 *db, const u8 *aChange, int nChange){
   i64 iCid = getInt64(&aChange[0]);
   i64 iSchemaCid = getInt64(&aChange[8]);
@@ -908,6 +1070,9 @@ static int hctWriteSerialWithRetry(sqlite3 *db, const u8 *aChange, int nChange){
   return hctWriteWithRetry(db, iCid, zSchema, aData, nData, iSchemaCid);
 }
 
+/*
+** Signal the condition variable to wake up any sleeping follower threads.
+*/
 static void hctFollowerSignal(TestFollower *pFollower){
   pthread_mutex_lock(&pFollower->mutex);
   pthread_cond_broadcast(&pFollower->cond);
@@ -925,20 +1090,20 @@ static void hctFollowerSignal(TestFollower *pFollower){
 */
 static int hctFollowerHelpWithSync(
   TestFollower *pFollower,        /* Follower context */
-  sqlite3 *db,
+  sqlite3 *db,                    /* Db handle to apply changes to */
   int bReturn                     /* True to return (not block) when no data */
 ){
   int rc = TCL_OK;
   i64 iOff = 0;
   i64 iStart = 0;
-  SyncChunk *pChunk = 0;
+  TestFollowerChunk *pChunk = 0;
   TestBuffer buf = {0, 0, 0};
 
   while( rc==TCL_OK ){
-    SyncChunk *pNext = 0;
+    TestFollowerChunk *pNext = 0;
     i64 iEof = 0;
 
-    /* Grab the next SyncChunk to work on. */
+    /* Grab the next TestFollowerChunk to work on. */
     pthread_mutex_lock(&pFollower->mutex);
     while( 1 ){
       iEof = pFollower->iEof;
@@ -992,7 +1157,6 @@ static int hctFollowerHelpWithSync(
         if( (iOff+4+nByte)<=(iStart+pChunk->nChunk) ){
           /* Case 1 - entire change is right here. */
           rc = hctWriteSerialWithRetry(db, aChange, nByte);
-assert( rc==SQLITE_OK );
         }else{
           /* Case 2 - have to buffer the start of this one. */
           int nHave = &pChunk->aChunk[pChunk->nChunk] - aChange;
@@ -1007,7 +1171,6 @@ assert( rc==SQLITE_OK );
         }
       }
 
-assert( nByte>0 && nByte<100000000 );
       iOff += (4 + nByte);
       if( bReturn==0 && iEof>=0 && iOff>=iEof ) break;
     }
@@ -1019,23 +1182,6 @@ assert( nByte>0 && nByte<100000000 );
   hctFollowerSignal(pFollower);
   testBufferFree(&buf);
   return rc;
-}
-
-static void hctFollowerCheck(TestFollower *p){
-  i64 iOff = 0;
-  i64 iStart = 0;
-  SyncChunk *pChunk = 0;
-
-  for(pChunk=p->pFirst; pChunk; pChunk=pChunk->pNext ){
-    while( iOff<(iStart+pChunk->nChunk) ){
-      int nByte = getInt32(&pChunk->aChunk[(iOff-iStart)]);
-      assert( nByte>0 );
-      iOff += (nByte+4);
-    }
-    iStart += pChunk->nChunk;
-  }
-
-  assert( iOff==iStart );
 }
 
 /*
@@ -1060,12 +1206,12 @@ static void hctFollowerSyncReply(
   hct_test_debug("syncreply %d start", bFinalSync);
 
   while( rc==TCL_OK && bRecvDone==0 ){
-    /* Allocate a new SyncChunk link */
-    SyncChunk *pNew = (SyncChunk*)ckalloc(sizeof(SyncChunk));
-    memset(pNew, 0, sizeof(SyncChunk));
+    /* Allocate a new TestFollowerChunk link */
+    TestFollowerChunk *pNew = (TestFollowerChunk*)ckalloc(sizeof(*pNew));
+    memset(pNew, 0, sizeof(TestFollowerChunk));
 
     if( nCarry>0 ){
-      SyncChunk *pLast = pFollower->pLast;
+      TestFollowerChunk *pLast = pFollower->pLast;
       assert( pLast );
       memcpy(pNew->aChunk, &pLast->aChunk[pLast->nChunk], nCarry);
       pNew->nChunk = nCarry;
@@ -1149,8 +1295,6 @@ static void hctFollowerSyncReply(
     pFollower->iEof = iLocalOff;
   }
   pthread_mutex_unlock(&pFollower->mutex);
-
-  hctFollowerCheck(pFollower);
 
   if( rc==SQLITE_OK ){
     hctFollowerSignal(pFollower);
@@ -1291,9 +1435,13 @@ static void *hctFollowerThread(void *pCtx){
 
     while( rc==SQLITE_OK ){
 
-      /* Read the next change from the socket. */
+      /* Read the next change from the socket. If the socket is at EOF,
+      ** break out of the loop.  */
       int nThis = 0;
-      recvInt32(&rc, fd, &nThis);
+      if( recvInt32(&rc, fd, &nThis) ){
+        rc = SQLITE_OK;
+        break;
+      }
       recvDataBuf(&rc, fd, nThis, &buf);
 
       /* Assuming no error occurred, write the change into the db. */
@@ -1314,16 +1462,8 @@ static void *hctFollowerThread(void *pCtx){
 }
 
 /*
-** Initialize the contents of the TestFollower object.
+** Launch follower thread iThread. Threads are numbered starting from 0.
 */
-static void hctFollowerInit(TestFollower *pSync, TestServer *pServer){
-  memset(pSync, 0, sizeof(*pSync));
-  pthread_mutex_init(&pSync->mutex, 0);
-  pthread_cond_init(&pSync->cond, 0);
-  pSync->pServer = pServer;
-  pSync->iEof = -1;
-}
-
 static int hctFollowerThreadInit(TestFollower *p, int iThread){
   int rc = SQLITE_OK;
   TestFollowerThread *pT = &p->aThread[iThread];
@@ -1336,6 +1476,9 @@ static int hctFollowerThreadInit(TestFollower *p, int iThread){
   return rc;
 }
 
+/*
+** Implementation of [run] command for follower nodes.
+*/
 static int hctFollowerRun(TestServer *p){
   int rc = SQLITE_OK;
   i64 iCid = 0;
@@ -1346,6 +1489,11 @@ static int hctFollowerRun(TestServer *p){
 
   TestFollower fol;
   hctFollowerInit(&fol, p);
+  memset(&fol, 0, sizeof(fol));
+  pthread_mutex_init(&fol.mutex, 0);
+  pthread_cond_init(&fol.cond, 0);
+  fol.pServer = pServer;
+  fol.iEof = -1;
 
   /* If extra sync threads are configured, launch them now. They will wait
   ** on condition variable "fol.cond" until there is data to process */
@@ -1377,7 +1525,7 @@ static int hctFollowerRun(TestServer *p){
   for(ii=0; ii<p->nJob; ii++){
     TestServerJob *pJob = &p->aJob[ii];
     pthread_mutex_init(&pJob->mutex, 0);
-    pthread_create(&pJob->tid, NULL, hctLeaderJobThread, (void*)pJob);
+    pthread_create(&pJob->tid, NULL, hctServerJobThread, (void*)pJob);
   }
 
   /* For each TestFollowerThread that will handle mirroring a leader

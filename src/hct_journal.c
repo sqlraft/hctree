@@ -254,7 +254,7 @@ int sqlite3_hct_journal_init(sqlite3 *db){
 /*
 ** Register a custom validation callback with the database handle.
 */
-int sqlite3_hct_journal_validation_hook(
+int sqlite3_hct_journal_hook(
   sqlite3 *db,
   void *pArg,
   int(*xValidate)(
@@ -2432,7 +2432,7 @@ int sqlite3_hct_journal_write(
     }
     if( rc==SQLITE_OK ){
       i64 iVal = iValidCid ? iValidCid : iCid;
-      i64 *pPtr = &pServer->aCommit[iCid % pServer->nCommit];
+      i64 *pPtr = (i64*)&pServer->aCommit[iCid % pServer->nCommit];
 
       /* If this transaction updated the schema, update the Server.iSchemaCid
       ** field as well. This field is not used in FOLLOWER mode, but may be

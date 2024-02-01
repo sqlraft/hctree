@@ -84,7 +84,7 @@ int sqlite3_hct_journal_snapshot(sqlite3 *db, sqlite3_int64 *piCid);
 /*
 ** Register a custom validation callback with the database handle.
 */
-int sqlite3_hct_journal_validation_hook(
+int sqlite3_hct_journal_hook(
   sqlite3 *db,
   void *pArg,
   int(*xValidate)(

@@ -102,7 +102,7 @@ jobs to the follower when it first connects. After it has applied the journal
 entries, the follower node establishes one new connection to the leader node
 for each job. On the leader, one new connection is assigned to each job
 thread. Thereafter, when the thread commits a transaction to the database, the
-registered <a href=#replication.md#hook>sqlite3\_hct\_journal\_hook()</a>
+registered <a href=replication.md#callback>sqlite3\_hct\_journal\_hook()</a>
 callback serializes and sends the new journal entry via its dedicated socket
 connection to each connected follower node. 
 
@@ -222,10 +222,11 @@ A follower script is simpler than a leader script. It
     sqlite3_hct_jounal_init dbhdl
     dbhdl close
 ```
-  2.  Create and configure a "testserver" object in follower mode.
+  2.  Create and configure a "testserver" object in follower mode. And to
+      use 8 threads to synchronize the database.
 ```
     hct_testserver T my_follower.db
-    T configure -follower 1
+    T configure -follower 1 -syncthreads 8
 ```
   3.  Run the server object.
 ```

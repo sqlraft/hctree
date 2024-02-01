@@ -5,10 +5,11 @@ sqlite3_hct_journal_init dbhdl
 dbhdl close
 
 hct_testserver T my_follower.db
-T configure -follower 1
+T configure -follower 1 -syncthreads 8
 
 T job {
   while {1} {
+  break
     after 1000
     puts "available snapshot: [sqlite3_hct_journal_snapshot db]"
   }
