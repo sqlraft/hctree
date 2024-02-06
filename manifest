@@ -1,5 +1,5 @@
-C Updates\sto\stestserver.md.
-D 2024-02-01T21:09:07.194
+C Minor\sfixes\sto\stest_hctserver.c.
+D 2024-02-06T16:17:15.707
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -804,7 +804,7 @@ F src/test_devsym.c 649434ed34d0b03fbd5a6b42df80f0f9a7e53f94dd1710aad5dd8831e91c
 F src/test_fs.c 56cc17e4fdc57efa61695026e2ba96e910b17060d7ee01d775ec048791522e2f
 F src/test_func.c 24df3a346c012b1fc9e1001d346db6054deb426db0a7437e92490630e71c9b0a
 F src/test_hct.c 62703e0ad72a0ba77b117fd8416cc6d8190d43c4a37f83675c5666a94f3f50f7
-F src/test_hctserver.c 132cc1fc1ec92798346f24d2f40466b15addf08cfcbb584d2cf972970c1a0642
+F src/test_hctserver.c a751f21a9c2c3dee0ee609de51d3daed8544780ec72dd20f6866d3669f986602
 F src/test_hexio.c 9478e56a0f08e07841a014a93b20e4ba2709ab56d039d1ca8020e26846aa19bd
 F src/test_init.c f2cc4774b7c9140f76e45ecbb2ae219f68e3acbbe248c0179db666a70eae9f08
 F src/test_intarray.c 26ffba666beb658d73cd925d9b4fb56913a3ca9aaeac122b3691436abb192b92
@@ -2249,8 +2249,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P 305a38a8e345937482f37a3b0a28f293bebdb0d21c0848e097632032136c3670
-R abc13e7a6c579cba0e7a9e0e17297720
+P c45e84697f604e6992ca056cb2e915fbce9a2674c2337d0ae94b35310afda2f0
+R bab920bc9bafd1885dc7ff0294494427
 U dan
-Z 56bccaae0c2a90f12a7686df7dc83473
+Z 5963b3a6ece2199f50c0f13c69baf7a2
 # Remove this line to create a well-formed Fossil manifest.

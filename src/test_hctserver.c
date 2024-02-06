@@ -1305,11 +1305,18 @@ static void hctFollowerSyncReply(
   *pRc = rc;
 }
 
+/*
+** This function is used in follower nodes to determine the current state
+** of the database. Specifically, to discover:
+**
+**   *  The last CID before the first hole in the journal, and
+**   *  The xor/hash value corresponding to that CID.
+*/
 static void hctFollowerGetVersion(
-  int *pRc, 
-  TestServer *p, 
-  i64 *piCid, 
-  u8 *aHash
+  int *pRc,                       /* IN/OUT: Error code */
+  TestServer *p,                  /* Follower testserver object */
+  i64 *piCid,                     /* OUT: Last contiguous CID value */
+  u8 *aHash                       /* OUT: Xor/hash value for (*piCid) */
 ){
   const char *z1 = "SELECT cid, hash FROM sqlite_hct_baseline";
   const char *z2 = "SELECT cid, hash FROM sqlite_hct_journal ORDER BY cid ASC";
@@ -1357,7 +1364,17 @@ static void hctFollowerGetVersion(
 
 /*
 ** Sync with the leader node. Return the number of jobs running on the 
-** leader.
+** leader. Specifically, this function:
+**
+**   1) Establishes a socket connection to the leader.
+**   2) Sends a SYNC message, specifying the values iCid and aHash.
+**   3) Processes the SYNCREPLY message. Waiting follower threads are
+**      signaled to help with this.
+**   4) Closes the socket and returns.
+**    
+** This function is a no-op if (*pRc) is other than TCL_OK when it is 
+** called. Or, if an error occurs within this function, an error message is 
+** left in pFollower->interp and (*pRc) set to TCL_ERROR.
 */
 static int hctFollowerDoSync(
   int *pRc, 
@@ -1402,6 +1419,15 @@ static int hctFollowerDoSync(
 }
 
 
+/*
+** This is the main() routine for follower threads. A follower thread
+** may do two things:
+**
+**  1) help with synchronization until the last contiguous journal entry
+**     received from the leader has been applied, then
+**  2) process entries that are part of a SUBREPLY received from a job 
+**     thread on a dedicated socket connection. 
+*/
 static void *hctFollowerThread(void *pCtx){
   TestFollowerThread *pThread = (TestFollowerThread*)pCtx;
   TestFollower *pFollower = pThread->pFollower;
@@ -1583,7 +1609,9 @@ static int hctFollowerRun(TestServer *p){
 
 /*
 ** Configure the TestServer object according to the objc arguments in
-** the objv[] array.
+** the objv[] array. The array may be extracted from the arguments passed
+** to either the testserver [configure] method, or from a [hct_testserver]
+** constructor.
 */
 static int testServerConfigure(
   TestServer *p,                  /* Test-server object */
@@ -1675,7 +1703,9 @@ static int testServerConfigure(
 
 
 /*
-** tclcmd: CMD SUBCMD ...ARGS...
+** tclcmd: TESTSERVERCMD SUBCMD ...ARGS...
+**
+** The implementation of the commands returned by [hct_testserver].
 */
 static int hctServerCmd(
   ClientData clientData,          /* Unused */
@@ -1755,7 +1785,9 @@ static void hctServerDel(void *pCtx){
 }
 
 /*
-** tclcmd: hct_testserver NAME DBFILE
+** tclcmd: hct_testserver NAME DBFILE ?OPTIONS?
+**
+** Create a new testserver object.
 */
 static int test_hct_testserver(
   ClientData clientData,          /* Unused */
