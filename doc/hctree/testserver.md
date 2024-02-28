@@ -91,7 +91,7 @@ XOR of the hash of all journal entries in its database, along with the
 largest CID value that it has, to the leader. Call this a "synchronization
 request". Because sqlite3\_hct\_journal\_rollback() has been called to remove
 all holes from the journal, this is sufficient for the leader node to determine
-if the follower nodes database is compabitible with the leader node database.
+if the follower node's database is compabitible with the leader node database.
 If it is, then the leader node replies with all journal entries that it has
 that the follower node does not. The follower node then uses multiple threads
 to apply the journal entries to its local database using 
@@ -103,8 +103,8 @@ entries, the follower node establishes one new connection to the leader node
 for each job. On the leader, one new connection is assigned to each job
 thread. Thereafter, when the thread commits a transaction to the database, the
 registered <a href=replication.md#callback>sqlite3\_hct\_journal\_hook()</a>
-callback serializes and sends the new journal entry via its dedicated socket
-connection to each connected follower node. 
+callback serializes and sends the new journal entry to each connected follower
+node via its dedicated socket connection.
 
 Meanwhile, on the follower node, a separate thread with its own database
 connection has been launched for each job on the leader. These threads
@@ -117,7 +117,7 @@ to changes from a job thread on the leader.
 At this point, there is a possibility that the follower will miss any 
 changes committed on the leader after its initial synchronization request
 is sent but before the subscriber connections are established. To ensure
-these are captured, nce the subscriber connections and threads have been 
+these are captured, once the subscriber connections and threads have been 
 established the follower node sends another synchronization request. As
 before, multiple threads are used to apply the received changes to the
 local follower database.
@@ -270,7 +270,7 @@ the following configuration options.
             leader replies with more data than it did to the previous
             synchronization request.
 
-<tr><td>-syncthreads&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<td> (default 1)
+<tr><td nowrap>-syncthreads&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<td> (default 1)
 <tr><td><td>The number of threads used to process the reply to synchronization
             requests. Must be greater than 0.
 </table>

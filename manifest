@@ -1,5 +1,5 @@
-C Minor\sfixes\sto\stest_hctserver.c.
-D 2024-02-06T16:17:15.707
+C Documentation\sfixes.
+D 2024-02-28T21:02:32.848
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -41,7 +41,7 @@ F doc/compile-for-windows.md 50b27d77be96195c66031a3181cb8684ed822327ea834e07f9c
 F doc/hctree/design.wiki 4199137de3d95d13cd7abf3c72b64f64ef433227651153e4ebd65c3517ac7fe6
 F doc/hctree/fileformat.wiki 75d2923c1ab4953cafc50a6829ea6e857334b76a64b4a910a17a04710b73cccd
 F doc/hctree/hctree_bedrock.md c4280b0fcf7aff496087633a160d821f1d71ef6bff30781286d26fd66af6d476
-F doc/hctree/index.html 46105aae0ab24595bd6f2ce9aeb9352d892d6c23d9fc8d9bcec9274e56564b9e
+F doc/hctree/index.html 63cdbc4f98d0247279cb5ff580e4939c1fae661be16f3fd7bd2e18d26a4e9bcd
 F doc/hctree/mkthreadtest.tcl 58b1c401b35dcabd978f5a9663376a5beee441bdd9d1e49536772dbd68086876
 F doc/hctree/pagetest.c 023b04fc4ceb8e6cffad66c2221472f68dc69a88282109c8235f57ebf945ad25
 F doc/hctree/perftest1.tcl f805fe08a9660c62145aa69b09cd1158243c52229cf300cde0df6df271ddfa1b
@@ -49,7 +49,7 @@ F doc/hctree/replication.md 45c7df44a05c9843d70e4cf8bccf001548c1b7e13080491666fe
 F doc/hctree/slides.html 763e1e5b40201595f0924a589c8e6e9a7ca3ca593ed0045d372e66e12ece7aef
 F doc/hctree/slides.wiki 4151889c5485fecd8a71d5d0089645998a2db5ebc3360b570f763e59effed60c
 F doc/hctree/testing.wiki 398878d3636512df24cdd4650e87423163ecc9bc371d40e5876237a42f8b59e1
-F doc/hctree/testserver.md 5ec28365b7436bb86a0da542d5189cf7bf789190a619e0be5e0790bf2bccac4d
+F doc/hctree/testserver.md 26c91ec18f9779256c6e8c80269a10dc2103c2c372a8a7367d02ce3164672c70
 F doc/hctree/testserver_follower.tcl 6759659f7919955fc8c7699fa3721139b94a454aa17b4522f4bb30cb37d0f2b6
 F doc/hctree/testserver_leader.tcl 5cdf83b88ecc64da60f1887244f1d050bef9c99a8a190733e34012fe2c5937af
 F doc/hctree/threadtest.data eb38fbd8a9742a2c6c0d3d7ec3b816476e546c909b5a40fce211e359cad175e7
@@ -2249,8 +2249,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P c45e84697f604e6992ca056cb2e915fbce9a2674c2337d0ae94b35310afda2f0
-R bab920bc9bafd1885dc7ff0294494427
+P 9873da9765a53cbb5f447199a3c16c1ebb8b8f259d784b8134a5cbf116f561dc
+R 7ee96b2f902e63ef066f44e49e4c2a6d
 U dan
-Z 5963b3a6ece2199f50c0f13c69baf7a2
+Z 15b29b29a45270f2030b5ab6791428f0
 # Remove this line to create a well-formed Fossil manifest.

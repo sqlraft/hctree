@@ -15,10 +15,11 @@
 
 <center>
   <b>Links:</b>
-    ...<a href=threadtest.wiki>Hctree Test Results</a>
-    ...<a href=design.wiki>Hctree Design Documentation</a>
-    ...<a href=fileformat.wiki>Hctree File Format</a>...
-    ...<a href=replication.md>Hctree Replication API Notes</a>...
+    ...<a href=threadtest.wiki>Test Results</a>
+    ...<a href=design.wiki>Design Documentation</a>
+    ...<a href=fileformat.wiki>File Format</a>...
+    ...<a href=replication.md>Replication API Notes</a>...
+    ...<a href=testserver.md>Replication Test Server</a>...
 </center>
 
 <h1> HC-tree </h1>
@@ -91,18 +92,17 @@ is incomplete. The current code has, at least, the following shortcomings:
   <li><p> All hctree databases currently use 32-bit page numbers (maximum
           database size of 16TiB with the default 4KiB byte page size).
 
-  <li><p> The database is always accessed using mmap(). It is not possible
-          to fallback to pread()/pwrite().
-
   <li><p> Transactions that do not fit entirely in main memory (e.g. large
           CREATE INDEX statements) are not handled efficiently.
 
-  <li><p> No support for replication is implemented. There are 
-          <a href=hctree_bedrock.md>extensive notes</a> regarding the kinds
-          of features that might be required to support high-concurrency
+  <li><p> Support for replication is now implemented. There is a 
+          <a href=replication.md>replication API</a> and a 
+          <a href=testserver.md>scriptable test application</a> for 
+          performance and other testing. The API is based on 
+          <a href=hctree_bedrock.md>an investigation</a> into the kinds of
+          features that might be required to support high-concurrency
           replication in the <a href=https://bedrockdb.com>bedrock database</a>
-          system though. And <a href=replication.md>notes on a proposed API</a>
-          here.
+          system.
 
   <li><p> The prototype library only works on POSIX, not win32, systems.
 
