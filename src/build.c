@@ -5157,8 +5157,7 @@ void sqlite3BeginTransaction(Parse *pParse, int type){
       sqlite3VdbeUsesBtree(v, i);
     }
   }
-  sqlite3VdbeAddOp0(v, OP_AutoCommit);
-  sqlite3VdbeChangeP5(v, type==TK_CONCURRENT);
+  sqlite3VdbeAddOp3(v, OP_AutoCommit, 0, 0, (type==TK_CONCURRENT));
 }
 
 /*

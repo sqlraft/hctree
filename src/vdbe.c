@@ -3927,27 +3927,30 @@ case OP_Savepoint: {
   break;
 }
 
-/* Opcode: AutoCommit P1 P2 * * P5
+/* Opcode: AutoCommit P1 P2 P3 * *
 **
 ** Set the database auto-commit flag to P1 (1 or 0). If P2 is true, roll
 ** back any currently active btree transactions. If there are any active
 ** VMs (apart from this one), then a ROLLBACK fails.  A COMMIT fails if
 ** there are active writing VMs or active VMs that use shared cache.
 **
-** Parameter P5 is true for a "BEGIN CONCURRENT", and false in all other
-** cases.
+** If P3 is non-zero, then this instruction is being executed as part of
+** a "BEGIN CONCURRENT" command.
 **
 ** This instruction causes the VM to halt.
 */
 case OP_AutoCommit: {
   int desiredAutoCommit;
   int iRollback;
+  int bConcurrent;
   int hrc;
 
   desiredAutoCommit = pOp->p1;
   iRollback = pOp->p2;
+  bConcurrent = pOp->p3;
   assert( desiredAutoCommit==1 || desiredAutoCommit==0 );
   assert( desiredAutoCommit==1 || iRollback==0 );
+  assert( desiredAutoCommit==0 || bConcurrent==0 );
   assert( db->nVdbeActive>0 );  /* At least this one VM is active */
   assert( p->bIsReader );
 
@@ -3968,7 +3971,7 @@ case OP_AutoCommit: {
       goto vdbe_return;
     }else{
       db->autoCommit = (u8)desiredAutoCommit;
-      db->bConcurrent = (u8)pOp->p5;
+      db->bConcurrent = bConcurrent;
     }
     hrc = sqlite3VdbeHalt(p);
     if( (hrc&0xFF)==SQLITE_BUSY ){
