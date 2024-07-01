@@ -160,6 +160,8 @@ struct WhereLoop {
   /**** whereLoopXfer() copies fields above ***********************/
 # define WHERE_LOOP_XFER_SZ offsetof(WhereLoop,nLSlot)
   u16 nLSlot;           /* Number of slots allocated for aLTerm[] */
+  LogEst rStarDelta;    /* Cost delta due to star-schema heuristic.  Not
+                        ** initialized unless pWInfo->nOutStarDelta>0 */
   WhereTerm **aLTerm;   /* WhereTerms used */
   WhereLoop *pNextLoop; /* Next WhereLoop object in the WhereClause */
   WhereTerm *aLTermSpace[3];  /* Initial aLTerm[] space */
@@ -482,6 +484,7 @@ struct WhereInfo {
   unsigned untestedTerms :1;   /* Not all WHERE terms resolved by outer loop */
   unsigned bOrderedInnerLoop:1;/* True if only the inner-most loop is ordered */
   unsigned sorted :1;          /* True if really sorted (not just grouped) */
+  LogEst nOutStarDelta;     /* Artifical nOut reduction for star-query */
   LogEst nRowOut;           /* Estimated number of output rows */
   int iTop;                 /* The very beginning of the WHERE loop */
   int iEndWhere;            /* End of the WHERE clause itself */
@@ -502,7 +505,7 @@ Bitmask sqlite3WhereGetMask(WhereMaskSet*,int);
 #ifdef WHERETRACE_ENABLED
 void sqlite3WhereClausePrint(WhereClause *pWC);
 void sqlite3WhereTermPrint(WhereTerm *pTerm, int iTerm);
-void sqlite3WhereLoopPrint(WhereLoop *p, WhereClause *pWC);
+void sqlite3WhereLoopPrint(const WhereLoop *p, const WhereClause *pWC);
 #endif
 WhereTerm *sqlite3WhereFindTerm(
   WhereClause *pWC,     /* The WHERE clause to be searched */

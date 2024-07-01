@@ -377,8 +377,12 @@ static int fts5InitVtab(
     assert( (rc==SQLITE_OK && *pzErr==0) || pConfig==0 );
   }
   if( rc==SQLITE_OK ){
+    pConfig->pzErrmsg = pzErr;
     pTab->p.pConfig = pConfig;
     pTab->pGlobal = pGlobal;
+    if( bCreate || sqlite3Fts5TokenizerPreload(&pConfig->t) ){
+      rc = sqlite3Fts5LoadTokenizer(pConfig);
+    }
   }
 
   /* Open the index sub-system */
@@ -400,11 +404,8 @@ static int fts5InitVtab(
 
   /* Load the initial configuration */
   if( rc==SQLITE_OK ){
-    assert( pConfig->pzErrmsg==0 );
-    pConfig->pzErrmsg = pzErr;
     rc = sqlite3Fts5IndexLoadConfig(pTab->p.pIndex);
     sqlite3Fts5IndexRollback(pTab->p.pIndex);
-    pConfig->pzErrmsg = 0;
   }
 
   if( rc==SQLITE_OK && pConfig->eContent==FTS5_CONTENT_NORMAL ){
@@ -414,6 +415,7 @@ static int fts5InitVtab(
     rc = sqlite3_vtab_config(db, SQLITE_VTAB_INNOCUOUS);
   }
 
+  if( pConfig ) pConfig->pzErrmsg = 0;
   if( rc!=SQLITE_OK ){
     fts5FreeVtab(pTab);
     pTab = 0;
@@ -481,10 +483,10 @@ static int fts5UsePatternMatch(
 ){
   assert( FTS5_PATTERN_GLOB==SQLITE_INDEX_CONSTRAINT_GLOB );
   assert( FTS5_PATTERN_LIKE==SQLITE_INDEX_CONSTRAINT_LIKE );
-  if( pConfig->ePattern==FTS5_PATTERN_GLOB && p->op==FTS5_PATTERN_GLOB ){
+  if( pConfig->t.ePattern==FTS5_PATTERN_GLOB && p->op==FTS5_PATTERN_GLOB ){
     return 1;
   }
-  if( pConfig->ePattern==FTS5_PATTERN_LIKE 
+  if( pConfig->t.ePattern==FTS5_PATTERN_LIKE 
    && (p->op==FTS5_PATTERN_LIKE || p->op==FTS5_PATTERN_GLOB)
   ){
     return 1;
@@ -531,10 +533,10 @@ static int fts5UsePatternMatch(
 ** This function ensures that there is at most one "r" or "=". And that if
 ** there exists an "=" then there is no "<" or ">".
 **
-** Costs are assigned as follows:
+** If an unusable MATCH operator is present in the WHERE clause, then
+** SQLITE_CONSTRAINT is returned.
 **
-**  a) If an unusable MATCH operator is present in the WHERE clause, the
-**     cost is unconditionally set to 1e50 (a really big number).
+** Costs are assigned as follows:
 **
 **  a) If a MATCH operator is present, the cost depends on the other
 **     constraints also present. As follows:
@@ -567,7 +569,7 @@ static int fts5BestIndexMethod(sqlite3_vtab *pVTab, sqlite3_index_info *pInfo){
   int bSeenEq = 0;
   int bSeenGt = 0;
   int bSeenLt = 0;
-  int bSeenMatch = 0;
+  int nSeenMatch = 0;
   int bSeenRank = 0;
 
 
@@ -598,18 +600,15 @@ static int fts5BestIndexMethod(sqlite3_vtab *pVTab, sqlite3_index_info *pInfo){
       /* A MATCH operator or equivalent */
       if( p->usable==0 || iCol<0 ){
         /* As there exists an unusable MATCH constraint this is an 
-        ** unusable plan. Set a prohibitively high cost. */
-        pInfo->estimatedCost = 1e50;
-        assert( iIdxStr < pInfo->nConstraint*6 + 1 );
-        idxStr[iIdxStr] = 0;
-        return SQLITE_OK;
+        ** unusable plan. Return SQLITE_CONSTRAINT. */
+        return SQLITE_CONSTRAINT;
       }else{
         if( iCol==nCol+1 ){
           if( bSeenRank ) continue;
           idxStr[iIdxStr++] = 'r';
           bSeenRank = 1;
         }else if( iCol>=0 ){
-          bSeenMatch = 1;
+          nSeenMatch++;
           idxStr[iIdxStr++] = 'M';
           sqlite3_snprintf(6, &idxStr[iIdxStr], "%d", iCol);
           idxStr += strlen(&idxStr[iIdxStr]);
@@ -626,6 +625,7 @@ static int fts5BestIndexMethod(sqlite3_vtab *pVTab, sqlite3_index_info *pInfo){
         idxStr += strlen(&idxStr[iIdxStr]);
         pInfo->aConstraintUsage[i].argvIndex = ++iCons;
         assert( idxStr[iIdxStr]=='\0' );
+        nSeenMatch++;
       }else if( bSeenEq==0 && p->op==SQLITE_INDEX_CONSTRAINT_EQ && iCol<0 ){
         idxStr[iIdxStr++] = '=';
         bSeenEq = 1;
@@ -662,7 +662,7 @@ static int fts5BestIndexMethod(sqlite3_vtab *pVTab, sqlite3_index_info *pInfo){
   */
   if( pInfo->nOrderBy==1 ){
     int iSort = pInfo->aOrderBy[0].iColumn;
-    if( iSort==(pConfig->nCol+1) && bSeenMatch ){
+    if( iSort==(pConfig->nCol+1) && nSeenMatch>0 ){
       idxFlags |= FTS5_BI_ORDER_RANK;
     }else if( iSort==-1 && (!pInfo->aOrderBy[0].desc || !pConfig->bTokendata) ){
       idxFlags |= FTS5_BI_ORDER_ROWID;
@@ -677,14 +677,17 @@ static int fts5BestIndexMethod(sqlite3_vtab *pVTab, sqlite3_index_info *pInfo){
 
   /* Calculate the estimated cost based on the flags set in idxFlags. */
   if( bSeenEq ){
-    pInfo->estimatedCost = bSeenMatch ? 100.0 : 10.0;
-    if( bSeenMatch==0 ) fts5SetUniqueFlag(pInfo);
+    pInfo->estimatedCost = nSeenMatch ? 1000.0 : 10.0;
+    if( nSeenMatch==0 ) fts5SetUniqueFlag(pInfo);
   }else if( bSeenLt && bSeenGt ){
-    pInfo->estimatedCost = bSeenMatch ? 500.0 : 250000.0;
+    pInfo->estimatedCost = nSeenMatch ? 5000.0 : 250000.0;
   }else if( bSeenLt || bSeenGt ){
-    pInfo->estimatedCost = bSeenMatch ? 750.0 : 750000.0;
+    pInfo->estimatedCost = nSeenMatch ? 7500.0 : 750000.0;
   }else{
-    pInfo->estimatedCost = bSeenMatch ? 1000.0 : 1000000.0;
+    pInfo->estimatedCost = nSeenMatch ? 10000.0 : 1000000.0;
+  }
+  for(i=1; i<nSeenMatch; i++){
+    pInfo->estimatedCost *= 0.4;
   }
 
   pInfo->idxNum = idxFlags;
@@ -960,6 +963,7 @@ static int fts5NextMethod(sqlite3_vtab_cursor *pCursor){
           }
         }else{
           rc = SQLITE_OK;
+          CsrFlagSet(pCsr, FTS5CSR_REQUIRE_DOCSIZE);
         }
         break;
       }
@@ -1433,9 +1437,13 @@ static i64 fts5CursorRowid(Fts5Cursor *pCsr){
   assert( pCsr->ePlan==FTS5_PLAN_MATCH 
        || pCsr->ePlan==FTS5_PLAN_SORTED_MATCH 
        || pCsr->ePlan==FTS5_PLAN_SOURCE 
+       || pCsr->ePlan==FTS5_PLAN_SCAN 
+       || pCsr->ePlan==FTS5_PLAN_ROWID 
   );
   if( pCsr->pSorter ){
     return pCsr->pSorter->iRowid;
+  }else if( pCsr->ePlan>=FTS5_PLAN_SCAN ){
+    return sqlite3_column_int64(pCsr->pStmt, 0);
   }else{
     return sqlite3Fts5ExprRowid(pCsr->pExpr);
   }
@@ -1452,20 +1460,10 @@ static int fts5RowidMethod(sqlite3_vtab_cursor *pCursor, sqlite_int64 *pRowid){
   int ePlan = pCsr->ePlan;
   
   assert( CsrFlagTest(pCsr, FTS5CSR_EOF)==0 );
-  switch( ePlan ){
-    case FTS5_PLAN_SPECIAL:
-      *pRowid = 0;
-      break;
-
-    case FTS5_PLAN_SOURCE:
-    case FTS5_PLAN_MATCH:
-    case FTS5_PLAN_SORTED_MATCH:
-      *pRowid = fts5CursorRowid(pCsr);
-      break;
-
-    default:
-      *pRowid = sqlite3_column_int64(pCsr->pStmt, 0);
-      break;
+  if( ePlan==FTS5_PLAN_SPECIAL ){
+    *pRowid = 0;
+  }else{
+    *pRowid = fts5CursorRowid(pCsr);
   }
 
   return SQLITE_OK;
@@ -1586,7 +1584,10 @@ static int fts5SpecialInsert(
   }else if( 0==sqlite3_stricmp("flush", zCmd) ){
     rc = sqlite3Fts5FlushToDisk(&pTab->p);
   }else{
-    rc = sqlite3Fts5IndexLoadConfig(pTab->p.pIndex);
+    rc = sqlite3Fts5FlushToDisk(&pTab->p);
+    if( rc==SQLITE_OK ){
+      rc = sqlite3Fts5IndexLoadConfig(pTab->p.pIndex);
+    }
     if( rc==SQLITE_OK ){
       rc = sqlite3Fts5ConfigSetValue(pTab->p.pConfig, zCmd, pVal, &bError);
     }
@@ -1697,6 +1698,7 @@ static int fts5UpdateMethod(
         rc = SQLITE_ERROR;
       }else{
         rc = fts5SpecialDelete(pTab, apVal);
+        bUpdateOrDelete = 1;
       }
     }else{
       rc = fts5SpecialInsert(pTab, z, apVal[2 + pConfig->nCol + 1]);
@@ -1911,7 +1913,10 @@ static int fts5ApiColumnText(
 ){
   int rc = SQLITE_OK;
   Fts5Cursor *pCsr = (Fts5Cursor*)pCtx;
-  if( fts5IsContentless((Fts5FullTable*)(pCsr->base.pVtab)) 
+  Fts5Table *pTab = (Fts5Table*)(pCsr->base.pVtab);
+  if( iCol<0 || iCol>=pTab->pConfig->nCol ){
+    rc = SQLITE_RANGE;
+  }else if( fts5IsContentless((Fts5FullTable*)(pCsr->base.pVtab)) 
    || pCsr->ePlan==FTS5_PLAN_SPECIAL 
   ){
     *pz = 0;
@@ -1936,8 +1941,9 @@ static int fts5CsrPoslist(
   int rc = SQLITE_OK;
   int bLive = (pCsr->pSorter==0);
 
-  if( CsrFlagTest(pCsr, FTS5CSR_REQUIRE_POSLIST) ){
-
+  if( iPhrase<0 || iPhrase>=sqlite3Fts5ExprPhraseCount(pCsr->pExpr) ){
+    rc = SQLITE_RANGE;
+  }else if( CsrFlagTest(pCsr, FTS5CSR_REQUIRE_POSLIST) ){
     if( pConfig->eDetail!=FTS5_DETAIL_FULL ){
       Fts5PoslistPopulator *aPopulator;
       int i;
@@ -1961,14 +1967,20 @@ static int fts5CsrPoslist(
     CsrFlagClear(pCsr, FTS5CSR_REQUIRE_POSLIST);
   }
 
-  if( pCsr->pSorter && pConfig->eDetail==FTS5_DETAIL_FULL ){
-    Fts5Sorter *pSorter = pCsr->pSorter;
-    int i1 = (iPhrase==0 ? 0 : pSorter->aIdx[iPhrase-1]);
-    *pn = pSorter->aIdx[iPhrase] - i1;
-    *pa = &pSorter->aPoslist[i1];
+  if( rc==SQLITE_OK ){
+    if( pCsr->pSorter && pConfig->eDetail==FTS5_DETAIL_FULL ){
+      Fts5Sorter *pSorter = pCsr->pSorter;
+      int i1 = (iPhrase==0 ? 0 : pSorter->aIdx[iPhrase-1]);
+      *pn = pSorter->aIdx[iPhrase] - i1;
+      *pa = &pSorter->aPoslist[i1];
+    }else{
+      *pn = sqlite3Fts5ExprPoslist(pCsr->pExpr, iPhrase, pa);
+    }
   }else{
-    *pn = sqlite3Fts5ExprPoslist(pCsr->pExpr, iPhrase, pa);
+    *pa = 0;
+    *pn = 0;
   }
+
 
   return rc;
 }
@@ -2721,8 +2733,8 @@ static int fts5RollbackToMethod(sqlite3_vtab *pVtab, int iSavepoint){
   int rc = SQLITE_OK;
   fts5CheckTransactionState(pTab, FTS5_ROLLBACKTO, iSavepoint);
   fts5TripCursors(pTab);
-  pTab->p.pConfig->pgsz = 0;
   if( (iSavepoint+1)<=pTab->iSavepoint ){
+    pTab->p.pConfig->pgsz = 0;
     rc = sqlite3Fts5StorageRollback(pTab->pStorage);
   }
   return rc;
@@ -2847,7 +2859,7 @@ static int fts5FindTokenizer(
   return rc;
 }
 
-int sqlite3Fts5GetTokenizer(
+int fts5GetTokenizer(
   Fts5Global *pGlobal, 
   const char **azArg,
   int nArg,
@@ -2861,28 +2873,41 @@ int sqlite3Fts5GetTokenizer(
   if( pMod==0 ){
     assert( nArg>0 );
     rc = SQLITE_ERROR;
-    *pzErr = sqlite3_mprintf("no such tokenizer: %s", azArg[0]);
+    if( pzErr ) *pzErr = sqlite3_mprintf("no such tokenizer: %s", azArg[0]);
   }else{
     rc = pMod->x.xCreate(
-        pMod->pUserData, (azArg?&azArg[1]:0), (nArg?nArg-1:0), &pConfig->pTok
+        pMod->pUserData, (azArg?&azArg[1]:0), (nArg?nArg-1:0), &pConfig->t.pTok
     );
-    pConfig->pTokApi = &pMod->x;
+    pConfig->t.pTokApi = &pMod->x;
     if( rc!=SQLITE_OK ){
-      if( pzErr ) *pzErr = sqlite3_mprintf("error in tokenizer constructor");
+      if( pzErr && rc!=SQLITE_NOMEM ){
+        *pzErr = sqlite3_mprintf("error in tokenizer constructor");
+      }
     }else{
-      pConfig->ePattern = sqlite3Fts5TokenizerPattern(
-          pMod->x.xCreate, pConfig->pTok
+      pConfig->t.ePattern = sqlite3Fts5TokenizerPattern(
+          pMod->x.xCreate, pConfig->t.pTok
       );
     }
   }
 
   if( rc!=SQLITE_OK ){
-    pConfig->pTokApi = 0;
-    pConfig->pTok = 0;
+    pConfig->t.pTokApi = 0;
+    pConfig->t.pTok = 0;
   }
 
   return rc;
 }
+
+/*
+** Attempt to instantiate the tokenizer.
+*/
+int sqlite3Fts5LoadTokenizer(Fts5Config *pConfig){
+  return fts5GetTokenizer(
+      pConfig->pGlobal, pConfig->t.azArg, pConfig->t.nArg, 
+      pConfig, pConfig->pzErrmsg
+  );
+}
+
 
 static void fts5ModuleDestroy(void *pCtx){
   Fts5TokenizerModule *pTok, *pNextTok;
@@ -2958,28 +2983,29 @@ static int fts5IntegrityMethod(
   char **pzErr            /* Write error message here */
 ){
   Fts5FullTable *pTab = (Fts5FullTable*)pVtab;
-  Fts5Config *pConfig = pTab->p.pConfig;
-  char *zSql;
-  char *zErr = 0;
   int rc;
+
   assert( pzErr!=0 && *pzErr==0 );
   UNUSED_PARAM(isQuick);
-  zSql = sqlite3_mprintf(
-            "INSERT INTO \"%w\".\"%w\"(\"%w\") VALUES('integrity-check');",
-            zSchema, zTabname, pConfig->zName);
-  if( zSql==0 ) return SQLITE_NOMEM;
-  rc = sqlite3_exec(pConfig->db, zSql, 0, 0, &zErr);
-  sqlite3_free(zSql);
-  if( (rc&0xff)==SQLITE_CORRUPT ){
-    *pzErr = sqlite3_mprintf("malformed inverted index for FTS5 table %s.%s",
-                zSchema, zTabname);
-  }else if( rc!=SQLITE_OK ){
-    *pzErr = sqlite3_mprintf("unable to validate the inverted index for"
-                             " FTS5 table %s.%s: %s",
-                zSchema, zTabname, zErr);
+  assert( pTab->p.pConfig->pzErrmsg==0 );
+  pTab->p.pConfig->pzErrmsg = pzErr;
+  rc = sqlite3Fts5StorageIntegrity(pTab->pStorage, 0);
+  if( *pzErr==0 && rc!=SQLITE_OK ){
+    if( (rc&0xff)==SQLITE_CORRUPT ){
+      *pzErr = sqlite3_mprintf("malformed inverted index for FTS5 table %s.%s",
+          zSchema, zTabname);
+      rc = (*pzErr) ? SQLITE_OK : SQLITE_NOMEM;
+    }else{
+      *pzErr = sqlite3_mprintf("unable to validate the inverted index for"
+          " FTS5 table %s.%s: %s",
+          zSchema, zTabname, sqlite3_errstr(rc));
+    }
   }
-  sqlite3_free(zErr);
-  return SQLITE_OK;
+
+  sqlite3Fts5IndexCloseReader(pTab->p.pIndex);
+  pTab->p.pConfig->pzErrmsg = 0;
+
+  return rc;
 }
 
 static int fts5Init(sqlite3 *db){

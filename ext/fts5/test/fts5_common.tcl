@@ -61,12 +61,22 @@ proc fts5_test_collist {cmd} {
   set res
 }
 
+proc fts5_collist {cmd iPhrase} {
+  set res [list]
+  $cmd xPhraseColumnForeach $iPhrase c { lappend res $c }
+  set res
+}
+
 proc fts5_test_columnsize {cmd} {
   set res [list]
   for {set i 0} {$i < [$cmd xColumnCount]} {incr i} {
     lappend res [$cmd xColumnSize $i]
   }
   set res
+}
+
+proc fts5_columntext {cmd iCol} {
+  $cmd xColumnText $iCol
 }
 
 proc fts5_test_columntext {cmd} {
@@ -104,6 +114,10 @@ proc fts5_test_rowcount {cmd} {
   $cmd xRowCount
 }
 
+proc fts5_test_rowid {cmd} {
+  $cmd xRowid
+}
+
 proc test_queryphrase_cb {cnt cmd} {
   upvar $cnt L 
   for {set i 0} {$i < [$cmd xInstCount]} {incr i} {
@@ -123,6 +137,13 @@ proc fts5_test_queryphrase {cmd} {
     lappend res $cnt
   }
   set res
+}
+
+proc fts5_queryphrase {cmd iPhrase} {
+  set cnt [list]
+  for {set j 0} {$j < [$cmd xColumnCount]} {incr j} { lappend cnt 0 }
+  $cmd xQueryPhrase $iPhrase [list test_queryphrase_cb cnt]
+  set cnt
 }
 
 proc fts5_test_phrasecount {cmd} {
@@ -150,10 +171,14 @@ proc fts5_aux_test_functions {db} {
     fts5_test_collist
     fts5_test_tokenize
     fts5_test_rowcount
+    fts5_test_rowid
     fts5_test_all
 
     fts5_test_queryphrase
     fts5_test_phrasecount
+    fts5_columntext
+    fts5_queryphrase
+    fts5_collist
   } {
     sqlite3_fts5_create_function $db $f $f
   }

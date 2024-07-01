@@ -8,9 +8,9 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
-# TESTRUNNER: hct
+# TESTRUNNER: shell
 #
-# Test the shell tool ".ar" command.
+# Test the shell tool ".recover" command.
 #
 
 set testdir [file dirname $argv0]

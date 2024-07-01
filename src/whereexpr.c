@@ -101,7 +101,12 @@ static int allowedOp(int op){
   assert( TK_LT>TK_EQ && TK_LT<TK_GE );
   assert( TK_LE>TK_EQ && TK_LE<TK_GE );
   assert( TK_GE==TK_EQ+4 );
-  return op==TK_IN || (op>=TK_EQ && op<=TK_GE) || op==TK_ISNULL || op==TK_IS;
+  assert( TK_IN<TK_EQ );
+  assert( TK_IS<TK_EQ );
+  assert( TK_ISNULL<TK_EQ );
+  if( op>TK_GE ) return 0;
+  if( op>=TK_EQ ) return 1;
+  return op==TK_IN || op==TK_ISNULL || op==TK_IS;
 }
 
 /*
@@ -134,15 +139,16 @@ static u16 exprCommute(Parse *pParse, Expr *pExpr){
 static u16 operatorMask(int op){
   u16 c;
   assert( allowedOp(op) );
-  if( op==TK_IN ){
+  if( op>=TK_EQ ){
+    assert( (WO_EQ<<(op-TK_EQ)) < 0x7fff );
+    c = (u16)(WO_EQ<<(op-TK_EQ));
+  }else if( op==TK_IN ){
     c = WO_IN;
   }else if( op==TK_ISNULL ){
     c = WO_ISNULL;
-  }else if( op==TK_IS ){
-    c = WO_IS;
   }else{
-    assert( (WO_EQ<<(op-TK_EQ)) < 0x7fff );
-    c = (u16)(WO_EQ<<(op-TK_EQ));
+    assert( op==TK_IS );
+    c = WO_IS;
   }
   assert( op!=TK_ISNULL || c==WO_ISNULL );
   assert( op!=TK_IN || c==WO_IN );
@@ -429,6 +435,13 @@ static int isAuxiliaryVtabOperator(
         }
       }
     }
+  }else if( pExpr->op>=TK_EQ ){
+    /* Comparison operators are a common case.  Save a few comparisons for
+    ** that common case by terminating early. */
+    assert( TK_NE < TK_EQ );
+    assert( TK_ISNOT < TK_EQ );
+    assert( TK_NOTNULL < TK_EQ );
+    return 0;
   }else if( pExpr->op==TK_NE || pExpr->op==TK_ISNOT || pExpr->op==TK_NOTNULL ){
     int res = 0;
     Expr *pLeft = pExpr->pLeft;
@@ -989,7 +1002,7 @@ static SQLITE_NOINLINE int exprMightBeIndexed2(
         if( pIdx->aiColumn[i]!=XN_EXPR ) continue;
         assert( pIdx->bHasExpr );
         if( sqlite3ExprCompareSkip(pExpr,pIdx->aColExpr->a[i].pExpr,iCur)==0
-          && pExpr->op!=TK_STRING
+         && !sqlite3ExprIsConstant(0,pIdx->aColExpr->a[i].pExpr)
         ){
           aiCurCol[0] = iCur;
           aiCurCol[1] = XN_EXPR;
@@ -1570,7 +1583,7 @@ static void whereAddLimitExpr(
   Expr *pNew;
   int iVal = 0;
 
-  if( sqlite3ExprIsInteger(pExpr, &iVal) && iVal>=0 ){
+  if( sqlite3ExprIsInteger(pExpr, &iVal, pParse) && iVal>=0 ){
     Expr *pVal = sqlite3Expr(db, TK_INTEGER, 0);
     if( pVal==0 ) return;
     ExprSetProperty(pVal, EP_IntValue);
@@ -1638,6 +1651,7 @@ void SQLITE_NOINLINE sqlite3WhereAddLimit(WhereClause *pWC, Select *p){
         continue;
       }
       if( pWC->a[ii].leftCursor!=iCsr ) return;
+      if( pWC->a[ii].prereqRight!=0 ) return;
     }
 
     /* Check condition (5). Return early if it is not met. */
@@ -1652,11 +1666,13 @@ void SQLITE_NOINLINE sqlite3WhereAddLimit(WhereClause *pWC, Select *p){
 
     /* All conditions are met. Add the terms to the where-clause object. */
     assert( p->pLimit->op==TK_LIMIT );
-    whereAddLimitExpr(pWC, p->iLimit, p->pLimit->pLeft,
-                      iCsr, SQLITE_INDEX_CONSTRAINT_LIMIT);
-    if( p->iOffset>0 ){
+    if( p->iOffset!=0 && (p->selFlags & SF_Compound)==0 ){
       whereAddLimitExpr(pWC, p->iOffset, p->pLimit->pRight,
                         iCsr, SQLITE_INDEX_CONSTRAINT_OFFSET);
+    }
+    if( p->iOffset==0 || (p->selFlags & SF_Compound)==0 ){
+      whereAddLimitExpr(pWC, p->iLimit, p->pLimit->pLeft,
+                        iCsr, SQLITE_INDEX_CONSTRAINT_LIMIT);
     }
   }
 }

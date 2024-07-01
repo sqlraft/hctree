@@ -51,7 +51,7 @@
 */
 "use strict";
 const wPost = (type,...args)=>postMessage({type, payload:args});
-const installAsyncProxy = function(self){
+const installAsyncProxy = function(){
   const toss = function(...args){throw new Error(args.join(' '))};
   if(globalThis.window === globalThis){
     toss("This code cannot run from the main thread.",
@@ -173,10 +173,10 @@ const installAsyncProxy = function(self){
 
   /**
      If the given file-holding object has a sync handle attached to it,
-     that handle is remove and asynchronously closed. Though it may
+     that handle is removed and asynchronously closed. Though it may
      sound sensible to continue work as soon as the close() returns
      (noting that it's asynchronous), doing so can cause operations
-     performed soon afterwards, e.g. a call to getSyncHandle() to fail
+     performed soon afterwards, e.g. a call to getSyncHandle(), to fail
      because they may happen out of order from the close(). OPFS does
      not guaranty that the actual order of operations is retained in
      such cases. i.e.  always "await" on the result of this function.
@@ -265,23 +265,34 @@ const installAsyncProxy = function(self){
       this.name = 'GetSyncHandleError';
     }
   };
+
+  /**
+     Attempts to find a suitable SQLITE_xyz result code for Error
+     object e. Returns either such a translation or rc if if it does
+     not know how to translate the exception.
+  */
   GetSyncHandleError.convertRc = (e,rc)=>{
-    if(1){
-      return (
-        e instanceof GetSyncHandleError
-          && ((e.cause.name==='NoModificationAllowedError')
-              /* Inconsistent exception.name from Chrome/ium with the
-                 same exception.message text: */
-              || (e.cause.name==='DOMException'
-                  && 0===e.cause.message.indexOf('Access Handles cannot')))
-      ) ? (
-        /*console.warn("SQLITE_BUSY",e),*/
-        state.sq3Codes.SQLITE_BUSY
-      ) : rc;
-    }else{
-      return rc;
+    if( e instanceof GetSyncHandleError ){
+      if( e.cause.name==='NoModificationAllowedError'
+        /* Inconsistent exception.name from Chrome/ium with the
+           same exception.message text: */
+          || (e.cause.name==='DOMException'
+              && 0===e.cause.message.indexOf('Access Handles cannot')) ){
+        return state.sq3Codes.SQLITE_BUSY;
+      }else if( 'NotFoundError'===e.cause.name ){
+        /**
+           Maintenance reminder: SQLITE_NOTFOUND, though it looks like
+           a good match, has different semantics than NotFoundError
+           and is not suitable here.
+        */
+        return state.sq3Codes.SQLITE_CANTOPEN;
+      }
+    }else if( 'NotFoundError'===e?.name ){
+      return state.sq3Codes.SQLITE_CANTOPEN;
     }
-  }
+    return rc;
+  };
+
   /**
      Returns the sync access handle associated with the given file
      handle object (which must be a valid handle object, as created by
@@ -293,6 +304,20 @@ const installAsyncProxy = function(self){
      times. If acquisition still fails at that point it will give up
      and propagate the exception. Client-level code will see that as
      an I/O error.
+
+     2024-06-12: there is a rare race condition here which has been
+     reported a single time:
+
+     https://sqlite.org/forum/forumpost/9ee7f5340802d600
+
+     What appears to be happening is that file we're waiting for a
+     lock on is deleted while we wait. What currently happens here is
+     that a locking exception is thrown but the exception type is
+     NotFoundError. In such cases, we very probably should attempt to
+     re-open/re-create the file an obtain the lock on it (noting that
+     there's another race condition there). That's easy to say but
+     creating a viable test for that condition has proven challenging
+     so far.
   */
   const getSyncHandle = async (fh,opName)=>{
     if(!fh.syncHandle){
@@ -562,6 +587,14 @@ const installAsyncProxy = function(self){
           wTimeEnd();
           return;
         }
+        if( state.opfsFlags.OPFS_UNLINK_BEFORE_OPEN & opfsFlags ){
+          try{
+            await hDir.removeEntry(filenamePart);
+          }catch(e){
+            /* ignoring */
+            //warn("Ignoring failed Unlink of",filename,":",e);
+          }
+        }
         const hFile = await hDir.getFileHandle(filenamePart, {create});
         wTimeEnd();
         const fh = Object.assign(Object.create(null),{
@@ -578,19 +611,6 @@ const installAsyncProxy = function(self){
         fh.releaseImplicitLocks =
           (opfsFlags & state.opfsFlags.OPFS_UNLOCK_ASAP)
           || state.opfsFlags.defaultUnlockAsap;
-        if(0 /* this block is modelled after something wa-sqlite
-                does but it leads to immediate contention on journal files.
-                Update: this approach reportedly only works for DELETE journal
-                mode. */
-           && (0===(flags & state.sq3Codes.SQLITE_OPEN_MAIN_DB))){
-          /* sqlite does not lock these files, so go ahead and grab an OPFS
-             lock. */
-          fh.xLock = "xOpen"/* Truthy value to keep entry from getting
-                               flagged as auto-locked. String value so
-                               that we can easily distinguish is later
-                               if needed. */;
-          await getSyncHandle(fh,'xOpen');
-        }
         __openFiles[fid] = fh;
         storeAndNotify(opName, 0);
       }catch(e){
@@ -666,8 +686,10 @@ const installAsyncProxy = function(self){
       mTimeStart('xUnlock');
       let rc = 0;
       const fh = __openFiles[fid];
-      if( state.sq3Codes.SQLITE_LOCK_NONE===lockType
-          && fh.syncHandle ){
+      if( fh.syncHandle
+          && state.sq3Codes.SQLITE_LOCK_NONE===lockType
+          /* Note that we do not differentiate between lock types in
+             this VFS. We're either locked or unlocked. */ ){
         wTimeStart('xUnlock');
         try { await closeSyncHandle(fh) }
         catch(e){
@@ -911,5 +933,5 @@ if(!globalThis.SharedArrayBuffer){
          !navigator?.storage?.getDirectory){
   wPost('opfs-unavailable',"Missing required OPFS APIs.");
 }else{
-  installAsyncProxy(self);
+  installAsyncProxy();
 }

@@ -15,14 +15,28 @@
 source [file join [file dirname [info script]] fts5_common.tcl]
 set testprefix fts5origintext4
 
-# If SQLITE_ENABLE_FTS5 is defined, omit this file.
+# If SQLITE_ENABLE_FTS5 is not defined, omit this file.
 ifcapable !fts5 {
+  finish_test
+  return
+}
+
+# The tests below verify that a doclist-index is used to limit the number
+# of pages loaded into the cache. It does this by querying sqlite3_db_status()
+# for the amount of memory used by the pager cache.
+#
+# memsubsys1 effectively limits the page-cache to 24 pages. Which masks
+# the effect tested by the tests in this file. And "mmap" prevents the 
+# cache from being used, also preventing these tests from working.
+#
+if {[permutation]=="memsubsys1" || [permutation]=="mmap"} {
   finish_test
   return
 }
 
 sqlite3_fts5_register_origintext db
 do_execsql_test 1.0 {
+  PRAGMA page_size = 4096;
   CREATE VIRTUAL TABLE ft USING fts5(
       x, tokenize="origintext unicode61", tokendata=1
   );

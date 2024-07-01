@@ -1547,9 +1547,9 @@ static int fts5DlidxLvlNext(Fts5DlidxLvl *pLvl){
     }
 
     if( iOff<pData->nn ){
-      i64 iVal;
+      u64 iVal;
       pLvl->iLeafPgno += (iOff - pLvl->iOff) + 1;
-      iOff += fts5GetVarint(&pData->p[iOff], (u64*)&iVal);
+      iOff += fts5GetVarint(&pData->p[iOff], &iVal);
       pLvl->iRowid += iVal;
       pLvl->iOff = iOff;
     }else{
@@ -6837,23 +6837,26 @@ static void fts5IterSetOutputsTokendata(Fts5Iter *pIter){
 static void fts5TokendataIterNext(Fts5Iter *pIter, int bFrom, i64 iFrom){
   int ii;
   Fts5TokenDataIter *pT = pIter->pTokenDataIter;
+  Fts5Index *pIndex = pIter->pIndex;
 
   for(ii=0; ii<pT->nIter; ii++){
     Fts5Iter *p = pT->apIter[ii];
     if( p->base.bEof==0 
      && (p->base.iRowid==pIter->base.iRowid || (bFrom && p->base.iRowid<iFrom))
     ){
-      fts5MultiIterNext(p->pIndex, p, bFrom, iFrom);
+      fts5MultiIterNext(pIndex, p, bFrom, iFrom);
       while( bFrom && p->base.bEof==0 
           && p->base.iRowid<iFrom 
-          && p->pIndex->rc==SQLITE_OK 
+          && pIndex->rc==SQLITE_OK 
       ){
-        fts5MultiIterNext(p->pIndex, p, 0, 0);
+        fts5MultiIterNext(pIndex, p, 0, 0);
       }
     }
   }
 
-  fts5IterSetOutputsTokendata(pIter);
+  if( pIndex->rc==SQLITE_OK ){
+    fts5IterSetOutputsTokendata(pIter);
+  }
 }
 
 /*
@@ -7944,7 +7947,7 @@ static void fts5IndexIntegrityCheckEmpty(
 }
 
 static void fts5IntegrityCheckPgidx(Fts5Index *p, Fts5Data *pLeaf){
-  int iTermOff = 0;
+  i64 iTermOff = 0;
   int ii;
 
   Fts5Buffer buf1 = {0,0,0};
@@ -7953,7 +7956,7 @@ static void fts5IntegrityCheckPgidx(Fts5Index *p, Fts5Data *pLeaf){
   ii = pLeaf->szLeaf;
   while( ii<pLeaf->nn && p->rc==SQLITE_OK ){
     int res;
-    int iOff;
+    i64 iOff;
     int nIncr;
 
     ii += fts5GetVarint32(&pLeaf->p[ii], nIncr);
