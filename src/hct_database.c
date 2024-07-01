@@ -6387,6 +6387,7 @@ struct IntCheckCtx {
   int nErr;
   int nMaxErr;
   char *zErr;
+  i64 nEntry;                     /* Number of entries in table */
 };
 
 static void hctDbICError(
@@ -6429,6 +6430,7 @@ static int hctDbIntegrityCheckCb(
 char *sqlite3HctDbIntegrityCheck(
   HctDatabase *pDb, 
   u32 *aRoot, 
+  Mem *aCnt,
   int nRoot, 
   int *pnErr
 ){
@@ -6451,7 +6453,17 @@ char *sqlite3HctDbIntegrityCheck(
 
     for(ii=0; c.nErr==0 && ii<nFileRoot; ii++){
       u32 r = aFileRoot[ii];
+      c.nEntry = 0;
       sqlite3HctDbWalkTree(pFile, r, hctDbIntegrityCheckCb, (void*)&c);
+
+#if 0
+      if( r!=2 ){
+        int jj;
+        for(jj=0; jj<nRoot && aRoot[jj]!=r; jj++);
+        assert( jj<nRoot );
+        sqlite3MemSetArrayInt64(aCnt, jj, c.nEntry);
+      }
+#endif
     }
 
     /* Check for leaks */

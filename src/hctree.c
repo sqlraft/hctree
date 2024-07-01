@@ -3063,6 +3063,7 @@ int sqlite3HctBtreeIntegrityCheck(
   sqlite3 *db,  /* Database connection that is running the check */
   Btree *pBt,   /* The btree to be checked */
   Pgno *aRoot,  /* An array of root pages numbers for individual trees */
+  Mem *aCnt,
   int nRoot,    /* Number of entries in aRoot[] */
   int mxErr,    /* Stop reporting errors after this many */
   int *pnErr,   /* Write number of errors seen to this variable */
@@ -3071,8 +3072,12 @@ int sqlite3HctBtreeIntegrityCheck(
   HBtree *const p = (HBtree*)pBt;
   char *zRet = 0;                 /* Return value */
   *pnErr = 0;
+  int ii;
+  for(ii=0; ii<nRoot; ii++){
+    sqlite3MemSetArrayInt64(aCnt, ii, 0);
+  }
   if( p->config.bQuiescentIntegrityCheck && nRoot>0 && aRoot[0]!=0 ){
-    zRet = sqlite3HctDbIntegrityCheck(p->pHctDb, aRoot, nRoot, pnErr);
+    zRet = sqlite3HctDbIntegrityCheck(p->pHctDb, aRoot, aCnt, nRoot, pnErr);
     assert( zRet==0 || (*pnErr)>0 );
   }
   *pzErr = zRet;

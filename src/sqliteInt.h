@@ -1401,8 +1401,8 @@ typedef int VList;
 #include "os.h"
 #include "pager.h"
 #include "btree.h"
-#include "btreeModules.h"
 #include "vdbe.h"
+#include "btreeModules.h"
 #include "pcache.h"
 #include "mutex.h"
 

@@ -144,7 +144,7 @@ struct BtreeMethods {
   int(*xBtreeSchemaLocked)(Btree*);
   int(*xBtreeIsReadonly)(Btree*);
   int(*xBtreeSetVersion)(Btree*, int);
-  int(*xBtreeIntegrityCheck)(sqlite3*, Btree*, Pgno*, int, int, int*, char**);
+  int(*xBtreeIntegrityCheck)(sqlite3*, Btree*, Pgno*, Mem*, int, int, int*, char**);
   int(*xBtreeCheckpoint)(Btree*, int, int *, int *);
 };
 int sqlite3BtreeNext(BtCursor *p, int a){
@@ -361,8 +361,8 @@ int sqlite3BtreeIsReadonly(Btree *p){
 int sqlite3BtreeSetVersion(Btree *p, int a){
   return p->pMethods->xBtreeSetVersion(p, a);
 }
-int sqlite3BtreeIntegrityCheck(sqlite3 *a, Btree *p, Pgno *b, int c, int d, int *e, char* *f){
-  return p->pMethods->xBtreeIntegrityCheck(a, p, b, c, d, e, f);
+int sqlite3BtreeIntegrityCheck(sqlite3 *a, Btree *p, Pgno *b, Mem *c, int d, int e, int *f, char* *g){
+  return p->pMethods->xBtreeIntegrityCheck(a, p, b, c, d, e, f, g);
 }
 int sqlite3BtreeCheckpoint(Btree *p, int a, int *b, int *c){
   if( p==0 ) return 0;

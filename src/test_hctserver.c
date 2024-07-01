@@ -1514,11 +1514,11 @@ static int hctFollowerRun(TestServer *p){
   i64 nPrevSyncData = ((i64)1 << 60);
 
   TestFollower fol;
-  hctFollowerInit(&fol, p);
+  /* hctFollowerInit(&fol, p); */
   memset(&fol, 0, sizeof(fol));
   pthread_mutex_init(&fol.mutex, 0);
   pthread_cond_init(&fol.cond, 0);
-  fol.pServer = pServer;
+  fol.pServer = p;
   fol.iEof = -1;
 
   /* If extra sync threads are configured, launch them now. They will wait
