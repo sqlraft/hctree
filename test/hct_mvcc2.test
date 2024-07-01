@@ -1,0 +1,191 @@
+# 2020 December 30
+#
+# The author disclaims copyright to this source code.  In place of
+# a legal notice, here is a blessing:
+#
+#    May you do good and not evil.
+#    May you find forgiveness for yourself and forgive others.
+#    May you share freely, never taking more than you give.
+#
+#*************************************************************************
+# This file implements regression tests for SQLite library.
+#
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+set testprefix hct_mvcc2
+
+hct_reset_db
+
+array set T1 [list]
+set nRange 200
+set nTSize 10
+set nRep   1000
+set nVal   500
+
+expr srand(0)
+
+proc show_db_entries {} {
+  execsql_pp {
+    SELECT slot, pgno, ikey, tid, rangetid, rangeoldpg, record 
+      FROM hctentry, hctpgmap 
+      WHERE slot>=33 AND logical_in_use AND pgno=value;
+  }
+}
+proc show_page_contents {pgno} {
+  execsql_pp "
+    SELECT pgno, ikey, tid, rangetid, rangeoldpg, record
+      FROM hctentry
+      WHERE pgno=$pgno
+  "
+}
+
+proc random_int {nRange} {
+  expr int(rand()*$nRange)
+}
+proc random_val {nMax} {
+  set bDel [expr int(rand()*4)==0]
+  if {$bDel} { return "" }
+  set nText [expr int(rand()*$nMax)+1]
+  return [string range [string repeat "x$nText." $nText] 0 [expr $nText-1]]
+}
+
+proc array_keys {nm} {
+  upvar $nm X
+  set ret [list]
+  foreach x [lsort -integer [array names X]] {
+    if {$X($x)==""} {
+      lappend ret "-$x"
+    } else {
+      lappend ret "$x"
+    }
+  }
+  set ret
+}
+
+foreach {tn ct} {
+  1 { CREATE TABLE t1(a INTEGER PRIMARY KEY, b TEXT) }
+  2 { CREATE TABLE t1(a INT, b TEXT, PRIMARY KEY(a)) WITHOUT ROWID }
+} {
+
+hct_reset_db
+do_execsql_test $tn.0 $ct
+sqlite3 db2 test.db
+catch { array unset T1 }
+
+for {set i 0} {$i < $nRep} {incr i} {
+  array unset a
+  array unset b
+
+  for {set x 0} {$x < $nTSize} {incr x} {
+    set a([random_int $nRange]) [random_val $nVal]
+    set b([random_int $nRange]) [random_val $nVal]
+  }
+
+  foreach x [array names a] {
+    if {$a($x)=="" && [info exists T1($x)]==0} { unset a($x) }
+  }
+  foreach x [array names b] {
+    if {$b($x)=="" && [info exists T1($x)]==0} { unset b($x) }
+  }
+
+  set bConflict 0
+  foreach x [array names a] {
+    if {[info exists b($x)]} { set bConflict 1 }
+  }
+
+  do_test $tn.$i.1 {
+  breakpoint
+    execsql "BEGIN CONCURRENT"
+    foreach k [array names a] {
+      set v $a($k) 
+      if {$v==""} {
+        #puts "1: DELETE FROM t1 WHERE a=$k "
+        execsql { DELETE FROM t1 WHERE a=$k }
+      } else {
+        #puts "1: REPLACE INTO t1 VALUES($k, $v) "
+        execsql { REPLACE INTO t1 VALUES($k, $v) }
+      }
+    }
+  } {}
+
+  #integrity_check $tn.$i.1a
+
+if {0 && $tn==2 && $i==($nRep-1)} {
+execsql_pp { SELECT * FROM hctpgmap natural join hctdb }
+execsql_pp { SELECT * FROM hctpgmap natural join hctentry }
+}
+
+#if {$i==46} breakpoint
+  do_test $tn.$i.2 {
+    execsql "BEGIN CONCURRENT" db2
+    foreach k [array names b] {
+      set v $b($k) 
+      if {$v==""} {
+        #puts "2: DELETE FROM t1 WHERE a=$k "
+        execsql { DELETE FROM t1 WHERE a=$k } db2
+      } else {
+        #puts "2: REPLACE INTO t1 VALUES($k, [string range $v 0 12]..) "
+        execsql { REPLACE INTO t1 VALUES($k, $v) } db2
+      }
+    }
+    execsql COMMIT db2
+  } {}
+
+if 0 {
+  puts "a: [array_keys a]"
+  puts "b: [array_keys b]"
+  puts "bConflict=$bConflict"
+}
+
+  if {$bConflict} {
+    do_catchsql_test $tn.$i.3a {
+      COMMIT
+    } {1 {database is locked}}
+    execsql ROLLBACK
+  } else {
+  breakpoint
+    do_catchsql_test $tn.$i.3b {
+      COMMIT
+    } {0 {}}
+  }
+
+
+  foreach x [array names b] {
+    if {$b($x)==""} {
+      unset -nocomplain T1($x)
+    } else {
+      set T1($x) $b($x)
+    }
+  }
+  if {$bConflict==0} {
+    foreach x [array names a] {
+      if {$a($x)==""} {
+        unset -nocomplain T1($x)
+      } else {
+        set T1($x) $a($x)
+      }
+    }
+  }
+
+  set res [list]
+  foreach x [lsort -integer [array names T1]] {
+    lappend res $x $T1($x)
+  }
+  # do_execsql_test $tn.$i.4 { SELECT * FROM t1 ORDER BY a } $res
+
+  set res [list]
+  foreach x [lsort -integer [array names T1]] {
+    lappend res $x
+  }
+  do_execsql_test $tn.$i.5 {
+    SELECT a FROM t1 ORDER BY a
+  } $res
+
+}
+
+}
+
+
+finish_test
+

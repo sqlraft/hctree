@@ -8,6 +8,8 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: hct
+#
 # Additional test cases for the COALESCE() and IFNULL() functions.
 #
 

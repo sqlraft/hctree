@@ -8,6 +8,8 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: hct
+#
 # This file implements regression tests for SQLite library.  The
 # focus of this file is generating semi-random strings of SQL
 # (a.k.a. "fuzz") and sending it into the parser to try to 

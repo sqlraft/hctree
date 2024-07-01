@@ -8,6 +8,8 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: hct
+#
 # This file implements regression tests for SQLite library.  The
 # focus of this file is the new RETURNING clause
 #
@@ -530,5 +532,18 @@ do_execsql_test 21.0 {
 do_execsql_test 21.1 {
   INSERT INTO sqlite_temp_schema DEFAULT VALUES RETURNING sqlite_temp_schema.name;
 } {{}}
+
+#-------------------------------------------------------------------------
+reset_db 
+do_execsql_test 22.0 {
+  PRAGMA writable_schema=ON;
+  CREATE TABLE xyz (a);
+}
+do_catchsql_test 22.1 {
+  INSERT INTO sqlite_temp_schema DEFAULT VALUES 
+    RETURNING
+    (SELECT * FROM xyz AS sqlite_master WHERE a=sqlite_master.name);
+} {1 {no such column: sqlite_master.name}}
+
 
 finish_test

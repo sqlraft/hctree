@@ -8,6 +8,8 @@
 #    May you share freely, never taking more than you give.
 #
 #*************************************************************************
+# TESTRUNNER: puresql
+#
 # This file implements regression tests for "approximate_match" virtual
 # table that is in the "amatch.c" extension.
 #

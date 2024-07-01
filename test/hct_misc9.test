@@ -1,0 +1,69 @@
+# 2020 October 8
+#
+# The author disclaims copyright to this source code.  In place of
+# a legal notice, here is a blessing:
+#
+#    May you do good and not evil.
+#    May you find forgiveness for yourself and forgive others.
+#    May you share freely, never taking more than you give.
+#
+#*************************************************************************
+# This file implements regression tests for SQLite library.
+#
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+set testprefix hct_misc9
+
+hct_reset_db
+
+do_execsql_test 1.1 { 
+  CREATE TABLE t1(i INTEGER PRIMARY KEY, a, b);
+}
+
+do_execsql_test 1.1b { 
+  INSERT INTO t1 VALUES(489, 'AAA', 'BBB');
+  UPDATE t1 SET b='CCCC' WHERE i=489;
+}
+
+#-------------------------------------------------------------------------
+hct_reset_db
+
+do_execsql_test 2.0 {
+  CREATE TABLE t1(a, b);
+  INSERT INTO t1 VALUES(1, 'AAA');
+  INSERT INTO t1 VALUES(2, 'BBB');
+  INSERT INTO t1 VALUES(3, 'CCC');
+  INSERT INTO t1 VALUES(4, 'DDD');
+  CREATE INDEX i1 ON t1(b);
+}
+
+do_execsql_test 2.1 {
+  BEGIN;
+    DELETE FROM t1 WHERE a=4;
+}
+
+do_execsql_test 2.2 {
+  SELECT * FROM t1 WHERE b>'CCD' AND b<'EEE'
+}
+
+#-------------------------------------------------------------------------
+hct_reset_db
+do_execsql_test 3.0 {
+  CREATE TABLE t1(a INTEGER PRIMARY KEY, b UNIQUE);
+  INSERT INTO t1 VALUES(13, 13);
+  DELETE FROM t1 WHERE a=13;
+}
+
+#-------------------------------------------------------------------------
+hct_reset_db
+do_execsql_test 4.0 {
+  CREATE TABLE t1(a INTEGER PRIMARY KEY, b UNIQUE);
+}
+do_execsql_test 4.1 {
+  SELECT * FROM t1 ORDER BY b DESC;
+}
+
+
+finish_test
+

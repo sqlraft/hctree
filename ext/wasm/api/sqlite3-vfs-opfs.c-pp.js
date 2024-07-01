@@ -38,10 +38,6 @@ globalThis.sqlite3ApiBootstrap.initializers.push(function(sqlite3){
 
   Significant notes and limitations:
 
-  - As of this writing, OPFS is still very much in flux and only
-    available in bleeding-edge versions of Chrome (v102+, noting that
-    that number will increase as the OPFS API matures).
-
   - The OPFS features used here are only available in dedicated Worker
     threads. This file tries to detect that case, resulting in a
     rejected Promise if those features do not seem to be available.
@@ -62,15 +58,17 @@ globalThis.sqlite3ApiBootstrap.initializers.push(function(sqlite3){
   The argument may optionally be a plain object with the following
   configuration options:
 
-  - proxyUri: as described above
+  - proxyUri: name of the async proxy JS file.
 
   - verbose (=2): an integer 0-3. 0 disables all logging, 1 enables
     logging of errors. 2 enables logging of warnings and errors. 3
-    additionally enables debugging info.
+    additionally enables debugging info. Logging is performed
+    via the sqlite3.config.{log|warn|error}() functions.
 
-  - sanityChecks (=false): if true, some basic sanity tests are
-    run on the OPFS VFS API after it's initialized, before the
-    returned Promise resolves.
+  - sanityChecks (=false): if true, some basic sanity tests are run on
+    the OPFS VFS API after it's initialized, before the returned
+    Promise resolves. This is only intended for testing and
+    development of the VFS, not client-side use.
 
   On success, the Promise resolves to the top-most sqlite3 namespace
   object and that object gets a new object installed in its
@@ -392,6 +390,7 @@ const installOpfsVfs = function callee(options){
       'SQLITE_ACCESS_EXISTS',
       'SQLITE_ACCESS_READWRITE',
       'SQLITE_BUSY',
+      'SQLITE_CANTOPEN',
       'SQLITE_ERROR',
       'SQLITE_IOERR',
       'SQLITE_IOERR_ACCESS',
@@ -720,9 +719,13 @@ const installOpfsVfs = function callee(options){
            involve an inherent race condition. For the time being,
            pending a better solution, we simply report whether the
            given pFile is open.
+
+           Update 2024-06-12: based on forum discussions, this
+           function now always sets pOut to 0 (false):
+
+           https://sqlite.org/forum/forumpost/a2f573b00cda1372
         */
-        const f = __openFiles[pFile];
-        wasm.poke(pOut, f.lockType ? 1 : 0, 'i32');
+        wasm.poke(pOut, 0, 'i32');
         return 0;
       },
       xClose: function(pFile){
@@ -738,7 +741,6 @@ const installOpfsVfs = function callee(options){
         return rc;
       },
       xDeviceCharacteristics: function(pFile){
-        //debug("xDeviceCharacteristics(",pFile,")");
         return capi.SQLITE_IOCAP_UNDELETABLE_WHEN_OPEN;
       },
       xFileControl: function(pFile, opId, pArg){
@@ -994,7 +996,9 @@ const installOpfsVfs = function callee(options){
     };
     /**
        Checks whether the given OPFS filesystem entry exists,
-       returning true if it does, false if it doesn't.
+       returning true if it does, false if it doesn't or if an
+       exception is intercepted while trying to make the
+       determination.
     */
     opfsUtil.entryExists = async function(fsEntryName){
       try {
@@ -1110,9 +1114,9 @@ const installOpfsVfs = function callee(options){
     };
 
     /**
-       Traverses the OPFS filesystem, calling a callback for each one.
-       The argument may be either a callback function or an options object
-       with any of the following properties:
+       Traverses the OPFS filesystem, calling a callback for each
+       entry.  The argument may be either a callback function or an
+       options object with any of the following properties:
 
        - `callback`: function which gets called for each filesystem
          entry.  It gets passed 3 arguments: 1) the
@@ -1142,11 +1146,6 @@ const installOpfsVfs = function callee(options){
        but that promise has no specific meaning: the traversal it
        performs is synchronous. The promise must be used to catch any
        exceptions propagated by the callback, however.
-
-       TODO: add an option which specifies whether to traverse
-       depth-first or breadth-first. We currently do depth-first but
-       an incremental file browsing widget would benefit more from
-       breadth-first.
     */
     opfsUtil.traverse = async function(opt){
       const defaultOpt = {

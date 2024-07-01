@@ -91,6 +91,9 @@ static int getProcessId(void){
 #endif
 }
 
+#include "sqliteInt.h"
+#ifndef SQLITE_ENABLE_HCT
+
 /* Names of environment variables to be used */
 #define ENVIRONMENT_VARIABLE1_NAME "SQLITE_SQLLOG_DIR"
 #define ENVIRONMENT_VARIABLE2_NAME "SQLITE_SQLLOG_REUSE_FILES"
@@ -554,3 +557,5 @@ void sqlite3_init_sqllog(void){
     }
   }
 }
+
+#endif /* SQLITE_ENABLE_HCT */

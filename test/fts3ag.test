@@ -3,6 +3,8 @@
 # The author disclaims copyright to this source code.
 #
 #*************************************************************************
+# TESTRUNNER: hct
+#
 # This file implements regression tests for SQLite library.  The focus
 # of this script is testing handling of edge cases for various doclist
 # merging functions in the FTS3 module query logic.

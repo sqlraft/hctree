@@ -8,6 +8,8 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: hct
+#
 # This file implements test cases for wide table (tables with more than
 # 64 columns) and indexes that reference columns beyond the 63rd or 64th
 # column.

@@ -1,0 +1,260 @@
+# 2021 June 1
+#
+# The author disclaims copyright to this source code.  In place of
+# a legal notice, here is a blessing:
+#
+#    May you do good and not evil.
+#    May you find forgiveness for yourself and forgive others.
+#    May you share freely, never taking more than you give.
+#
+#*************************************************************************
+# This file implements regression tests for SQLite library.
+#
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+set testprefix hct_conflict1
+
+hct_reset_db
+
+proc show_db_entries {} {
+  execsql_pp {
+    SELECT slot, pgno, ikey, tid, rangetid, rangeoldpg, record
+      FROM hctentry, hctpgmap 
+      WHERE slot>=33 AND logical_in_use AND pgno=value;
+  }
+}
+proc show_page_contents {pgno} {
+  execsql_pp "
+    SELECT pgno, ikey, tid, rangetid, rangeoldpg, record
+      FROM hctentry
+      WHERE pgno=$pgno
+  "
+}
+
+foreach {nm int without_rowid} { 
+  "without_rowid" INT {WITHOUT ROWID} 
+  "integer"       INTEGER {} 
+  "int"           INT {} 
+} {
+  hct_reset_db
+  sqlite3 db2 test.db
+  do_execsql_test 1.$nm.1.0 "
+    CREATE TABLE x1(i $int PRIMARY KEY, j) $without_rowid;
+    INSERT INTO x1 VALUES(1, 'one');
+    INSERT INTO x1 VALUES(2, 'two');
+    INSERT INTO x1 VALUES(3, 'three');
+    INSERT INTO x1 VALUES(4, 'four');
+  "
+  
+  do_execsql_test 1.$nm.1.1 {
+    BEGIN;
+      UPDATE x1 SET j='iii' WHERE i=3;
+  }
+  
+  do_execsql_test -db db2 1.$nm.1.2 {
+    UPDATE x1 SET j='THREE' WHERE i=3;
+  }
+  
+  do_catchsql_test 1.$nm.1.3 {
+    COMMIT;
+  } {1 {database is locked}}
+  execsql ROLLBACK
+  
+  do_execsql_test 1.$nm.1.4 {
+    BEGIN;
+      UPDATE x1 SET j='ii' WHERE i=2;
+      UPDATE x1 SET j='iii' WHERE i=3;
+  }
+  
+  do_execsql_test -db db2 1.$nm.1.5 {
+    DELETE FROM x1 WHERE i=3
+  }
+  
+  do_catchsql_test 1.$nm.1.6 {
+    COMMIT;
+  } {1 {database is locked}}
+  execsql ROLLBACK
+  
+  do_execsql_test 1.$nm.1.7.1 {
+    SELECT * FROM x1
+  } {1 one 2 two 4 four}
+  do_execsql_test -db db2 1.$nm.1.7.2 {
+    SELECT * FROM x1
+  } {1 one 2 two 4 four}
+  do_execsql_test 1.$nm.1.7.3 {
+    SELECT * FROM x1 ORDER BY 1 DESC
+  } {4 four 2 two 1 one}
+  do_execsql_test -db db2 1.$nm.1.7.4 {
+    SELECT * FROM x1 ORDER BY 1 DESC
+  } {4 four 2 two 1 one}
+  
+  db close
+  db2 close
+  sqlite3 db test.db
+  
+  do_execsql_test 1.$nm.1.8 {
+    SELECT * FROM x1
+  } {1 one 2 two 4 four}
+  
+  #-------------------------------------------------------------------------
+  
+  hct_reset_db
+  do_execsql_test 1.$nm.2.0 "
+    CREATE TABLE t1(a $int PRIMARY KEY, b CHAR(10)) $without_rowid;
+    WITH s(i) AS (
+        SELECT 1 UNION ALL SELECT i+1 FROM s WHERE i<6
+    )
+    INSERT INTO t1 SELECT i, hex(randomblob(50)) FROM s;
+  "
+  
+  do_execsql_test 1.$nm.2.1 {
+    DELETE FROM t1 WHERE a<5
+  }
+  
+  do_execsql_test 1.$nm.2.2 {
+    SELECT a FROM t1
+  } {5 6}
+  
+  do_execsql_test 1.$nm.2.3 {
+    SELECT a FROM t1 WHERE a=3
+  } {}
+  
+  do_execsql_test 1.$nm.2.4 {
+    INSERT INTO t1 VALUES(3, 'three');
+  }
+  
+  #-------------------------------------------------------------------------
+  
+  hct_reset_db
+  sqlite3 db2 test.db
+  do_execsql_test 1.$nm.3.0 "
+    CREATE TABLE t1(a $int PRIMARY KEY, b, c CHAR(10)) $without_rowid;
+    WITH s(i) AS (
+        SELECT 1 UNION ALL SELECT i+1 FROM s WHERE i<100
+    )
+    INSERT INTO t1 SELECT i, i, hex(randomblob(500)) FROM s;
+  "
+
+  do_execsql_test -db db2 1.$nm.3.0.1 {
+    SELECT a, b, length(c) FROM t1 WHERE a IN (1, 90);
+  } {
+    1  1 1000
+    90 90 1000
+  }
+  
+  do_execsql_test 1.$nm.3.1 {
+    BEGIN;
+      UPDATE t1 SET b = 'one' WHERE a=1;
+      UPDATE t1 SET b = 'many' WHERE a=90;
+  }
+  
+  do_execsql_test -db db2 1.$nm.3.2 {
+    DELETE FROM t1 WHERE a=90;
+  }
+
+  do_execsql_test -db db2 1.$nm.3.2.1 {
+    SELECT a, b, length(c) FROM t1 WHERE a IN (1, 90);
+  } {
+    1  1 1000
+  }
+
+  do_catchsql_test 1.$nm.3.3 {
+    COMMIT;
+  } {1 {database is locked}}
+  execsql ROLLBACK
+
+  do_execsql_test -db db2 1.$nm.3.4 {
+    SELECT a, b,  length(c) FROM t1 WHERE a = 1;
+  } {
+    1 1 1000
+  }
+  do_execsql_test -db db2 1.$nm.3.4 {
+    SELECT a, b, length(c) FROM t1 WHERE a = 90;
+  } {
+  }
+}
+
+#-------------------------------------------------------------------------
+# Test read/write conflicts.
+#
+  #"without_rowid" INT {WITHOUT ROWID} 
+  #"integer"       INTEGER {} 
+foreach {nm int without_rowid} { 
+  "int"           INT {} 
+} {
+  hct_reset_db
+  sqlite3 db2 test.db
+  do_execsql_test 2.$nm.1.0 "
+    CREATE TABLE x1(i $int PRIMARY KEY, j) $without_rowid;
+    INSERT INTO x1 VALUES(1, 'one');
+    INSERT INTO x1 VALUES(2, 'two');
+    INSERT INTO x1 VALUES(3, 'three');
+    INSERT INTO x1 VALUES(4, 'four');
+
+    CREATE TABLE x2(i $int PRIMARY KEY, j) $without_rowid;
+    INSERT INTO x2 VALUES(1, 'one');
+    INSERT INTO x2 VALUES(2, 'two');
+    INSERT INTO x2 VALUES(3, 'three');
+    INSERT INTO x2 VALUES(4, 'four');
+  "
+
+  do_execsql_test 2.$nm.1.1 {
+    BEGIN;
+      INSERT INTO x1 VALUES(5, 'five');
+      SELECT * FROM x2 WHERE i=3;
+  } {3 three}
+
+  do_execsql_test -db db2 2.$nm.1.2 {
+    DELETE FROM x2 WHERE i=3;
+  }
+
+  do_catchsql_test 2.$nm.1.3 {
+    COMMIT;
+  } {1 {database is locked}}
+  execsql ROLLBACK
+
+  do_execsql_test 2.$nm.1.4 {
+    REPLACE INTO x2 VALUES(2, 'TWO');
+  } 
+
+  do_execsql_test -db db2 2.$nm.1.5 {
+    SELECT * FROM x2 ORDER BY 1
+  } {1 one 2 TWO 4 four}
+}
+
+#-------------------------------------------------------------------------
+hct_reset_db
+sqlite3 db2 test.db
+do_execsql_test 3.0 {
+  CREATE TABLE t1(a INTEGER PRIMARY KEY, b);
+  CREATE TABLE t2(a INTEGER PRIMARY KEY, b);
+
+  INSERT INTO t1 VALUES(1, 'one'), (2, 'two'), (3, 'three');
+  INSERT INTO t2 VALUES(1, 'one'), (2, 'two'), (3, 'three');
+}
+
+do_execsql_test 3.1 {
+  BEGIN;
+    DELETE FROM t1 WHERE a=2;
+    SELECT * FROM t2;
+} {
+  1 one 2 two 3 three
+}
+
+do_execsql_test -db db2 3.2 {
+  BEGIN;
+    DELETE FROM t1 WHERE a=2;
+    DELETE FROM t2 WHERE a=2;
+  COMMIT;
+} {
+}
+
+do_catchsql_test 3.3 {
+  COMMIT
+} {1 {database is locked}}
+db eval ROLLBACK
+
+finish_test
+
+

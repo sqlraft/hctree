@@ -1,0 +1,110 @@
+# 2021 June 1
+#
+# The author disclaims copyright to this source code.  In place of
+# a legal notice, here is a blessing:
+#
+#    May you do good and not evil.
+#    May you find forgiveness for yourself and forgive others.
+#    May you share freely, never taking more than you give.
+#
+#*************************************************************************
+# This file implements regression tests for SQLite library.
+#
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+set testprefix hct_delete3
+
+hct_reset_db
+sqlite3 db2 test.db
+
+proc show_db_lists {} {
+
+  execsql_pp {
+    WITH map AS (
+      SELECT * FROM hctpgmap, hctdb 
+      WHERE logical_in_use AND hctpgmap.value=hctdb.pgno
+    ),
+
+    chain(type, s, l, c) AS (
+      SELECT pgtype, slot, slot, slot FROM map WHERE slot NOT IN (
+        SELECT peer FROM map
+      ) 
+      UNION ALL
+      SELECT type, s, peer, c || '->' || peer FROM chain, map WHERE l=slot
+    )
+
+    SELECT type, c FROM chain WHERE l NOT IN (
+      SELECT slot FROM map
+    );
+  }
+
+}
+
+proc show_db_entries {} {
+  execsql_pp {
+    SELECT slot, pgno, ikey, tid, rangetid, rangeoldpg 
+      FROM hctentry, hctpgmap 
+      WHERE slot>=33 AND logical_in_use AND pgno=value;
+  }
+}
+
+foreach {tn keytype} {
+  1 {INTEGER PRIMARY KEY}
+  2 {INT PRIMARY KEY}
+} {
+  hct_reset_db
+  sqlite3 db2 test.db
+
+  do_execsql_test 1.$tn.0 "
+    CREATE TABLE t1(x $keytype, y TEXT);
+  "
+  do_execsql_test 1.$tn.1 {
+    WITH s(i) AS (
+      VALUES(1) UNION ALL SELECT i+1 FROM s WHERE i<20
+    )
+    INSERT INTO t1 SELECT i, hex(randomblob(2)) FROM s;
+  }
+
+  do_execsql_test -db db2 1.$tn.2 {
+    BEGIN;
+      SELECT x FROM t1 ORDER BY x
+  } {1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20}
+  
+  do_execsql_test 1.$tn.3 {
+    DELETE FROM t1 WHERE x IN (3,4);
+  }
+  
+  do_execsql_test 1.$tn.4 {
+    DELETE FROM t1 WHERE x IN (5,6);
+  }
+  
+  do_execsql_test 1.$tn.5 {
+    DELETE FROM t1 WHERE x=9;
+  }
+  
+  do_execsql_test 1.$tn.6 {
+    DELETE FROM t1 WHERE x=1;
+  }
+  
+  show_db_lists
+  show_db_entries
+  
+  do_execsql_test 1.$tn.7 {
+    SELECT x FROM t1 ORDER BY x;
+  } {2 7 8 10 11 12 13 14 15 16 17 18 19 20}
+
+  do_execsql_test -db db2 1.$tn.8 {
+      SELECT x FROM t1 ORDER BY x;
+    END;
+  } {1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20}
+
+  #execsql_pp { SELECT * FROM hctpgmap }
+  #execsql_pp { SELECT * FROM hctentry }
+
+  db2 close
+  # break
+}
+
+finish_test
+

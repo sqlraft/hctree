@@ -12,6 +12,7 @@
 # Verify that WITHOUT ROWID tables work correctly when the PRIMARY KEY
 # has redundant columns.
 #
+# TESTRUNNER: puresql
 
 set testdir [file dirname $argv0]
 source $testdir/tester.tcl

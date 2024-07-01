@@ -8,6 +8,7 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: puresql
 #
 # This file implements regression tests for SQLite library. This file 
 # implements tests for range and LIKE constraints that use bound variables

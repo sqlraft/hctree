@@ -39,6 +39,8 @@
 # Bisecting shows that this problem was introduced in SQLite version 3.6.0
 # by check-in [8bbfa97837a74ef] on 2008-06-15. 
 #
+# TESTRUNNER: puresql
+#
 
 set testdir [file dirname $argv0]
 source $testdir/tester.tcl

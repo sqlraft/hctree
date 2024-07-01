@@ -1,0 +1,232 @@
+# 2021 January 01
+#
+# The author disclaims copyright to this source code.  In place of
+# a legal notice, here is a blessing:
+#
+#    May you do good and not evil.
+#    May you find forgiveness for yourself and forgive others.
+#    May you share freely, never taking more than you give.
+#
+#*************************************************************************
+# This file implements regression tests for SQLite library.
+#
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+set testprefix hct_pman1
+
+hct_reset_db
+
+do_execsql_test 1.0 {
+  CREATE TABLE t1(a INTEGER PRIMARY KEY, b BLOB);
+  CREATE INDEX i1 ON t1(b);
+}
+
+
+# Return a list of logical page numbers linked into list structures
+# within the database.
+#
+proc logical_in_use {{db db}} {
+  $db eval {
+    WITH roots(pgno) AS (
+        SELECT 1 UNION ALL 
+        SELECT 2 UNION ALL 
+        SELECT rootpage FROM sqlite_schema
+    ),
+  
+    leftchilds(pgno, leftchild) AS (
+      SELECT slot, child FROM hctpgmap, hctentry WHERE 
+          logical_in_use 
+      AND hctpgmap.value=hctentry.pgno 
+      AND hctentry.entry=0 
+      AND child IS NOT NULL
+    ),
+  
+    lefts AS (
+      SELECT pgno FROM roots
+      UNION ALL
+      SELECT leftchild FROM lefts, leftchilds WHERE lefts.pgno=leftchilds.pgno
+    ),
+  
+    allpages(pgno) AS (
+      SELECT pgno FROM lefts
+      UNION ALL
+      SELECT peer FROM hctpgmap, hctdb, allpages WHERE
+          logical_in_use 
+      AND hctpgmap.value=hctdb.pgno 
+      AND allpages.pgno=hctpgmap.slot
+      AND peer>0
+    )
+  
+    SELECT * FROM allpages ORDER BY 1
+  }
+}
+
+proc show_db_lists {} {
+
+  execsql_pp {
+    WITH map AS (
+      SELECT * FROM hctpgmap, hctdb 
+      WHERE logical_in_use AND hctpgmap.value=hctdb.pgno
+    ),
+
+    chain(type, s, l, c) AS (
+      SELECT pgtype, slot, slot, slot FROM map WHERE slot NOT IN (
+        SELECT peer FROM map
+      ) 
+      UNION ALL
+      SELECT type, s, peer, c || '->' || peer FROM chain, map WHERE l=slot
+    )
+
+    SELECT type, c FROM chain WHERE l NOT IN (
+      SELECT slot FROM map
+    );
+  }
+
+}
+
+proc dumpdb {} {
+  if 0 {
+  execsql_pp { 
+    SELECT * FROM hctpgmap, hctdb WHERE logical_in_use AND hctpgmap.pgno=hctdb.pgno
+  }
+  }
+
+  if 0 {
+    execsql_pp { 
+      SELECT * FROM hctpgmap, hctentry WHERE logical_in_use AND hctpgmap.value=hctentry.pgno
+    }
+  }
+
+  show_db_lists
+
+  execsql_pp {
+    SELECT 'physical_in_use' AS type, count(*) 
+    FROM hctpgmap WHERE physical_in_use;
+    SELECT 'logical_in_use' AS type, count(*) 
+    FROM hctpgmap WHERE logical_in_use;
+    SELECT 'logical_evicted' AS type, count(*) 
+    FROM hctpgmap WHERE logical_evicted;
+  }
+
+  execsql_pp {
+    WITH fname(i, s) AS ( VALUES
+        (3, 'logical_eof'), (4, 'physical_eof'), 
+        (5, 'transid'), (6, 'commitid')
+    )
+    SELECT s, value FROM hctpgmap, fname WHERE slot=i;
+  }
+
+  execsql_pp {
+    SELECT type, location, count(*) FROM hctpman GROUP BY 1, 2;
+    -- SELECT * FROM hctpman
+  }
+}
+
+proc do_evictinuse_test {tn} {
+  set nBad [db one {
+    SELECT count(*) FROM hctpgmap WHERE logical_in_use AND logical_evicted
+  }]
+
+  uplevel [list do_test $tn [list expr $nBad] 0]
+}
+
+proc do_pageleak_test {tn} {
+return
+
+  # Obtain a list of logical pages in use by traversing the tree 
+  # structures (variable $lLogic). Then get the list of pages for
+  # which the logical_in_use flag is set (variable $lLogic2). Check 
+  # that they match.
+  set lLogic  [logical_in_use]
+  set lLogic2 [db eval {
+    SELECT slot FROM hctpgmap WHERE logical_in_use ORDER BY 1
+  }]
+  uplevel [list do_test $tn.0 [list set {} $lLogic2] $lLogic]
+
+  # Check that there are the same number of physical as logical pages
+  # in use. This is not generally true - but it is true for databases
+  # with no overflow pages.
+  set nPhys [db one {SELECT count(*) FROM hctpgmap WHERE physical_in_use}]
+  set nLog  [db one {SELECT count(*) FROM hctpgmap WHERE logical_in_use}]
+  uplevel [list do_test $tn.1 [list expr $nPhys] $nLog]
+
+  if {$nLog!=$nPhys} {
+    execsql_pp {
+      SELECT slot AS "leaked_physical_page" FROM hctpgmap WHERE 
+        physical_in_use AND slot NOT IN (
+          SELECT value FROM hctpgmap WHERE logical_in_use
+        )
+    }
+  }
+
+  return
+
+  # Check that each physical page not marked as IN_USE on disk
+  # is managed by the page-manager.
+  set lPhys [db eval {
+    SELECT slot FROM hctpgmap WHERE physical_in_use=0 AND slot<=(
+      SELECT value from hctpgmap WHERE slot=4
+    )
+  }]
+  set lPhys2 [db eval {
+    SELECT pgno FROM hctpman WHERE type='physical' ORDER BY 1
+  }]
+  uplevel [list do_test $tn.2 [list set res $lPhys2] $lPhys]
+
+  # Check that each logical page not marked as IN_USE on disk
+  # is managed by the page-manager.
+  set lLog [db eval {
+    SELECT slot FROM hctpgmap WHERE logical_in_use=0 AND slot<=(
+      SELECT value from hctpgmap WHERE slot=3
+    ) AND (slot=1 OR slot=2 OR slot>=33)
+  }]
+  set lLog2 [db eval {
+    SELECT pgno FROM hctpman WHERE type='logical' ORDER BY 1
+  }]
+  uplevel [list do_test $tn.3 [list set res $lLog2] $lLog]
+}
+
+set nStep 1000
+for {set ii 1} {$ii <= $nStep} {incr ii} {
+  do_execsql_test 1.$ii {
+    REPLACE INTO t1 VALUES($ii%500, randomblob(100));
+  }
+  do_pageleak_test 1.$ii.pageleak
+} 
+
+integrity_check 1.$ii.ic
+dumpdb
+
+set nStep 1000
+for {set ii 1} {$ii <= $nStep} {incr ii} {
+  sqlite3_hct_cas_failure [expr ($ii%10)+1] 0
+  do_execsql_test 2.$ii {
+    REPLACE INTO t1 VALUES($ii%500, randomblob(100));
+  }
+  sqlite3_hct_cas_failure 0 0
+
+  do_pageleak_test 2.$ii.pageleak
+  do_evictinuse_test 2.$ii.evictinuse
+} 
+
+integrity_check 2.$ii.ic
+
+do_execsql_test 3.0 {
+  UPDATE hctpgmap SET logical_evicted=1 WHERE slot IN (
+    SELECT peer FROM hctpgmap, hctdb WHERE 
+      logical_in_use AND 
+      hctpgmap.value=hctdb.pgno 
+  )
+}
+
+do_execsql_test 3.1 {
+  UPDATE t1 SET b = randomblob(100) WHERE a = ( SELECT max(a) FROM t1 )
+}
+
+do_pageleak_test 3.pageleak
+
+finish_test
+
+
+

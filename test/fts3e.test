@@ -8,6 +8,8 @@
 #    May you share freely, never taking more than you give.
 #
 #*************************************************************************
+# TESTRUNNER: hct
+#
 # These tests exercise the various types of fts3 cursors.
 #
 # $Id: fts3e.test,v 1.1 2008/07/29 20:24:46 shess Exp $

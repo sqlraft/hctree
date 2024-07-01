@@ -8,6 +8,7 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: hct
 #
 # This file containst tests to verify that ROLLBACK or ROLLBACK TO 
 # operations interact correctly with ongoing SELECT statements.

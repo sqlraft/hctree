@@ -5,8 +5,8 @@ namespace eval trd {
   variable tcltest
   variable extra
   variable all_configs
+  variable script
   variable build
-
 
   # Tcl tests to run for various builds.
   #
@@ -363,6 +363,49 @@ namespace eval trd {
 
 }
 
+#-------------------------------------------------------------------------
+# Some test scripts include a line like:
+#
+#     testrunner: property1 property2...
+#
+# This must occur in the first 100 lines of the script.
+#
+# This block of code populates the trd::script array such that each key
+# is the full path to a tcl test script, and the value is the list of
+# properties read from the file. e.g.
+#
+proc trd_script_load {} {
+  variable ::trd::script
+
+  if {[array names ::trd::script]==[list]} {
+    set testdir [file dirname [info script]]
+    foreach path [list                   \
+      $testdir/*.test                    \
+      $testdir/../ext/rtree/*.test       \
+      $testdir/../ext/fts5/test/*.test   \
+      $testdir/../ext/expert/*.test      \
+      $testdir/../ext/lsm1/test/*.test   \
+      $testdir/../ext/recover/*.test     \
+      $testdir/../ext/rbu/*.test         \
+    ] {
+      foreach f [glob $path] {
+        set f [file normalize $f]
+        set fd [open $f]
+        set properties [list]
+        set script($f) [list]
+        for {set ii 0} {![eof $fd] && $ii<100} {incr ii} {
+          set line [gets $fd]
+          if {[string match -nocase *testrunner:* $line]} {
+            regexp -nocase {.*testrunner:(.*)} $line -> properties
+            lappend script($f) {*}$properties
+          }
+        }
+        close $fd
+      }
+    }
+  }
+}
+
 
 #-------------------------------------------------------------------------
 proc trd_import {} {
@@ -370,6 +413,7 @@ proc trd_import {} {
     variable ::trd::tcltest
     variable ::trd::extra
     variable ::trd::all_configs
+    variable ::trd::script
     variable ::trd::build
   }
 }
@@ -457,6 +501,23 @@ proc trd_fuzztest_data {} {
 proc trd_all_configs {} {
   trd_import
   set all_configs
+}
+
+# Return the list of properties for script file $file.
+#
+proc trd_script_properties {file} {
+  trd_import
+  trd_script_load
+  if {[info exists script($file)]} {
+    return $script($file)
+  }
+  return ""
+}
+
+proc trd_all_scripts {} {
+  trd_import
+  trd_script_load
+  lsort [array names script]
 }
 
 proc trimscript {text} {

@@ -1,0 +1,245 @@
+# 2023 May 17
+#
+# The author disclaims copyright to this source code.  In place of
+# a legal notice, here is a blessing:
+#
+#    May you do good and not evil.
+#    May you find forgiveness for yourself and forgive others.
+#    May you share freely, never taking more than you give.
+#
+#*************************************************************************
+#
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+set testprefix hct_journal1
+
+hct_reset_db
+do_execsql_test 1.0 {
+  CREATE TABLE t1(a);
+}
+do_test 1.1 {
+  catch_hct_journal_init db
+} {1 {not an empty database}}
+
+db close
+sqlite3 db test.db
+
+do_test 1.2 {
+  catch_hct_journal_init db
+} {1 {not an empty database}}
+
+hct_reset_db
+do_execsql_test 1.3.1 {
+  BEGIN;
+}
+do_test 1.3.2 {
+  catch_hct_journal_init db
+} {1 {open transaction on database}}
+do_execsql_test 1.3.3 {
+  COMMIT;
+}
+
+reset_db
+do_test 1.4 {
+  catch_hct_journal_init db
+} {1 {not an hct database}}
+
+hct_reset_db
+do_test 1.5 {
+  catch_hct_journal_init db
+} {0 {}}
+
+do_execsql_test 1.6 {
+  SELECT cid, schemacid, quote(hash) FROM sqlite_hct_baseline
+} {
+  6 0 X'00000000000000000000000000000000'
+}
+
+do_execsql_test 1.7 {
+  PRAGMA table_info = sqlite_hct_journal
+} {
+  0 cid            INTEGER 0 {} 1 
+  1 schema         TEXT 0 {} 0 
+  2 data           BLOB 0 {} 0 
+  3 schemacid      INTEGER 0 {} 0 
+  4 hash           BLOB 0 {} 0 
+  5 tid            INTEGER 0 {} 0 
+  6 validcid       INTEGER 0 {} 0
+}
+
+do_catchsql_test 1.8 {
+  INSERT INTO sqlite_hct_journal DEFAULT VALUES;
+} {1 {attempt to write a readonly database}}
+do_catchsql_test 1.9 {
+  INSERT INTO sqlite_hct_baseline DEFAULT VALUES;
+} {1 {attempt to write a readonly database}}
+
+db close
+sqlite3 db test.db
+
+do_catchsql_test 1.10 {
+  INSERT INTO sqlite_hct_journal DEFAULT VALUES;
+} {1 {attempt to write a readonly database}}
+do_catchsql_test 1.11 {
+  INSERT INTO sqlite_hct_baseline DEFAULT VALUES;
+} {1 {attempt to write a readonly database}}
+
+#-------------------------------------------------------------------------
+hct_reset_db
+catch_hct_journal_init db
+sqlite3_hct_journal_setmode db LEADER
+
+do_execsql_test 2.0 {
+  CREATE TABLE t1(x, y);
+  INSERT INTO t1 VALUES(1, 2);
+}
+
+do_execsql_test 2.1 {
+  SELECT cid FROM sqlite_hct_journal
+} {7 8}
+
+db close
+sqlite3 db test.db
+sqlite3_hct_journal_setmode db LEADER
+
+do_execsql_test 2.2 {
+  INSERT INTO t1 VALUES(3, 4);
+}
+
+do_execsql_test 2.3 {
+  SELECT cid FROM sqlite_hct_journal
+} {7 8 9}
+
+sqlite3 db2 test.db
+do_execsql_test -db db2 2.4 {
+  INSERT INTO t1 VALUES(5, 6);
+}
+db2 close
+
+do_execsql_test 2.5 {
+  SELECT cid FROM sqlite_hct_journal
+} {7 8 9 10}
+
+#-------------------------------------------------------------------------
+hct_reset_db
+catch_hct_journal_init db
+sqlite3_hct_journal_setmode db LEADER
+
+do_execsql_test 3.1.0 {
+  CREATE TABLE t1(x PRIMARY KEY, y) WITHOUT ROWID;
+  INSERT INTO t1 VALUES('a', 'one');
+  DELETE FROM t1 WHERE x='a';
+}
+
+do_execsql_test 3.1.1 {
+  SELECT cid, hct_journal_entry(data) FROM sqlite_hct_journal
+} {
+  7 {}
+  8 {t1: ins ('a','one')}
+  9 {t1: del ('a')}
+}
+
+do_execsql_test 3.1.2 {
+  BEGIN CONCURRENT;
+    INSERT INTO t1 VALUES(14, 15);
+    INSERT INTO t1 VALUES(16, 17);
+    INSERT INTO t1 VALUES(18, 19);
+  COMMIT;
+
+  SELECT hct_journal_entry(data) FROM sqlite_hct_journal 
+  ORDER BY cid DESC LIMIT 1;
+} {
+  {t1: ins (14,15) t1: ins (16,17) t1: ins (18,19)}
+}
+
+hct_reset_db
+catch_hct_journal_init db
+sqlite3_hct_journal_setmode db LEADER
+
+do_execsql_test 3.2.0 {
+  CREATE TABLE t1(x PRIMARY KEY, y);
+  INSERT INTO t1 VALUES('a', 'one');
+  DELETE FROM t1 WHERE x='a';
+}
+
+do_execsql_test 3.2.1 {
+  SELECT cid, schema, hct_journal_entry(data) FROM sqlite_hct_journal
+} {
+  7 {CREATE TABLE t1(x PRIMARY KEY, y);} {}
+  8 {}                                   {t1: ins 1/('a','one')}
+  9 {}                                   {t1: del 1}
+}
+
+do_execsql_test 3.2.2 {
+  BEGIN CONCURRENT;
+    INSERT INTO t1 VALUES(14, 15);
+    INSERT INTO t1 VALUES(16, 17);
+    INSERT INTO t1 VALUES(18, 19);
+  COMMIT;
+
+  SELECT hct_journal_entry(data) FROM sqlite_hct_journal 
+  ORDER BY cid DESC LIMIT 1;
+} {
+  {t1: ins 1/(14,15) t1: ins 2/(16,17) t1: ins 3/(18,19)}
+}
+
+#-------------------------------------------------------------------------
+hct_reset_db
+catch_hct_journal_init db
+sqlite3_hct_journal_setmode db LEADER
+
+do_execsql_test 4.0 {
+  CREATE TABLE t1(a, b);
+  INSERT INTO t1 VALUES(1, 2);
+  CREATE TABLE t2(a, b);
+  INSERT INTO t2 VALUES(1, 2);
+  CREATE TABLE t3(a, b);
+  INSERT INTO t3 VALUES(1, 2);
+  ALTER TABLE t3 RENAME TO t4;
+}
+db close
+sqlite3 db test.db
+sqlite3_hct_journal_setmode db LEADER
+
+do_execsql_test 4.1 {
+  INSERT INTO t4 VALUES(3, 4);
+}
+
+#-------------------------------------------------------------------------
+hct_reset_db
+catch_hct_journal_init db
+sqlite3_hct_journal_setmode db LEADER
+
+do_execsql_test 5.0 {
+  CREATE TABLE t1(a INTEGER PRIMARY KEY, b);          -- cid=7
+  INSERT INTO t1 VALUES(1, 'one');                    -- cid=8
+  INSERT INTO t1 VALUES(2, 'two');                    -- cid=9
+  INSERT INTO t1 VALUES(3, 'three');                  -- cid=10
+  INSERT INTO t1 VALUES(4, 'four');                   -- cid=11
+  INSERT INTO t1 VALUES(5, 'five');                   -- cid=12
+}
+
+forcedelete test.db2
+sqlite3 db2 file:test.db2?hctree=1 -uri 1
+catch_hct_journal_init db2
+
+do_test 5.1 {
+  db eval { 
+    SELECT cid, schema, data, schemacid FROM sqlite_hct_journal 
+    WHERE cid IN (7, 8, 11, 12);
+  } {
+    set rc [sqlite3_hct_journal_write db2 $cid $schema $data $schemacid]
+  }
+} {}
+
+do_execsql_test -db db2 5.2 {
+  SELECT * FROM t1;
+} {1 one}
+
+do_execsql_test -db db2 5.3 {
+  SELECT cid FROM sqlite_hct_journal
+} {7 8 11 12}
+
+finish_test
+

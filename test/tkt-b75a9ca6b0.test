@@ -8,6 +8,7 @@
 #    May you share freely, never taking more than you give.
 #
 #*************************************************************************
+# TESTRUNNER: hct
 #
 # Test that ticket [b75a9ca6b0] has been fixed.
 #

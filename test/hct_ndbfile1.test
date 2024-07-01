@@ -1,0 +1,90 @@
+# 2023 January 06
+#
+# The author disclaims copyright to this source code.  In place of
+# a legal notice, here is a blessing:
+#
+#    May you do good and not evil.
+#    May you find forgiveness for yourself and forgive others.
+#    May you share freely, never taking more than you give.
+#
+#*************************************************************************
+#
+# 
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+set testprefix hct_ndbfile1
+
+db close
+foreach f [glob test.db*] { forcedelete $f }
+hct_reset_db
+
+do_execsql_test 1.0 {
+  PRAGMA hct_ndbfile = 4;
+} {4}
+
+do_execsql_test 1.1 {
+  PRAGMA hct_ndbfile;
+  PRAGMA page_size = 1024;
+} {4}
+
+do_execsql_test 1.2 {
+  CREATE TABLE t1(a, b);
+}
+
+do_test 1.3 {
+  set ret [list]
+  foreach f {test.db test.db-1 test.db-2 test.db-3} {
+    lappend ret [expr {[file size $f]>256*1024}]
+  }
+  set ret
+} {1 0 0 0}
+
+do_execsql_test 1.4 {
+  PRAGMA hct_ndbfile = 8;
+} {4}
+
+do_execsql_test 1.5 {
+  PRAGMA hct_ndbfile;
+} {4}
+
+do_test 1.6 {
+  lsort [glob test.db*]
+} {test.db test.db-1 test.db-2 test.db-3 test.db-log-0 test.db-pagemap}
+
+do_execsql_test 1.7 {
+  WITH s(i) AS (
+    VALUES(1) UNION ALL SELECT i+1 FROM s WHERE i<10000
+  )
+  INSERT INTO t1 SELECT randomblob(400), randomblob(400) FROM s;
+}
+
+do_test 1.8 {
+  set ret [list]
+  foreach f {test.db test.db-1 test.db-2 test.db-3} {
+    lappend ret [expr {[file size $f]>2*1024*1024}]
+  }
+  set ret
+} {1 1 1 1}
+
+do_execsql_test 1.9 {
+  PRAGMA integrity_check
+} ok
+
+do_execsql_test 1.10 {
+  CREATE INDEX i1 ON t1(a, b);
+  PRAGMA integrity_check;
+} ok
+
+db close
+sqlite3 db test.db
+do_execsql_test 1.11 {
+  PRAGMA integrity_check;
+} ok
+
+
+
+finish_test
+
+
+

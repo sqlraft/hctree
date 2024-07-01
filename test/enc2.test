@@ -8,6 +8,8 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: hct
+#
 # This file implements regression tests for SQLite library.  The focus of
 # this file is testing the SQLite routines used for converting between the
 # various suported unicode encodings (UTF-8, UTF-16, UTF-16le and
@@ -462,11 +464,12 @@ do_test enc2-7.3 {
     CREATE TABLE abc(a, b, c);
   } db2
 } {}
+set root_page_number [expr {[permutation]=="hct"?33:($AUTOVACUUM?3:2)}]
 do_test enc2-7.4 {
   execsql {
     SELECT * FROM sqlite_master;
   }
-} "table abc abc [expr $AUTOVACUUM?3:2] {CREATE TABLE abc(a, b, c)}"
+} "table abc abc $root_page_number {CREATE TABLE abc(a, b, c)}"
 do_test enc2-7.5 {
   execsql {
     PRAGMA encoding;

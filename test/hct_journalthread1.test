@@ -1,0 +1,70 @@
+# 2023 August 3
+#
+# The author disclaims copyright to this source code.  In place of
+# a legal notice, here is a blessing:
+#
+#    May you do good and not evil.
+#    May you find forgiveness for yourself and forgive others.
+#    May you share freely, never taking more than you give.
+#
+#*************************************************************************
+# This file implements regression tests for SQLite library.
+#
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+source $testdir/hct_common.tcl
+set testprefix hct_thread1
+
+hct_reset_db
+catch_hct_journal_init db
+sqlite3_hct_journal_setmode db LEADER
+
+do_execsql_test 1.0 { 
+  CREATE TABLE t1(i INTEGER PRIMARY KEY, a, b);
+  WITH s(i) AS (
+    SELECT 1 UNION ALL SELECT i+1 FROM s WHERE i<100
+  )
+  INSERT INTO t1 SELECT i, NULL, NULL FROM s;
+}
+
+hct_copy_db test.db test.db2
+sqlite_thread_test T test.db
+
+T configure -follower test.db2
+T configure -nsecond 2
+T configure -jtruncate 256
+
+for {set tt 1} {$tt <= 20} {incr tt} {
+  T thread w$tt {
+    BEGIN CONCURRENT;
+      UPDATE t1 SET a = hex(frandomblob(16)), b = hex(frandomblob(16)) 
+        WHERE i = 1+frandomid(100);
+    COMMIT;
+  }
+}
+
+do_test 1.1 {
+  T run
+} {}
+
+puts [T result]
+sqlite3 db2 test.db2
+
+test_dbs_match 1.2 "SELECT * FROM t1 ORDER BY i"
+test_dbs_match 1.3 "SELECT cid FROM sqlite_hct_journal"
+
+if 0 {
+  execsql_pp {
+    SELECT cid, schema, hct_journal_entry(data), schemacid FROM sqlite_hct_journal
+  }
+  execsql_pp {
+    SELECT cid, schema, hct_journal_entry(data), schemacid FROM sqlite_hct_journal
+  } db2
+}
+
+T destroy
+db close
+
+finish_test
+

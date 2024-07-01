@@ -8,6 +8,8 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: puresql
+#
 # Test that deterministic scalar functions passed constant arguments
 # are used with stat4 data.
 #

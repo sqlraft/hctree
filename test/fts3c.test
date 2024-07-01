@@ -8,6 +8,8 @@
 #    May you share freely, never taking more than you give.
 #
 #*************************************************************************
+# TESTRUNNER: hct
+#
 # This file exercises some new testing functions in the FTS3 module,
 # and then uses them to do some basic tests that FTS3 is internally
 # working as expected.

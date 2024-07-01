@@ -10,7 +10,8 @@
 #***********************************************************************
 # This file implements regression tests for SQLite library. 
 #
-# $Id: selectB.test,v 1.10 2009/04/02 16:59:47 drh Exp $
+# TESTRUNNER: puresql
+#
 
 set testdir [file dirname $argv0]
 source $testdir/tester.tcl

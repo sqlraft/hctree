@@ -24,6 +24,8 @@
 #include "sqlite3.h"
 #include <assert.h>
 
+#include "sqliteInt.h"
+
 /* These functions are implemented in main.c. */
 extern const char *sqlite3ErrName(int);
 

@@ -1,0 +1,50 @@
+# 2023 January 06
+#
+# The author disclaims copyright to this source code.  In place of
+# a legal notice, here is a blessing:
+#
+#    May you do good and not evil.
+#    May you find forgiveness for yourself and forgive others.
+#    May you share freely, never taking more than you give.
+#
+#*************************************************************************
+#
+# Test that "BEGIN" and "BEGIN CONCURRENT" are handled correctly.
+# 
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+set testprefix hct_begin1
+
+hct_reset_db
+sqlite3 db2 test.db
+
+do_execsql_test 1.0 {
+  CREATE TABLE t1(a INTEGER PRIMARY KEY, b);
+  INSERT INTO t1 VALUES(1, 'one'), (2, 'two'), (3, 'three'), (4, 'four');
+}
+
+foreach {tn b res} {
+  1 "BEGIN"            {1 {database is locked}}
+  2 "BEGIN CONCURRENT" {0 {}}
+} {
+  do_execsql_test -db db 1.$tn.1 "
+    $b;
+    DELETE FROM t1 WHERE a=$tn;
+  "
+
+  do_execsql_test -db db2 1.$tn.2 {
+    INSERT INTO t1 VALUES(NULL, 'new row');
+  }
+
+  do_catchsql_test 1.$tn.3 {
+    COMMIT
+  } $res
+
+  catchsql { ROLLBACK }
+}
+
+finish_test
+
+
+

@@ -11,7 +11,7 @@
 # This file implements regression tests for SQLite library.  The
 # focus of this file is testing corner cases of the INSERT statement.
 #
-# $Id: insert3.test,v 1.9 2009/04/23 14:58:40 danielk1977 Exp $
+# TESTRUNNER: puresql
 
 set testdir [file dirname $argv0]
 source $testdir/tester.tcl

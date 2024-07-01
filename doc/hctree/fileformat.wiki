@@ -1,0 +1,329 @@
+
+  *   [#overall | 1. Overall Structure]
+  *   [#header  | 2. Header File Format]
+  *   [#pagemap | 3. Page Map Format]
+  *   [#db      | 4. Database File Format]
+    <ul>
+      <li>[#intkey_leaf | 4.1. Intkey Leaf Page Format]
+      <li>[#intkey_node | 4.2. Intkey Internal Node Format]
+      <li>[#index_leaf  | 4.3. Index Leaf Page Format]
+      <li>[#index_node  | 4.4. Index Internal Node Format]
+      <li>[#overflow    | 4.5. Overflow Chain Format]
+      <li>[#history     | 4.6. History Fan Format]
+    </ul>
+  *   [#logfile | 5. Log File Format]
+
+<h1 id=overall>1. Overall Structure </h1>
+
+Each database consists of at least three files:
+
+  *  A database file, containing database file pages, and
+  *  A page-map file, containing the page-map.
+
+Additionally, there may be one or more client log files.
+
+<h1 id=header> 2. Header Page Format </h1>
+
+The database header consists of two pages using the same format.
+
+<table border=1 cellpadding=5 width=90%>
+  <tr><th>Byte Offset <th>Size <th width=80%> Description
+  <tr><td>0  <td>32 <td>Magic string identifying an hctree database - "hctree
+  version 01 database file" followed by a nul-terminator 0x00 byte.
+  <tr><td>32 <td>8  <td>Checksum for header page.
+  <tr><td>40 <td>4  <td>Constant Value 1234. To identify endianness of database.
+  <tr><td>44 <td>4  <td>Page size in bytes.
+  <tr><td>48 <td>8  <td>Guaranteed safe recovery transaction id.
+</table>
+
+<h1 id=pagemap> 3. Page Map Format </h1>
+
+Page-map slots 3-32, inclusive, are not used for a logical-to-physical page
+mapping. Instead, the lower 56-bits of these slots are used as follows:
+
+<table border=1 cellpadding=5 width=90%>
+  <tr><th>Slot<th>Use 
+  <tr><td>3   <td>Largest logical page number allocated in database.
+  <tr><td>4   <td>Largest physical page number allocated in database.
+  <tr><td>5   <td>Largest transaction id allocated so far.
+  <tr><td>6   <td>Largest commit id allocated so far.
+</table>
+
+<h1 id=db> 4. Database File Format </h1>
+
+Both logical and physical database pages are numbered starting from 1. Each
+database page is <i>pgsz</i> bytes in size, where <i>pgsz</i> is determined by
+the value stored in the header file.
+
+There are 5 types of database page:
+
+  *  Intkey Leaf Pages
+  *  Intkey Internal Node Pages
+  *  Index Leaf Pages
+  *  Index Internal Node Pages
+  *  Overflow Pages
+
+All pages begin with an 8 byte page header:
+
+<table border=1 cellpadding=5 width=90%>
+  <tr><th>Byte Offset <th>Size <th width=80%> Description
+  <tr><td>0 <td>1 <td> Least-signicant nibble stores the page type:
+  *  0x01 - Intkey page.
+  *  0x03 - Index pages.
+  *  0x05 - Overflow page. 
+  *  0x06 - History fan page.
+
+Other nibble contains flags:
+  *  0x80 - HCT_PAGETYPE_LEFTMOST (set for leftmost page in each list)
+  <tr><td>1 <td>1 <td> Distance between list and leaves. For leaves, 0, for
+                        parents of leaves, 1, and so on)
+  <tr><td>2 <td>2 <td> Number of entries on page (<i>nEntry</i> below).
+  <tr><td>4 <td>4 <td> Peer page number.
+</table>
+
+<h2 id=intkey_leaf> 4.1. Intkey Leaf Page Format</h2>
+Intkey leaf page format:
+
+<center><verbatim type="pikchr">
+boxht=0.2 ; boxwid=0.6 ; linewid=0.2
+
+# total width is 7.5
+PGHDR: box "page hdr"        wid 0.8
+LEHDR: box "leaf hdr"        wid 1.0
+ARRAY:box "entry array"      wid 1.2
+box "free space"             wid 1.5
+box "record area"            wid 3.0
+
+text "8 bytes" at PGHDR - (0, 0.2)
+text "16 bytes" at LEHDR - (0, 0.2)
+text "nEntry x 16 bytes" at ARRAY - (0, 0.2)
+</verbatim></center>
+
+Following the page header, the 16 byte leaf header:
+
+<table border=1 cellpadding=5 width=90%>
+  <tr><th>Byte Offset <th>Size <th width=80%> Description
+  <tr><td>8 <td>2 <td> number of bytes of free space between the end of 
+    header array and the first entry within the record area (the region
+    marked "free space" in the diagram above).
+  <tr><td>10 <td>2 <td> number of bytes of free space (in total) within
+    record area.
+  <tr><td>12 <td>4 <td> Unused.
+</table>
+
+Following the free-space header, an array of <i>nEntry</i> 16-byte entries. 
+Each 16-byte entry is comprised of the following:
+
+  *  4-byte record size (in bytes).
+  *  2-byte record offset (from start of page).
+  *  1-byte flags field. Flags are HAS_TID, HAS_OLD, HAS_OVFL and IS_DELETE.
+  *  1-byte unused.
+  *  8-byte rowid value.
+
+Each record within the record area consists of:
+
+  *  If HAS_TID is set, an 8-byte transaction id.
+  *  If HAS_RANGETID is set, an  8-byte transaction id.
+  *  If HAS_OLD is set, a 4-byte "old" physical page number.
+  *  If HAS_OVFL is set, a 4-byte physical overflow page number.
+  *  The part of the record stored on the main page.
+
+The part of the record stored on the main page is calculated using:
+
+<verbatim>
+        nMax  = pgsz - 8 - 16 - 16 - 20;    /* max record that fits on page */
+        nMaxO = nMax - 4;                   /* max record with ovfl that fits */
+        nMin  = pgsz / 8;                   /* min prefix to store on page */
+
+        if( nRecord <= nMax ){
+          nLocal = nRecord;
+        }else{ 
+          nLocal = nRecord % (pgsz-8);
+          if( nLocal < nMin || nLocal > nMaxO ){
+            nLocal = nMin;
+          }
+        }
+</verbatim></center>
+
+
+<h2 id=intkey_node> 4.2. Intkey Internal Node Format </h2>
+
+<center><verbatim type="pikchr">
+boxht=0.2 ; boxwid=0.6 ; linewid=0.2
+
+# total width is 7.5
+PGHDR: box "page hdr"        wid 0.8
+ARRAY:box "entry array"      wid 4.2
+box "free space"             wid 2.5
+
+text "8 bytes" at PGHDR - (0, 0.2)
+text "nEntry x 16 bytes" at ARRAY - (0, 0.2)
+</verbatim></center>
+
+Each entry on an intkey internal node page consists of an 8 byte rowid 
+followed by a 4 byte logical page-id, and is padded out to 16 bytes.
+The maximum number of entries on an intkey internal node page is
+therefore:
+
+<verbatim>
+        nMax = ((pgsz-8) / 16)
+</verbatim></center>
+
+<h2 id=index_leaf> 4.3. Index Leaf Page Format </h2>
+
+<center><verbatim type="pikchr">
+boxht=0.2 ; boxwid=0.6 ; linewid=0.2
+
+# total width is 7.5
+PGHDR: box "page hdr"        wid 0.8
+LEHDR: box "leaf hdr"        wid 1.0
+ARRAY:box "entry array"      wid 1.2
+box "free space"             wid 1.5
+box "record area"            wid 3.0
+
+text "8 bytes" at PGHDR - (0, 0.2)
+text "24 bytes" at LEHDR - (0, 0.2)
+text "nEntry x 8 bytes" at ARRAY - (0, 0.2)
+</verbatim></center>
+
+Index leaf pages have a 24 byte leaf header immediately following the page
+header. See the <a href=#intkey_leaf>intkey leaf page format</a> section for
+details.
+
+Immediately following the free-space header is an <i>nEntry</i> entry array
+of 8-byte entries. Each entry consists of:
+
+  *  A 4-byte record size value,
+  *  A 2-byte record offset, and
+  *  A 1-byte flags field (flags are HAS_TID, HAS_OLD and HAS_OVFL).
+  *  1-byte unused.
+
+Each record within the record area consist of:
+
+  *  If HAS_TID is set, an 8-byte transaction id.
+  *  If HAS_RANGETID is set, an  8-byte transaction id.
+  *  If HAS_OLD is set, a 4-byte "old" physical page number.
+  *  If HAS_OVFL is set, a 4-byte overflow page number.
+  *  The part of the record stored on the main page.
+
+just as those on intkey leaf pages do. The part of the record stored on the
+main page is calculated using:
+
+<verbatim>
+        if( nRecord <= (pgsz-16-8-12) ){
+          nLocal = nRecord;
+        }else{ 
+          nLocal = nRecord % (pgsz-8);
+          if( nLocal < (pgsz/16) || nLocal > (pgsz-16-8-16) ){
+            nLocal = pgsz/16;
+          }
+        }
+</verbatim></center>
+
+
+<h2 id=index_node> 4.4. Index Internal Node Page Format </h2>
+
+<center><verbatim type="pikchr">
+boxht=0.2 ; boxwid=0.6 ; linewid=0.2
+
+# total width is 7.5
+PGHDR: box "page hdr"        wid 0.8
+INHDR: box "i-n hdr"         wid 0.6
+ARRAY:box "entry array"      wid 1.2
+box "free space"             wid 1.5
+box "record area"            wid 3.4
+
+text "8 bytes" at PGHDR - (0, 0.2)
+text "4 bytes" at INHDR - (0, 0.2)
+text "nEntry x 12 bytes" at ARRAY - (0, 0.2)
+</verbatim></center>
+
+<table border=1 cellpadding=5 width=90%>
+  <tr><th>Byte Offset <th>Size <th width=80%> Description
+  <tr><td>8 <td>2 <td> number of bytes of free space between the end of 
+    header array and the first entry within the record area (the region
+    marked "free space" in the diagram above).
+  <tr><td>10 <td>2 <td> number of bytes of free space (in total) within
+    record area.
+</table>
+
+As for index leaf pages, except that the <i>nEntry</i> array consists of
+12-byte entries:
+
+  *  A 4-byte record size value,
+  *  A 2-byte record offset, and
+  *  A 1-byte flags field (the only valid flag is HAS_OVFL).
+  *  1-byte unused.
+  *  A 4-byte child page number.
+
+<h2 id=overflow> 4.5. Overflow Chain Format </h2>
+
+<center><verbatim type="pikchr">
+boxht=0.2 ; boxwid=0.6 ; linewid=0.2
+
+PGHDR: box "page hdr"        wid 0.8
+DATA: box "data"             wid 4.7
+box "free space"             wid 2.0
+
+text "8 bytes" at PGHDR - (0, 0.2)
+text "nEntry bytes" at DATA - (0, 0.2)
+</verbatim></center>
+
+As in SQLite, overflow pages are a linked list, starting with the page
+identified in the b-tree page record. The number of overflow pages in
+the linked list, and the amount of data on the last of them, may be inferred
+from the record-size field on the b-tree page. The amount of data on each
+page, in bytes, is also stored in the <i>nEntry</i> field of the overflow
+page header.
+
+Overflow pages are identified by physical page only - both the page number
+embedded in the start of the record within the tree structure page and the
+"next page" page number on overflow pages themselves are physical, not 
+logical, page numbers
+
+<h2 id=history> 4.6. History Fan Format </h2>
+
+<center><verbatim type="pikchr">
+boxht=0.2 ; boxwid=0.6 ; linewid=0.2
+
+PGHDR: box "page hdr"        wid 0.8
+FANHDR: box "fan page hdr"   wid 2.4
+DATA: box "entry array"      wid 3.0
+box "free space"             wid 1.3
+
+text "8 bytes" at PGHDR - (0, 0.2)
+text "24 bytes" at FANHDR - (0, 0.2)
+text "nEntry*4 bytes" at DATA - (0, 0.2)
+</verbatim></center>
+
+A history fan page consists of the page header followed by a fan
+page header followed by <i>nEntry</i> 4-byte physical page numbers.
+
+The 24-byte fan page header consists of
+
+  *  An 8-byte TID value for the first old-data page.
+  *  A 4-byte physical page number for the first old-data page.
+  *  Index of first key to consider of second old-data page.
+  *  An 8-byte TID value for the second and subsequent old-data pages.
+
+<h1 id=logfile> 5. Log File Format </h1>
+
+Each valid log file begins with a log file header consisting of:
+
+  *  8 byte TID,
+
+Following this there are a series of records. Each record consists of:
+
+  *  4 byte root page number,
+  *  for intkey tables, an 8 bytes integer key, or
+  *  for index tables, a 4 byte key size followed by the key itself.
+
+The log is terminated by a 4-byte zero value.
+
+When a client commits a transaction, it first writes the log file with the
+TID value set to zero. Once it has obtained the TID, it writes it into the
+log file and then sets about writing to the database. Once the transaction
+is done - committed or rolled back - the TID field in the log file is set to
+zero to invalidate it.
+
+

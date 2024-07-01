@@ -193,6 +193,13 @@ foreach hdr {
    vxworks.h
    wal.h
    whereInt.h
+   hctInt.h
+   hctFileInt.h
+   hctPManInt.h
+   hctTMapInt.h
+   btreeModules.h
+   btreeDefine.h
+   btreeUndef.h
    sqlite3recover.h
 } {
   set available_hdr($hdr) 1
@@ -418,6 +425,8 @@ set flist {
    btree.c
    backup.c
 
+   btwrapper.c
+
    vdbemem.c
    vdbeaux.c
    vdbeapi.c
@@ -488,7 +497,16 @@ set flist {
    sqlite3session.c
    fts5.c
    stmt.c
-}
+
+   hct_pman.c
+   hctree.c
+   hct_tree.c
+   hct_file.c
+   hct_database.c
+   hct_tmap.c
+   hct_record.c
+   hct_stats.c
+} 
 if {$enable_recover} {
   lappend flist sqlite3recover.c dbdata.c
 }

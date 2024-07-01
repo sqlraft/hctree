@@ -8,6 +8,7 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: hct
 #
 # This file tests features of the name resolver (the component that
 # figures out what identifiers in the SQL statement refer to) that

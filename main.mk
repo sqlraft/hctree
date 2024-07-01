@@ -55,7 +55,7 @@ THREADLIB += $(LIBS)
 #
 LIBOBJ+= vdbe.o parse.o \
          alter.o analyze.o attach.o auth.o \
-         backup.o bitvec.o btmutex.o btree.o build.o \
+         backup.o bitvec.o btmutex.o btree.o hctree.o build.o \
          callback.o complete.o ctime.o \
          date.o dbpage.o dbstat.o delete.o expr.o \
 	 fault.o fkey.o \
@@ -77,7 +77,9 @@ LIBOBJ+= vdbe.o parse.o \
          vdbeapi.o vdbeaux.o vdbeblob.o vdbemem.o vdbesort.o \
 	 vdbetrace.o vdbevtab.o \
          wal.o walker.o where.o wherecode.o whereexpr.o \
-         utf.o vtab.o window.o
+         utf.o vtab.o window.o \
+         hct_tree.o hct_file.o hct_database.o hct_tmap.o hct_pman.o \
+         hct_record.o hct_stats.o btwrapper.o hct_journal.o hct_journalhash.o
 
 LIBOBJ += sqlite3session.o
 
@@ -189,6 +191,26 @@ SRC = \
   $(TOP)/src/whereexpr.c \
   $(TOP)/src/whereInt.h \
   $(TOP)/src/window.c
+
+SRC += \
+  $(TOP)/src/hctree.c \
+  $(TOP)/src/hct_tree.c \
+  $(TOP)/src/hct_file.c \
+  $(TOP)/src/hct_journal.c \
+  $(TOP)/src/hct_journalhash.c \
+  $(TOP)/src/hct_database.c \
+  $(TOP)/src/hct_stats.c \
+  $(TOP)/src/hct_tmap.c \
+  $(TOP)/src/hct_record.c \
+  $(TOP)/src/hct_pman.c  \
+  $(TOP)/src/hctFileInt.h  \
+  $(TOP)/src/hctInt.h      \
+  $(TOP)/src/hctPManInt.h  \
+  $(TOP)/src/hctTMapInt.h \
+  $(TOP)/src/btreeModules.h \
+  $(TOP)/src/btreeDefine.h \
+  $(TOP)/src/btreeUndef.h \
+  $(TOP)/src/btwrapper.c 
 
 # Source code for extensions
 #
@@ -335,7 +357,11 @@ TESTSRC = \
   $(TOP)/src/test_vfs.c \
   $(TOP)/src/test_windirent.c \
   $(TOP)/src/test_window.c \
-  $(TOP)/src/test_wsd.c
+  $(TOP)/src/test_wsd.c \
+  $(TOP)/src/test_mtperf.c \
+  $(TOP)/src/test_hct.c \
+  $(TOP)/src/test_hctserver.c \
+  $(TOP)/src/test_mtcommit.c
 
 # Extensions to be statically loaded.
 #
@@ -365,6 +391,7 @@ TESTSRC += \
   $(TOP)/ext/misc/remember.c \
   $(TOP)/ext/misc/series.c \
   $(TOP)/ext/misc/spellfix.c \
+  $(TOP)/ext/misc/stmtrand.c \
   $(TOP)/ext/misc/totype.c \
   $(TOP)/ext/misc/unionvtab.c \
   $(TOP)/ext/misc/wholenumber.c \
@@ -377,7 +404,8 @@ TESTSRC += \
   $(TOP)/ext/recover/dbdata.c \
   $(TOP)/ext/recover/test_recover.c \
   $(TOP)/ext/intck/test_intck.c  \
-  $(TOP)/ext/intck/sqlite3intck.c 
+  $(TOP)/ext/intck/sqlite3intck.c \
+  $(TOP)/ext/hct/hct_vtab.c
 
 
 #TESTSRC += $(TOP)/ext/fts3/fts3_tokenizer.c
@@ -386,6 +414,7 @@ TESTSRC2 = \
   $(TOP)/src/attach.c \
   $(TOP)/src/backup.c \
   $(TOP)/src/btree.c \
+  $(TOP)/src/hctree.c \
   $(TOP)/src/build.c \
   $(TOP)/src/date.c \
   $(TOP)/src/dbpage.c \
@@ -440,6 +469,7 @@ TESTSRC2 = \
 HDR = \
    $(TOP)/src/btree.h \
    $(TOP)/src/btreeInt.h \
+   $(TOP)/src/hctInt.h \
    $(TOP)/src/hash.h \
    $(TOP)/src/hwtime.h \
    keywordhash.h \
@@ -563,6 +593,10 @@ sqldiff$(EXE):	$(TOP)/tool/sqldiff.c sqlite3.c sqlite3.h
 dbhash$(EXE):	$(TOP)/tool/dbhash.c sqlite3.c sqlite3.h
 	$(TCCX) -o dbhash$(EXE) -DSQLITE_THREADSAFE=0 \
 		$(TOP)/tool/dbhash.c sqlite3.c $(TLIBS) $(THREADLIB)
+
+hct_thread_test$(EXE): $(TOP)/tool/hct_thread_test.c libsqlite3.a sqlite3.h
+	$(TCCX) -o hct_thread_test$(EXE) \
+		$(TOP)/tool/hct_thread_test.c libsqlite3.a $(TLIBS) $(THREADLIB)
 
 scrub$(EXE):	$(TOP)/ext/misc/scrub.c sqlite3.o
 	$(TCC) -I. -DSCRUB_STANDALONE -o scrub$(EXE) $(TOP)/ext/misc/scrub.c sqlite3.o $(THREADLIB)

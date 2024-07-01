@@ -8,6 +8,8 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: hct
+#
 # This file tests a special case in the b-tree code that can be
 # hit by the "IN" operator (or EXISTS, NOT IN, etc.).
 #

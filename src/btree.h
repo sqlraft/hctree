@@ -33,6 +33,9 @@
 #define BTREE_AUTOVACUUM_FULL 1        /* Do full auto-vacuum */
 #define BTREE_AUTOVACUUM_INCR 2        /* Incremental vacuum */
 
+typedef struct BtCursorMethods BtCursorMethods;
+typedef struct BtreeMethods BtreeMethods;
+
 /*
 ** Forward declarations of structure
 */
@@ -418,5 +421,20 @@ void sqlite3BtreeClearCache(Btree*);
 # define sqlite3BtreeHoldsAllMutexes(X) 1
 # define sqlite3SchemaMutexHeld(X,Y,Z) 1
 #endif
+#define BTREE_DIR_NONE    0
+#define BTREE_DIR_FORWARD 1
+#define BTREE_DIR_REVERSE 2
+
+#ifdef SQLITE_ENABLE_HCT
+void sqlite3BtreeCursorDir(BtCursor*, int eDir);
+int sqlite3HctVtabInit(sqlite3*);
+int sqlite3BtreeSchemaLoaded(Btree *pBt);
+#else
+# define sqlite3BtreeCursorDir(a,b)
+# define sqlite3BtreeSchemaLoaded(x) SQLITE_OK
+#endif
+
+int sqlite3BtreePragma(Btree *pBtree, char **aFnctl);
+int sqlite3BtreeIdxDelete(BtCursor*, UnpackedRecord*);
 
 #endif /* SQLITE_BTREE_H */

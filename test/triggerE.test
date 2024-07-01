@@ -8,6 +8,7 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: hct
 #
 # This file tests the effects of SQL variable references embedded in
 # triggers. If the user attempts to create such a trigger, it is an

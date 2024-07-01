@@ -1,0 +1,45 @@
+# 2023 June 30
+#
+# The author disclaims copyright to this source code.  In place of
+# a legal notice, here is a blessing:
+#
+#    May you do good and not evil.
+#    May you find forgiveness for yourself and forgive others.
+#    May you share freely, never taking more than you give.
+#
+#*************************************************************************
+#
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+source $testdir/hct_common.tcl
+set testprefix hct_journal6
+
+hct_reset_db
+catch_hct_journal_init db
+sqlite3_hct_journal_setmode db LEADER
+
+
+do_execsql_test 1.0 {
+  CREATE TABLE t1(a INTEGER PRIMARY KEY, b TEXT);
+  CREATE UNIQUE INDEX t1b ON t1(b);
+}
+
+do_perm_test 1.1 {
+  INSERT INTO t1 VALUES(1, 'val1');
+  DELETE FROM t1 WHERE a=1;
+  INSERT INTO t1 VALUES(2, 'val1');
+  DELETE FROM t1 WHERE a=2;
+  INSERT INTO t1 VALUES(3, 'val1');
+}
+
+do_perm_test 1.2 {
+  INSERT INTO t1 VALUES(4, 'val2');
+  CREATE TABLE t2(x PRIMARY KEY, y UNIQUE);
+  INSERT INTO t2 VALUES('a', 'b');
+  DELETE FROM t2;
+  INSERT INTO t2 VALUES('b', 'b');
+}
+
+finish_test
+

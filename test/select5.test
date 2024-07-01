@@ -12,6 +12,8 @@
 # focus of this file is testing aggregate functions and the
 # GROUP BY and HAVING clauses of SELECT statements.
 #
+# TESTRUNNER: puresql
+#
 
 set testdir [file dirname $argv0]
 source $testdir/tester.tcl

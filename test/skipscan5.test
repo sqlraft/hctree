@@ -13,6 +13,7 @@
 # particular it tests that stat4 data can be used by a range query
 # that uses the skip-scan approach.
 #
+# TESTRUNNER: puresql
 
 set testdir [file dirname $argv0]
 source $testdir/tester.tcl

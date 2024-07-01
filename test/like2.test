@@ -8,6 +8,8 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: hct
+#
 # This file implements regression tests for SQLite library.  The
 # focus of this file is testing the LIKE and GLOB operators and
 # in particular the optimizations that occur to help those operators

@@ -1,0 +1,248 @@
+# 2021 June 1
+#
+# The author disclaims copyright to this source code.  In place of
+# a legal notice, here is a blessing:
+#
+#    May you do good and not evil.
+#    May you find forgiveness for yourself and forgive others.
+#    May you share freely, never taking more than you give.
+#
+#*************************************************************************
+# This file implements regression tests for SQLite library.
+#
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+set testprefix hct_delete
+
+hct_reset_db
+
+sqlite3 db2 test.db
+
+do_execsql_test 1.1 {
+  CREATE TABLE t1(a INTEGER PRIMARY KEY, b TEXT);
+  BEGIN;
+    CREATE INDEX t1b ON t1(b);
+    INSERT INTO t1 VALUES(1, 'one');
+    INSERT INTO t1 VALUES(2, 'two');
+  COMMIT;
+}
+
+do_execsql_test -db db2 1.2 {
+  BEGIN;
+    SELECT * FROM t1 ORDER BY b;
+} {1 one 2 two}
+
+do_execsql_test 1.3 {
+  DELETE FROM t1 WHERE a=2;
+}
+
+do_execsql_test -db db2 1.4 {
+    SELECT * FROM t1 ORDER BY b;
+} {1 one 2 two}
+
+do_execsql_test -db db2 1.5 {
+  END;
+  SELECT * FROM t1 ORDER BY b;
+} {1 one}
+
+#execsql_pp { SELECT * FROM hctdb; }
+#execsql_pp { SELECT * FROM hctentry; }
+
+#-------------------------------------------------------------------------
+proc irange {i1 i2} {
+  set R [list]
+  for {set i $i1} {$i<=$i2} {incr i} { lappend R $i }
+  set R
+}
+
+proc lreverse {L} {
+  set ret [list]
+  for {set i [expr [llength $L]-1]} {$i>=0} {incr i -1} {
+    lappend ret [lindex $L $i]
+  }
+  set ret
+}
+
+
+hct_reset_db
+sqlite3 db2 test.db
+do_execsql_test 2.0 {
+  BEGIN;
+    CREATE TABLE x1(y INTEGER PRIMARY KEY, z TEXT);
+    WITH s(i) AS (
+      VALUES(1) UNION ALL SELECT i+1 FROM s WHERE i<80
+    ) 
+    INSERT INTO x1(z) SELECT quote(randomblob(10)) FROM s;
+  COMMIT;
+}
+
+do_execsql_test -db db2 2.1 {
+  BEGIN;
+    SELECT y FROM x1
+} [irange 1 80]
+
+do_execsql_test 2.2 {
+  DELETE FROM x1 WHERE y<10
+}
+
+do_execsql_test -db db2 2.3a {
+  SELECT y FROM x1;
+} [irange 1 80]
+
+do_execsql_test -db db2 2.3b {
+  SELECT y FROM x1 ORDER BY y DESC;
+} [lreverse [irange 1 80]]
+
+do_execsql_test -db db2 2.3c {
+  SELECT y, length(z) FROM x1 WHERE y = 4
+} {4 23}
+
+do_execsql_test -db db2 2.3d {
+  SELECT y, length(z) FROM x1 WHERE y > 3 AND y < 12;
+} {4 23 5 23 6 23 7 23 8 23 9 23 10 23 11 23}
+
+do_execsql_test 2.4 {
+  DELETE FROM x1 WHERE y<60
+}
+
+do_execsql_test -db db2 2.5 {
+  SELECT y FROM x1;
+  COMMIT;
+} [irange 1 80]
+
+do_execsql_test -db db2 2.6 {
+  SELECT y FROM x1
+} [irange 60 80]
+
+#-------------------------------------------------------------------------
+
+
+proc run_delete_range_test3 {tn2 data} {
+  set lSql {
+    "SELECT count(*), sum(y), md5sum(z) FROM x1 ORDER BY y ASC"
+    "SELECT count(*), sum(y), md5sum(z) FROM (SELECT * FROM x1 ORDER BY y DESC)"
+    "WITH tens(x) AS (
+       SELECT 10 UNION ALL SELECT x+10 FROM tens WHERE x<500
+     )
+     SELECT count(*), sum(y), md5sum(z) FROM x1 WHERE y IN (SELECT x FROM tens)"
+
+    "WITH tens(x) AS (
+       SELECT 10 UNION ALL SELECT x+10 FROM tens WHERE x<500
+     )
+     SELECT count(*), sum(y), md5sum(z) FROM x1, tens WHERE y BETWEEN x AND x+3"
+
+    "
+     WITH tens(x) AS (
+       SELECT 10 UNION ALL SELECT x+10 FROM tens WHERE x<500
+     )
+     SELECT x, md5sum( 
+       (SELECT z FROM x1 WHERE y<x ORDER BY y DESC LIMIT 1 OFFSET 3) 
+     ) FROM tens;
+    "
+  }
+
+  hct_reset_db
+  do_execsql_test $tn2.0 {
+    BEGIN;
+    CREATE TABLE x1(y INTEGER PRIMARY KEY, z TEXT);
+    WITH s(i) AS (
+      VALUES(1) UNION ALL SELECT i+1 FROM s WHERE i<500
+    ) 
+    INSERT INTO x1(z) SELECT quote(randomblob(100)) FROM s;
+    COMMIT;
+  }
+ 
+  foreach {tn i1 i2} $data {
+
+    set hdl "db$tn"
+    sqlite3 $hdl test.db
+    $hdl eval BEGIN
+    set lRes [list]
+    foreach sql $lSql { lappend lRes [$hdl eval $sql] }
+    lappend lHandle $hdl $lRes
+  
+    do_execsql_test $tn2.$tn.1 "DELETE FROM x1 WHERE y BETWEEN $i1 AND $i2"
+  
+    foreach {hdl lRes} $lHandle {
+      set ii 1
+      foreach sql $lSql res $lRes {
+        do_execsql_test -db $hdl $tn2.$tn.$hdl.$ii.([lindex $res 0]) $sql $res
+        incr ii
+      }
+    }
+  }
+
+  foreach {hdl lRes} $lHandle {
+    $hdl eval { COMMIT }
+    $hdl close
+  }
+}
+
+run_delete_range_test3 3.1 {
+  1     1  40
+  2     40 80
+  3     80 120
+  4     80 120
+  5     120 160
+  6     160 200
+  7     200 400
+  8     400 450
+  9     450 500
+}
+
+run_delete_range_test3 3.2 {
+  1     450 500
+  2     400 450
+  3     200 400
+  4     160 200
+  5     120 160
+  6     80 120
+  7     80 120
+  8     40 80
+  9     1  40
+}
+
+run_delete_range_test3 3.3 {
+  1       0  50
+  2     200 250
+  3     400 450
+  4      50 100
+  5     250 300
+  6     450 500
+  7     100 150
+  8     300 350
+  9     150 200
+ 10     350 400
+}
+
+
+#execsql_pp { SELECT * FROM sqlite_schema; }
+#execsql_pp { SELECT * FROM hctdb; }
+#execsql_pp { SELECT * FROM hctpgmap; }
+#execsql_pp { SELECT * FROM hctpgmap NATURAL JOIN hctdb }
+#execsql_pp { SELECT pgtype, count(*) FROM hctdb GROUP BY 1 }
+#execsql_pp { SELECT * FROM hctdb WHERE pgtype LIKE '%edks%' }
+#execsql_pp { SELECT * FROM hctentry WHERE EXISTS( SELECT 1 FROM hctdb WHERE pgno=hctentry.pgno AND pgtype LIKE '%edks%' ) }
+#execsql_pp { SELECT * FROM hctentry; }
+
+
+
+if 0 {
+execsql_pp {
+  WITH edks_root(logical, edks) AS (
+    SELECT logical, edks_pg FROM hctpgmap NATURAL JOIN hctdb WHERE edks_pg>0
+  ),
+
+  edks_tree(path, epgno) AS (
+    SELECT '/' || edks, edks FROM edks_root
+      UNION ALL
+    SELECT path || '/' || oldpg, oldpg FROM hctentry, edks_tree WHERE pgno=epgno AND ikey IS NULL
+  )
+
+  SELECT * FROM edks_tree ORDER BY path
+}
+}
+
+finish_test
+

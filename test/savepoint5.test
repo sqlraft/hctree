@@ -8,6 +8,7 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: hct
 #
 # Verify that a SAVEPOINT on a new, empty database followed by a
 # ROLLBACK TO that savepoint starts over again with another new

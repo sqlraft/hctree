@@ -165,7 +165,7 @@ LTINSTALL = $(LIBTOOL) --mode=install $(INSTALL)
 # You should not have to change anything below this line
 ###############################################################################
 
-USE_AMALGAMATION = @USE_AMALGAMATION@
+USE_AMALGAMATION = 0
 AMALGAMATION_LINE_MACROS = @AMALGAMATION_LINE_MACROS@
 
 # Object files for the SQLite library (non-amalgamation).
@@ -195,6 +195,10 @@ LIBOBJS0 = alter.lo analyze.lo attach.lo auth.lo \
          vdbetrace.lo vdbevtab.lo \
          wal.lo walker.lo where.lo wherecode.lo whereexpr.lo \
          window.lo utf.lo vtab.lo
+
+LIBOBJS0 += hct_pman.lo hct_record.lo hctree.lo hct_stats.lo
+LIBOBJS0 += hct_tree.lo hct_file.lo hct_database.lo hct_tmap.lo 
+LIBOBJS0 += btwrapper.lo
 
 # Object files for the amalgamation.
 #
@@ -365,6 +369,24 @@ SRC += \
   shell.c \
   sqlite3.h
 
+SRC += \
+  $(TOP)/src/hctree.c \
+  $(TOP)/src/hct_tree.c \
+  $(TOP)/src/hct_file.c \
+  $(TOP)/src/hct_database.c \
+  $(TOP)/src/hct_stats.c \
+  $(TOP)/src/hct_tmap.c \
+  $(TOP)/src/hct_record.c \
+  $(TOP)/src/hct_pman.c  \
+  $(TOP)/src/hctInt.h      \
+  $(TOP)/src/hctFileInt.h  \
+  $(TOP)/src/hctPManInt.h  \
+  $(TOP)/src/hctTMapInt.h  \
+  $(TOP)/src/btreeModules.h \
+  $(TOP)/src/btreeDefine.h \
+  $(TOP)/src/btreeUndef.h \
+  $(TOP)/src/btwrapper.c
+
 # Source code to the test files.
 #
 TESTSRC = \
@@ -421,7 +443,10 @@ TESTSRC = \
   $(TOP)/ext/recover/test_recover.c \
   $(TOP)/ext/intck/test_intck.c  \
   $(TOP)/ext/intck/sqlite3intck.c \
-  $(TOP)/ext/rbu/test_rbu.c
+  $(TOP)/ext/rbu/test_rbu.c \
+  $(TOP)/ext/hct/hct_vtab.c \
+  $(TOP)/src/test_mtperf.c \
+  $(TOP)/src/test_mtcommit.c
 
 # Statically linked extensions
 #
@@ -456,6 +481,7 @@ TESTSRC += \
   $(TOP)/ext/misc/remember.c \
   $(TOP)/ext/misc/series.c \
   $(TOP)/ext/misc/spellfix.c \
+  $(TOP)/ext/misc/stmtrand.c \
   $(TOP)/ext/misc/totype.c \
   $(TOP)/ext/misc/unionvtab.c \
   $(TOP)/ext/misc/wholenumber.c \
@@ -678,6 +704,9 @@ libtclsqlite3.la:	tclsqlite.lo libsqlite3.la
 		-rpath "$(TCLLIBDIR)" \
 		-version-info "8:6:8" \
 		-avoid-version
+
+hct_thread_test$(TEXE):	$(TOP)/tool/hct_thread_test.c sqlite3.lo sqlite3.h
+	$(LTLINK) -o $@ $(TOP)/tool/hct_thread_test.c sqlite3.lo $(TLIBS)
 
 sqlite3$(TEXE):	shell.c sqlite3.c
 	$(LTLINK) $(READLINE_FLAGS) $(SHELL_OPT) -o $@ \
@@ -1114,6 +1143,33 @@ whereexpr.lo:	$(TOP)/src/whereexpr.c $(HDR)
 window.lo:	$(TOP)/src/window.c $(HDR)
 	$(LTCOMPILE) $(TEMP_STORE) -c $(TOP)/src/window.c
 
+hct_tree.lo:	$(TOP)/src/hct_tree.c $(HDR)
+	$(LTCOMPILE) $(TEMP_STORE) -c $(TOP)/src/hct_tree.c
+
+hct_file.lo:	$(TOP)/src/hct_file.c $(HDR)
+	$(LTCOMPILE) $(TEMP_STORE) -c $(TOP)/src/hct_file.c
+
+hct_database.lo:	$(TOP)/src/hct_database.c $(HDR)
+	$(LTCOMPILE) $(TEMP_STORE) -c $(TOP)/src/hct_database.c
+
+hct_stats.lo:	$(TOP)/src/hct_stats.c $(HDR)
+	$(LTCOMPILE) $(TEMP_STORE) -c $(TOP)/src/hct_stats.c
+
+btwrapper.lo:	$(TOP)/src/btwrapper.c $(HDR)
+	$(LTCOMPILE) $(TEMP_STORE) -c $(TOP)/src/btwrapper.c
+
+hct_tmap.lo:	$(TOP)/src/hct_tmap.c $(HDR)
+	$(LTCOMPILE) $(TEMP_STORE) -c $(TOP)/src/hct_tmap.c
+
+hct_pman.lo:	$(TOP)/src/hct_pman.c $(HDR)
+	$(LTCOMPILE) $(TEMP_STORE) -c $(TOP)/src/hct_pman.c
+
+hct_record.lo:	$(TOP)/src/hct_record.c $(HDR)
+	$(LTCOMPILE) $(TEMP_STORE) -c $(TOP)/src/hct_record.c
+
+hctree.lo:	$(TOP)/src/hctree.c $(HDR)
+	$(LTCOMPILE) $(TEMP_STORE) -c $(TOP)/src/hctree.c
+
 tclsqlite.lo:	$(TOP)/src/tclsqlite.c $(HDR)
 	$(LTCOMPILE) -DUSE_TCL_STUBS=1 -c $(TOP)/src/tclsqlite.c
 
@@ -1123,9 +1179,11 @@ tclsqlite-shell.lo:	$(TOP)/src/tclsqlite.c $(HDR)
 tclsqlite-stubs.lo:	$(TOP)/src/tclsqlite.c $(HDR)
 	$(LTCOMPILE) -DUSE_TCL_STUBS=1 -o $@ -c $(TOP)/src/tclsqlite.c
 
-tclsqlite3$(TEXE):	tclsqlite-shell.lo libsqlite3.la
-	$(LTLINK) -o $@ tclsqlite-shell.lo \
-		 libsqlite3.la $(LIBTCL)
+#tclsqlite3$(TEXE):	tclsqlite3.c
+#       $(LTLINK) -DTCLSH -o $@ tclsqlite3.c $(LIBTCL) $(TLIBS)
+
+tclsqlite3$(TEXE): $(TOP)/src/test_mtperf.c $(TOP)/src/tclsqlite.c sqlite3.lo
+	$(LTLINK) -DTCLSH -o $@ -DTCLSQLITE3_EXTRA_INIT=SqliteThreadTest_Init $(TOP)/src/test_mtperf.c $(TOP)/src/tclsqlite.c sqlite3.lo $(LIBTCL) $(TLIBS)
 
 # Rules to build opcodes.c and opcodes.h
 #

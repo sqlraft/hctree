@@ -306,6 +306,13 @@ if {[llength $argv]==2
 
   } elseif {$permutation!="default" && $permutation!=""} {
 
+    test_suite "hct" -prefix "hct." -files [list] -initialize {
+      set ::G(perm:hct) 1
+      set ::G(perm:presql) { PRAGMA page_size = 1024 }
+    } -shutdown {
+      catch { unset ::G(perm:hct) }
+    }
+
     if {[info exists ::testspec($permutation)]==0} {
       error "no such permutation: $permutation"
     }
@@ -458,7 +465,9 @@ if {[llength $argv]==1
 }
 
 #-------------------------------------------------------------------------
-# Parse the command line.
+# This script is not being invoked for the special [status] or [njob] 
+# commands, and that it is not being invoked as a sub-process to run
+# a single test script. So parse the command line.
 #
 for {set ii 0} {$ii < [llength $argv]} {incr ii} {
   set isLast [expr $ii==([llength $argv]-1)]
@@ -560,6 +569,204 @@ proc build_to_dirname {bname} {
 }
 
 #-------------------------------------------------------------------------
+# Return a list of tests to run. Each element of the list is itself a
+# list of two elements - the name of a permuations.test configuration
+# followed by the full path to a test script. i.e.:
+#
+#    {BUILD CONFIG FILENAME} {BUILD CONFIG FILENAME} ...
+#
+
+proc _make_hct_perm {} {
+  foreach f [trd_all_scripts] {
+    set p [trd_script_properties $f]
+    if {[lsearch $p puresql]>=0 || [lsearch $p hct]>=0} {
+      lappend files $f
+    }
+  }
+
+  test_suite "hct" -prefix "hct" -files $files -initialize {
+    set ::G(perm:hct) 1
+    set ::G(perm:presql) { PRAGMA page_size = 1024 }
+  } -shutdown {
+    catch { unset ::G(perm:hct) }
+  }
+}
+_make_hct_perm
+
+proc testset_patternlist {patternlist} {
+  global TRG
+
+  set testset [list]              ;# return value
+
+  set first [lindex $patternlist 0]
+
+  if {$first=="release"} {
+    set platform $::TRG(platform)
+
+    set patternlist [lrange $patternlist 1 end]
+    foreach b [trd_builds $platform] {
+      foreach c [trd_configs $platform $b] {
+        testset_append testset $b $c $patternlist
+      }
+
+      if {[llength $patternlist]==0 || $b=="User-Auth"} {
+        set target testfixture
+      } else {
+        set target coretestprogs
+      }
+      lappend testset [list $b build $target]
+    }
+
+    if {[llength $patternlist]==0} {
+      foreach b [trd_builds $platform] {
+        foreach e [trd_extras $platform $b] {
+          lappend testset [list $b make $e]
+        }
+      }
+    }
+
+    set TRG(fuzztest) 0           ;# ignore --fuzztest option in this case
+
+  } elseif {$first=="all"} {
+
+    set clist [trd_all_configs]
+    set patternlist [lrange $patternlist 1 end]
+    foreach c $clist {
+      testset_append testset "" $c $patternlist
+    }
+
+  } elseif {[info exists ::testspec($first)]} {
+    set clist $first
+    testset_append testset "" $first [lrange $patternlist 1 end]
+  } elseif { [llength $patternlist]==0 } {
+    testset_append testset "" veryquick $patternlist
+  } else {
+    testset_append testset "" full $patternlist
+  }
+  if {$TRG(fuzztest)} {
+    if {$TRG(platform)=="win"} { error "todo" }
+    lappend testset [list "" make fuzztest]
+  }
+
+  set testset
+}
+
+proc testset_append {listvar build config patternlist} {
+  upvar $listvar lvar
+
+  catch { array unset O }
+  array set O $::testspec($config)
+
+  foreach f $O(-files) {
+    if {[llength $patternlist]>0} {
+      set bMatch 0
+      foreach p $patternlist {
+        if {[string match $p [file tail $f]]} {
+          set bMatch 1
+          break
+        }
+      }
+      if {$bMatch==0} continue
+    }
+
+    if {[file pathtype $f]!="absolute"} {
+      set f [file join $::testdir $f]
+    }
+    lappend lvar [list $build $config $f]
+  }
+}
+
+#--------------------------------------------------------------------------
+# Return a list of tests to run. Each element of the list is itself a
+# list of two elements - the name of a permuations.test configuration
+# followed by the full path to a test script. i.e.:
+#
+#    {BUILD CONFIG FILENAME} {BUILD CONFIG FILENAME} ...
+#
+proc testset_patternlist {patternlist} {
+  global TRG
+
+  set testset [list]              ;# return value
+
+  set first [lindex $patternlist 0]
+
+  if {$first=="release"} {
+    set platform $::TRG(platform)
+
+    set patternlist [lrange $patternlist 1 end]
+    foreach b [trd_builds $platform] {
+      foreach c [trd_configs $platform $b] {
+        testset_append testset $b $c $patternlist
+      }
+
+      if {[llength $patternlist]==0 || $b=="User-Auth"} {
+        set target testfixture
+      } else {
+        set target coretestprogs
+      }
+      lappend testset [list $b build $target]
+    }
+
+    if {[llength $patternlist]==0} {
+      foreach b [trd_builds $platform] {
+        foreach e [trd_extras $platform $b] {
+          lappend testset [list $b make $e]
+        }
+      }
+    }
+
+    set TRG(fuzztest) 0           ;# ignore --fuzztest option in this case
+
+  } elseif {$first=="all"} {
+
+    set clist [trd_all_configs]
+    set patternlist [lrange $patternlist 1 end]
+    foreach c $clist {
+      testset_append testset "" $c $patternlist
+    }
+
+  } elseif {[info exists ::testspec($first)]} {
+    set clist $first
+    testset_append testset "" $first [lrange $patternlist 1 end]
+  } elseif { [llength $patternlist]==0 } {
+    testset_append testset "" veryquick $patternlist
+  } else {
+    testset_append testset "" full $patternlist
+  }
+  if {$TRG(fuzztest)} {
+    if {$TRG(platform)=="win"} { error "todo" }
+    lappend testset [list "" make fuzztest]
+  }
+
+  set testset
+}
+
+proc testset_append {listvar build config patternlist} {
+  upvar $listvar lvar
+
+  catch { array unset O }
+  array set O $::testspec($config)
+
+  foreach f $O(-files) {
+    if {[llength $patternlist]>0} {
+      set bMatch 0
+      foreach p $patternlist {
+        if {[string match $p [file tail $f]]} {
+          set bMatch 1
+          break
+        }
+      }
+      if {$bMatch==0} continue
+    }
+
+    if {[file pathtype $f]!="absolute"} {
+      set f [file join $::testdir $f]
+    }
+    lappend lvar [list $build $config $f]
+  }
+}
+
+#--------------------------------------------------------------------------
 
 proc r_write_db {tcl} {
   trdb eval { BEGIN EXCLUSIVE }

@@ -14,6 +14,7 @@
 # in an index.  For example, if (a,b,c) are indexed, and we have
 # "WHERE a=?1 AND c=?2" - verify that skip-scan can still be used.
 #
+# TESTRUNNER: puresql
 
 set testdir [file dirname $argv0]
 source $testdir/tester.tcl

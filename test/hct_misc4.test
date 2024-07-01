@@ -1,0 +1,109 @@
+# 2020 November 11
+#
+# The author disclaims copyright to this source code.  In place of
+# a legal notice, here is a blessing:
+#
+#    May you do good and not evil.
+#    May you find forgiveness for yourself and forgive others.
+#    May you share freely, never taking more than you give.
+#
+#*************************************************************************
+# This file implements regression tests for SQLite library.
+#
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+set testprefix hct_misc4
+
+hct_reset_db
+
+do_execsql_test 1.0 {
+  CREATE TABLE tx(a INTEGER PRIMARY KEY, b TEXT);
+}
+
+do_execsql_test 1.1 {
+  BEGIN;
+    INSERT INTO tx VALUES(4, 'four');
+    INSERT INTO tx VALUES(5, 'five');
+    INSERT INTO tx VALUES(2, 'two');
+    INSERT INTO tx VALUES(6, 'six');
+    INSERT INTO tx VALUES(7, 'seven');
+    INSERT INTO tx VALUES(3, 'three');
+    INSERT INTO tx VALUES(1, 'one');
+    INSERT INTO tx VALUES(8, 'eight');
+    INSERT INTO tx VALUES(9, 'nine');
+    INSERT INTO tx VALUES(10, 'ten');
+  COMMIT
+}
+
+do_execsql_test 1.2 {
+  SELECT * FROM tx ORDER BY a
+} {
+  1 one 2 two 3 three 4 four 5 five 6 six 7 seven 8 eight 9 nine 10 ten
+}
+
+#-------------------------------------------------------------------------
+do_execsql_test 2.0 {
+  CREATE TABLE t2(a INTEGER PRIMARY KEY, b TEXT);
+}
+
+do_execsql_test 2.1 {
+  WITH s(i) AS (
+    SELECT 1 UNION ALL SELECT i+1 FROM s WHERE i<30
+  )
+  INSERT INTO t2 SELECT i+50, randomblob(500) FROM s;
+}
+
+do_execsql_test 2.2 {
+  SELECT sum(a) FROM t2
+} {1965}
+
+do_execsql_test 2.3 {
+  WITH s(i) AS (
+    SELECT 1 UNION ALL SELECT i+1 FROM s WHERE i<30
+  )
+  INSERT INTO t2 SELECT i, randomblob(500) FROM s;
+}
+
+do_execsql_test 2.4 {
+  SELECT sum(a) FROM t2
+} {2430}
+
+#-------------------------------------------------------------------------
+do_execsql_test 3.0 {
+  CREATE TABLE t3(a INTEGER PRIMARY KEY, b TEXT);
+}
+do_execsql_test 3.1 {
+  WITH s(i) AS (
+    SELECT 1 UNION ALL SELECT i+1 FROM s WHERE i<300
+  )
+  INSERT INTO t3 SELECT i, randomblob(500) FROM s;
+}
+do_execsql_test 2.4 {
+  SELECT sum(a) FROM t3
+} {45150}
+
+#-------------------------------------------------------------------------
+hct_reset_db
+sqlite3 db2 test.db
+do_execsql_test 4.0 {
+  CREATE TABLE t1(a INTEGER PRIMARY KEY, b TEXT);
+  INSERT INTO t1 VALUES(1, 'one');
+}
+do_execsql_test -db db2 4.1 {
+  BEGIN;
+    SELECT * FROM t1;
+} {1 one}
+do_execsql_test 4.2 {
+  UPDATE t1 SET b = 'two' WHERE a=1;
+}
+do_execsql_test -db db2 4.3 {
+    SELECT * FROM t1;
+} {1 one}
+do_execsql_test -db db2 4.4 {
+  COMMIT;
+  SELECT * FROM t1;
+} {1 two}
+
+finish_test
+

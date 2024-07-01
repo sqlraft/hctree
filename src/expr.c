@@ -2789,8 +2789,12 @@ int sqlite3ExprContainsSubquery(Expr *p){
 ** to fit in a 32-bit integer, return 1 and put the value of the integer
 ** in *pValue.  If the expression is not an integer or if it is too big
 ** to fit in a signed 32-bit integer, return 0 and leave *pValue unchanged.
+**
+** If the pParse pointer is provided, then allow the expression p to be
+** a parameter (TK_VARIABLE) that is bound to an integer.
+** But if pParse is NULL, then p must be a pure integer literal.
 */
-int sqlite3ExprIsInteger(const Expr *p, int *pValue){
+int sqlite3ExprIsInteger(const Expr *p, int *pValue, Parse *pParse){
   int rc = 0;
   if( NEVER(p==0) ) return 0;  /* Used to only happen following on OOM */
 
@@ -2805,15 +2809,35 @@ int sqlite3ExprIsInteger(const Expr *p, int *pValue){
   }
   switch( p->op ){
     case TK_UPLUS: {
-      rc = sqlite3ExprIsInteger(p->pLeft, pValue);
+      rc = sqlite3ExprIsInteger(p->pLeft, pValue, 0);
       break;
     }
     case TK_UMINUS: {
       int v = 0;
-      if( sqlite3ExprIsInteger(p->pLeft, &v) ){
+      if( sqlite3ExprIsInteger(p->pLeft, &v, 0) ){
         assert( ((unsigned int)v)!=0x80000000 );
         *pValue = -v;
         rc = 1;
+      }
+      break;
+    }
+    case TK_VARIABLE: {
+      sqlite3_value *pVal;
+      if( pParse==0 ) break;
+      if( NEVER(pParse->pVdbe==0) ) break;
+      if( (pParse->db->flags & SQLITE_EnableQPSG)!=0 ) break;
+      sqlite3VdbeSetVarmask(pParse->pVdbe, p->iColumn);
+      pVal = sqlite3VdbeGetBoundValue(pParse->pReprepare, p->iColumn,
+                                      SQLITE_AFF_BLOB);
+      if( pVal ){
+        if( sqlite3_value_type(pVal)==SQLITE_INTEGER ){
+          sqlite3_int64 vv = sqlite3_value_int64(pVal);
+          if( vv == (vv & 0x7fffffff) ){ /* non-negative numbers only */
+            *pValue = (int)vv;
+            rc = 1;
+          }
+        }
+        sqlite3ValueFree(pVal);
       }
       break;
     }
@@ -4243,7 +4267,7 @@ void sqlite3ExprCodeMove(Parse *pParse, int iFrom, int iTo, int nReg){
 ** register iReg.  The caller must ensure that iReg already contains
 ** the correct value for the expression.
 */
-static void exprToRegister(Expr *pExpr, int iReg){
+void sqlite3ExprToRegister(Expr *pExpr, int iReg){
   Expr *p = sqlite3ExprSkipCollateAndLikely(pExpr);
   if( NEVER(p==0) ) return;
   p->op2 = p->op;
@@ -5252,7 +5276,7 @@ expr_code_doover:
           break;
         }
         testcase( pX->op==TK_COLUMN );
-        exprToRegister(pDel, exprCodeVector(pParse, pDel, &regFree1));
+        sqlite3ExprToRegister(pDel, exprCodeVector(pParse, pDel, &regFree1));
         testcase( regFree1==0 );
         memset(&opCompare, 0, sizeof(opCompare));
         opCompare.op = TK_EQ;
@@ -5306,15 +5330,14 @@ expr_code_doover:
       }
       assert( !ExprHasProperty(pExpr, EP_IntValue) );
       if( pExpr->affExpr==OE_Ignore ){
-        sqlite3VdbeAddOp4(
-            v, OP_Halt, SQLITE_OK, OE_Ignore, 0, pExpr->u.zToken,0);
+        sqlite3VdbeAddOp2(v, OP_Halt, SQLITE_OK, OE_Ignore);
         VdbeCoverage(v);
       }else{
-        sqlite3HaltConstraint(pParse,
+        r1 = sqlite3ExprCodeTemp(pParse, pExpr->pLeft, &regFree1);
+        sqlite3VdbeAddOp3(v, OP_Halt, 
              pParse->pTriggerTab ? SQLITE_CONSTRAINT_TRIGGER : SQLITE_ERROR,
-             pExpr->affExpr, pExpr->u.zToken, 0, 0);
+             pExpr->affExpr, r1);
       }
-
       break;
     }
 #endif
@@ -5603,7 +5626,7 @@ static void exprCodeBetween(
     compRight.op = TK_LE;
     compRight.pLeft = pDel;
     compRight.pRight = pExpr->x.pList->a[1].pExpr;
-    exprToRegister(pDel, exprCodeVector(pParse, pDel, &regFree1));
+    sqlite3ExprToRegister(pDel, exprCodeVector(pParse, pDel, &regFree1));
     if( xJump ){
       xJump(pParse, &exprAnd, dest, jumpIfNull);
     }else{

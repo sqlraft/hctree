@@ -13,6 +13,8 @@
 # in a compound select in a case where the source register might be changed
 # before the copy is used.
 #
+# TESTRUNNER: puresql
+
 
 set testdir [file dirname $argv0]
 source $testdir/tester.tcl

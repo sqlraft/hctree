@@ -347,6 +347,7 @@ struct BtLock {
 ** they often do so without holding sqlite3.mutex.
 */
 struct Btree {
+  const BtreeMethods *pMethods;
   sqlite3 *db;       /* The database connection holding this btree */
   BtShared *pBt;     /* Sharable content of this btree */
   u8 inTrans;        /* TRANS_NONE, TRANS_READ or TRANS_WRITE */
@@ -536,6 +537,7 @@ struct CellInfo {
 **   FAULT             skipNext holds the cursor fault error code.
 */
 struct BtCursor {
+  const BtCursorMethods *pMethods;
   u8 eState;                /* One of the CURSOR_XXX constants (see below) */
   u8 curFlags;              /* zero or more BTCF_* flags defined below */
   u8 curPagerFlags;         /* Flags to send to sqlite3PagerGet() */

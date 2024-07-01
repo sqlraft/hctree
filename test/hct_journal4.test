@@ -1,0 +1,231 @@
+# 2023 June 30
+#
+# The author disclaims copyright to this source code.  In place of
+# a legal notice, here is a blessing:
+#
+#    May you do good and not evil.
+#    May you find forgiveness for yourself and forgive others.
+#    May you share freely, never taking more than you give.
+#
+#*************************************************************************
+#
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+source $testdir/hct_common.tcl
+set testprefix hct_journal4
+
+hct_reset_db
+catch_hct_journal_init db
+sqlite3_hct_journal_setmode db LEADER
+
+do_execsql_test 1.0 {
+  CREATE TABLE t1(x, y);
+  INSERT INTO t1 VALUES(1, 2);
+  CREATE TABLE t2(x, y);
+  INSERT INTO t2 VALUES(3, 4);
+  INSERT INTO t2 VALUES(5, 6);
+  CREATE TABLE t3(x, y);
+  INSERT INTO t3 VALUES(7, 8);
+}
+
+do_execsql_test 1.1 {
+  SELECT cid, schema, hct_journal_entry(data), schemacid FROM sqlite_hct_journal
+} {
+  7 {CREATE TABLE t1(x, y);} {}    0 
+  8 {} {t1: ins 1/(1,2)}           7 
+  9 {CREATE TABLE t2(x, y);} {}    7 
+  10 {} {t2: ins 1/(3,4)}          9
+  11 {} {t2: ins 2/(5,6)}          9 
+  12 {CREATE TABLE t3(x, y);} {}   9 
+  13 {} {t3: ins 1/(7,8)}         12
+}
+
+forcedelete test.db2
+sqlite3 db2 file:test.db2?hctree=1 -uri 1
+catch_hct_journal_init db2
+
+foreach {tn cid res} {
+  1   7    SQLITE_OK
+  2   10   SQLITE_BUSY
+  3   9    SQLITE_BUSY
+  4   8    SQLITE_OK
+  5   10   SQLITE_BUSY
+  6   13   SQLITE_BUSY
+  7   9    SQLITE_OK
+  8   11   SQLITE_OK
+  9   10   SQLITE_OK
+ 10   13   SQLITE_BUSY
+ 11   12   SQLITE_OK
+ 12   13   SQLITE_OK
+} {
+  set cmd [list sqlite3_hct_journal_write db2] 
+  set cmd [concat $cmd [db eval {
+    SELECT cid, schema, data, schemacid 
+    FROM sqlite_hct_journal WHERE cid=$cid
+  }]]
+
+  do_test 1.2.$tn $cmd $res
+}
+
+test_dbs_match 1.3 {
+  SELECT * FROM t1;
+  SELECT * FROM t2;
+  SELECT * FROM t3;
+}
+
+do_execsql_test -db db2 1.4 {
+  SELECT cid, schema, hct_journal_entry(data), schemacid FROM sqlite_hct_journal
+} {
+  7 {CREATE TABLE t1(x, y);} {}    0 
+  8 {} {t1: ins 1/(1,2)}           7 
+  9 {CREATE TABLE t2(x, y);} {}    7 
+  10 {} {t2: ins 1/(3,4)}          9
+  11 {} {t2: ins 2/(5,6)}          9 
+  12 {CREATE TABLE t3(x, y);} {}   9 
+  13 {} {t3: ins 1/(7,8)}         12
+}
+
+db2 close
+#-------------------------------------------------------------------------
+hct_reset_db
+catch_hct_journal_init db
+sqlite3_hct_journal_setmode db LEADER
+
+forcedelete test.db2
+sqlite3 db2 file:test.db2?hctree=1 -uri 1
+catch_hct_journal_init db2
+
+do_execsql_test 2.0 {
+  CREATE TABLE t1(x INTEGER PRIMARY KEY, y TEXT);
+  INSERT INTO t1 VALUES(1, 'one');
+  INSERT INTO t1 VALUES(2, 'two');
+  INSERT INTO t1 VALUES(3, 'three');
+  DELETE FROM t1 WHERE x=2;
+}
+
+do_execsql_test 2.1 {
+  SELECT cid, schema, hct_journal_entry(data), schemacid FROM sqlite_hct_journal
+} {
+  7 {CREATE TABLE t1(x INTEGER PRIMARY KEY, y TEXT);} {} 0
+  8 {} {t1: ins 1/(NULL,'one')}                          7
+  9 {} {t1: ins 2/(NULL,'two')}                          7
+  10 {} {t1: ins 3/(NULL,'three')}                       7
+  11 {} {t1: del 2}                                      7
+}
+
+do_test 2.2 {
+  db eval { SELECT cid, schema, data, schemacid FROM sqlite_hct_journal } {
+    sqlite3_hct_journal_write db2 $cid $schema $data $schemacid
+  }
+} {}
+
+test_dbs_match 2.3 {
+  SELECT * FROM t1;
+}
+
+#-------------------------------------------------------------------------
+hct_reset_db
+catch_hct_journal_init db
+sqlite3_hct_journal_setmode db LEADER
+
+do_execsql_test 3.0 {
+  CREATE TABLE t1(a INTEGER PRIMARY KEY, b TEXT);
+}
+
+hct_copy_db test.db test.db2
+sqlite3 db2 test.db2
+set cid0 [db eval {SELECT max(cid) FROM sqlite_hct_journal}]
+
+do_execsql_test 3.1 {
+  INSERT INTO t1 VALUES(33, 'first insert');      --1
+  DELETE FROM t1 WHERE a=33;                      --2
+  INSERT INTO t1 VALUES(33, 'second insert');     --3
+  DELETE FROM t1 WHERE a=33;                      --4
+  INSERT INTO t1 VALUES(33, 'third insert');      --5
+  DELETE FROM t1 WHERE a=33;                      --6
+}
+
+execsql_pp {
+  SELECT cid, schema, hct_journal_entry(data) FROM sqlite_hct_journal
+}
+
+foreach o  {1 3 5 2 4 6} { lappend lCid [expr $cid0 + $o] }
+
+do_test 3.1 {
+  while {[llength $lCid]>0} {
+    set c [lindex $lCid 0]
+    set lCid [lrange $lCid 1 end]
+    if {$c==($cid0+6)} breakpoint
+    db eval {
+      SELECT cid, schema, data, schemacid FROM sqlite_hct_journal WHERE cid=$c
+    } {
+      set rc [sqlite3_hct_journal_write db2 $cid $schema $data $schemacid]
+      # puts "[expr $c-$cid0]: $rc"
+      if {$rc=="SQLITE_BUSY"} {
+        lappend lCid $c
+      }
+    }
+  }
+} {}
+
+test_dbs_match 3.2 { SELECT * FROM t1 }
+
+#-------------------------------------------------------------------------
+hct_reset_db
+catch_hct_journal_init db
+sqlite3_hct_journal_setmode db LEADER
+
+do_execsql_test 4.0 {
+  CREATE TABLE t1(a INTEGER PRIMARY KEY, b TEXT);
+  INSERT INTO t1 VALUES(1000, 'one');
+}
+
+hct_copy_db test.db test.db2
+sqlite3 db2 test.db2
+set cid0 [db eval {SELECT max(cid) FROM sqlite_hct_journal}]
+
+do_execsql_test 4.1 {
+  BEGIN;
+    UPDATE t1 SET b = 'two' WHERE a=1000;
+    INSERT INTO t1 VALUES(1001, 'x');
+  COMMIT;
+  BEGIN;
+    UPDATE t1 SET b = 'three' WHERE a=1000;
+    INSERT INTO t1 VALUES(1002, 'y');
+  COMMIT;
+  BEGIN;
+    UPDATE t1 SET b = 'four' WHERE a=1000;
+    INSERT INTO t1 VALUES(1003, 'z');
+  COMMIT;
+}
+
+foreach o  {3 1} { lappend lCid [expr $cid0 + $o] }
+
+do_test 4.2 {
+  while {[llength $lCid]>0} {
+    set c [lindex $lCid 0]
+    set lCid [lrange $lCid 1 end]
+    db eval {
+      SELECT cid, schema, data, schemacid FROM sqlite_hct_journal WHERE cid=$c
+    } {
+      set rc [sqlite3_hct_journal_write db2 $cid $schema $data $schemacid]
+    }
+  }
+} {}
+
+do_execsql_test -db db2 4.3 {
+  SELECT * FROM t1;
+} {1000 one}
+
+do_test 4.3 {
+  set c [expr 2+$cid0]
+  db eval {
+    SELECT cid, schema, data, schemacid FROM sqlite_hct_journal WHERE cid=$c
+  } {
+    set rc [sqlite3_hct_journal_write db2 $cid $schema $data $schemacid]
+  }
+} {}
+
+finish_test
+

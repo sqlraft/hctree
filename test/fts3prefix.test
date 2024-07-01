@@ -8,6 +8,8 @@
 #    May you share freely, never taking more than you give.
 #
 #*************************************************************************
+# TESTRUNNER: hct
+#
 # This file implements regression tests for SQLite library.  The
 # focus of this script is testing the FTS3 module.
 #
@@ -171,7 +173,7 @@ do_execsql_test 3.1 {
 }
 
 fts3_tap_test 3.2 db t2 {1 2 3}
-do_execsql_test 3.3 { SELECT optimize(t2) FROM t2 LIMIT 1 } {{Index optimized}}
+do_execsql_test 3.3 { INSERT INTO t2(t2) VALUES('optimize') } {}
 fts3_tap_test 3.4 db t2 {1 2 3}
 
 

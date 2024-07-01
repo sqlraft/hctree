@@ -6,6 +6,8 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: hct
+#
 # This file implements regression tests for SQLite library.  The
 # focus of this file is the interactions between the FTS3/4 module 
 # and shared-cache mode.

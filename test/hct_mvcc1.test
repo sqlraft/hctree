@@ -1,0 +1,243 @@
+# 2020 December 16
+#
+# The author disclaims copyright to this source code.  In place of
+# a legal notice, here is a blessing:
+#
+#    May you do good and not evil.
+#    May you find forgiveness for yourself and forgive others.
+#    May you share freely, never taking more than you give.
+#
+#*************************************************************************
+# This file implements regression tests for SQLite library.
+#
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+set testprefix hct_mvcc1
+
+hct_reset_db
+
+proc c_common {db tn sql res} {
+  if {$res=="database is locked"} {
+    uplevel [list do_test $tn [subst -nocommands {
+      list [catch { execsql {$sql} } msg] [set msg]
+    }] {1 {database is locked}}]
+  } else {
+    uplevel [list do_execsql_test -db $db $tn $sql $res]
+  }
+}
+
+#explain_i { CREATE TABLE txx(a, b); }
+
+proc c1 {tn sql {res {}}} { uplevel [list c_common db $tn $sql $res] }
+proc c2 {tn sql {res {}}} { uplevel [list c_common db2 $tn $sql $res] }
+
+foreach {tn type} {
+  1 "INTEGER"
+  2 "INT"
+} {
+  catch {db2 close}
+  hct_reset_db
+  sqlite3 db2 test.db
+
+  c1 $tn.1.1 "CREATE TABLE t1(a $type PRIMARY KEY, b)"
+  c1 $tn.1.2 "INSERT INTO t1 VALUES(1, 'one')"
+  c1 $tn.1.3 "INSERT INTO t1 VALUES(3, 'three')"
+  c1 $tn.1.4 "INSERT INTO t1 VALUES(5, 'five')"
+  c1 $tn.1.5 "BEGIN CONCURRENT"
+  c1 $tn.1.6 "  INSERT INTO t1 VALUES(2, 'two')"
+  c1 $tn.1.7 "  INSERT INTO t1 VALUES(4, 'four')"
+  c2 $tn.1.8                      "BEGIN CONCURRENT"
+  c2 $tn.1.9                        "SELECT * FROM t1 ORDER BY 1" \
+                                      {1 one 3 three 5 five}
+  c2 $tn.1.10                       "INSERT INTO t1 VALUES(4, 'iv')"
+  c2 $tn.1.11                       "INSERT INTO t1 VALUES(6, 'vi')"
+  c2 $tn.1.12                     "COMMIT"
+  c2 $tn.1.13                     "SELECT * FROM t1 ORDER BY 1" \
+                                    {1 one 3 three 4 iv 5 five 6 vi}
+  c1 $tn.1.14 "COMMIT" {database is locked}
+  c1 $tn.1.15 ROLLBACK
+  c1 $tn.1.16 "SELECT * FROM t1 ORDER BY 1" {1 one 3 three 4 iv 5 five 6 vi}
+  
+  c1 $tn.2.1 "CREATE TABLE t2(x $type PRIMARY KEY, y)"
+  c1 $tn.2.2 "INSERT INTO t2 VALUES(100, 'C')"
+  c1 $tn.2.3 "BEGIN CONCURRENT"
+  c1 $tn.2.4 "  INSERT INTO t2 VALUES(200, 'CC')"
+  c1 $tn.2.5 "  INSERT INTO t1 VALUES(10, 'ten')"
+  c2 $tn.2.6                      "INSERT INTO t1 VALUES(10, 'ten')"
+  c1 $tn.2.7 "COMMIT" {database is locked}
+  c1 $tn.2.8 "ROLLBACK"
+  c1 $tn.2.9 "SELECT * FROM t2 ORDER BY 1" {100 C}
+  c1 $tn.2.10 "SELECT * FROM t1 ORDER BY 1" \
+                {1 one 3 three 4 iv 5 five 6 vi 10 ten}
+  
+  c1 $tn.3.1 "BEGIN CONCURRENT"
+  c1 $tn.3.2 "  INSERT INTO t2 VALUES(300, 'CCC')"
+  c1 $tn.3.3 "  INSERT INTO t1 VALUES(20, 'twenty')"
+  c2 $tn.3.4                      "INSERT INTO t2 VALUES(300, 'CCC')"
+  c1 $tn.3.5 "COMMIT" {database is locked}
+  c1 $tn.3.6 "ROLLBACK"
+  c1 $tn.3.7 "SELECT * FROM t1 ORDER BY 1" \
+               {1 one 3 three 4 iv 5 five 6 vi 10 ten}
+  c1 $tn.3.8 "SELECT * FROM t2 ORDER BY 1" {100 C 300 CCC}
+  
+  c1 $tn.4.1 "BEGIN CONCURRENT"
+  c1 $tn.4.2 "  UPDATE t2 SET y='three hundred' WHERE x=300"
+  c1 $tn.4.3 "  UPDATE t1 SET b='v' WHERE a=5"
+  c2 $tn.4.4                      "DELETE FROM t2 WHERE x=300"
+  c1 $tn.4.5 "COMMIT" {database is locked}
+  c1 $tn.4.6 "ROLLBACK"
+  c1 $tn.4.7 "SELECT * FROM t1 ORDER BY 1" \
+               {1 one 3 three 4 iv 5 five 6 vi 10 ten}
+  c1 $tn.4.8 "SELECT * FROM t2" {100 C}
+}
+
+
+set maxi64 0x7fffffffffffffff
+
+foreach {tn wo pk} {
+  3 ""              "PRIMARY KEY"
+  4 ""              "UNIQUE"
+  5 "WITHOUT ROWID" "PRIMARY KEY"
+} {
+  catch {db2 close}
+  hct_reset_db
+  sqlite3 db2 test.db
+
+  c1 $tn.1.1 "CREATE TABLE t1(a INT $pk, b) $wo"
+  if {$wo==""} {
+    c1 $tn.1.2 "INSERT INTO t1(rowid, a, b) VALUES($maxi64, 1, 'one')"
+  } else {
+    c1 $tn.1.2 "INSERT INTO t1(a, b) VALUES(1, 'one')"
+  }
+  c1 $tn.1.3 "INSERT INTO t1 VALUES(3, 'three')"
+  c1 $tn.1.4 "INSERT INTO t1 VALUES(5, 'five')"
+  c1 $tn.1.5 "BEGIN CONCURRENT"
+  c1 $tn.1.6   "INSERT INTO t1 VALUES(7, 'seven')"
+  c2 $tn.1.7                      "BEGIN CONCURRENT"
+  c2 $tn.1.8                        "INSERT INTO t1 VALUES(7, 'six')"
+  c2 $tn.1.9                      "COMMIT"
+  c1 $tn.1.10 "COMMIT" {database is locked}
+  c1 $tn.1.10a "ROLLBACK"
+
+  c1 $tn.1.11 "SELECT * FROM t1 ORDER BY 1" {1 one 3 three 5 five 7 six}
+
+breakpoint
+  if {$wo==""} {
+    c1 $tn.1.12 "BEGIN CONCURRENT"
+    c1 $tn.1.13   "INSERT INTO t1(rowid, a, b) VALUES(350, NULL, 'null1')"
+    c2 $tn.1.14       "BEGIN CONCURRENT"
+    c2 $tn.1.15         "INSERT INTO t1(rowid, a, b) VALUES(349, NULL, 'null2')"
+    c2 $tn.1.16       "COMMIT"
+    c1 $tn.1.17 "COMMIT"
+  } 
+}
+
+catch {db2 close}
+hct_reset_db
+sqlite3 db2 test.db
+
+c1 6.1  "CREATE TABLE t1(a INTEGER PRIMARY KEY, b UNIQUE)"
+c1 6.2  "INSERT INTO t1 VALUES(1, 'one'), (2, 'two'), (3, 'three')"
+c2 6.3                 "BEGIN CONCURRENT"
+c2 6.4                   "SELECT a FROM t1 ORDER BY b" {1 3 2}
+c1 6.5  "DELETE FROM t1 WHERE a=3"
+c2 6.6                   "SELECT a FROM t1 ORDER BY b" {1 3 2}
+c2 6.7                 "END"
+c2 6.8                 "BEGIN CONCURRENT"
+c2 6.9                   "SELECT a FROM t1 ORDER BY b" {1 2}
+c1 6.10 "INSERT INTO t1 VALUES(3, 'three')"
+breakpoint
+c2 6.11                  "SELECT a FROM t1 ORDER BY b" {1 2}
+breakpoint
+c2 6.12                "END"
+c2 6.13                  "SELECT a FROM t1 ORDER BY b" {1 3 2}
+
+catch {db2 close}
+hct_reset_db
+sqlite3 db2 test.db
+c1 7.1  "CREATE TABLE t1(a INTEGER PRIMARY KEY, b)"
+c1 7.2  "INSERT INTO t1 VALUES(1, 'one'), (2, 'two'), (3, 'three')"
+c2 7.3                 "BEGIN CONCURRENT"
+c2 7.4                   "SELECT b FROM t1 ORDER BY a" {one two three}
+c1 7.5  "UPDATE t1 SET b='ii' WHERE a=2"
+c2 7.6                   "SELECT b FROM t1 ORDER BY a" {one two three}
+c1 7.7  "UPDATE t1 SET b='TOO' WHERE a=2"
+c2 7.8                   "SELECT b FROM t1 ORDER BY a" {one two three}
+c2 7.9                 "END"
+c2 7.10                  "SELECT b FROM t1 ORDER BY a" {one TOO three}
+
+catch {db2 close}
+hct_reset_db
+sqlite3 db2 test.db
+c1 7a.1  "CREATE TABLE t1(a INTEGER PRIMARY KEY, b)"
+c1 7a.2  "CREATE UNIQUE INDEX i1 ON t1(b)"
+c1 7a.3  {
+  WITH s(i) AS (
+    VALUES(1) UNION ALL SELECT i+1 FROM s WHERE i<100
+  )
+  INSERT INTO t1 SELECT i, hex(randomblob(100)) FROM s;
+}
+c1 7a.4  "BEGIN CONCURRENT"
+c1 7a.5    "UPDATE t1 SET b=hex(randomblob(50)) WHERE a IN (1,2,3,4,5,1000)"
+c1 7a.6    "INSERT INTO t1 VALUES(1000, 'ZZ')"
+c2 7a.7                           "INSERT INTO t1 VALUES(2000, 'ZZ')"
+c1 7a.8  "COMMIT" {database is locked}
+
+do_execsql_test 7a.9 {
+  ROLLBACK;
+  PRAGMA integrity_check
+} {ok}
+
+
+foreach {tn sz} {
+  1 100
+  2 10000
+} {
+  catch {db2 close}
+  hct_reset_db
+  sqlite3 db2 test.db
+  c1 8.$tn.1  "CREATE TABLE t1(a INTEGER PRIMARY KEY, b UNIQUE)"
+  c1 8.$tn.2  "CREATE TABLE t2(a INTEGER PRIMARY KEY, b)"
+  c1 8.$tn.3  "INSERT INTO t1 VALUES(1000, hex(randomblob($sz)))"
+  c1 8.$tn.4  "BEGIN CONCURRENT"
+  c1 8.$tn.5    "INSERT INTO t2 VALUES(500, 'hello world')"
+  c2 8.$tn.6                    "INSERT INTO t2 VALUES(500, 'world hello')"
+  c1 8.$tn.7    "DELETE FROM t1 WHERE a=1000"
+  c1 8.$tn.8  "COMMIT" {database is locked}
+  c1 8.$tn.9  "ROLLBACK"
+}
+
+do_execsql_test 8.10 {
+  PRAGMA integrity_check;
+  SELECT a, length(b) FROM t1;
+} {ok 1000 20000}
+
+#execsql_pp { SELECT * FROM (hctpgmap NATURAL JOIN hctdb) NATURAL JOIN hctentry }
+#puts -------------------------
+#execsql_pp { SELECT * FROM hctentry }
+
+catch {db2 close}
+hct_reset_db
+sqlite3 db2 test.db
+c1 9.1 "CREATE TABLE t1(a INTEGER PRIMARY KEY, b)"
+c1 9.2 "CREATE TABLE t2(a INTEGER PRIMARY KEY, b)"
+c1 9.2 "CREATE TABLE t3(a INTEGER PRIMARY KEY, b)"
+c1 9.3 "INSERT INTO t1 VALUES(1, 'one'), (2, 'two'), (3, 'three')"
+c1 9.4 "INSERT INTO t2 VALUES(4, 'iv')"
+c1 9.5 "BEGIN CONCURRENT"
+c1 9.6 "  UPDATE t1 SET b='TWOTWOTWO' WHERE a=2"
+c1 9.7 "  INSERT INTO t3 VALUES(3, '444')"
+c1 9.7 "  UPDATE t2 SET b='four' WHERE a=4"
+c2 9.8 "          UPDATE t2 SET b='whatever' WHERE a=4"
+c1 9.9 "COMMIT" {database is locked} 
+c1 9.9a "ROLLBACK" {}
+
+c1 9.10 "SELECT * FROM t1" {1 one 2 two 3 three}
+c2 9.11 "SELECT * FROM t1" {1 one 2 two 3 three}
+
+c1 9.12 "SELECT * FROM t2" {4 whatever}
+c2 9.13 "SELECT * FROM t2" {4 whatever}
+
+finish_test
+

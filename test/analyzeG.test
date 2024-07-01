@@ -8,6 +8,8 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: puresql
+#
 # Tests for functionality related to ANALYZE.
 #
 

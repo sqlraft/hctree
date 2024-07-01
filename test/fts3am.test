@@ -3,6 +3,8 @@
 # The author disclaims copyright to this source code.
 #
 #*************************************************************************
+# TESTRUNNER: hct
+#
 # This file implements regression tests for SQLite library.  fts3
 # DELETE handling assumed all fields were non-null.  This was not
 # the intention at all.

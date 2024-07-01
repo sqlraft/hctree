@@ -1,0 +1,46 @@
+# 2022 November 14
+#
+# The author disclaims copyright to this source code.  In place of
+# a legal notice, here is a blessing:
+#
+#    May you do good and not evil.
+#    May you find forgiveness for yourself and forgive others.
+#    May you share freely, never taking more than you give.
+#
+#*************************************************************************
+# This file implements regression tests for SQLite library.
+#
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+set testprefix hct_wrapper
+
+db close
+forcedelete test.db test.db-data test.db-pagemap
+
+proc open_check {uri} {
+  sqlite3 dbtest $uri -uri 1
+  dbtest eval { 
+    DROP TABLE IF EXISTS t1;
+    CREATE TABLE t1(a, b, c);
+  }
+
+  set ret stock
+  dbtest eval { PRAGMA hct_ncasfail } { set ret hct }
+  dbtest close
+
+  set ret
+}
+
+do_test 1.0 { open_check test.db } stock
+do_test 1.1 { open_check test.db } stock
+do_test 1.2 { open_check file:test.db?hctree=1 } stock
+
+forcedelete test.db
+
+do_test 2.0 { open_check file:test.db?hctree=1 } hct
+do_test 2.1 { open_check test.db } hct
+do_test 2.2 { open_check file:test.db?hctree=0 } hct
+
+finish_test
+

@@ -1,0 +1,161 @@
+# 2022 December 28
+#
+# The author disclaims copyright to this source code.  In place of
+# a legal notice, here is a blessing:
+#
+#    May you do good and not evil.
+#    May you find forgiveness for yourself and forgive others.
+#    May you share freely, never taking more than you give.
+#
+#*************************************************************************
+# This file implements regression tests for SQLite library.
+#
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+set testprefix hct_rollback1
+
+hct_reset_db
+
+do_execsql_test 1.0 {
+  CREATE TABLE t1(a INTEGER PRIMARY KEY, b);
+  INSERT INTO t1 VALUES(1, 'one');
+  INSERT INTO t1 VALUES(2, 'two');
+  INSERT INTO t1 VALUES(3, 'three');
+  INSERT INTO t1 VALUES(4, 'four');
+  INSERT INTO t1 VALUES(5, 'five');
+}
+
+sqlite3 db2 test.db
+
+do_execsql_test 1.1 {
+  BEGIN CONCURRENT;
+    INSERT INTO t1 VALUES(7, 'seven');
+    DELETE FROM t1 WHERE a=7;
+    INSERT INTO t1 VALUES(8, 'eight');
+    SELECT * FROM t1;
+} {1 one 2 two 3 three 4 four 5 five 8 eight}
+
+do_execsql_test -db db2 1.2 {
+  INSERT INTO t1 VALUES(6, 'six');
+}
+
+do_catchsql_test 1.3 {
+  COMMIT;
+} {1 {database is locked}}
+execsql ROLLBACK
+
+do_execsql_test -db db2 1.4 {
+  SELECT * FROM t1;
+} {1 one 2 two 3 three 4 four 5 five 6 six}
+
+do_execsql_test 1.5 {
+  BEGIN CONCURRENT;
+    INSERT INTO t1 VALUES(9, 'nine');
+}
+
+do_test 1.6 { set T [sqlite_hct_mtcommit T db] } T
+do_test 1.7 { T step } 0    ;# allocated TID
+do_test 1.7 { T step } 0    ;# wrote data
+do_test 1.8 { T step } 0    ;# allocated CID
+do_test 1.9 { T step } 1    ;# validated and committed.
+T destroy
+
+#-------------------------------------------------------------------------
+
+db2 close
+hct_reset_db
+
+sqlite3 db2 test.db
+do_execsql_test 2.0 {
+  CREATE TABLE t1(a INTEGER PRIMARY KEY, b TEXT);
+  INSERT INTO t1 VALUES(1, 'one');
+  INSERT INTO t1 VALUES(2, 'two');
+  INSERT INTO t1 VALUES(3, 'three');
+  INSERT INTO t1 VALUES(4, 'four');
+  INSERT INTO t1 VALUES(5, 'five');
+}
+
+do_execsql_test -db db   2.1.1 {
+  BEGIN CONCURRENT;
+    DELETE FROM t1 WHERE a=3;
+}
+do_execsql_test -db db2  2.1.2 {
+  BEGIN CONCURRENT;
+    DELETE FROM t1 WHERE a=4;
+    SELECT * FROM t1
+} {1 one 2 two 3 three 5 five}
+
+do_test 2.1.3 {
+  sqlite_hct_mtcommit db_t db
+  sqlite_hct_mtcommit db2_t db2
+
+  # Allocate TID values so that [db2] has the larger TID.
+  db_t step
+  db2_t step
+
+  # Write to disk so that [db2] writes first.
+  db2_t step
+  db_t step
+
+  # Finish the commit for [db]
+  db_t step
+  db_t step
+
+  # Attempt to finish the commit for [db2]
+  db2_t step
+  list [catch { db2_t step } msg] $msg
+} {1 {error (5): database is locked}}
+
+db_t destroy
+db2_t destroy
+
+do_execsql_test 2.1.4 {
+  SELECT * FROM t1
+} {1 one 2 two 4 four 5 five}
+
+do_execsql_test 2.2.0 {
+  INSERT INTO t1 VALUES(3, 'three');
+}
+
+do_execsql_test -db db   2.2.1 {
+  BEGIN CONCURRENT;
+    UPDATE t1 SET b='thirteen' WHERE a=3;
+}
+do_execsql_test -db db2  2.2.2 {
+  BEGIN CONCURRENT;
+    DELETE FROM t1 WHERE a=4;
+    SELECT * FROM t1
+} {1 one 2 two 3 three 5 five}
+
+do_test 2.2.3 {
+  sqlite_hct_mtcommit db_t db
+  sqlite_hct_mtcommit db2_t db2
+
+  # Allocate TID values so that [db2] has the larger TID.
+  db_t step
+  db2_t step
+
+  # Write to disk so that [db2] writes first.
+  db2_t step
+  db_t step
+
+  # Finish the commit for [db]
+  db_t step
+  db_t step
+
+  # Attempt to finish the commit for [db2]
+  db2_t step
+  list [catch { db2_t step } msg] $msg
+} {1 {error (5): database is locked}}
+
+db_t destroy
+db2_t destroy
+
+do_execsql_test 2.2.4 {
+  SELECT * FROM t1
+} {1 one 2 two 3 thirteen 4 four 5 five}
+
+finish_test
+
+

@@ -1,4 +1,3 @@
-//#ifnot omit-oo1
 /*
   2022-05-23
 
@@ -32,23 +31,20 @@
   - `sqlite3.dir`, if set, treats the given directory name as the
     directory from which `sqlite3.js` will be loaded.
 */
-//#if target=es6-bundler-friendly
-import {default as sqlite3InitModule} from './sqlite3-bundler-friendly.mjs';
-//#else
 "use strict";
-{
-  const urlParams = globalThis.location
-        ? new URL(globalThis.location.href).searchParams
-        : new URLSearchParams();
+(()=>{
+//#if target=es6-bundler-friendly
+  importScripts('sqlite3.js');
+//#else
+  const urlParams = new URL(self.location.href).searchParams;
   let theJs = 'sqlite3.js';
   if(urlParams.has('sqlite3.dir')){
     theJs = urlParams.get('sqlite3.dir') + '/' + theJs;
   }
   //console.warn("worker1 theJs =",theJs);
   importScripts(theJs);
-}
 //#endif
-sqlite3InitModule().then(sqlite3 => sqlite3.initWorker1API());
-//#else
-/* Built with the omit-oo1 flag. */
-//#endif ifnot omit-oo1
+  sqlite3InitModule().then((sqlite3)=>{
+    sqlite3.initWorker1API();
+  });
+})();

@@ -8,6 +8,8 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: hct
+#
 # This file implements tests for sqlite3_value_subtype() and
 # sqlite3_result_subtype() interfaces.
 #

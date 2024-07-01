@@ -324,7 +324,11 @@ int sqlite3Fts5ExprNew(
   }
 
   sqlite3_free(sParse.apPhrase);
-  *pzErr = sParse.zErr;
+  if( 0==*pzErr ){
+    *pzErr = sParse.zErr;
+  }else{
+    sqlite3_free(sParse.zErr);
+  }
   return sParse.rc;
 }
 
@@ -1890,7 +1894,7 @@ int sqlite3Fts5ExprClonePhrase(
   Fts5ExprPhrase *pOrig = 0;      /* The phrase extracted from pExpr */
   Fts5Expr *pNew = 0;             /* Expression to return via *ppNew */
   TokenCtx sCtx = {0,0,0};        /* Context object for fts5ParseTokenize */
-  if( iPhrase<0 || iPhrase>=pExpr->nPhrase ){
+  if( !pExpr || iPhrase<0 || iPhrase>=pExpr->nPhrase ){
     rc = SQLITE_RANGE;
   }else{
     pOrig = pExpr->apExprPhrase[iPhrase];

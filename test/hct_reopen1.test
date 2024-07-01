@@ -1,0 +1,25 @@
+
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+set testprefix hct_reopen1
+
+hct_reset_db
+
+db close
+sqlite3 db test.db
+
+do_execsql_test 1.0 {
+  CREATE TABLE t1(x, y);
+  INSERT INTO t1 VALUES(1, 2);
+}
+
+db close
+breakpoint
+sqlite3 db test.db
+do_execsql_test 1.1 {
+  SELECT * FROM t1
+} {1 2}
+
+finish_test
+

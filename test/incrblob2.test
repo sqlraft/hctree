@@ -312,11 +312,11 @@ do_test incrblob2-6.1 {
   set wrHandle [db incrblob t1 data 1]
 
   sqlite3_blob_read $rdHandle 0 100
+  close $rdHandle
 
   sqlite3_blob_write $wrHandle 0 ABCDEF
 
   close $wrHandle
-  close $rdHandle
 } {}
 
 do_test incrblob2-6.2 {
@@ -366,8 +366,8 @@ do_test incrblob2-6.3c {
 
 
 do_test incrblob2-6.4 {
-  close $wrHandle
   close $rdHandle
+  close $wrHandle
 } {}
 
 sqlite3_memory_highwater 1

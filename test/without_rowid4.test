@@ -9,6 +9,8 @@
 #
 #***********************************************************************
 #
+# TESTRUNNER: puresql
+#
 # Regression testing of FOR EACH ROW table triggers on WITHOUT ROWID
 # tables.
 #

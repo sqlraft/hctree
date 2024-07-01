@@ -8,6 +8,8 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: hct
+#
 # Tests to exercise the MEM_IntReal representation of Mem objects.
 #
 set testdir [file dirname $argv0]

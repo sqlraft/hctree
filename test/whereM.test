@@ -8,6 +8,8 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: hct
+#
 # Tests focused on the "constant propagation" that occurs within the
 # WHERE clause of a SELECT statemente.
 #

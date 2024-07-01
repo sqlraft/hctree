@@ -10,6 +10,7 @@
 #*************************************************************************
 # This file implements regression tests for SQLite library.  
 #
+# TESTRUNNER: puresql
 
 set testdir [file dirname $argv0]
 source $testdir/tester.tcl

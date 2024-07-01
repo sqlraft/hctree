@@ -1,0 +1,28 @@
+
+
+<h1> How to Update SQLite </h1>
+
+<pre>
+fossil pull https://sqlite.org/src --project-code 2ab58778c2967968b94284e989e43dc11791f548
+fossil up hctree
+fossil merge trunk
+</pre>
+
+<h1> How to Test Hctree </h1>
+
+<pre>
+./testfixture ../trunk/test/testrunner.tcl hct
+./testfixture ../trunk/test/testrunner.tcl hct%
+./testfixture ../trunk/test/testrunner.tcl
+
+./hct_thread_test -nidx 2 +16
+</pre>
+
+<h1> How to Update hctree-bedrock Branch </h1>
+
+<pre>
+fossil up hctree-bedrock
+fossil merge hctree
+</pre>
+
+Then run the same test procedure as for the hctree branch.

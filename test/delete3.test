@@ -12,6 +12,7 @@
 # focus of this script is a test of the DELETE command where a
 # large number of rows are deleted.
 #
+# TESTRUNNER: puresql
 
 set testdir [file dirname $argv0]
 source $testdir/tester.tcl

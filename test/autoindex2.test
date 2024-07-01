@@ -15,6 +15,7 @@
 # This file contains a single real-world test case that was giving
 # suboptimal performance because of over-use of automatic indexes.
 #
+# TESTRUNNER: puresql
 
 set testdir [file dirname $argv0]
 source $testdir/tester.tcl

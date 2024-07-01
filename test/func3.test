@@ -8,6 +8,8 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: hct
+#
 # This file implements regression tests for SQLite library. The
 # focus of this file is testing that destructor functions associated
 # with functions created using sqlite3_create_function_v2() is 

@@ -8,6 +8,7 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: hct
 # 
 # This test script reproduces the problem reported by ticket #2565,
 # A database corruption bug that occurs in auto_vacuum mode when

@@ -1,0 +1,90 @@
+# 2001 September 15
+#
+# The author disclaims copyright to this source code.  In place of
+# a legal notice, here is a blessing:
+#
+#    May you do good and not evil.
+#    May you find forgiveness for yourself and forgive others.
+#    May you share freely, never taking more than you give.
+#
+#***********************************************************************
+# This file implements regression tests for SQLite library.  The
+# focus of this file is testing the UPDATE statement.
+#
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+set testprefix hct_update2
+
+hct_reset_db
+
+proc show_db_entries {} {
+  execsql_pp {
+    SELECT slot, pgno, ikey, tid, rangetid, rangeoldpg 
+      FROM hctentry, hctpgmap 
+      WHERE slot>=33 AND logical_in_use AND pgno=value;
+  }
+}
+proc show_page_contents {pgno} {
+  execsql_pp "
+    SELECT pgno, ikey, tid, rangetid, rangeoldpg, record
+      FROM hctentry
+      WHERE pgno=$pgno
+  "
+}
+
+do_execsql_test 1.1 {
+  BEGIN;
+  CREATE TABLE t2(a);
+  INSERT INTO t2 VALUES(1);
+  INSERT INTO t2 VALUES(2);
+  INSERT INTO t2 SELECT a+2 FROM t2;
+  INSERT INTO t2 SELECT a+4 FROM t2;
+  INSERT INTO t2 SELECT a+8 FROM t2;
+  INSERT INTO t2 SELECT a+16 FROM t2;
+  INSERT INTO t2 SELECT a+32 FROM t2;
+  INSERT INTO t2 SELECT a+64 FROM t2;
+  INSERT INTO t2 SELECT a+128 FROM t2;
+  INSERT INTO t2 SELECT a+256 FROM t2;
+  INSERT INTO t2 SELECT a+512 FROM t2;
+  INSERT INTO t2 SELECT a+1024 FROM t2;
+  COMMIT;
+  SELECT count(*) FROM t2;
+} {2048}
+
+do_execsql_test 1.2.1 {
+  SELECT count(*) FROM t2 WHERE a=rowid;
+} {2048}
+
+sqlite3 db2 test.db
+
+do_execsql_test -db db2 1.2.2 {
+  BEGIN;
+  SELECT count(*) FROM t2 WHERE a=rowid;
+} {2048}
+
+do_execsql_test 1.3 {
+  UPDATE t2 SET rowid=rowid+10000;
+} {}
+
+do_execsql_test 1.4 {
+  SELECT count(*) FROM t2 WHERE a=rowid-10000;
+} {2048}
+
+do_execsql_test -db db2 1.5 {
+  SELECT count(*) FROM t2 WHERE a=rowid;
+} {2048}
+
+do_execsql_test -db db2 1.6 {
+  END;
+  SELECT count(*) FROM t2 WHERE a=rowid;
+} {0}
+
+show_db_entries
+show_page_contents 69
+
+show_page_contents 26
+show_page_contents 44
+
+
+finish_test

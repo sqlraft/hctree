@@ -1255,7 +1255,7 @@ static i64 fts5IndexDataVersion(Fts5Index *p){
     if( p->pDataVersion==0 ){
       p->rc = fts5IndexPrepareStmt(p, &p->pDataVersion, 
           sqlite3_mprintf("PRAGMA %Q.data_version", p->pConfig->zDb)
-          );
+      );
       if( p->rc ) return 0;
     }
 

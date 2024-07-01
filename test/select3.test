@@ -12,10 +12,12 @@
 # focus of this file is testing aggregate functions and the
 # GROUP BY and HAVING clauses of SELECT statements.
 #
-# $Id: select3.test,v 1.23 2008/01/16 18:20:42 danielk1977 Exp $
+# TESTRUNNER: puresql
+#
 
 set testdir [file dirname $argv0]
 source $testdir/tester.tcl
+set testprefix select3
 
 # Build some test data
 #

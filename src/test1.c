@@ -8242,6 +8242,7 @@ static int SQLITE_TCLAPI tclLoadStaticExtensionCmd(
   extern int sqlite3_ieee_init(sqlite3*,char**,const sqlite3_api_routines*);
   extern int sqlite3_nextchar_init(sqlite3*,char**,const sqlite3_api_routines*);
   extern int sqlite3_percentile_init(sqlite3*,char**,const sqlite3_api_routines*);
+  extern int sqlite3_hct_init(sqlite3*,char**,const sqlite3_api_routines*);
 #ifndef SQLITE_OMIT_VIRTUALTABLE
   extern int sqlite3_prefixes_init(sqlite3*,char**,const sqlite3_api_routines*);
 #endif
@@ -8251,6 +8252,7 @@ static int SQLITE_TCLAPI tclLoadStaticExtensionCmd(
   extern int sqlite3_remember_init(sqlite3*,char**,const sqlite3_api_routines*);
   extern int sqlite3_series_init(sqlite3*,char**,const sqlite3_api_routines*);
   extern int sqlite3_spellfix_init(sqlite3*,char**,const sqlite3_api_routines*);
+  extern int sqlite3_stmtrand_init(sqlite3*,char**,const sqlite3_api_routines*);
   extern int sqlite3_totype_init(sqlite3*,char**,const sqlite3_api_routines*);
   extern int sqlite3_wholenumber_init(sqlite3*,char**,const sqlite3_api_routines*);
   extern int sqlite3_unionvtab_init(sqlite3*,char**,const sqlite3_api_routines*);
@@ -8284,12 +8286,14 @@ static int SQLITE_TCLAPI tclLoadStaticExtensionCmd(
     { "remember",              sqlite3_remember_init             },
     { "series",                sqlite3_series_init               },
     { "spellfix",              sqlite3_spellfix_init             },
+    { "stmtrand",              sqlite3_stmtrand_init             },
     { "totype",                sqlite3_totype_init               },
     { "unionvtab",             sqlite3_unionvtab_init            },
     { "wholenumber",           sqlite3_wholenumber_init          },
 #ifdef SQLITE_HAVE_ZLIB
     { "zipfile",               sqlite3_zipfile_init              },
 #endif
+    { "hct",                   sqlite3_hct_init          },
   };
   sqlite3 *db;
   const char *zName;
@@ -8863,6 +8867,55 @@ static int SQLITE_TCLAPI test_write_db(
 }
 
 /*
+** Usage:  sqlite3_hct_cas_failure NFAIL NRESET
+*/
+static int SQLITE_TCLAPI test_hct_cas_failure(
+  void * clientData,
+  Tcl_Interp *interp,
+  int objc,
+  Tcl_Obj *CONST objv[]
+){
+  int nFail;
+  int nReset;
+
+  if( objc!=3 ){
+    Tcl_WrongNumArgs(interp, 1, objv, "NFAIL NRESET");
+    return TCL_ERROR;
+  }
+
+  if( Tcl_GetIntFromObj(interp, objv[1], &nFail) ) return TCL_ERROR;
+  if( Tcl_GetIntFromObj(interp, objv[2], &nReset) ) return TCL_ERROR;
+
+  sqlite3_hct_cas_failure(nFail, nReset);
+  Tcl_ResetResult(interp);
+  return TCL_OK;
+}
+
+/*
+** Usage:  sqlite3_hct_proc_failure NFAIL
+*/
+static int SQLITE_TCLAPI test_hct_proc_failure(
+  void * clientData,
+  Tcl_Interp *interp,
+  int objc,
+  Tcl_Obj *CONST objv[]
+){
+  int nFail;
+  int nReset;
+
+  if( objc!=2 ){
+    Tcl_WrongNumArgs(interp, 1, objv, "NFAIL");
+    return TCL_ERROR;
+  }
+
+  if( Tcl_GetIntFromObj(interp, objv[1], &nFail) ) return TCL_ERROR;
+
+  sqlite3_hct_proc_failure(nFail);
+  Tcl_ResetResult(interp);
+  return TCL_OK;
+}
+
+/*
 ** Usage:  sqlite3_register_cksumvfs
 **
 */
@@ -9408,6 +9461,8 @@ int Sqlitetest1_Init(Tcl_Interp *interp){
      { "sqlite3_autovacuum_pages", test_autovacuum_pages,   0 },
      { "decode_hexdb",             test_decode_hexdb,       0 },
      { "test_write_db",            test_write_db,           0 },
+     { "sqlite3_hct_cas_failure",  test_hct_cas_failure,    0 },
+     { "sqlite3_hct_proc_failure",  test_hct_proc_failure,    0 },
      { "sqlite3_register_cksumvfs", test_register_cksumvfs,  0 },
      { "sqlite3_unregister_cksumvfs", test_unregister_cksumvfs,  0 },
      { "number_of_cores",             guess_number_of_cores,     0 },
@@ -9433,7 +9488,9 @@ int Sqlitetest1_Init(Tcl_Interp *interp){
 #ifdef SQLITE_DEBUG
   extern u32 sqlite3WhereTrace;
   extern int sqlite3OSTrace;
+#ifndef SQLITE_OMIT_WAL
   extern int sqlite3WalTrace;
+#endif
 #endif
 #ifdef SQLITE_TEST
 #ifdef SQLITE_ENABLE_FTS3

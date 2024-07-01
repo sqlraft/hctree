@@ -8,6 +8,7 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: hct
 #
 # Ticket #3791:  A segfault when inserting into a table that contains
 # an arbitrary expression as its default value.

@@ -22,6 +22,11 @@
 #include "sqliteInt.h"
 #include "wal.h"
 
+#ifdef SQLITE_ENABLE_HCT
+# define IS_HCT(pPager) (pPager->pVfs==0)
+#else
+# define IS_HCT(pPager) 0
+#endif
 
 /******************* NOTES ON THE DESIGN OF THE PAGER ************************
 **
@@ -6502,6 +6507,7 @@ int sqlite3PagerSync(Pager *pPager, const char *zSuper){
 */
 int sqlite3PagerExclusiveLock(Pager *pPager, PgHdr *pPage1, u32 *aConflict){
   int rc = pPager->errCode;
+  if( IS_HCT(pPager) ) return SQLITE_OK;
   assert( assert_pager_state(pPager) );
   if( rc==SQLITE_OK ){
     assert( pPager->eState==PAGER_WRITER_CACHEMOD
@@ -7250,6 +7256,10 @@ sqlite3_vfs *sqlite3PagerVfs(Pager *pPager){
 ** not yet been opened.
 */
 sqlite3_file *sqlite3PagerFile(Pager *pPager){
+#ifdef SQLITE_ENABLE_HCT
+  static sqlite3_file s = {0};
+  if( pPager->pVfs==0 ) return &s;
+#endif
   return pPager->fd;
 }
 
@@ -7605,6 +7615,7 @@ int sqlite3PagerGetJournalMode(Pager *pPager){
 ** is unmodified.
 */
 int sqlite3PagerOkToChangeJournalMode(Pager *pPager){
+  if( IS_HCT(pPager) ) return 0;
   assert( assert_pager_state(pPager) );
   if( pPager->eState>=PAGER_WRITER_CACHEMOD ) return 0;
   if( NEVER(isOpen(pPager->jfd) && pPager->journalOff>0) ) return 0;

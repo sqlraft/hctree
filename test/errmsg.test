@@ -8,6 +8,8 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: hct
+#
 # Test that if sqlite3_prepare_v2() is used to prepare a query, the
 # error-message associated with an sqlite3_step() error is available
 # immediately. Whereas if sqlite3_prepare() is used, it is not available

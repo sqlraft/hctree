@@ -1,0 +1,549 @@
+
+<title> Slides </title>
+
+<h1>Overview</h1>
+
+Hctree is A high-concurrency, optimistic row-level-locking backend for SQLite that more
+or less plugs in to the btree.h interface.
+
+<b>Goals are:</b>
+
+<ul>
+  <li> To run as fast or faster than SQLite for cases that are likely to come
+       up on server systems, and 
+
+  <li> To support many simultaneous write transactions.
+</ul>
+
+Current implementation requires all clients in the same process.
+
+<hr><h1>Test Results</h1>
+
+Some test results are <a href=threadtest.wiki>here</a>.
+
+8 threads running flat out on small write transactions seem to get around
+6.4 times as much work as a single thread. i.e. 80% efficiency.
+
+Not clear how much of this is the software and how much is the hardware just
+yet. Certainly it's some of each.
+
+<hr><hr>
+
+<i><h1>Implementation Part 1: Database Layer</h1></i>
+
+<hr>
+<hr><h1>The Page Map</h1>
+
+<ul>
+  <li> Primary purpose is <b>to map from logical to physical page numbers</b>.
+
+  <li> Huge array of 64-bit integers. One for each page in the database.
+
+  <li> Stored on disk - currently, but not necessarily in its own file - and
+       is expected to survive a process crash.
+
+  <li> Accessed via mmap(), written using 64-bit CAS primitives.
+
+</ul>
+
+<hr><h1>A CAS Primitive for Database Pages</h1>
+
+To write a database page (identified by logical page number):
+
+<ol>
+  <li> Allocate a new physical page,
+  <li> Populate the new physical page with the modified data,
+  <li> Use a 64-bit CAS primitive to modify the page-map entry to point to the
+       new physical page. If some other client has gotten to our page first,
+       the CAS will fail.
+</ol>
+
+So we have a compare-and-swap for database pages.
+
+<hr><h1>B-Link Tree</h1>
+
+<verbatim type="pikchr center">
+boxht=0.2 ; boxwid=0.5 ; linewid=0.2
+
+A1: box ; arrow ; A2: box ; arrow ; A3: box ; arrow ; A4: box ; arrow
+A5: box ; arrow ; A6: box ; arrow ; A7: box ; arrow ; A8: box
+B1: box at A3 + (0.35, 0.5) ; arrow -> ; B2: box ; arrow -> ; B3: box
+C1: box at B2 + (0,0.5) 
+
+arrow from B1.s to A1.n
+arrow from B1.s to A2.n
+arrow from B2.s to A4.n
+arrow from B2.s to A5.n
+arrow from B3.s to A6.n
+arrow from B3.s to A7.n
+arrow from C1.s to B1.n
+arrow from C1.s to B3.n
+</verbatim>
+
+<ul>
+  <li> Each page has a pointer to its right-hand-peer, if any.
+
+  <li> Some of the parent-child pointers might be missing. Readers must
+       navigate this hazard.
+
+  <li> Each parent-child pointer is accompanied by a copy of the smallest
+       key on the child page.
+</ul>
+
+<hr><h1>Lists, Not Trees</h1>
+
+<ul>
+  <li> Consider a "tree" that is just the linked list of leaf pages.
+
+  <li> INSERT operations only.
+
+  <li> And with an infinite supply of logical and physical pages.
+</ul>
+  
+<verbatim type="pikchr center">
+boxht=0.2 ; boxwid=0.5
+
+box "1" ; arrow ; box "2" ; arrow ; box "3" ; arrow ; box "4" ;
+</verbatim>
+
+<ul>
+  <li> Each record carries with it the 64-bit transaction id (TID) 
+       associated with the transaction that wrote it.
+
+  <li> Transaction ids are monotonically increasing integers (close enough, anyway...).
+
+  <li> Readers ignore records written by transactions committed after they started.
+</ul>
+
+<hr><h1>Page Splits</h1>
+<verbatim type="pikchr center">
+boxht=0.2 ; boxwid=0.5
+
+ONE: box "1" ; arrow ; TWO: box "2" ; arrow ; box "3" ; arrow ; box "4" ;
+text "Step 1:" with e at ONE + (-0.5, 0)
+FIVE: box at TWO + (-0.5, -0.3) "5" color red
+arrow from FIVE.e to TWO.s color red
+</verbatim>
+
+<verbatim type="pikchr center">
+boxht=0.2 ; boxwid=0.5
+
+ONE: box "1" color red ; move ; TWO: box "2" ; arrow ; box "3" ; arrow ; box "4"
+text "Step 2:" with e at ONE + (-0.5, 0)
+
+FIVE: box at TWO + (-0.5, -0.3) "5"
+arrow from FIVE.e to TWO.s
+arrow from ONE.s to FIVE.w color red
+</verbatim>
+
+<ul>
+  <li><b>Important Point:</b> Once it has been used, a logical page number is
+  inseparably associated with the FP key on its page until the end of time (not
+  really).  
+</ul>
+
+<hr><h1>Page Consolidation</h1>
+
+<verbatim type="pikchr center">
+boxht=0.2 ; boxwid=0.5
+
+ONE: box "1" ; arrow ; box "2" ; arrow ; THREE: box "3" color red; arrow color red; box "4" 
+circle "X" radius 0.05 color red at THREE.ne fill white
+text "Step 1:" with e at ONE + (-0.5, 0)
+</verbatim>
+
+<verbatim type="pikchr center">
+boxht=0.2 ; boxwid=0.5
+
+ONE: box "1" ; arrow ; TWO: box "2" color red; move ; THREE: box "3"; arrow; FOUR: box "4" 
+circle "X" radius 0.05 at THREE.ne fill white
+text "Step 2:" with e at ONE + (-0.5, 0)
+
+arrow from TWO.e right 0.1 then right 0.3 down 0.3 then right until even with FOUR.w then to FOUR.s color red
+</verbatim>
+
+<ul>
+  <li> One of the bits in the page-map slot for a page is the PAGE_EVICTED bit.
+  <li> Set using a CAS instruction, so will clash with any other write.
+  <li> If the PAGE_EVICTED bit is set:
+  <ul> 
+    <li> The page may not be written to, and
+    <li> No reader will follow a parent-to-child pointer to the page.
+  </ul>
+</ul>
+
+<hr><h1>Key Redistribution</h1>
+<verbatim type="pikchr center">
+boxht=0.2 ; boxwid=0.5
+ONE: box "1" ; arrow ; box "2" ; arrow ; THREE: box "3" color red; arrow color red; box "4" 
+circle "X" radius 0.05 color red at THREE.ne fill white
+text "Step 1:" with e at ONE + (-0.5, 0)
+</verbatim>
+<verbatim type="pikchr center">
+boxht=0.2 ; boxwid=0.5
+ONE: box "1" ; arrow ; TWO: box "2" ; arrow ; THREE: box "3" ; arrow ; FOUR: box "4" ;
+circle "X" radius 0.05 at THREE.ne fill white
+text "Step 2:" with e at ONE + (-0.5, 0)
+FIVE: box at THREE + (0.0, -0.3) "5" color red
+arrow from FIVE.e to FOUR.s color red
+</verbatim>
+<verbatim type="pikchr center">
+boxht=0.2 ; boxwid=0.5
+ONE: box "1" ; arrow ; TWO: box "2" color red; move ; THREE: box "3" ; arrow ; FOUR: box "4" ;
+circle "X" radius 0.05 at THREE.ne fill white
+text "Step 3:" with e at ONE + (-0.5, 0)
+FIVE: box at THREE + (0.0, -0.3) "5"
+arrow from FIVE.e to FOUR.s
+arrow from TWO.e to FIVE.w color red
+</verbatim>
+
+<ul>
+  <li> Other operations are possible.
+</ul>
+
+<hr><h1>Internal Lists</h1>
+
+<ul>
+  <li> Lists are of course too slow in practice - they do not support efficient
+       point or range queries!
+
+  <li> So we have the hierachy of parent lists.
+
+  <li> Each time new pages are added or existing pages evicted from a list, its
+       parent list is updated.
+
+  <li> But while it is being updated, readers go on. Missing entries in the
+       parent list don't matter - this is allowed in the b-link tree. And the
+       entries to be deleted don't matter, as no reader follows an EVICTED
+       parent-to-child pointer.
+
+  <li> There are techniques for increasing or decreasing the height of the
+       hierarchy of lists - just as there are for b-trees. They're dull.
+</ul>
+
+<hr><h1>Page Management</h1>
+
+<ul>
+  <li> There is not an infinite supply of physical or logical page ids.
+</ul>
+
+<b> IN_USE Flags: </b>
+<ul>
+  <li> There are two flags in the page-map slots - LOGICAL_IN_USE and
+       PHYSICAL_IN_USE.
+
+  <li> These flags are set and cleared by writers as pages are used and
+       removed from the tree.
+
+  <li> When the system starts up (first connection to a database is
+       established), the entire page-map is scanned to determine the
+       set of free logical and physical pages. This is the only time
+       these flags are read.
+
+  <li> We accept that if the database process crashes at an inopportune 
+       time, a handful of physical or logical pages might be leaked.
+</ul>
+
+<b> Page Manager: </b>
+
+<ul>
+  <li> While the system is running, free pages are managed by the page 
+       manager - a mutex protected container.
+
+  <li> Page manager allocates blocks of N (say 1000) pages at a time.
+
+  <li> Clients that exit before they use all of a block of pages may 
+       return them to the page manager.
+
+  <li> Logical and physical pages freed by transaction T may be reused
+       once it is sure that there are no readers that do not include 
+       transaction T in their snapshots.
+
+  <li> The upper layer - specifically the transaction map manager - tracks
+       readers so that writers can tell when this condition is met.
+</ul>
+
+<hr><h1>UPDATE Operations</h1>
+
+<ul>
+  <li> Cannot just remove the old record and write in the new, as with SQLite.
+       Because readers.
+
+  <li> Instead, when the page is modified and the new record added, the new
+       record has associated with it the physical page number of the old
+       version of the page - the one with the previous version of the record
+       on it.
+
+  <li> Readers follow this "old data pointer" if the TID associated with the
+       new record indicates it is not in the readers snapshot - the previous
+       version, or the version before that, might be...
+</ul>
+
+e.g. <b>UPDATE ... WHERE rowid=2</b> by transaction with TID=T:
+
+<verbatim type="pikchr center">
+boxht=0.2 ; boxwid=1.0
+
+B1: box "1     2     3     4";
+
+C1: box "1     2¹     3     4" at B1 + (0.0, -0.7);
+
+text "Physical page P1:" with e at B1.w + (-0.1, 0.0);
+text "Physical page P2:" with e at C1.w + (-0.1, 0.0);
+
+A: arrow from C1.n + (-0.15, 0.0) to B1.s + (0.0, -0.02) thin;
+text "P1" at A.e;
+</verbatim>
+
+<ul>
+  <li> The pointer to physical page P1 is only followed by readers reading
+       snapshots that do not include transaction T.
+
+  <li> The page manager is already guaranteeing that physical page P1 will
+       not be reused before no such readers exist.
+</ul>
+
+<hr><h1>DELETE Operations</h1>
+
+<ul>
+  <li> Like UPDATE, except that the "old data pointer" is attached to the
+       key immediately before the deleted range.
+</ul>
+
+e.g. <b>DELETE ... WHERE rowid=(2,3)</b> by transaction with TID=T:
+
+<verbatim type="pikchr center">
+boxht=0.2 ; boxwid=1.0
+
+B1: box "1     2     3     4";
+
+C1: box "1     4             " at B1 + (0.0, -0.7);
+
+text "Physical page P1:" with e at B1.w + (-0.1, 0.0);
+text "Physical page P2:" with e at C1.w + (-0.1, 0.0);
+
+A: arrow from C1.nw + (0.15, 0.0) to B1.s + (0.0, -0.02) thin;
+text "P1" at A.e;
+</verbatim>
+
+<ul>
+  <li> Readers that follow the old data pointer actually merge in all
+       data from the indicated physical page with key values between 
+       the key that carries the pointer and its right-hand peer (in this
+       case rowids 1 and 4).
+
+  <li> If large numbers of keys are deleted, a fan page is created:
+</ul>
+
+e.g. <b>DELETE ... WHERE rowid BETWEEN 2 AND 9</b> by transaction with TID=T:
+
+<verbatim type="pikchr center">
+boxht=0.2 ; boxwid=1.0
+
+B1: box "1     2     3     4";
+arrow thin dashed
+B2: box "5     6     7     8";
+arrow thin dashed
+B3: box "9     10    11   12";
+
+C1: box "                   " at B2 + (0.0, -0.7);
+arrow from C1.nw + (0.1,0.0) to B1.s + (0.0, -0.02) thin;
+arrow from C1.nw + (0.2,0.0) to B2.s + (0.0, -0.02) thin;
+arrow from C1.nw + (0.3,0.0) to B3.s + (0.0, -0.02) thin;
+
+D1: box "1     10    11   12" at B1 + (0.0, -1.4);
+arrow from D1.nw + (0.2,0.0) to C1.s + (0.0, -0.02) thin;
+</verbatim>
+
+<ul>
+  <li> The fan page is flagged as free and passed to the page manager
+       as soon as it is created. To be reused when there are no readers
+       using snapshots older than transaction T that created it.
+</ul>
+
+<hr><hr>
+
+<i><h1>Implementation Part 2: Transaction Layer</h1></i>
+
+<hr>
+
+<hr><h1>In-Memory Trees</h1>
+
+<ul>
+  <li> In-memory red-black trees are used to accumulate writes while
+       a write transaction is running.
+
+  <li> These trees handle savepoints, and explicit ROLLBACK commands.
+
+  <li> Queries merge data from the in-memory tree and the database on disk.
+</ul>
+
+<hr><h1>The Transaction Map</h1>
+
+<ul>
+  <li> As well as transaction ids (TID), there are commit ids (CID).
+
+  <ul> <li> The sequence of CIDs represents the logical order transactions
+            are committed in.
+       <li> The sequence of TIDs is the actual order in which transactions
+            started committing in.
+  </ul>
+
+  <li> They are similar, in that they are both monotonically increasing
+       counters stored in dedicated 64-bit page-map slots.
+
+  <li> A readers snapshot is defined by a snapshot id. The snapshot 
+       includes all commits for which the CID is equal to or less than
+       the snapshot id.
+
+  <li> The "transaction map" maps from TID to (CID + transaction state).
+
+  <li> Transaction states are:
+
+  <ul> <li> WRITING,
+       <li> VALIDATING,
+       <li> COMMITTED,
+       <li> ROLLBACK
+  </ul>
+
+  <li> Not persistent.
+</ul>
+
+<hr><h1>Transaction Map Implementation</h1>
+
+<ul>
+  <li> Only the most recent part of the transaction map need be maintained.
+</ul>
+
+
+<hr><h1>Commit Procedure</h1>
+
+<ol>
+  <li> First, all writes (including and tombstones for deletes) are 
+       assembled in the in-memory tree. As well as this, the point and
+       range queries made by the transaction on any b-trees are recorded.
+
+  <li> A transaction id (TID) is allocated. And the transaction-map slot
+       is set to <b>WRITING</b>. The CID value in the transaction-map slot
+       is not defined.
+
+  <li> All the keys from the in-memory tree are written to the db. If
+       any write attempts to clobber an existing key with a TID that
+       indicates it was not visible to the current transaction, this is a
+       write-write conflict. Rollback!
+
+  <li> A commit id (CID) is allocated. The transaction map is set to
+       the allocated CID + <b>VALIDATING</b>.
+
+  <li> The client validates the transaction: 
+
+    <ul><li> This means repeating all the point and range queries made 
+             during the transaction to see if any modifications have been 
+             made (if they encounter any entries with TIDs not in the
+             transaction snapshot).
+        <li> But - for each point/range, first check if there have been 
+             any modifications to the page (or set of pages) that the
+             point/range are stored on. This is cheap, as just need to
+             check the page-map to see if the mapped physical pages have
+             changed.
+        <li> So it's like page-level locking that falls back to row-level
+             locking.
+    </ul>
+
+  <li> If validation succeeded, set the transaction-map slot to 
+       <b>COMMITTED</b>.
+</ol>
+
+<b>Why bother with the TID/CID indirection?</b> Otherwise, the validation
+step above (step 5) would have to wait for all transactions with smaller 
+CIDs to finish writing.
+
+<hr><h1>Rollback Procedure</h1>
+
+To rollback a transaction if a write-write conflict is encountered or if
+validation fails (read-write conflict), a client iterates through all keys in
+the in-memory tree and undoes its writes to the db - restoring old versions
+or simply removing the inserted keys as required.
+
+<hr><h1>Meanwhile, Readers...</h1>
+
+When a reader opens its transaction, it takes a copy of the largest CID
+allocated so far. This is the snapshot id.
+
+<ul>
+  <li> Keys with TIDs that map to WRITING state are ignored.
+
+  <li> If a reader meets a key with a TID mapped to VALIDATING state and the
+       mapped CID is in the readers transaction, the reader spin locks until 
+       the transaction is either COMMITTED or ROLLBACK.
+
+  <li> If a reader meets a key with a TID mapped to COMMITED state and the
+       mapped CID is in the readers transaction, the key is returned. 
+       Otherwise it is ignored.
+
+  <li> If a reader meets a key with a TID mapped to ROLLBACK state it
+       must be ignored.
+</ul>
+
+Any time a key is ignored because it is not part of the reader's snapshot, 
+any older versions found by following old data pointers are considered.
+
+<hr><h1>Handling Process Crashes</h1>
+
+<ul>
+  <li> Each writer has its own log file.
+
+  <li> Containing copies of keys written.
+
+  <li> Following a crash, the system searches for such files and uses them
+       to rollback partially committed transactions.
+</ul>
+
+<hr><h1>Replication</h1>
+
+Leader/follower replication is easy:
+
+<ul>
+  <li> The leader runs as described above - normally.
+
+  <li> After each committed transaction, a serialized copy of the keys written,
+       and the CID, is sent to each follower.
+
+  <li> Followers write the keys to the db, while:
+    <ul> <li> Using the CID from the leader as both the TID and CID in 
+              the follower, 
+         <li> Omitting all validation, and
+         <li> Never allowing a smaller CID key to clobber one with a larger CID.
+    </ul>
+
+  <li> Readers on the followers must not access a snapshot until all of the
+       transactions with a CID smaller than the snapshot id have finished
+       committing.
+</ul>
+
+Given the above, it should be possible to allocate many threads to updating
+the follower databases.
+         
+
+<hr><h1>Summary</h1>
+
+<ul>
+  <li> Page map maps from logical to physical pages.
+  <li> Provides a CAS primitive for database pages.
+  <li> Database "trees" are hierarchies of lists.
+  <li> Readers see a consistent snapshot by ignoring keys with TIDs not 
+       included in their snapshots.
+  <li> Updated and deleted data is found by readers by following old data
+       pointers to earlier versions of logical pages.
+  <li> Writers assemble transactions in-memory, they do not write until
+       COMMIT time.
+  <li> Writing is: (1) assign TID, (2) write, (3) assign CID, (4) validate.
+  <li> Writers keep log files so that partial transactions can be rolled
+       back if there is a process crash.
+  <li> Replication will be easy.
+</ul>
+
+
+
+
+

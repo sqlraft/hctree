@@ -8,6 +8,8 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: hct
+#
 # The focus of the tests is the word-fuzzer virtual table. The tests
 # in this file are slower than those in fuzzer1.test. So this file does
 # not run as part of veryquick.test etc.

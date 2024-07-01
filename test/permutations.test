@@ -188,13 +188,49 @@ if {[info exists ::env(TEST_FAILURE)]} {
 #
 lappend ::testsuitelist xxx
 
+test_suite "hct" -prefix "" -description {
+} -files {
+
+hct_cas.test
+hct_conflict1.test
+hct_delete2.test
+hct_delete3.test
+hct_delete4.test
+hct_delete.test
+hct_misc1.test
+hct_misc2.test
+hct_misc3.test
+hct_misc4.test
+hct_misc5.test
+hct_misc6.test
+hct_misc7.test
+hct_misc8.test
+hct_mvcc1.test
+hct_mvcc2.test
+hct_pman1.test
+hct_reopen1.test
+hct_simple_rollback.test
+hct_overflow1.test
+hct_schema1.test
+hct_recover1.test
+
+  update.test
+  delete3.test
+  select2.test select4.test select5.test
+  select6.test select7.test select8.test select9.test
+  selectA.test
+}
+
+# select3.test
+# delete2.test
+
 test_suite "veryquick" -prefix "" -description {
   "Very" quick test suite. Runs in minutes on a workstation.
   This test suite is the same as the "quick" tests, except that some files
   that test malloc and IO errors are omitted.
 } -files [
   test_set $allquicktests -exclude *malloc* *ioerr* *fault* *bigfile* *_err* \
-      *fts5corrupt* *fts5big* *fts5aj* *rbucrash*
+      *fts5corrupt* *fts5big* *fts5aj* hct* *rbucrash*
 ]
 
 test_suite "shell" -prefix "" -description {

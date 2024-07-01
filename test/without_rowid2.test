@@ -13,6 +13,7 @@
 # focus of this file is testing WITHOUT ROWID tables, and especially
 # FOREIGN KEY constraints.
 #
+# TESTRUNNER: puresql
 
 set testdir [file dirname $argv0]
 source $testdir/tester.tcl

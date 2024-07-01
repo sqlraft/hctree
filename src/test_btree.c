@@ -33,6 +33,7 @@ int SQLITE_TCLAPI sqlite3BtreeSharedCacheReport(
   Tcl_Obj *CONST objv[]
 ){
 #ifndef SQLITE_OMIT_SHARED_CACHE
+#ifndef SQLITE_ENABLE_HCT
   extern BtShared *sqlite3SharedCacheList;
   BtShared *pBt;
   Tcl_Obj *pRet = Tcl_NewObj();
@@ -43,6 +44,7 @@ int SQLITE_TCLAPI sqlite3BtreeSharedCacheReport(
   }
   Tcl_SetObjResult(interp, pRet);
 #endif
+#endif
   return TCL_OK;
 }
 
@@ -50,7 +52,8 @@ int SQLITE_TCLAPI sqlite3BtreeSharedCacheReport(
 ** Print debugging information about all cursors to standard output.
 */
 void sqlite3BtreeCursorList(Btree *p){
-#ifdef SQLITE_DEBUG
+#ifdef SQLITE_DEBUG 
+#ifndef SQLITE_ENABLE_HCT
   BtCursor *pCur;
   BtShared *pBt = p->pBt;
   for(pCur=pBt->pCursor; pCur; pCur=pCur->pNext){
@@ -62,5 +65,6 @@ void sqlite3BtreeCursorList(Btree *p){
        (pCur->eState==CURSOR_VALID) ? "" : " eof"
     );
   }
+#endif
 #endif
 }

@@ -8,6 +8,8 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: puresql
+#
 # This file implements regression tests for SQLite library. This
 # script focuses on testing internal function sqlite_rename_quotefix().
 #

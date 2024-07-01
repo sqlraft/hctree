@@ -1,0 +1,126 @@
+# 2021 January 13
+#
+# The author disclaims copyright to this source code.  In place of
+# a legal notice, here is a blessing:
+#
+#    May you do good and not evil.
+#    May you find forgiveness for yourself and forgive others.
+#    May you share freely, never taking more than you give.
+#
+#*************************************************************************
+# This file implements regression tests for SQLite library.
+#
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+set testprefix hct_misc7
+
+hct_reset_db
+
+set nRow 2000
+
+if 0 {
+
+do_execsql_test 1.1.0 {
+  CREATE TABLE t1(a INTEGER PRIMARY KEY, b TEXT);
+}
+
+do_test 1.1.1 {
+  for {set i 1} {$i <= $nRow} {incr i} {
+    set t [db one {SELECT hex(randomblob(5000))}]
+    db eval { INSERT INTO t1 VALUES($i, $t) }
+    set A($i) $t
+  }
+  set {} {}
+} {}
+
+do_test 1.1.2 {
+  foreach k [array names A] {
+    set res [db one { SELECT b FROM t1 WHERE a=$k }]
+    if {$res != $A($k)} {
+      error "data mismatch for a=$k"
+    }
+  }
+} {}
+
+execsql_pp { SELECT * FROM hctpgmap NATURAL JOIN hctdb }
+exit
+
+hct_reset_db
+array unset A
+do_execsql_test 1.2.0 {
+  CREATE TABLE t1(a INTEGER PRIMARY KEY, b TEXT);
+  CREATE INDEX i1 ON t1(b);
+}
+
+do_test 1.2.1 {
+  for {set i 1} {$i <= $nRow} {incr i} {
+    set t [db one {SELECT hex(randomblob(5000))}]
+    set k [db one {SELECT random()}]
+    db eval { INSERT INTO t1 VALUES($k, $t) }
+    set A($k) $t
+  }
+  set {} {}
+} {}
+
+do_test 1.2.2 {
+  foreach k [array names A] {
+    set res [db one { SELECT b FROM t1 WHERE a=$k }]
+    if {$res != $A($k)} {
+      error "data mismatch for a=$k"
+    }
+  }
+} {}
+
+do_test 1.2.3 {
+  foreach k [array names A] {
+    set v $A($k)
+    set res [db one { SELECT a FROM t1 WHERE b=$v }]
+    if {$res != $k} { error "data mismatch for a=$k (res=$res)" }
+  }
+} {}
+
+do_execsql_test 1.2.4 { PRAGMA integrity_check } {ok}
+
+#-------------------------------------------------------------------------
+}
+hct_reset_db
+do_execsql_test 2.0 {
+  CREATE TABLE x1(a INTEGER PRIMARY KEY, b TEXT);
+}
+
+set nRow 5000
+
+do_test 2.1 {
+  for {set i 1} {$i <= $nRow} {incr i} {
+    set t [db one {SELECT hex(randomblob(50))}]
+    db eval { INSERT INTO x1 VALUES($i, $t) }
+    set A($i) $t
+  }
+  set {} {}
+} {}
+
+hct_reset_db
+breakpoint
+do_test 2.2 {
+  execsql {
+    CREATE TABLE x1(a INTEGER PRIMARY KEY, b TEXT);
+  }
+  for {set ii 1} {$ii <= $nRow} {incr ii} {
+    set t [db one {SELECT hex(randomblob(50))}]
+    set i [db one {SELECT random()}]
+    db eval { INSERT INTO x1 VALUES($i, $t) }
+    set A($i) $t
+  }
+  set {} {}
+} {}
+
+#execsql_pp { SELECT * FROM hctpgmap NATURAL JOIN hctdb ORDER BY CAST (fpkey }
+#execsql_pp { SELECT * FROM hctpgmap NATURAL JOIN hctdb NATURAL JOIN hctentry WHERE nheight>0 }
+
+#execsql_pp { SELECT * FROM hctpgmap }
+#execsql_pp { SELECT * FROM hctpgmap NATURAL JOIN hctdb }
+#execsql_pp { SELECT * FROM hctpgmap NATURAL JOIN hctentry }
+
+finish_test
+

@@ -8,6 +8,8 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: hct
+#
 # This file implements regression tests for the FTS3 module. The focus
 # of this file is tables created with the "matchinfo=fts3" option.
 #

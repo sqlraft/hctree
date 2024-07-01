@@ -50,6 +50,11 @@
 #  define SQLITE_TCLAPI
 #endif
 
+#define SQLITE_ENABLE_HCT 1
+#ifdef SQLITE_ENABLE_HCT
+# define SQLITE_OMIT_SHARED_CACHE 1
+#endif
+
 /*
 ** Include the header file used to customize the compiler options for MSVC.
 ** This should be done first so that it can successfully prevent spurious
@@ -379,7 +384,7 @@
 ** which case memory allocation statistics are disabled by default.
 */
 #if !defined(SQLITE_DEFAULT_MEMSTATUS)
-# define SQLITE_DEFAULT_MEMSTATUS 1
+# define SQLITE_DEFAULT_MEMSTATUS 0
 #endif
 
 /*
@@ -1398,6 +1403,7 @@ typedef int VList;
 #include "pager.h"
 #include "btree.h"
 #include "vdbe.h"
+#include "btreeModules.h"
 #include "pcache.h"
 #include "mutex.h"
 
@@ -1820,6 +1826,14 @@ struct sqlite3 {
   */
   u32 aCommit[5];
 #endif
+
+  /* Used as part of testing hctree commits */
+  void (*xMtCommit)(void*, int);
+  void *pMtCommitCtx;
+
+  /* The sqlite3_hct_journal_validation_hook() callback */
+  void *pValidateArg;
+  int (*xValidate)(void*, i64, const char*, const void*, int, i64);
 };
 
 /*
@@ -2671,6 +2685,7 @@ struct FKey {
 struct KeyInfo {
   u32 nRef;           /* Number of references to this KeyInfo object */
   u8 enc;             /* Text encoding - one of the SQLITE_UTF* values */
+  u16 nUniqField;
   u16 nKeyField;      /* Number of key columns in the index */
   u16 nAllField;      /* Total columns, including key plus others */
   sqlite3 *db;        /* The database connection */
@@ -3413,7 +3428,7 @@ struct SrcList {
 #define WHERE_AGG_DISTINCT     0x0400 /* Query is "SELECT agg(DISTINCT ...)" */
 #define WHERE_ORDERBY_LIMIT    0x0800 /* ORDERBY+LIMIT on the inner loop */
 #define WHERE_RIGHT_JOIN       0x1000 /* Processing a RIGHT JOIN */
-                        /*     0x2000    not currently used */
+#define WHERE_KEEP_ALL_JOINS   0x2000 /* Do not do the omit-noop-join opt */
 #define WHERE_USE_LIMIT        0x4000 /* Use the LIMIT in cost estimates */
                         /*     0x8000    not currently used */
 
@@ -3485,7 +3500,7 @@ struct NameContext {
 #define NC_UUpsert   0x000200 /* True if uNC.pUpsert is used */
 #define NC_UBaseReg  0x000400 /* True if uNC.iBaseReg is used */
 #define NC_MinMaxAgg 0x001000 /* min/max aggregates seen.  See note above */
-#define NC_Complex   0x002000 /* True if a function or subquery seen */
+/*                   0x002000 // available for reuse */
 #define NC_AllowWin  0x004000 /* Window functions are allowed here */
 #define NC_HasWin    0x008000 /* One or more window functions seen */
 #define NC_IsDDL     0x010000 /* Resolving names in a CREATE statement */
@@ -4147,7 +4162,7 @@ struct Returning {
 };
 
 /*
-** An objected used to accumulate the text of a string where we
+** An object used to accumulate the text of a string where we
 ** do not necessarily know how big the string will be in the end.
 */
 struct sqlite3_str {
@@ -4161,7 +4176,7 @@ struct sqlite3_str {
 };
 #define SQLITE_PRINTF_INTERNAL 0x01  /* Internal-use-only converters allowed */
 #define SQLITE_PRINTF_SQLFUNC  0x02  /* SQL function arguments to VXPrintf */
-#define SQLITE_PRINTF_MALLOCED 0x04  /* True if xText is allocated space */
+#define SQLITE_PRINTF_MALLOCED 0x04  /* True if zText is allocated space */
 
 #define isMalloced(X)  (((X)->printfFlags & SQLITE_PRINTF_MALLOCED)!=0)
 
@@ -5050,6 +5065,7 @@ void sqlite3ExprCodeLoadIndexColumn(Parse*, Index*, int, int, int);
 int sqlite3ExprCodeGetColumn(Parse*, Table*, int, int, int, u8);
 void sqlite3ExprCodeGetColumnOfTable(Vdbe*, Table*, int, int, int);
 void sqlite3ExprCodeMove(Parse*, int, int, int);
+void sqlite3ExprToRegister(Expr *pExpr, int iReg);
 void sqlite3ExprCode(Parse*, Expr*, int);
 #ifndef SQLITE_OMIT_GENERATED_COLUMNS
 void sqlite3ExprCodeGeneratedColumn(Parse*, Table*, Column*, int);
@@ -5114,7 +5130,7 @@ int sqlite3ExprIsSingleTableConstraint(Expr*,const SrcList*,int,int);
 #ifdef SQLITE_ENABLE_CURSOR_HINTS
 int sqlite3ExprContainsSubquery(Expr*);
 #endif
-int sqlite3ExprIsInteger(const Expr*, int*);
+int sqlite3ExprIsInteger(const Expr*, int*, Parse*);
 int sqlite3ExprCanBeNull(const Expr*);
 int sqlite3ExprNeedsNoAffinityChange(const Expr*, char);
 int sqlite3IsRowid(const char*);
@@ -5823,6 +5839,11 @@ sqlite3_uint64 sqlite3Hwtime(void);
 # define IS_STMT_SCANSTATUS(db) (db->flags & SQLITE_StmtScanStatus)
 #else
 # define IS_STMT_SCANSTATUS(db) 0
+#endif
+
+#ifdef SQLITE_ENABLE_HCT
+int sqlite3IsHct(Btree*);
+int sqlite3HctSchemaOp(Btree*, const char*);
 #endif
 
 #endif /* SQLITEINT_H */

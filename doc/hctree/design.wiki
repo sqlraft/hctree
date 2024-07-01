@@ -1,0 +1,1084 @@
+
+
+  *  [#system_overview |1. System Overview]
+  *  [#database_backend|2. Database Backend]
+    <ul>
+      <li> [#pagemap|2.1. The Page Map]
+      <li> [#btree|2.2. B-Tree Data Structure]
+    <ul>
+      <li><a href=#leaves>2.2.1. B-Tree Leaf Node Operations</a>
+      <li><a href=#interior>2.2.2. B-Tree Interior Node Operations</a>
+      <li><a href=#other>2.2.3. Changing the Height of the Tree</a>
+    </ul>
+      <li> [#mvcc|2.3. MVCC Version Management]
+      <li> [#pages|2.4. Page Management]
+      <li> [#recovery|2.5. Crash Recovery]
+    <ul>
+     <li><a href=#recover1>2.5.1. Recovery From Application Failure </a>
+     <li><a href=#recover2>2.5.2. Recovery From Power/OS Failure (ideas for)</a>
+    </ul>
+    </ul>
+  *  [#concurrency    |3. Concurrent Transactions Implementation]
+    <ul>
+      <li> [#concurrency_read  |3.1. Read Transactions]
+      <li> [#concurrency_write |3.2. Write Transactions]
+      <li> [#concurrency_notes |3.3. Notes on HC-Tree Concurrency]
+      <li> [#concurrency_inc   |3.4. Increasing Concurrency]
+    </ul>
+  *  [#replication    |4. Replication and other Integration Issues]
+  *  [#concurrencytheory |Appendix A. Database Concurrency Theory]
+
+Description of the design of hctree.
+
+<h1 id=system_overview>1. System Overview</h1>
+
+<b>The Database Backend:</b>
+
+The system is built around the database backend described below. It:
+
+  *  Allows zero or more tree structures to be stored in a single file (like
+     the stock SQLite database backend). Tree structures use either 64-bit
+     integers or SQLite index records as keys.
+
+  *  Does not support transactions or rollback. Instead, each individual
+     insert/update/delete operation on a single tree is atomic and instantly
+     visible to all other database readers.
+
+  *  Associates with each key a 56-bit transaction id (TID) - all keys 
+     written by a single transaction share the same TID value. Readers ignore
+     keys with transactions ids that indicate that the transaction is not
+     included in the readers MVCC snapshot.
+
+  *  Is a copy-on-write system (each time a database page is modified,
+     a new page is allocated within the db file and the new version written
+     there). When database entries are deleted or overwritten, the tree
+     includes "history" pointers back to the old versions of pages, so 
+     that existing readers can find data deleted or overwritten by transactions
+     not included in their MVCC snapshot.
+
+<b>Reader Snapshots and the Transaction Map:</b>
+
+In order to read a consistent snapshot from the database backend, a reader
+must know the set of TIDs included in its snapshot. For this we have the
+transaction map. The transaction map:
+
+  *  Maps from 56-bit TID values to 56-bit commit id (CID) values.
+
+  *  Is stored in main-memory only, not on disk. Only the most recent few
+     hundred or thousand entries need actually be stored.
+
+  *  A readers snapshot is defined by a single CID value (called a snapshot
+     id). All transactions with TIDs that map to CID values equal to or
+     smaller than the snapshot id are visible to the transaction.
+
+<b>Write Transactions</b>
+
+A (BEGIN CONCURRENT) write transaction proceeds similarly to a read 
+transaction. Modifications are accumulated in private memory during the
+transaction, nothing is written to the database until the transaction
+is committed. Also, the connection remembers all the keys and ranges of
+keys read from any tree in the database during the transaction. This
+is called "validation data". Then, on COMMIT:
+
+  #  <p>A new TID is allocated for the transaction. TID values are allocated
+     in ascending order.
+  #  <p>All the modifications made by the transaction are applied to the
+     database.
+  #  <p>A CID value is allocated. CID values are also allocated in ascending
+     order.
+  #  <p>All the keys and ranges of keys read by the transaction are reread. If
+     none of them have been modified by transactions newer than the
+     transactions snapshot, the transaction may be committed. Otherwise
+     it must be rolled back.
+  #  <p>If the transaction is to be committed, the transaction-map is updated 
+     to map the transaction's TID to its CID.
+  #  <p>If the transaction is to be rolled back, the client undoes all writes
+     made by the transaction. Old database values can be found from the db
+     itself by following history pointers.
+
+The progress of CID values represents the logical order in which the
+transactions are committed - an example of at least one possible order in
+which possibly overlapping and concurrent transactions may be serialized.
+
+<b>Replication</b>
+
+In a leader-follower configuration, transactions committed on the leader
+database must be propagated to each follower database. This is convenient
+to do, because:
+
+  *  After a transaction is committed, the set of modifications made to
+     table b-trees are still present in memory, ready to send to followers.
+
+  *  The sequence of CID values allocated by the leader can also be used
+     by followers. Followers can use the leaders CID value as each 
+     transactions TID value and ensure that transactions with lower TID
+     values never overwrite higher TID values when updating the database,
+     bypassing validation altogether. 
+
+  *  This allows multiple threads to be used to apply efficiently apply a
+     stream of transactions coming from the leader node.
+
+
+<h1 id=database_backend>2. Database Backend</h1>
+
+<h2 id=pagemap>2.1. The Page Map</h2>
+  
+The distinguishing feature of the database format is the <b>page-map</b>. The
+page-map is a very large array - large enough to contain an entry for each
+page in the database. It's primary purpose is to map between logical and
+physical page numbers (locations in the database file). In order to read the
+data for a page from disk given a logical page number, a client must first
+look up the physical page number within the page-map.
+
+The page-map is stored on disk and memory mapped into the database process
+address space for client access. Clients always write to the page-map using
+atomic compare-and-swap (CAS) instructions.
+
+This arrangement means that clients effectively have a <b>CAS primitive for
+entire pages</b>. In order to safely update an existing page, a client:
+
+  #  Reads the current value from the page-map, and then the data from
+     the physical page on disk.
+  #  Allocates an entirely new physical page and writes the new version
+     of the page data into it.
+  #  Attempts to modify the page-map entry for the logical page number to
+     point to the new physical page on disk using a CAS instruction. If
+     the page has been written since step 1, this will fail (as the
+     page-map entry will have been modified). 
+
+For the purposes of most of this document, we assume that logical and physical
+page numbers are never reused. In practice they must be, in order to avoid
+the database file or page map from growing indefinitely.
+
+Page-map slots are 64-bits in size, but physical page numbers are just 
+48-bits. The remaining bits are used to store flags, including:
+
+  *  PHYSICAL_IN_USE
+  *  LOGICAL_IN_USE
+  *  LOGICAL_IS_ROOT
+  *  LOGICAL_EVICTED
+  *  LOGICAL_IRREVICTED
+
+Part of removing a logical page from a list (see below) is setting the
+LOGICAL_EVICTED flag on a logical page slot. Because it is part of the page-map
+entry, the LOGICAL_EVICTED flag and the page data may both be considered part
+of the thing that is Compared-And-Swapped by the method above.
+
+<h2 id=btree>2.2. B-Tree Data Structure </h2>
+
+The tree data structure is similar to a "b-link tree" - a b-tree where each
+node has a pointer to its right-hand peer, if any. In some variants, including
+this one, some parent-child pointers may at times be missing from the tree
+structure. Readers use the peer-peer pointers to navigate to child pages for
+which the parent-child pointer is missing.
+
+<center><verbatim type="pikchr">
+boxht=0.2 ; boxwid=0.5 ; linewid=0.2
+
+A1: box ; arrow ; A2: box ; arrow ; A3: box ; arrow ; A4: box ; arrow
+A5: box ; arrow ; A6: box ; arrow ; A7: box ; arrow ; A8: box
+B1: box at A3 + (0.35, 0.5) ; arrow -> ; B2: box ; arrow -> ; B3: box
+C1: box at B2 + (0,0.5) 
+
+arrow from B1.s to A1.n
+arrow from B1.s to A2.n
+arrow from B2.s to A4.n
+arrow from B2.s to A5.n
+arrow from B3.s to A6.n
+arrow from B3.s to A7.n
+arrow from C1.s to B1.n
+arrow from C1.s to B3.n
+</verbatim></center>
+
+The first key on a page - either a leaf or internal node - is called the
+<b>fencepost key</b>. Once a page has been written to disk, its fencepost key
+never changes and the page will never contain a key smaller than the fencepost.
+The logical page number and the fencepost key value are indelibly coupled for
+all time<sup>*</sup>. If a fencepost key is deleted, the system must remove
+the logical page from the tree and redistribute keys between different
+pages.
+
+For both intkey and index trees, all entries are stored on leaf nodes.
+
+Each child pointer in a parent node is accompanied by a copy of the fencepost
+key for the child node. This is different from the usual b-tree approach of N
+pointers and N-1 keys per internal node page - in this system an internal
+node with N pointer contains N keys.
+
+<sup>*</sup> Not really, of course, as after a logical page is removed
+from the tree, its page number must eventually be reused. In this case the
+system ensures that the logical page number is not reused until
+after there are no existing readers old enough to become confused. 
+
+<h3 id=leaves>2.2.1. B-Tree Leaf Node Operations </h3>
+
+The data structure is best analyzed as a series of loosely coupled
+linked-lists. Consider, to begin with, just the leaves of a b-tree 
+structure - logical pages 1, 2, 3 and 4. The linked-list is being
+updated, possibly by multiple concurrent writers, and is also being
+traversed from start to finish by multiple readers. With a linked list,
+a seek operation is equivalent to iterating from start to finish (as the
+only algorithm available is a linear search), and a reverse iteration is
+equivalent to multiple seeks (instead of following a pointer to skip to the
+"previous" page, the client must seek to the current key less a delta).
+
+<center><verbatim type="pikchr">
+boxht=0.2 ; boxwid=0.5
+
+box "1" ; arrow ; box "2" ; arrow ; box "3" ; arrow ; box "4" ;
+</verbatim></center>
+
+Writing a new key to such a list when the destination page has enough
+room for the new entry is easy. The writer locates the page to update,
+and uses the <a href=#overview>CAS primitive</a> to write the new version
+of the page containing the new key.
+
+If another writer is trying to simultaneously update the same page,
+one of the writes will fail. The failed writer restarts its operation to 
+write its key. Such a write does not interfere with readers either. Readers
+either see the old or new version of the page, and both contain the 
+data they require. If the reader sees the new version of the page, it 
+ignores the new key based on its transaction id.
+
+There are three slightly more complicated cases:
+
+  #  Splitting a linked-list page in two,
+  #  Consolidating two linked-list pages into one, and
+  #  Redistributing keys between two linked-list pages.
+
+If there is insufficient space within a node to accommodate a new key, the
+node may be <b>split in two</b>. This is a two step procedure:
+
+  #  A new node is allocated and populated with the keys destined for the
+     right-hand node of the new pair. The peer node pointer of the new
+     node is a copy of the peer node pointer of the node being split. Node 
+     5 in the diagram below.
+  #  A new version of the node being split (node 1 in the diagram below)
+     is written containing with the keys destined for the left-hand node
+     of the new pair. The peer node pointer of the new version points to
+     the node allocated in the previous step.
+
+<center><verbatim type="pikchr">
+boxht=0.2 ; boxwid=0.5
+
+ONE: box "1" ; arrow ; TWO: box "2" ; arrow ; box "3" ; arrow ; box "4" ;
+text "Step 1:" with e at ONE + (-0.5, 0)
+FIVE: box at TWO + (-0.5, -0.3) "5" color red
+arrow from FIVE.e to TWO.s color red
+</verbatim></center>
+
+<center><verbatim type="pikchr">
+boxht=0.2 ; boxwid=0.5
+
+ONE: box "1" color red ; move ; TWO: box "2" ; arrow ; box "3" ; arrow ; box "4"
+text "Step 2:" with e at ONE + (-0.5, 0)
+
+FIVE: box at TWO + (-0.5, -0.3) "5"
+arrow from FIVE.e to TWO.s
+arrow from ONE.s to FIVE.w color red
+</verbatim></center>
+<center><i>Splitting a node in two</i></center>
+
+The new version of the page written in step 2 is of course written using
+the CAS primitive. If this fails because some other writer has written
+the page being split since it was read, the writer must reclaim the resources
+in step 1 and restart the write operation that required the split.
+
+It's not described above, but data must of course sometimes be removed from
+a node. This may result in the node becoming so underfull that the keys from
+it and its right-hand peer may be <b>consolidated into a single node</b>. 
+
+The diagram below shows the keys in nodes 2 and 3 being consolidated into a
+new version of node 2, removing 3 from the tree. This is a two step procedure:
+
+  #  The LOGICAL_EVICTED flag is set on the right-hand node of the pair
+     being consolidated (node 3 in the diagram). This tells other writers 
+     that the page may not be written - it is being removed from the tree.
+  #  A new version of page 2 is written, containing all keys from 
+     pages 2 and 3, with the peer node set to point to page 4.
+
+<center><verbatim type="pikchr">
+boxht=0.2 ; boxwid=0.5
+
+ONE: box "1" ; arrow ; box "2" ; arrow ; THREE: box "3" color red; arrow color red; box "4" 
+circle "X" radius 0.05 color red at THREE.ne fill white
+text "Step 1:" with e at ONE + (-0.5, 0)
+</verbatim></center>
+
+<center><verbatim type="pikchr">
+boxht=0.2 ; boxwid=0.5
+
+ONE: box "1" ; arrow ; TWO: box "2" color red; move ; THREE: box "3"; arrow; FOUR: box "4" 
+circle "X" radius 0.05 at THREE.ne fill white
+text "Step 2:" with e at ONE + (-0.5, 0)
+
+arrow from TWO.e right 0.1 then right 0.3 down 0.3 then right until even with FOUR.w then to FOUR.s color red
+</verbatim></center>
+<center><i>Consolidating two nodes</i></center>
+
+Once the LOGICAL_EVICTED flag has been set on a page, it may not be cleared.
+
+Setting the LOGICAL_EVICTED flag on a node does not count as a lock, as it need
+not block another writer. If a writer determines that a new key should be
+written to a node with the LOGICAL_EVICTED flag already set, it may perform
+step 2 of the procedure above (or steps 2 and 3 of the one below) to correct
+the problem before restarting its write operation. It does not have to wait on
+the writer that set the LOGICAL_EVICTED flag.
+
+The final case is <b>redistributing keys between two peer nodes</b>. This
+cannot be done literally, as it would necessitate modifying the fencepost
+key of the right-hand peer, which is not allowed. Instead, the right-hand
+peer is removed from the tree and a newly allocated node used in its place.
+The following figure shows the three step process to redistribute the keys
+in nodes 2 and 3:
+
+<center><verbatim type="pikchr">
+boxht=0.2 ; boxwid=0.5
+ONE: box "1" ; arrow ; box "2" ; arrow ; THREE: box "3" color red; arrow color red; box "4" 
+circle "X" radius 0.05 color red at THREE.ne fill white
+text "Step 1:" with e at ONE + (-0.5, 0)
+</verbatim></center>
+<center><verbatim type="pikchr">
+boxht=0.2 ; boxwid=0.5
+ONE: box "1" ; arrow ; TWO: box "2" ; arrow ; THREE: box "3" ; arrow ; FOUR: box "4" ;
+circle "X" radius 0.05 at THREE.ne fill white
+text "Step 2:" with e at ONE + (-0.5, 0)
+FIVE: box at THREE + (0.0, -0.3) "5" color red
+arrow from FIVE.e to FOUR.s color red
+</verbatim></center>
+<center><verbatim type="pikchr">
+boxht=0.2 ; boxwid=0.5
+ONE: box "1" ; arrow ; TWO: box "2" color red; move ; THREE: box "3" ; arrow ; FOUR: box "4" ;
+circle "X" radius 0.05 at THREE.ne fill white
+text "Step 3:" with e at ONE + (-0.5, 0)
+FIVE: box at THREE + (0.0, -0.3) "5"
+arrow from FIVE.e to FOUR.s
+arrow from TWO.e to FIVE.w color red
+</verbatim></center>
+<center><i>Redistributing keys between two nodes</i></center>
+
+In the consolidating two nodes case above, it may be that by the time the
+writer gets to step 2, it finds that some other writer has added keys to
+the left-hand peer (node 2 in the diagram) such that the two nodes now
+collectively contain too much data to consolidate. In this case the writer
+must change tack and proceed with step 2 of the "redistributing keys" case.
+
+<h3 id=interior>2.2.2. Btree Interior Node Operations </h3>
+
+Linked-lists are fine for scanning through in a forwards direction. But
+SQLite also requires support for efficiently (a) iterating backwards and
+(b) seeking within a tree structure for a nominated key. Singly linked
+lists can be used for both of these operations of course, but inefficiently.
+For efficient operation, b-tree interior nodes are required.
+
+Each tier of b-tree interior nodes (parents of leaves, grandparents of leaves,
+etc.) may be thought of as a separate linked list data structure, just as
+the leaf nodes were in the previous section. Each tier is populated with the
+fencepost keys and associated logical page numbers from its child pages. After
+a writer splits a leaf node into two nodes, it adds the new fencepost key/page
+number entry to the parent linked-list. After it marks a leaf page with the
+LOGICAL_EVICTED flag, it removes the corresponding entry from the parent
+linked-list. There is no real hurry to perform either of these operations, 
+they may be deferred in order to consolidate multiple writes to the same page
+of the parent linked-list.
+
+Obviously, this means that when seeking for a key within a tree structure, a
+reader may encounter a parent linked-list that does not reflect the latest
+update to the child list. Specifically:
+
+<ol>
+<li> the parent list may contain entries for pages that have been removed from
+     the child list, and
+<li> the parent list may be missing entries for pages that have been added
+     to the child list.
+</ol>
+
+Readers avoid these hazards as follows:
+
+<ol>
+<li> a reader never follows a child pointer if the destination logical page
+     has already been marked as LOGICAL_EVICTED. Instead, it moves to the
+     previous entry in the parent list and follows that pointer instead. If it
+     turns out that the LOGICAL_EVICTED child actually is still part of the
+     child list, and the pointer should have been followed, this transforms
+     this case into the following one (missing entry in parent page).
+
+<li> when searching within a page, if the key being seeked to is greater than
+     all keys on the page, the reader loads the right-hand peer node and
+     determines based on the fencepost key whether or not the peer node
+     should be searched as well. This way, if the pointer for the peer node 
+     is missing from the parent page, it is searched anyway.
+</ol>
+
+In the worst case, a parent list might contain no child pointers not marked
+LOGICAL_EVICTED except for the pointer to the leftmost page of the child
+linked-list. In this case performance falls back to the linked-list case.
+Otherwise, even if the parent list contains only a few non-LOGICAL_EVICTED keys,
+they may be used to jump to a better position within the child list at 
+which to start the search. Since the fencepost key of a logical page never
+changes, it is not possible for a non-LOGICAL_EVICTED entry within a parent
+list to be invalid or out of date.
+
+The following diagram shows a tree structure containing keys from a keyspace
+consisting of 8-bit numbers, rendered in hexadecimal.
+
+<center><verbatim type="pikchr">
+boxht=0.2 ; boxwid=0.6 ; linewid=0.2
+
+A1:  box "09  13  19" ; arrow
+A2:  box "21  2A  2A" ; arrow
+A3:  box "38  3C  43" ; arrow
+A4:  box "45  4F  50" ; arrow
+A5:  box "51  5E  69" ; arrow
+A6:  box "7A  BD  C2" ; arrow
+A7:  box "CE  E0  F6" ; arrow
+A8:  box "F7  FA  FB"
+
+B1: box "00  21  38" with c at A3 + (0.35, 0.5) ; arrow ->
+B2: box "45  51" ; arrow ->
+B3: box "7A  CE  F7"
+
+C:  box "00  45  7A" with c at B2 + (0, 0.5)
+
+arrow from C.s to B2.n
+arrow from C.s left 0.2 then to B1.n
+arrow from C.s right 0.2 then to B3.n
+
+arrow from B1.s left 0.2 then to A1.n
+arrow from B1.s to A2.n
+arrow from B1.s right 0.2 then to A3.n
+
+arrow from B2.s left 0.1 then to A4.n
+arrow from B2.s right 0.1 then to A5.n
+
+arrow from B3.s left 0.2 then to A6.n
+arrow from B3.s to A7.n
+arrow from B3.s right 0.2 then to A8.n
+</verbatim></center>
+
+<h3 id=other>2.2.3. Changing the Height of the Tree</h3>
+
+Each tree structure is initially created as a single leaf node that is also
+the root of the tree. Once the root node is full, it is not split in two
+as any other node would be, but instead:
+
+  #  Two new leaf nodes are allocated and populated with all the keys from
+     the root node.
+  #  The root node is rewritten so as to be the parent of the two new leaves.
+
+This occurs any time the root node is full, just as it does in a regular
+b-tree. A root node is not allowed to have a peer node. Each time this
+occurs, the height of the tree has increased by 1.
+
+<center><verbatim type="pikchr">
+boxht=0.2 ; boxwid=0.5
+R1: box "1"
+L1: box "2" with c at R1 + (-0.5, -0.5) color red; 
+arrow color red; box "3" color red
+text "Step 1:" with e at L1 + (-0.5, 0.25)
+
+R2: box "1" with c at R1 + (2.5, 0) color red
+L2: box "2" with c at R2 + (-0.5, -0.5); arrow ; L3: box "3"
+arrow color red from R2.s left 0.1 then to L2.n
+arrow color red from R2.s right 0.1 then to L3.n
+text "Step 2:" with e at L2 + (-0.5, 0.25)
+
+</verbatim></center>
+
+If the root node has only a single child, the height of the tree can be
+decreased by 1. This is done as follows:
+
+  #  The child node is marked as LOGICAL_EVICTED.
+  #  The contents of the child node are copied into the parent.
+
+Step 1 of the above is a special case - it is the only case in which the 
+first node in a linked-list is marked as LOGICAL_EVICTED. As a result, special
+rules apply. It is still not possible to write to the page once it is marked
+as LOGICAL_EVICTED, but readers are allowed to traverse the parent-child
+pointer.  This allows readers (and other writers) to continue while the height
+of the tree is being decreased.
+
+<h2 id=mvcc>2.3. MVCC Key Management </h2>
+
+When a new entry pair is written to the database, the writer associates with 
+it a transaction id (TID). When a reader reads the page, it inspects the
+transaction id of each record and ignores those written by transactions that
+are not part of its database snapshot. 
+
+The above would be sufficient if database entries were never deleted or
+overwritten. In these cases though, readers reading from old snapshots require
+access to the deleted or overwritten data. In hctree, this is facilitated 
+using "history" pointers. An history pointer may be attached to any entry
+within a leaf-list, and consists of:
+
+  *  a TID value, and
+  *  a physical database page number.
+
+A history pointer attached to key E with TID value T and page number P, where
+E<sub>1</sub> is the key immediately following key E within the list of leaves,
+indicates that any reader for which the snapshot does not include transaction T
+should read keys in the range E to E<sub>1</sub> from physical page P. This
+range is never inclusive of E<sub>1</sub>, and only includes E if the key E in the list of leaves is not itself visible to the reader.
+
+
+<center><verbatim type="pikchr">
+boxht=0.2 ; boxwid=1.25
+
+B1: box "1     2     3     4     5";
+
+C1: box "1     4     5            " at B1 + (0.0, -0.7);
+
+D1: box "1     5                  " at C1 + (0.0, -0.7);
+
+text "Physical page P1:" with e at B1.w + (-0.1, 0.0);
+text "Physical page P2:" with e at C1.w + (-0.1, 0.0);
+text "Physical page P3:" with e at D1.w + (-0.1, 0.0);
+
+A: arrow from C1.nw + (0.20, 0.0) to B1.s + (0.0, -0.02) thin;
+text "T1/P1" at A.e;
+
+A: arrow from D1.nw + (0.20, 0.0) to C1.s + (0.0, -0.02) thin;
+text "T2/P2" at A.e;
+</verbatim>
+<i>History Pointers Example 1</i>
+</center>
+
+The diagram above - history pointers example 1 - depicts a tree that initially
+consists of a single page containing key values 1 through 5 stored on
+physical page P1. Transaction T1 then deletes keys 3 and 4. Then transaction T2
+deletes key 4, so that the root of the tree is now mapped to physical page P3.
+
+The above is the outcome if (T2>T1). But note that this does not guarantee
+that the CID corresponding to T2 is greater than that corresponding to T1.
+It is quite possible that a future reader encounters this configuration of
+pages when reading a snapshot that does include transaction T2, but does
+not include T1. For this reason, readers must follow any history pointer
+if there exists any TID value not included in the readers snapshot that is
+less than or equal to the history pointer TID value for the purpose of
+following nested history pointers. But they must only merge in values
+from the indicated physical page if the history pointer TID itself is not
+included in the readers snapshot.
+
+There are still two complicated cases:
+
+  *  In the situation depicted above, T1 may be greater than T2.
+
+  *  If a contiguous set of entries spanning more than one leaf page is
+     deleted, the data structure that results from using just the technique
+     is inefficient.
+
+Hctree uses an <a href=fileformat.wiki#history>history fan pages</a> to 
+address both of these problems. A history fan page essentially contains 
+space for a large number of history pointers. Any history pointer, on a history
+fan page or attached to a leaf list entry, may point to a history fan page
+instead of an old leaf list data page. The TID attached to a history pointer
+must be the maximum of any TID associated with any history pointer on the fan
+page.
+
+<center><verbatim type="pikchr">
+boxht=0.2 ; boxwid=1.0
+
+B1: box "1     2     3     4";
+arrow thin
+B2: box "5     6     7     8";
+arrow thin 
+B3: box "9     10    11   12";
+
+text "Leaves before big DELETE:" with e at B1.w + (-0.1, 0.0);
+
+C1: box "History Fan Page" at B2 + (0.0, -0.7);
+arrow from C1.nw + (0.1,0.0) to B1.s + (0.0, -0.02) thin;
+arrow from C1.nw + (0.2,0.0) to B2.s + (0.0, -0.02) thin;
+arrow from C1.nw + (0.3,0.0) to B3.s + (0.0, -0.02) thin;
+
+D1: box "1     10    11   12" at B1 + (0.0, -1.4);
+arrow from D1.nw + (0.2,0.0) to C1.s + (0.0, -0.02) thin;
+
+text "Leaves after big DELETE:" with e at D1.w + (-0.1, 0.0);
+</verbatim>
+<i>History Pointers Example 2</i>
+</center>
+
+The figure above - history pointers example 2 - depicts a database tree that
+initially contained keys 1 to 12, distributed between 3 leaf pages. A
+transaction then deleted keys 2 through 9, inclusive, leaving the tree
+consisting of a single leaf page. Access to the deleted data is provided
+to existing readers via a history fan page.
+
+It is of course important that physical pages containing history data are
+not reused and overwritten while any transactions open on snapshots old enough
+to require them are still active. This is not a new problem introduced by
+history pointers though - any such page may also be accessed by such a 
+transaction without going via a history pointer. Any history fan pages
+allocated by a transaction are immediately scheduled for reuse using the 
+<a href=#pages>same mechanism</a> as old physical pages replaced by the
+transaction (such as page P1 in history pointers example 1 above).
+
+
+<h2 id=pages>2.4. Page Management</h2>
+
+The description in the sections above give the impression that there is an
+infinite supply of both physical pages and logical page ids, and that those
+used and no longer required may be carelessly discarded. Obviously this is
+not the case - old physical pages and logical page ids must eventually
+be reused.
+
+Free pages are persistently tracked within the page-map as follows:
+
+  *  The header of the page-map contains two fields containing the page
+     number of the largest physical and logical page allocated so
+     far.
+
+  *  For each logical page in use by the latest version of the database,
+     the LOGICAL_IN_USE flag is set in the page map.
+
+  *  For each physical page in use by the latest version of the database,
+     the PHYSICAL_IN_USE flag is set in the page map. <span style=color:green>
+     This might change. (a) it's redundant - a client can figure out which
+     physical pages are free by inspecting the set of ids that logical
+     pages with the LOGICAL_IN_USE flag set are mapped to, and (b)
+     omitting it halves the number of writes to the page-map, which
+     improves performance a little when there are lots of writer threads...
+     </span>
+
+The fields and flags described above are updated by writers as pages are
+used and freed. We accept that a process failure at an inopportune moment 
+might cause logical or physical pages to be leaked. This is not expected to
+be significant.
+
+At system startup time, the entire page-map is scanned to build an in-memory 
+table of free physical and logical pages. Internally, clients allocate
+physical and logical pages to themselves N (say 128) at a time. To allocate a
+set of N pages, the client must take a database-wide mutex and then either
+increase a header field or remove the required number of elements from the
+in-memory table. The client does not set the PHYSICAL_IN_USE and
+LOGICAL_IN_USE flags until the pages are actually used. When a client
+disconnects, it returns any unused pages to the in-memory table.
+
+When a client frees a physical or logical page while writing to the database,
+it clears the PHYSICAL_IN_USE or LOGICAL_IN_USE flag immediately and retains
+the free page id. It may reuse the free page itself at some point in the 
+future, or, once it has accumulated some configurable number of pages (again,
+say 128), it may add it to the in-memory table of free pages.
+
+Pages found to be free at system startup may be reused at any time. However
+pages that have been freed <i>since</i> system startup may only be reused
+once it is guaranteed that there are no clients reading from snapshots old
+enough to require them. In practice this means that pages free by a 
+transaction with TID T may be reused once all extant readers are reading
+from a snapshot that includes all transactions with TID values less than
+or equal to T. The system tracks readers so that it can tell when this
+condition is true.
+
+In the prototype, the sub-system that tracks readers is the 
+transaction-map manager (<a href=../../src/hctTMapInt.h>hctTMapInt.h</a>).
+
+The in-memory table of free pages is implemented by the
+page manager (<a href=../../src/hctPManInt.h>hctTPManInt.h</a>).
+
+<h2 id=recovery>2.5. Crash Recovery </h2>
+
+Recovery from application failure is handled differently from recovery from
+power, OS or other system failures (hereafter summarized as "power failures").
+In the case of application failures, it is assumed that any data written to the
+file-system before the crash, either via a system call or a memory mapping, is
+present and uncorrupted following the crash. 
+
+In the case of power or other system failures, it must be assumed that any 
+disk sector written but not synced when the failure occured may be corrupted.
+Following recovery, such a sector may contain the original data, the updated
+data, or any other values. Supporting recovery in this case therefore requires
+periodic calls to fsync(), and some extra processing from writers. Deployments
+that do not require recovery of this nature can omit these extra operations.
+<span style=color:green>Recovery from power/system failure is not currently 
+implemented. But there are <a href=#recover2>some ideas</a> for how this
+might be done.</span>
+
+<h3 id=recover1>2.5.1. Recovery From Application Failure </h3>
+
+To support application failure, each writer client has a log file. Before
+it begins writing a transaction into the database, a new entry containing
+the transactions keys and delete-keys is appended to the log file. Once the
+transaction has either been completely written and the system has determined 
+it will be committed, or else completely rolled back, the log file entry
+is marked as completed.
+
+Upon recovery, the database process scans the log files for transactions
+not marked as completed. They are then written into the database, one
+key at a time, using the usual methods. This avoids partial transactions
+being left in the database following an application failure.
+
+Note that all log files must be scanned and all old key/value pairs for
+transactions that will be rolled back extracted from the database before
+any are written back. This is because when the database is written to it
+may overwrite a free page that contains a key/value pair required for the
+rollback of some other log file.
+
+<h3 id=recover2>2.5.2. Recovery From Power/OS Failure (ideas for)</h3>
+
+Robustness in the face of power failures is achieved using database checkpoints
+and checksummed log files. A checkpoint is a version of the database that
+can be recovered following a power failure. A checkpoint is a version
+of the database that:
+
+    *  contains all data for all transactions with transaction ids less 
+       than or equal to some value T, and no data for any transaction with a
+       transaction id greater than T. 
+
+    *  contains all data for all transactions with commit ids less 
+       than or equal to some value C, and no data for any transaction with a
+       commit id greater than C. 
+
+A database has two header pages. Each header page is located on a
+different disk sector, so it can be synced to disk separately. These are
+called header pages, but are in fact stored in a separate file to other
+database content. This is also to allow them to be synced separately.
+
+In order to create a checkpoint, the database client must:
+
+    *  Block any new writers from beginning to commit (i.e. from obtaining
+       new transaction ids),
+    *  Wait until all existing writers have committed,
+    *  Record the current snapshot id, then unblock new writers,
+    *  Sync the db file,
+    *  Write the checkpoint id to a database header page,
+    *  Sync the header pages.
+
+To recover the database following a power failure, as many transactions as
+possible are recovered from the checksummed log files and added to the
+checkpointed version of the database.
+
+There are two ideas here for implementing recovery of a checkpoint following
+power or OS failure here. Idea #1 is reasonably simple, but requires the
+entire database file (possibly many TB of data) to be scanned twice in 
+order to reconstruct the page-map. Idea 2 is more complicated, and adds some
+overhead to all clients, but allows for fast recovery.
+
+Idea #1 seems the more plausible of the two.
+
+<b>Idea #1</b>
+
+This scheme adds three fields to each page written to the database file:
+
+  *  The logical page number, and
+
+  *  The TID of the transaction that wrote the page, and
+
+  *  The version number of the logical page. This is incremented each time
+     a new version of the logical page is written to disk.
+
+As in idea #1, a checkpoint requires all currently outstanding transactions
+to be committed before any new commits are started. The database file is
+synced to disk and the largest TID of any transaction committed before the
+checkpoint is recorded in a header page as part of the checkpoint.
+
+To recover from a power failure, the client must reconstruct the page-map
+by scanning the entire database file from beginning to end. This creates
+a preliminary page-map by mapping each logical page to the version with
+with the largest version number that also has a TID less than or equal
+to the checkpoint TID. 
+
+This page-map is not quite complete though, as it includes logical pages
+that are free. To identify these, the client then scans each tree structure
+within the database file, identifying all logical and physical pages that are
+linked in to the database. All other logical and physical pages are marked as
+free in the reconstructed page-map.
+
+
+<b>Idea #2</b>
+
+Each database has three separate page-map files - A, B and C. We refer to
+"files" in this section, but these could just as easily be three different
+parts of a single file, or three different parts of the database file itself.
+
+Writers begin by writing transactions into the database and into page-map 
+file A. Each writer also writes its transactions into a log file (one log 
+file per writer), along with a checksum and transaction id for each. To
+checkpoint a version of the database:
+
+  *  the "next" page-map file (file B in this case) is populated entirely
+     with NULL entries.
+
+  *  new transactions are prevented from beginning to commit until all
+     currently committing transactions have finished committing. The 
+     checkpoint will contain all transactions up to and including the
+     transaction with the largest transaction id committed at this point.
+
+  *  when new transactions are permitted to begin committing again, new
+     values are written into page-map file B. When a value is read, an
+     attempt is first made to read it from file B. If file B contains a
+     NULL value, the real value is read from file A and copied into file B
+     using a CAS instruction. If the write fails, the value is reread
+     from file B.
+
+  *  The database file is synced to disk.
+
+  *  Page-map file A is synced to disk.
+
+  *  A header page in the database file is updated to indicate that page-map
+     file A now correspond to the latest checkpointed version of the database
+     file and the transaction id of the checkpointed snapshot. The database
+     file is synced to disk. Successive writes alternate back and forth 
+     between the two header pages.
+
+  *  The checkpointer thread loops through the entire page-map copying
+     values from file A to file B. File B is always written using the CAS
+     primitive, so there is no chance of accidentally clobbering a value
+     written by a writer following the transaction barrier.
+
+For this to work, writers must only recycle a physical page made eligible
+for recycling before the most recent completed checkpoint. Logical page
+ids may still be recycled as soon as they are eligible.
+
+<h1 id=concurrency>3. Concurrent Transactions Implementation</h1>
+
+<h2 id=concurrency_read>3.1. Read Transactions</h2>
+
+<h2 id=concurrency_write>3.2. Write Transactions</h2>
+
+A write transaction writes no data into the database while executing DDL
+or DML statements. Instead, it proceeds like a read transaction while new
+database entries and delete keys are accumulated in a private, in-memory, data
+structure. Queries run within the transaction merge data from the database and
+in-memory tree structures to return to the caller. Also accumulated in memory
+is a record of the keys and key-ranges read from the database as part of the
+transaction.
+
+Associated with each record or delete-key in the database is a transaction ID
+(TID). A TID is a 56-bit integer assigned to transactions in increasing order
+as described below. A TID's only purpose is as a key to use with the
+transaction-map. The transaction-map maps each TID to two values:
+
+  *  A 56-bit commit ID (CID).
+  *  A transaction state value. The transaction state is one of WRITING,
+     VALIDATING, COMMITTED or ROLLBACK.
+
+These two values are of course stored together in a 64-bit transaction map
+entry that may be read and written using atomic primitives.
+
+Commit IDs (CIDs) are also 56-bit integers assigned to transactions in
+increasing order. A database snapshot is defined by a commit id <i>C</i> - all
+keys in the file with with TIDs mapped to CIDs less than or equal to <i>C</i>
+are part of the snapshot and should be read, all other keys should be ignored.
+
+In WRITING state, the CID value is always 0. In COMMITTED state, it is 
+always non-zero.
+
+A commit proceeds as follows:
+
+  #  <p>The transaction is assigned a transaction ID (TID). The transaction 
+     map entry is set to <b>(cid=0, state=WRITING)</b>. This is a no-op, as the
+     state WRITING is encoded as 0x00, and so the default transaction map
+     value of 0 is already correct.
+  #  <p>The transaction writes its modifications into the database. The TID
+     assigned in the previous step is associated with each new database entry.
+     If the writer finds that it must clobber a version of a key with a TID
+     that indicates that the key being clobbered was written after the writers
+     snapshot, the transaction is deemed to conflict and any changes rolled
+     back.
+  #  <p>The transaction map entry is set to <b>(cid=0, state=VALIDATING)</b>.
+  #  <p>The transaction is assigned a commit ID (CID), $cid. The transaction 
+     map entry is updated to <b>(cid=$cid, state=VALIDATING)</b>.
+  #  <p>The transaction queries the database for the keys and key ranges that
+     it queried for while it was running. If it encounters any keys with
+     TIDs mapped to CID values greater than the CID of the database snapshot
+     that the transaction was prepared against, but less than the CID assigned
+     in step 3, the transaction is deemed to conflict and all changes rolled
+     back.
+  #  The transaction map entry state is set to 
+     <b>(cid=$cid, state=COMMITTED)</b>.
+
+A rollback may be triggered in either step 2 (before the CID is assigned)
+or in step 5 (after the CID is assigned). In each case the writer must:
+
+  #  <p>Run through all keys already written to the database, restoring the
+     original values.
+  #  <p>Set the transaction map entry for the transaction to 
+     <b>(cid=$cid, state=ROLLBACK)</b>. If the rollback was triggered before
+     a CID was assigned, $cid is 0.
+
+<div style="border:1px solid black; padding: 1ex; margin: auto; color: green; width:80%">
+Question: Why not just use the TID? What is the point of the extra layer of
+indirection provided by the TID-&gt;CID mapping?
+
+Without the CID, step 5 of the above procedure would have to wait for all
+transactions with TIDs smaller than that of the current transaction to finish
+writing to the database (i.e. steps 1 to 3) before validation could proceed.
+This is awkward to arrange, and causes extra interactions between threads
+committing otherwise entirely unrelated transactions.
+</div>
+
+The snapshot read by a reader is defined by the largest CID value 
+assigned so far when the read transaction was opened. For each key 
+encountered, the state of the associated transaction determines how it
+is handled. According to the following rules:
+
+  *  A key that maps to WRITING state may always be ignored. The reader
+     should seek to find the previous version, if any, of the key.
+
+  *  If a reader encounters a key in VALIDATING state for which the CID
+     value is equal to or less than its snapshot id (including the value 0),
+     the reader must wait. It spinlocks on the transaction map slot until
+     either the state or CID value has changed.
+
+  *  A key that maps to ROLLBACK state may always be ignored.
+
+  *  For a key that maps to COMMITTED state, a reader must ignore it if
+     the CID value is greater than its snapshot id, and read it in all
+     other cases.
+
+In step (5) of a commit, when validating the transaction, the client must
+wait on any keys with (cid=0, state=VALIDATING). Whether or not the 
+transaction must be rolled back depends on the value the CID field of
+associated with the key is set to (less than the blocked transaction's CID ->
+rollback, greater than the blocke tranasction's CID -> proceed). 
+
+<h2 id=concurrency_notes>3.3. Notes on HC-Tree Concurrency</h2>
+
+  *  The system <b>does not have to store the entire transaction map</b>.
+     Instead, it can be compressed by storing a transaction id Tmin for
+     which there are no readers reading from snapshots old enough to
+     exclude transaction Tmin or any transaction with a TID smaller than
+     Tmin from the snapshot. Then all entries for TIDs Tmin and smaller
+     may be discarded.
+
+  *  <b>The validation phase can be optimized by using page level checks
+     before falling back to range and key checks</b>. When a client records
+     the list of keys and ranges that it reads during the transaction,
+     it also records the 
+     <a href=#pagemap>page-map value</a> for each logical page that
+     it reads. When validating a key or range of keys, it first compares the
+     recorded page-map values with the current page-map value or values. If the
+     page-map values have not changed, there is no need to proceed with the
+     more expensive key level checks.
+
+  *  <b>This permits less theoretical concurrency than some other schemes</b>.
+     This is largely a consequence of not wishing to validate read-only
+     transactions. The technique used most successfully to increase
+     concurrency relative to the scheme described above is Serializable
+     Snapshot Isolation (SSI): 
+     <p> [https://wiki.postgresql.org/wiki/Serializable] <p>Another, similar,
+     method is the Serial Safety Net:
+     <p>[https://event.cwi.nl/damon2015/papers/damon15-wang.pdf]
+
+<h2 id=concurrency_inc>3.4. Increasing Concurrency </h2>
+
+<i> In which it is discussed how to enhance the above to be equivalent 
+to SSN. </i>
+
+<h1 id=replication>4. Replication and other Integration Issues</h1>
+
+<i> In which it is discussed how this fits in with streaming replication
+and bootstrapping a new node</i>
+
+
+<h1 id=concurrencytheory>Appendix A. Database Concurrency Theory</h1>
+
+Until surprisingly recently, concurrency in SQL database systems was much
+simpler. Transactions were in most cases allowed to proceed concurrently so
+long as they did not write to the same rows, or cause database constraint
+violations. This is often termed <b>snapshot isolation</b>. Although this is 
+simpler to implement and imposes relatively little overhead, it turns out to be
+quite difficult to use, as concurrent combinations of transactions that
+function correctly when run independently may malfunction.
+
+Consider a database created as follows:
+
+<pre>
+    CREATE TABLE marbles(id INTEGER PRIMARY KEY, color);
+    INSERT INTO marbles VALUES(1, 'white'), (2, 'black'), (3, 'white'), (4, 'black');
+</pre>
+
+And two transactions, one that changes the color of all marbles to white, and
+one that changes all marbles to black:
+
+<pre>
+    -- Transaction 1:
+    UPDATE marbles SET color='white' WHERE color='black';
+</pre>
+
+<pre>
+    -- Transaction 2:
+    UPDATE marbles SET color='black' WHERE color='white';
+</pre>
+
+Intuitively, after running both of the transactions above concurrently, there
+are two possible outcomes - either all of the marbles are white or all of the
+marbles are black. However, with snapshot isolation there is a third
+possibility - that the color of each marble has been changed, leaving half
+white and half black.
+
+Modern systems implement <b>serializable</b> isolation, which does not allow
+for this third possibility. Under serializable isolation, a set of
+transactions may only be committed if the same transactions may be executed
+in some serial order producing results consistent with the final and all
+visible interim states of the database produced by concurrent execution. The
+usual way to model this is as a graph, where each node is a transaction, and
+each directly edge represents a dependency. There are two types of dependency
+between transactions:
+
+  *  a <b>dependency</b> which occurs when transaction B reads data written
+     by transaction A. In this case transaction B must occur after transaction
+     A in the serialization order.
+
+  *  an <b>anti-dependency</b> which occurs when transaction A reads data
+     that is overwritten by transaction B. In this case transaction A must
+     occur before transaction B in the serialization order.
+
+when a transaction is to be committed, it is added to the directed graph. If
+this creates a cycle in the graph, the transaction may not be committed.
+
+One quirk in this is that read-only transactions must also be added to the
+graph and be validated before "committing". Results returned by a
+read-transaction that does not pass validation must be considered suspect.
+For example, consider the following two transactions:
+
+<pre>
+    -- T1:
+    UPDATE marbles SET color='white';
+</pre>
+
+<pre>
+    -- T2:
+    INSERT INTO marbles VALUES(NULL, 'black');
+</pre>
+
+The final state of the database is that it contains one black marble, and the
+rest are white. This implies that there is an anti-dependency between T1 and T2
+- T1 read data that was later overwritten by T2, so T1 must occur before T2 in
+the serialization order:
+
+<center><verbatim type="pikchr">
+circle "T1" ; arrow ; circle "T2"
+</verbatim></center>
+
+In the above diagram, the arrow runs in the direction of time. The graph
+indicates that T2 must occur after T1 in the serialization order.
+
+Say there is also a read-only transaction running:
+<pre>
+  -- T3:
+  SELECT * FROM marbles;
+</pre>
+
+If, by some quirk of the system, saw the effects of T2 but not T1 (a mix of
+black and white marbles plus the new black marble added by T2), then it would
+have a dependency on T2 but an anti-dependency on T1:
+
+<center><verbatim type="pikchr">
+T3: circle "T3"
+T1: circle "T1" at T3 + (-0.5,0.7) ; arrow ; T2: circle "T2"
+arrow from T2.sw to T3.ne
+arrow from T3.nw to T1.se
+</verbatim></center>
+
+In this case, one of more of T1, T2 or T3 would have to be rolled back. Even
+though the both the final state and interim state of the database observed
+by T3 are possible outcomes of executing T1 and T2 in serial, they are not
+consistent with each other and therefore a violation of serializable
+isolation.
+
+A full implementation of such a graph is considered too expensive in 
+practice. And so all current systems implement some compromise that allows
+for some number of false-positive conflict detections.
+

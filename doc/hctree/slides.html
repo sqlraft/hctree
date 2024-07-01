@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#000000" />
+  <meta name="description" content="Reveal JS Presentation" />
+
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.4.0/reveal.min.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.4.0/theme/white.css" id="theme" />
+
+  <title>Reveal JS - CDN Example - Markdown</title>
+</head>
+
+<body>
+  <div class="reveal">
+    <div class="slides">
+<section data-markdown><textarea data-template>
+
+## Hctree
+* A high-concurrency, optimistic row-level-locking backend for SQLite.
+---
+## Which does what?
+* Increased concurrency 
+  * _dozens of writers and lots of readers running at full-speed_.  
+* Huge databases spread across multiple files.
+* Replication hooks.
+
+---
+## Plugs in to btree.h
+
+_...pikchr diagram...__
+
+---
+## Lives here:
+* https://sqlite.org/hctree
+* in a clone of the main SQLite "src" repository. 
+
+</textarea></section>
+    </div>
+  </div>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.4.0/reveal.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.4.0/plugin/markdown/markdown.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.4.0/plugin/math/math.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.4.0/plugin/notes/notes.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.4.0/plugin/highlight/highlight.js"></script>
+
+  <script>
+    Reveal.initialize({
+      controls: true,
+      progress: true,
+      history: true,
+      center: true,
+
+      // IMPORTANT: The order matters!
+      // So, RevealHightlight must be the LAST to load
+      plugins: [RevealMarkdown, RevealMath, RevealNotes, RevealHighlight]
+    });
+  </script>
+</body>
+</html> 

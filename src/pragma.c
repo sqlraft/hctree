@@ -477,7 +477,10 @@ void sqlite3Pragma(
   aFcntl[2] = zRight;
   aFcntl[3] = 0;
   db->busyHandler.nBusy = 0;
-  rc = sqlite3_file_control(db, zDb, SQLITE_FCNTL_PRAGMA, (void*)aFcntl);
+  rc = sqlite3BtreePragma(pDb->pBt, aFcntl); 
+  if( rc==SQLITE_NOTFOUND ){
+    rc = sqlite3_file_control(db, zDb, SQLITE_FCNTL_PRAGMA, (void*)aFcntl);
+  }
   if( rc==SQLITE_OK ){
     sqlite3VdbeSetNumCols(v, 1);
     sqlite3VdbeSetColName(v, 0, COLNAME_NAME, aFcntl[0], SQLITE_TRANSIENT);

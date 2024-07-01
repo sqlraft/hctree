@@ -124,6 +124,16 @@ if {[info command sqlite_orig]==""} {
         lappend args -key {xyzzy}
       }
 
+      if {[info exists ::G(perm:hct)]} {
+        set fname [lindex $args 1]
+        if {$fname!=":memory:" && $fname!=""} {
+          set args [concat [list \
+            [lindex $args 0]            \
+            "file:$fname?hctree=1" -uri 1
+          ] [lrange $args 2 end]]
+        }
+      }
+
       set res [uplevel 1 sqlite_orig $args]
       if {[info exists ::G(perm:presql)]} {
         [lindex $args 0] eval $::G(perm:presql)
@@ -610,10 +620,12 @@ sqlite3_hard_heap_limit64 $cmdlinearg(hard-heap-limit)
 #
 proc reset_db {} {
   catch {db close}
+  catch {db2 close}
   forcedelete test.db
   forcedelete test.db-journal
   forcedelete test.db-wal
   forcedelete test.db-wal2
+  forcedelete test.db-pagemap
   sqlite3 db ./test.db
   set ::DB [sqlite3_connection_pointer db]
   if {[info exists ::SETUP_SQL]} {
@@ -621,6 +633,12 @@ proc reset_db {} {
   }
 }
 reset_db
+
+proc hct_reset_db {} {
+  catch {db close}
+  forcedelete test.db
+  sqlite3 db file:test.db?hctree=1 -uri 1
+}
 
 # Abort early if this script has been run before.
 #
@@ -1632,7 +1650,6 @@ proc execsql_pp {sql {db db}} {
     puts [string repeat - $nTotal]
   }
 }
-
 
 # Show the VDBE program for an SQL statement but omit the Trace
 # opcode at the beginning.  This procedure can be used to prove
@@ -2658,5 +2675,6 @@ extra_schema_checks 1
 
 source $testdir/thread_common.tcl
 source $testdir/malloc_common.tcl
+source $testdir/hct_common.tcl
 
 set tester_tcl_has_run 1

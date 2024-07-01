@@ -8,6 +8,7 @@
 #    May you share freely, never taking more than you give.
 #
 #***********************************************************************
+# TESTRUNNER: hct
 #
 # Ticket #3762:  Make sure that an incremental vacuum that reduces the
 # size of the database file such that if a pointer-map page is eliminated

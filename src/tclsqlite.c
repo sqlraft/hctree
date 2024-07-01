@@ -3167,6 +3167,7 @@ deserialize_error:
   ** of FILENAME into the local database DATABASE (default: "main").
   */
   case DB_RESTORE: {
+#ifndef SQLITE_ENABLE_HCT
     const char *zSrcFile;
     const char *zDestDb;
     sqlite3 *pSrc;
@@ -3218,6 +3219,7 @@ deserialize_error:
       rc = TCL_ERROR;
     }
     sqlite3_close(pSrc);
+#endif
     break;
   }
 
@@ -4049,6 +4051,9 @@ int SQLITE_CDECL TCLSH_MAIN(int argc, char **argv){
   Tcl_SetSystemEncoding(NULL, "utf-8");
   interp = Tcl_CreateInterp();
   Sqlite3_Init(interp);
+#ifdef TCLSQLITE3_EXTRA_INIT
+  TCLSQLITE3_EXTRA_INIT(interp);
+#endif
 
   sqlite3_snprintf(sizeof(zArgc), zArgc, "%d", argc-1);
   Tcl_SetVar(interp,"argc", zArgc, TCL_GLOBAL_ONLY);
