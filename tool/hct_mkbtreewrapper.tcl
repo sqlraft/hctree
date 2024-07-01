@@ -90,6 +90,7 @@ set tree_apis {
   int sqlite3BtreeSetVersion(Btree*, int);
   int sqlite3BtreeIntegrityCheck(sqlite3*, Btree*, Pgno*, Mem*, int, int, int*,char**);
   int sqlite3BtreeCheckpoint(Btree*, int, int *, int *);
+  int sqlite3BtreeExclusiveLock(Btree*);
 }
 
 set check_for_null_object {

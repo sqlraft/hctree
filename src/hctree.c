@@ -3310,6 +3310,10 @@ int sqlite3HctBtreeConnectionCount(Btree *p){
 }
 #endif
 
+int sqlite3HctBtreeExclusiveLock(Btree *p){
+  return SQLITE_OK;
+}
+
 int sqlite3HctBtreeTransferRow(BtCursor *p1, BtCursor *p2, i64 iKey){
   assert( 0 );
   return SQLITE_LOCKED;
