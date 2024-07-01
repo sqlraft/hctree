@@ -29,7 +29,8 @@ proc validate {iCid zSchema data schema_version} {
   return $::validate_ret
 }
 
-sqlite3_hct_journal_validation_hook db validate
+#sqlite3_hct_journal_validation_hook db validate
+sqlite3_hct_journal_hook db validate
 
 do_test 1.0.1 {
   sqlite3_hct_journal_mode db

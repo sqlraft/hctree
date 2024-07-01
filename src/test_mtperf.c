@@ -228,7 +228,6 @@ static int ttAddThread(TT_Test *p, Tcl_Obj *pName, Tcl_Obj *pSql){
     );
     return TCL_ERROR;
   }
-  sqlite3_wal_hook(pNew->db, ttWalHook, (void*)pNew);
 
   if( p->pSqlConfig ){
     rc = sqlite3_exec(pNew->db, Tcl_GetString(p->pSqlConfig), 0, 0, 0);
@@ -414,6 +413,7 @@ static int ttRunTest(TT_Test *p){
 
   for(ii=0; ii<p->nThread; ii++){
     TT_Thread *pThread = &p->aThread[ii];
+    sqlite3_wal_hook(pThread->db, ttWalHook, (void*)pThread);
     pthread_create(&pThread->tid, NULL, ttThreadMain, (void*)pThread);
   }
 

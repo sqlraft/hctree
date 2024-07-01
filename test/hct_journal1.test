@@ -53,7 +53,7 @@ do_test 1.5 {
 do_execsql_test 1.6 {
   SELECT cid, schemacid, quote(hash) FROM sqlite_hct_baseline
 } {
-  0 0 X'00000000000000000000000000000000'
+  6 0 X'00000000000000000000000000000000'
 }
 
 do_execsql_test 1.7 {
