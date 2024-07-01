@@ -102,6 +102,10 @@ do_test 2.1 {
 
 hct_reset_db
 breakpoint
+db func random myrandom
+proc myrandom {} {
+  expr {int(rand() * 10000000000)}
+}
 do_test 2.2 {
   execsql {
     CREATE TABLE x1(a INTEGER PRIMARY KEY, b TEXT);

@@ -1,5 +1,5 @@
-C Add\smissing\sbtree\smethod\ssqlite3BtreeExclusiveLock()\sto\shctree.
-D 2024-07-01T17:45:31.917
+C Update\stest\sfile\shct_misc7.test\sto\savoid\sthe\sbuild-in\srandom()\sfunction\son\sthis\sbranch.
+D 2024-07-01T17:49:37.399
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -1363,7 +1363,7 @@ F test/hct_misc3.test e74bcf359c0ad44a05723c5bd8e47fbf28375f0a6ca959052db91f0229
 F test/hct_misc4.test 37c20dd52ae3f7750e834eb74e3d65e9d6f89ce36c119ea6be46dcddc3efea48
 F test/hct_misc5.test a36652fb8321f0b7bdf416ec15429e9c9e76be8507140d81438a241655df6f02
 F test/hct_misc6.test 816ec612547da53756573015ab3c893bac49258c96df154f98ad81bfe8d7aef0
-F test/hct_misc7.test ca8256a42f4b9e697767899063959e924e8177c4e2dba98459cbb3e7a9764204
+F test/hct_misc7.test 3558dab675197cd165dee1fffcfb733cdfc2a5d5763e976e846409e26a823f05
 F test/hct_misc8.test 0b13f51010cb476235a6076aa7bbde581f5729a1c6bf08d8811cfc8c7d4946bf
 F test/hct_misc9.test 70d97c790235df73b2f1e7b49084778fab731555c57926289f44e1468a4c6134
 F test/hct_mvcc1.test ce6cee78781e83fb9e9d3995cd46bb4f5b12721cfa844da2d99abc880be1abd6
@@ -2328,8 +2328,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P 6fbbdf018bdc3ae5e1104ad8731bf55ce33e748696b4e4866477defa3092f068
-R e99351fca70e818d53a9240a08b140a9
+P b1b218bd9749eb5c1da8171bcc77d764ef7dc62c4ac4229a86ec0c73a92f3764
+R d5e6f19ef986289a2295618ea05d3a21
 U dan
-Z 98dfbad8519a5f36dc6ad6f38419e3ed
+Z bff7fcda252a00d0255a06fe2d8a791a
 # Remove this line to create a well-formed Fossil manifest.
