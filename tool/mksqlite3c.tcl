@@ -184,6 +184,7 @@ foreach hdr {
    sqlite3session.h
    sqlite3.h
    sqlite3ext.h
+   sqlite3hct.h
    sqlite3rbu.h
    sqliteicu.h
    sqliteInt.h
@@ -197,6 +198,7 @@ foreach hdr {
    hctFileInt.h
    hctPManInt.h
    hctTMapInt.h
+   hctJrnlInt.h
    btreeModules.h
    btreeDefine.h
    btreeUndef.h
@@ -506,6 +508,8 @@ set flist {
    hct_tmap.c
    hct_record.c
    hct_stats.c
+   hct_journal.c
+   hct_journalhash.c
 } 
 if {$enable_recover} {
   lappend flist sqlite3recover.c dbdata.c

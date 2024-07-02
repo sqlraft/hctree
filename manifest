@@ -1,9 +1,9 @@
-C Change\sthe\sway\sthe\sOP_AutoCommit\sopcode\sworks\son\sthis\sbranch\sto\smake\sit\seasier\sto\smerge\swith\sthe\sbegin-concurrennt\sbranch.
-D 2024-07-01T16:54:48.802
+C Fix\sconfigure/make\sbuilds.
+D 2024-07-02T18:31:36.016
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
-F Makefile.in f883aac808a973fa14ecd2aea5aa2709822badbe2794c7691d4de94190d0f7fc
+F Makefile.in 9e14e5887463d05e3af5bc0c206be5ff5123f839c477b5153d764c759efbb123
 F Makefile.linux-gcc f3842a0b1efbfbb74ac0ef60e56b301836d05b4d867d014f714fa750048f1ab6
 F Makefile.msc 993f8addade63bcac7192416e7161ceee60edcee2376299ea48b2a74c66ac2d5
 F README.md 6358805260a03ebead84e168bbf3740ddf3f683b477e478567186aa7afb490d3
@@ -689,8 +689,8 @@ F ext/wasm/tests/opfs/concurrency/index.html 0802373d57034d51835ff6041cda438c7a9
 F ext/wasm/tests/opfs/concurrency/test.js a98016113eaf71e81ddbf71655aa29b0fed9a8b79a3cdd3620d1658eb1cc9a5d
 F ext/wasm/tests/opfs/concurrency/worker.js 0a8c1a3e6ebb38aabbee24f122693f1fb29d599948915c76906681bb7da1d3d2
 F ext/wasm/wasmfs.make 8a4955882aaa0783b3f60a9484a1f0f3d8b6f775c0fcd17c082f31966f1bc16a
-F install-sh 9d4de14ab9fb0facae2f48780b874848cbf2f895 x
-F ltmain.sh 3ff0879076df340d2e23ae905484d8c15d5fdea8
+F install-sh 2182b3705d92e25753411e2c28cf788c69e35a48fbb8aa332e342dfc6b95b80d x
+F ltmain.sh 782161cb6c610db2fbcf63132a6178eb75c560026cdc0e579ade9f152feb5c36 x
 F magic.txt 5ade0bc977aa135e79e3faaea894d5671b26107cc91e70783aa7dc83f22f3ba0
 F main.mk 5c7e276672e77edc5970750c98e7d56b9a5742a975b5a8e3e0326a1ce60ac00d
 F mptest/config01.test 3c6adcbc50b991866855f1977ff172eb6d901271
@@ -2222,7 +2222,7 @@ F tool/mkshellc.tcl b7adf08b82de60811d2cb6af05ff59fc17e5cd6f3e98743c14eaaa3f8971
 F tool/mksourceid.c 36aa8020014aed0836fd13c51d6dc9219b0df1761d6b5f58ff5b616211b079b9
 F tool/mkspeedsql.tcl a1a334d288f7adfe6e996f2e712becf076745c97
 F tool/mksqlite3c-noext.tcl 4f7cfef5152b0c91920355cbfc1d608a4ad242cb819f1aea07f6d0274f584a7f
-F tool/mksqlite3c.tcl 24c0f9a5c916322644e5f4d2ab99c07526df2dd7ae471b6c874057528e7ee53d
+F tool/mksqlite3c.tcl 74d03491df5d9ca2b44b1b12461051963c99fb064fa4db78353df9cc06698c07
 F tool/mksqlite3h.tcl d391cff7cad0a372ee1406faee9ccc7dad9cb80a0c95cae0f73d10dd26e06762
 F tool/mksqlite3internalh.tcl eb994013e833359137eb53a55acdad0b5ae1049b
 F tool/mktoolzip.tcl c7a9b685f5131d755e7d941cec50cee7f34178b9e34c9a89811eeb08617f8423
@@ -2291,8 +2291,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P a46c30082dab5a7348d8a5d27883409a151fd0915a48fd32d4c314fa7850485a
-R 9ac04344f6e5a21dd1c3b65c842c79a0
+P fcdc6b2d0f5c73330fd915f1052cec36f4799f140bd6cf082197e592ddc3e65b
+R 67ac9567ce339a78a0c4bb295f6f3646
 U dan
-Z 838b23acb03569cb48672ac0a09320a3
+Z 8a18d281d89d41f1e3a56756aafd6ba1
 # Remove this line to create a well-formed Fossil manifest.

@@ -198,6 +198,7 @@ LIBOBJS0 = alter.lo analyze.lo attach.lo auth.lo \
 
 LIBOBJS0 += hct_pman.lo hct_record.lo hctree.lo hct_stats.lo
 LIBOBJS0 += hct_tree.lo hct_file.lo hct_database.lo hct_tmap.lo 
+LIBOBJS0 += hct_journal.lo hct_journalhash.lo
 LIBOBJS0 += btwrapper.lo
 
 # Object files for the amalgamation.
@@ -284,6 +285,7 @@ SRC = \
   $(TOP)/src/shell.c.in \
   $(TOP)/src/sqlite.h.in \
   $(TOP)/src/sqlite3ext.h \
+  $(TOP)/src/sqlite3hct.h \
   $(TOP)/src/sqliteInt.h \
   $(TOP)/src/sqliteLimit.h \
   $(TOP)/src/table.c \
@@ -373,6 +375,8 @@ SRC += \
   $(TOP)/src/hctree.c \
   $(TOP)/src/hct_tree.c \
   $(TOP)/src/hct_file.c \
+  $(TOP)/src/hct_journal.c \
+  $(TOP)/src/hct_journalhash.c \
   $(TOP)/src/hct_database.c \
   $(TOP)/src/hct_stats.c \
   $(TOP)/src/hct_tmap.c \
@@ -382,6 +386,7 @@ SRC += \
   $(TOP)/src/hctFileInt.h  \
   $(TOP)/src/hctPManInt.h  \
   $(TOP)/src/hctTMapInt.h  \
+  $(TOP)/src/hctJrnlInt.h  \
   $(TOP)/src/btreeModules.h \
   $(TOP)/src/btreeDefine.h \
   $(TOP)/src/btreeUndef.h \
@@ -434,6 +439,8 @@ TESTSRC = \
   $(TOP)/src/test_windirent.c \
   $(TOP)/src/test_window.c \
   $(TOP)/src/test_wsd.c       \
+  $(TOP)/src/test_hct.c       \
+  $(TOP)/src/test_hctserver.c       \
   $(TOP)/ext/fts3/fts3_term.c \
   $(TOP)/ext/fts3/fts3_test.c  \
   $(TOP)/ext/session/test_session.c \
@@ -1146,6 +1153,12 @@ hct_tree.lo:	$(TOP)/src/hct_tree.c $(HDR)
 
 hct_file.lo:	$(TOP)/src/hct_file.c $(HDR)
 	$(LTCOMPILE) $(TEMP_STORE) -c $(TOP)/src/hct_file.c
+
+hct_journal.lo:	$(TOP)/src/hct_journal.c $(HDR)
+	$(LTCOMPILE) $(TEMP_STORE) -c $(TOP)/src/hct_journal.c
+
+hct_journalhash.lo:	$(TOP)/src/hct_journalhash.c $(HDR)
+	$(LTCOMPILE) $(TEMP_STORE) -c $(TOP)/src/hct_journalhash.c
 
 hct_database.lo:	$(TOP)/src/hct_database.c $(HDR)
 	$(LTCOMPILE) $(TEMP_STORE) -c $(TOP)/src/hct_database.c
