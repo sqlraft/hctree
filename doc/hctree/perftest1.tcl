@@ -9,7 +9,7 @@ set G(nSecond)  30
 
 set G(system) [lindex $argv 0]
 if {[llength $argv]!=1 || [lsearch {hctree hct1024 bcw2} $G(system)]<0 } {
-  puts stderr "Usage $argv0 hctree|bcw2"
+  puts stderr "Usage $argv0 hctree|bcw2|hct1024"
   exit -1
 }
 
@@ -135,16 +135,16 @@ puts "-- setup database..."
 setup_database
 
 #run_one_test 14 update1
-exit
+#exit
 
-foreach nThread {16 15 14 13 12 11 10 9 8 7 6 5 4 3 2 1} {
-  foreach testname {
-    update1
-    update10
-    update1_scan10
-    update10_scan10
-    scan10
-  } {
+set lThread [list 16 15 14 13 12 11 10 9 8 7 6 5 4 3 2 1]
+set lTest [list update1 update10 update1_scan10 update10_scan10 scan10]
+
+set lThread [list 1 2 4]
+set lTest [list update1]
+
+foreach nThread $lThread {
+  foreach testname $lTest {
     puts "-- sleeping $G(nSleep) seconds..."
     after [expr {$G(nSleep) * 1000}]
     run_one_test $nThread $testname

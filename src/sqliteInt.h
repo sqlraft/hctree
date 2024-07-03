@@ -55,6 +55,10 @@
 # define SQLITE_OMIT_SHARED_CACHE 1
 #endif
 
+#ifndef SQLITE_DISABLE_PAGECACHE_OVERFLOW_STATS
+# define SQLITE_DISABLE_PAGECACHE_OVERFLOW_STATS
+#endif
+
 /*
 ** Include the header file used to customize the compiler options for MSVC.
 ** This should be done first so that it can successfully prevent spurious
