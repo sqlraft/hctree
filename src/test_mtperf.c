@@ -106,7 +106,7 @@ struct TT_Thread {
   TT_Test *pTest;
   Tcl_Obj *pName;                 /* Name of thread */
 
-  FastPrng prng;
+  FastPrng *pPrng;
   int bDoCheckpoint;
   int bCheckpointer;
   int iTruncate;
@@ -184,6 +184,18 @@ static void frandomBlobFunc(
   sqlite3_free(aBlob);
 }
 
+static void ttInstallRandomFunctions(TT_Thread *pThread){
+  sqlite3_create_function(pThread->db, "frandomid", 
+      1, SQLITE_ANY, (void*)pThread->pPrng, frandomIdFunc, 0, 0
+  );
+  sqlite3_create_function(pThread->db, "frandom", 
+      0, SQLITE_ANY, (void*)pThread->pPrng, frandomFunc, 0, 0
+  );
+  sqlite3_create_function(pThread->db, "frandomblob", 
+      1, SQLITE_ANY, (void*)pThread->pPrng, frandomBlobFunc, 0, 0
+  );
+}
+
 static int ttWalHook(void *pCtx, sqlite3 *db, const char *z, int nPg){
   TT_Thread *pThread = (TT_Thread*)pCtx;
   TT_Test *pTest = pThread->pTest;
@@ -210,8 +222,9 @@ static int ttAddThread(TT_Test *p, Tcl_Obj *pName, Tcl_Obj *pSql){
   memset(pNew, 0, sizeof(TT_Thread));
 
   /* Populate TT_Thread.pTest and TT_Thread.pName. */
-  sqlite3_randomness(sizeof(FastPrng), (void*)&pNew->prng);
-  pNew->prng.x |= 1;
+  pNew->pPrng = (FastPrng*)ckalloc(sizeof(FastPrng));
+  sqlite3_randomness(sizeof(FastPrng), (void*)pNew->pPrng);
+  pNew->pPrng->x |= 1;
   pNew->pTest = p;
   pNew->pName = pName;
   Tcl_IncrRefCount(pNew->pName);
@@ -228,6 +241,7 @@ static int ttAddThread(TT_Test *p, Tcl_Obj *pName, Tcl_Obj *pSql){
     );
     return TCL_ERROR;
   }
+  ttInstallRandomFunctions(pNew);
 
   if( p->pSqlConfig ){
     rc = sqlite3_exec(pNew->db, Tcl_GetString(p->pSqlConfig), 0, 0, 0);
@@ -244,16 +258,6 @@ static int ttAddThread(TT_Test *p, Tcl_Obj *pName, Tcl_Obj *pSql){
   );
   sqlite3_exec(pNew->db, zPragma, 0, 0, 0);
   sqlite3_free(zPragma);
-
-  sqlite3_create_function(pNew->db, "frandomid", 
-      1, SQLITE_ANY, (void*)&pNew->prng, frandomIdFunc, 0, 0
-  );
-  sqlite3_create_function(pNew->db, "frandom", 
-      0, SQLITE_ANY, (void*)&pNew->prng, frandomFunc, 0, 0
-  );
-  sqlite3_create_function(pNew->db, "frandomblob", 
-      1, SQLITE_ANY, (void*)&pNew->prng, frandomBlobFunc, 0, 0
-  );
 
   while( zSql ){
     int eType = STEP_SQL;
@@ -414,6 +418,7 @@ static int ttRunTest(TT_Test *p){
   for(ii=0; ii<p->nThread; ii++){
     TT_Thread *pThread = &p->aThread[ii];
     sqlite3_wal_hook(pThread->db, ttWalHook, (void*)pThread);
+    ttInstallRandomFunctions(pThread);
     pthread_create(&pThread->tid, NULL, ttThreadMain, (void*)pThread);
   }
 
@@ -656,6 +661,7 @@ static void tt_del(ClientData clientData){
       if( pThread->pErr ) Tcl_DecrRefCount(pThread->pErr);
       sqlite3_close(pThread->db);
       sqlite3_close(pThread->fdb);
+      ckfree(pThread->pPrng);
     }
     if( p->pDatabase ) Tcl_DecrRefCount(p->pDatabase);
     if( p->pSqlConfig ) Tcl_DecrRefCount(p->pSqlConfig);

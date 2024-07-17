@@ -1,5 +1,5 @@
-C Fix\sconfigure/make\sbuilds\son\sthis\sbranch.
-D 2024-07-03T15:29:12.982
+C Fix\sproblem\sin\stest_mtperf.c.
+D 2024-07-17T10:13:47.358
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -841,7 +841,7 @@ F src/test_loadext.c 337056bae59f80b9eb00ba82088b39d0f4fe6dfd
 F src/test_malloc.c 21121ea85b49ec0bdb69995847cef9036ef9beca3ce63bbb776e4ea2ecc44b97
 F src/test_md5.c 0472c86d561f7f9e4ff94080100c2783196f50e583bb83375b759450c5b81802
 F src/test_mtcommit.c f8e9094d07b6a18f609a0dfe2b3fd28432b8768b8663cfe993a7b6b7588d4272
-F src/test_mtperf.c f2bb3f5695fe3855e481127d94706c66928a0f0c3764d7cc82f2da8ec16e366e
+F src/test_mtperf.c de1f2eb7883ea094ff6f8182f87f489687ea97d4a2452e7e99a0723aadf4a1be
 F src/test_multiplex.c 70479161239d65af2a231550b270e9d11ece717ad7bf0e13ef42206586e9dd7f
 F src/test_multiplex.h f0ff5b6f4462bfd46dac165d6375b9530d08089b7bcbe75e88e0926110db5363
 F src/test_mutex.c cd5bac43f2fd168f43c4326b1febe0966439217fac52afb270a6b8215f94cb40
@@ -2328,8 +2328,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P f8086c66c95942b9b1b2fb0a7039fa4798c7b589d3bf5133485e23ef7fe4ba53 07cae6953f3f32c5681fc9c0f74530e77ac35e32f2d667d07d5c5fbfaed0f075
-R 0c70440a1c13651ed5ea0dc7c36d7e6b
+P 38f31f319f60f8aa5d1df9b8d669b31042629f90b8df1ad8132e2c544e93c799
+R a6c570fa0c535898812bade0d1cb8954
 U dan
-Z 4a56e0bf7d97cf95aa08759c6ca15169
+Z dc7a70eaa230f61ece95300903fdc374
 # Remove this line to create a well-formed Fossil manifest.
