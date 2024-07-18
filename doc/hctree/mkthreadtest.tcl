@@ -70,7 +70,11 @@ proc make_chart {testcase} {
   sputs {
     FIRST: box color none fill none width 35%
   }
-  for {set thread 1} {$thread <= 16} {incr thread} {
+
+  # Find all the threads values in the dataset.
+  set lThread [db eval {SELECT DISTINCT nthread FROM result ORDER BY 1 ASC}]
+
+  foreach thread $lThread {
     set sprev -100.0
 
     foreach sys {bcw2 hctree hct1024} {

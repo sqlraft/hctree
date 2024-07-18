@@ -1,5 +1,5 @@
-C Fix\sproblem\sin\stest_mtperf.c.
-D 2024-07-17T10:13:47.358
+C Fix\sdoc/hctree/mkthreadtest.tcl\sto\smake\sfewer\sassumptions\sabout\sthe\stest\sdata\sbeing\scharted.
+D 2024-07-18T10:49:42.482
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -45,7 +45,7 @@ F doc/hctree/design.wiki 4199137de3d95d13cd7abf3c72b64f64ef433227651153e4ebd65c3
 F doc/hctree/fileformat.wiki 75d2923c1ab4953cafc50a6829ea6e857334b76a64b4a910a17a04710b73cccd
 F doc/hctree/hctree_bedrock.md c4280b0fcf7aff496087633a160d821f1d71ef6bff30781286d26fd66af6d476
 F doc/hctree/index.html 63cdbc4f98d0247279cb5ff580e4939c1fae661be16f3fd7bd2e18d26a4e9bcd
-F doc/hctree/mkthreadtest.tcl 58b1c401b35dcabd978f5a9663376a5beee441bdd9d1e49536772dbd68086876
+F doc/hctree/mkthreadtest.tcl f51f8b4af2f60231b3e06c6bd63275bd9b0e5b18709da6241251526bbc7107ad
 F doc/hctree/pagetest.c 023b04fc4ceb8e6cffad66c2221472f68dc69a88282109c8235f57ebf945ad25
 F doc/hctree/perftest1.tcl 9ac683429edb44a5acfdde52c92e430c7eb5f9cff9094d02202fdf352870aa08
 F doc/hctree/replication.md 45c7df44a05c9843d70e4cf8bccf001548c1b7e13080491666fee5800caeb5a9
@@ -2328,8 +2328,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P 38f31f319f60f8aa5d1df9b8d669b31042629f90b8df1ad8132e2c544e93c799
-R a6c570fa0c535898812bade0d1cb8954
+P b37df43577a00ed6505cdda52d8977bb849e6c10c5c0d81dae5dce0da6400881
+R 0365592eb810322cadbbe0335f0161ef
 U dan
-Z dc7a70eaa230f61ece95300903fdc374
+Z b01158fbca4314ea2411019d9854705d
 # Remove this line to create a well-formed Fossil manifest.
