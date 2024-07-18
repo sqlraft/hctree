@@ -13,6 +13,12 @@ if {[llength $argv]!=1 || [lsearch {hctree hct1024 bcw2} $G(system)]<0 } {
   exit -1
 }
 
+sqlite3_shutdown
+if {"SQLITE_OK"!=[sqlite3_config multithread]} {
+  error "Failed to set \[sqlite3_config multithread\]"
+}
+sqlite3_initialize
+
 # Setup SQL scripts for each of the 4 test cases:
 #
 #   update1:         1 update per transaction.
@@ -134,14 +140,26 @@ proc run_one_test {nThread testname} {
 puts "-- setup database..."
 setup_database
 
-#run_one_test 14 update1
+#run_one_test 3 update10
 #exit
 
-set lThread [list 16 15 14 13 12 11 10 9 8 7 6 5 4 3 2 1]
-set lTest [list update1 update10 update1_scan10 update10_scan10 scan10]
-
-set lThread [list 1 2 4]
-set lTest [list update1]
+if 1 {
+  # These values used for threadtest.wiki. For running on a 16 core workstation
+#  set lThread [list 16 15 14 13 12 11 10 9 8 7 6 5 4 3 2 1]
+  set lThread [list 1 2 4]
+  #set lTest [list update1 update10 update1_scan10 update10_scan10 scan10]
+  set lTest scan10
+} else {
+  # These values used for machines with many cores
+  set lThread {
+    1 4 8 12 16
+    20 24 28 32
+    36 40 44 48
+    52 56 60 64
+    80 96 128
+  }
+  set lTest [list update1 update10 update1_scan10 scan10]
+}
 
 foreach nThread $lThread {
   foreach testname $lTest {
