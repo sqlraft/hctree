@@ -132,7 +132,10 @@ proc run_one_test {nThread testname} {
   foreach {k v} $data {
     if {[string match *ok $k]} { incr nTotal $v }
   }
-  puts "-- $testname, $nThread threads: [expr $nTotal/$G(nSecond)] per second"
+
+  set nPerSecond [expr $nTotal/$G(nSecond)]
+  set nPerThreadSecond [expr $nPerSecond/$nThread]
+  puts "-- $testname, $nThread threads: $nPerSecond per second ($nPerThreadSecond per cpu second)"
 
   puts "INSERT INTO result(system, test, nthread, nsecond, data) VALUES('$G(system)', '$testname', $nThread, $G(nSecond), '$data');"
 }

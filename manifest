@@ -1,5 +1,5 @@
-C Updates\sto\sperftest1.tcl.
-D 2024-07-18T11:30:12.250
+C Enhance\soutput\sof\sperftest1.tcl.
+D 2024-07-19T10:40:42.652
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -47,7 +47,7 @@ F doc/hctree/hctree_bedrock.md c4280b0fcf7aff496087633a160d821f1d71ef6bff3078128
 F doc/hctree/index.html 63cdbc4f98d0247279cb5ff580e4939c1fae661be16f3fd7bd2e18d26a4e9bcd
 F doc/hctree/mkthreadtest.tcl f51f8b4af2f60231b3e06c6bd63275bd9b0e5b18709da6241251526bbc7107ad
 F doc/hctree/pagetest.c 023b04fc4ceb8e6cffad66c2221472f68dc69a88282109c8235f57ebf945ad25
-F doc/hctree/perftest1.tcl 6f3e7e3ac47bbec8697cf99c1bd771c129a60b1e60234801f7159bd8f0894358
+F doc/hctree/perftest1.tcl 0cafa8875ff8338cf7f8c603ca7ffec8896415b4dd23e9a7c691a8f459310a0f
 F doc/hctree/replication.md 45c7df44a05c9843d70e4cf8bccf001548c1b7e13080491666fee5800caeb5a9
 F doc/hctree/slides.html 763e1e5b40201595f0924a589c8e6e9a7ca3ca593ed0045d372e66e12ece7aef
 F doc/hctree/slides.wiki 4151889c5485fecd8a71d5d0089645998a2db5ebc3360b570f763e59effed60c
@@ -2328,8 +2328,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P 5a00366fc4818eaa254c245d9e10d106e0519d0ace63e5b65e3efdbda3666336
-R bc2bb146c327782a0ca9a309e4e18143
+P a5e2749d9bc9d5db0c5f592762c50287417ba4cf8423ae7f301e9f73603c2aef
+R 8dd2e20b739d2823a4034721fb210330
 U dan
-Z 77fcacabc74404d63cb731b3df931259
+Z 563d7703ac4a88c27c161e84353ff722
 # Remove this line to create a well-formed Fossil manifest.
