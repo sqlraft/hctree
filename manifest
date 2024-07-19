@@ -1,5 +1,5 @@
-C Enhance\soutput\sof\sperftest1.tcl.
-D 2024-07-19T10:40:42.652
+C Enhancements\sto\sperftest1.tcl\sand\stest_mtperf.c.
+D 2024-07-19T11:12:42.802
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -47,7 +47,7 @@ F doc/hctree/hctree_bedrock.md c4280b0fcf7aff496087633a160d821f1d71ef6bff3078128
 F doc/hctree/index.html 63cdbc4f98d0247279cb5ff580e4939c1fae661be16f3fd7bd2e18d26a4e9bcd
 F doc/hctree/mkthreadtest.tcl f51f8b4af2f60231b3e06c6bd63275bd9b0e5b18709da6241251526bbc7107ad
 F doc/hctree/pagetest.c 023b04fc4ceb8e6cffad66c2221472f68dc69a88282109c8235f57ebf945ad25
-F doc/hctree/perftest1.tcl 0cafa8875ff8338cf7f8c603ca7ffec8896415b4dd23e9a7c691a8f459310a0f
+F doc/hctree/perftest1.tcl 1d431a18d49aa49a11488635602b595eee1493280bc0fbfbbbd8092bd372d92a
 F doc/hctree/replication.md 45c7df44a05c9843d70e4cf8bccf001548c1b7e13080491666fee5800caeb5a9
 F doc/hctree/slides.html 763e1e5b40201595f0924a589c8e6e9a7ca3ca593ed0045d372e66e12ece7aef
 F doc/hctree/slides.wiki 4151889c5485fecd8a71d5d0089645998a2db5ebc3360b570f763e59effed60c
@@ -700,7 +700,7 @@ F ext/wasm/wasmfs.make 8a4955882aaa0783b3f60a9484a1f0f3d8b6f775c0fcd17c082f31966
 F install-sh 2182b3705d92e25753411e2c28cf788c69e35a48fbb8aa332e342dfc6b95b80d x
 F ltmain.sh 782161cb6c610db2fbcf63132a6178eb75c560026cdc0e579ade9f152feb5c36 x
 F magic.txt 5ade0bc977aa135e79e3faaea894d5671b26107cc91e70783aa7dc83f22f3ba0
-F main.mk 92c00ab6c41fb22b0ffd83913b86929ffbab6099ef1dc3ab8e7dbd3ee7b5e650
+F main.mk a6b1310fd648e02f1a8418e545555fc28fb4a97582dcf39ae65d0bbe5f7efdc8
 F mptest/config01.test 3c6adcbc50b991866855f1977ff172eb6d901271
 F mptest/config02.test 4415dfe36c48785f751e16e32c20b077c28ae504
 F mptest/crash01.test 61e61469e257df0850df4293d7d4d6c2af301421
@@ -841,7 +841,7 @@ F src/test_loadext.c 337056bae59f80b9eb00ba82088b39d0f4fe6dfd
 F src/test_malloc.c 21121ea85b49ec0bdb69995847cef9036ef9beca3ce63bbb776e4ea2ecc44b97
 F src/test_md5.c 0472c86d561f7f9e4ff94080100c2783196f50e583bb83375b759450c5b81802
 F src/test_mtcommit.c f8e9094d07b6a18f609a0dfe2b3fd28432b8768b8663cfe993a7b6b7588d4272
-F src/test_mtperf.c de1f2eb7883ea094ff6f8182f87f489687ea97d4a2452e7e99a0723aadf4a1be
+F src/test_mtperf.c 06ccefa8ade01f79e8ceccfe519c59dd66048314efee881d2b87a00a52566247
 F src/test_multiplex.c 70479161239d65af2a231550b270e9d11ece717ad7bf0e13ef42206586e9dd7f
 F src/test_multiplex.h f0ff5b6f4462bfd46dac165d6375b9530d08089b7bcbe75e88e0926110db5363
 F src/test_mutex.c cd5bac43f2fd168f43c4326b1febe0966439217fac52afb270a6b8215f94cb40
@@ -2328,8 +2328,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P a5e2749d9bc9d5db0c5f592762c50287417ba4cf8423ae7f301e9f73603c2aef
-R 8dd2e20b739d2823a4034721fb210330
+P e78628ee5ce0e13ccc3ac8ec2091173bb4f08a7b8b0e5137aeea94a9320ae128
+R 0376d1e5f7146408d8dc4fb87675ef85
 U dan
-Z 563d7703ac4a88c27c161e84353ff722
+Z e86e6f7ca1d7f829b54fa4da1294bea1
 # Remove this line to create a well-formed Fossil manifest.

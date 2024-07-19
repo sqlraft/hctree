@@ -701,10 +701,56 @@ static int sqlite_thread_test(
 }
 
 /*
+** tclcmd: sqlite_thread_test_config
+*/
+static int sqlite_thread_test_config(
+  ClientData clientData,          /* Unused */
+  Tcl_Interp *interp,             /* The TCL interpreter */
+  int objc,                       /* Number of arguments */
+  Tcl_Obj *CONST objv[]           /* Command arguments */
+){
+  int rc;
+
+  if( objc!=1 ){
+    Tcl_WrongNumArgs(interp, 1, objv, "");
+    return TCL_ERROR;
+  }
+
+#ifdef SQLITE_TEST
+  Tcl_SetObjResult(interp, Tcl_NewStringObj(
+        "Do not run multi-threaded performance tests with testfixture!", -1
+  ));
+  return TCL_ERROR;
+#endif
+
+  rc = sqlite3_config(SQLITE_CONFIG_MEMSTATUS, (int)0);
+  if( rc==SQLITE_OK ){
+    rc = sqlite3_config(SQLITE_CONFIG_MULTITHREAD);
+  }
+
+  if( rc!=SQLITE_OK ){
+    Tcl_SetObjResult(interp, Tcl_NewStringObj("error configuring sqlite", -1));
+    return TCL_ERROR;
+  }
+
+  return TCL_OK;
+}
+
+/*
 ** Register commands with the TCL interpreter.
 */
 int SqliteThreadTest_Init(Tcl_Interp *interp){
-  Tcl_CreateObjCommand(interp, "sqlite_thread_test", sqlite_thread_test, 0, 0);
+  struct Cmd {
+    Tcl_ObjCmdProc *xProc;
+    const char *zName;
+  } aCmd[] = {
+    { sqlite_thread_test, "sqlite_thread_test" },
+    { sqlite_thread_test_config, "sqlite_thread_test_config" }
+  };
+  int ii;
+  for(ii=0; ii<sizeof(aCmd)/sizeof(aCmd[0]); ii++){
+    Tcl_CreateObjCommand(interp, aCmd[ii].zName, aCmd[ii].xProc, 0, 0);
+  }
   return TCL_OK;
 }
 
