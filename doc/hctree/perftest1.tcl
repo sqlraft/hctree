@@ -109,6 +109,7 @@ proc run_one_test {nThread testname} {
   T config -sqlconf {
     PRAGMA mmap_size = 1000000000;
     PRAGMA synchronous = off;
+    PRAGMA journal_size_limit = 16777216;
   }
 
   for {set ii 0 } {$ii<$nThread} {incr ii} {

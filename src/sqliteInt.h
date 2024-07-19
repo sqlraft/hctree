@@ -56,8 +56,9 @@
 #endif
 
 #ifndef SQLITE_DISABLE_PAGECACHE_OVERFLOW_STATS
-# define SQLITE_DISABLE_PAGECACHE_OVERFLOW_STATS
+# define SQLITE_DISABLE_PAGECACHE_OVERFLOW_STATS 1
 #endif
+#define SQLITE_SHARED_MAPPING 1
 
 /*
 ** Include the header file used to customize the compiler options for MSVC.
