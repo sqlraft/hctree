@@ -4,6 +4,10 @@
 set G(filename) test.db
 set G(nRow)     1000000
 
+set G(nRow)          [expr 100 * 1000000]
+
+set G(nRowPerCommit) [expr 1000000]
+
 set G(nSleep)   10
 set G(nSecond)  30
 
@@ -91,9 +95,12 @@ proc setup_database {} {
 
   set nRow [expr $nRow]
   db eval BEGIN
-  for {set ii 0} {$ii < $nRow} {incr ii} {
+  for {set ii 1} {$ii <= $nRow} {incr ii} {
     db eval {
       INSERT INTO tbl0 VALUES(NULL, zeroblob(200), hex(randomblob(32)));
+    }
+    if { ($ii % $G(nRowPerCommit))==0 } {
+      db eval { COMMIT; BEGIN; }
     }
   }
   db eval COMMIT
@@ -137,8 +144,22 @@ setup_database
 #run_one_test 14 update1
 #exit
 
-set lThread [list 16 15 14 13 12 11 10 9 8 7 6 5 4 3 2 1]
-set lTest [list update1 update10 update1_scan10 update10_scan10 scan10]
+if 1 {
+  # These values used for threadtest.wiki. For running on a 16 core workstation
+  set lThread [list 16 15 14 13 12 11 10 9 8 7 6 5 4 3 2 1]
+#  set lTest [list update1 update10 update1_scan10 update10_scan10 scan10]
+  set lTest update1
+} else {
+  # These values used for machines with many cores
+  set lThread {
+    1 4 8 12 16
+    20 24 28 32
+    36 40 44 48
+    52 56 60 64
+    80 96 128
+  }
+  set lTest [list update1 update10 update1_scan10 update10_scan10 scan10]
+}
 
 foreach nThread $lThread {
   foreach testname $lTest {
