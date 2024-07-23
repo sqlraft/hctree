@@ -1,0 +1,881 @@
+
+
+<title> Thread Test </title>
+
+<h1 id=results>Test Results</h1>
+
+This page shows the results of repeating the <a href=threadtest.wiki>tests 
+described here</a> using version 
+<a href=https://www.sqlite.org/hctree/info/e842ed36acbae396>e842ed36acbae396</a>
+on more powerful hardware. Observations:
+
+<ul>
+  <li> Write heavy transactions (update1, update10) using hctree scale
+  reasonably well to about 44 threads. hct1024, which uses 1024 byte pages
+  instead of the default 4096 bytes, appears to scale slightly better.
+
+  <li> Write heavy transactions (update1, update10) using begin-concurrent +
+  wal2 do not really even to 2 threads. As observed <a
+  href=threadtest.wiki>here</a>, this is a difficult test for bcw2. That there
+  are no read queries, and the database is small enough to fit in memory means
+  that most of the time is spent in the serialized COMMIT operations, not in
+  preparing the transactions.
+
+  <li> For test cases that write, hctree and bcw2 (see update1_scan10), seem
+  to become less efficient when the 2nd and 3rd threads are added, but then
+  scale quite well from 4 threads onwards. See, for example, "hctree" in test
+  case "update1". A single thread writes 49K transactions per second, 4 threads
+  105K, and 8 threads 200K. It's not clear why this is - something to
+  investigate.
+
+  <li> Read-only transactions (scan10) scale well for both hctree and bcw2.
+  This time bcw2 was consistently around 10% faster than hctree, which did
+  not happen last time tests were run. Also something to investigate.
+
+  <li> For a write-transaction with many reads (update1_scan10), bcw2 is able
+  to efficiently use about 12 threads.
+
+  <li> As <a href=threadtest.wiki>before</a>, hctree scales well with
+  write-transactions that include many reads (update1_scan10), and balanced
+  transactions that include both reads and writes (udpate10_scan10).
+</ul>
+
+<h2>Test case update1 - nUpdate=1, nScan=0</h2>
+<center><verbatim type=pikchr>
+boxwid=0.10
+movewid=0.1
+FIRST: box color none fill none width 35%
+box color lightgreen fill lightgreen height 0.019575898553572946 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "16k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.05856929561847883 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "49k" small small with s at last box.n + (0.0,0.08100660293509411) fill grey
+box color pink fill pink height 0.059640549237479794 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "50k" small small with s at last box.n + (0.0,0.0) fill grey
+text "1" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.024039259743802596 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "20k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.12430061981349862 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "105k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.15686297516346004 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "133k" small small with s at last box.n + (0.0,0.08743764465003857) fill grey
+text "4" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.02153653907641042 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "18k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.23473243592864956 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "200k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.2824613019896805 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "240k" small small with s at last box.n + (0.0,0.07227113393896906) fill grey
+text "8" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.02505888668236978 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "21k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.3233590195624052 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "275k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.4140201637387103 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "352k" small small with s at last box.n + (0.0,0.0) fill grey
+text "12" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.02560331349421693 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "21k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.43824598353226224 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "373k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.536199396319839 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "456k" small small with s at last box.n + (0.0,0.0) fill grey
+text "16" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.02385269969405325 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "20k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.5416049444279851 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "461k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.6618305764881537 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "564k" small small with s at last box.n + (0.0,0.0) fill grey
+text "20" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.024622406565975082 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "20k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.6260814469550525 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "533k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.7295025945340252 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "621k" small small with s at last box.n + (0.0,0.0) fill grey
+text "24" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.02635072702686054 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "22k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.6964579990554663 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "593k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.8182124848566626 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "697k" small small with s at last box.n + (0.0,0.0) fill grey
+text "28" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.023792859678095912 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "20k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.7599705493254798 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "647k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.9001534133742436 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "767k" small small with s at last box.n + (0.0,0.0) fill grey
+text "32" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.02429973981326395 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "20k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.8393289704877255 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "715k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.9747093799225013 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "830k" small small with s at last box.n + (0.0,0.0) fill grey
+text "36" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.023345819558885216 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "19k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.8669973511992937 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "738k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 1.03328806221015 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "880k" small small with s at last box.n + (0.0,0.0) fill grey
+text "40" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.024871153298974213 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "21k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.912685790049544 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "777k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 1.0880182101381894 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "927k" small small with s at last box.n + (0.0,0.0) fill grey
+text "44" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.025141020037605342 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "21k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.9683921515712404 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "825k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 1.1313505950268252 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "964k" small small with s at last box.n + (0.0,0.0) fill grey
+text "48" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.02347605959361589 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "20k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.9781378608367629 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "833k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 1.1516375337700089 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "981k" small small with s at last box.n + (0.0,0.0) fill grey
+text "52" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.024756166601644425 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "21k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.9985773329539555 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "851k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 1.1922888512770269 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "1016k" small small with s at last box.n + (0.0,0.0) fill grey
+text "56" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.0251386733703129 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "21k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 1.009801442613718 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "860k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 1.1718810591682824 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "998k" small small with s at last box.n + (0.0,0.0) fill grey
+text "60" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.024505073201352853 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "20k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.9721808459148922 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "828k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 1.1997183999249066 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "1022k" small small with s at last box.n + (0.0,0.0) fill grey
+text "64" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+line color grey from first box.sw to last box.se
+text "Threads:" with ne at last line.w
+VERT: line color grey from last line.sw up 1.2
+box width 0.5 height 0.2 color lightgreen fill lightgreen with nw at VERT.n + (0.1,0.0)
+text "bcw2" with n at previous.n
+box width 0.5 height 0.2 color lightsteelblue fill lightsteelblue with w at last box.e + (0.1,0.0)
+text "hctree" with n at previous.n
+box width 0.5 height 0.2 color pink fill pink with w at last box.e + (0.1,0.0)
+text "hct1024" with n at previous.n
+line color grey from first line.w + (0.0,0.11733336462223057) left 0.1
+PEG1: text "100K" with e at last line.w
+line color grey from first line.w + (0.0,0.23466672924446114) left 0.1
+PEG2: text "200K" with e at last line.w
+line color grey from first line.w + (0.0,0.3520000938666917) left 0.1
+PEG3: text "300K" with e at last line.w
+line color grey from first line.w + (0.0,0.4693334584889223) left 0.1
+PEG4: text "400K" with e at last line.w
+line color grey from first line.w + (0.0,0.5866668231111528) left 0.1
+PEG5: text "500K" with e at last line.w
+line color grey from first line.w + (0.0,0.7040001877333834) left 0.1
+PEG6: text "600K" with e at last line.w
+line color grey from first line.w + (0.0,0.8213335523556139) left 0.1
+PEG7: text "700K" with e at last line.w
+line color grey from first line.w + (0.0,0.9386669169778445) left 0.1
+PEG8: text "800K" with e at last line.w
+line color grey from first line.w + (0.0,1.056000281600075) left 0.1
+PEG9: text "900K" with e at last line.w
+line color grey from first line.w + (0.0,1.1733336462223056) left 0.1
+PEG10: text "1000K" with e at last line.w
+line invis from (PEG10.w - (0.1,0.0), PEG1.w) up until even with PEG10.w "transactions/second" aligned
+</verbatim></center>
+
+
+<h2>Test case update10 - nUpdate=10, nScan=0</h2>
+<center><verbatim type=pikchr>
+boxwid=0.10
+movewid=0.1
+FIRST: box color none fill none width 35%
+box color lightgreen fill lightgreen height 0.009137624466571835 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "1.7k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.034859530583214796 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "6.5k" small small with s at last box.n + (0.0,0.09427809388335703) fill grey
+box color pink fill pink height 0.040887268847795165 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "7.6k" small small with s at last box.n + (0.0,0.0) fill grey
+text "1" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.011575391180654338 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "2.1k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.07773115220483641 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "14k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.09938833570412518 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "18k" small small with s at last box.n + (0.0,0.09834281650071122) fill grey
+text "4" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.011996799431009958 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "2.2k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.13829658605974396 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "25k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.17277204836415364 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "32k" small small with s at last box.n + (0.0,0.08552453769559032) fill grey
+text "8" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.012732930298719773 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "2.3k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.18778271692745377 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "35k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.2556614509246088 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "47k" small small with s at last box.n + (0.0,0.0) fill grey
+text "12" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.011986130867709815 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "2.2k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.24739331436699857 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "46k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.33634779516358465 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "63k" small small with s at last box.n + (0.0,0.0) fill grey
+text "16" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.012188833570412517 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "2.2k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.31987019914651493 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "59k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.42157894736842105 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "79k" small small with s at last box.n + (0.0,0.0) fill grey
+text "20" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.011169985775248933 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "2.0k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.34441856330014226 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "64k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.4942051920341394 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "92k" small small with s at last box.n + (0.0,0.0) fill grey
+text "24" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.011516714082503557 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "2.1k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.3968545519203414 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "74k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.5739100284495021 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "107k" small small with s at last box.n + (0.0,0.0) fill grey
+text "28" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.010508534850640114 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "1.9k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.440024893314367 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "82k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.6508410384068278 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "122k" small small with s at last box.n + (0.0,0.0) fill grey
+text "32" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.010599217638691323 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "1.9k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.47782361308677096 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "89k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.7537766714082503 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "141k" small small with s at last box.n + (0.0,0.0) fill grey
+text "36" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.01039651493598862 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "1.9k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.5122830725462304 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "96k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.8105600995732575 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "151k" small small with s at last box.n + (0.0,0.0) fill grey
+text "40" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.010081792318634424 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "1.8k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.5362980085348507 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "100k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.8740753911806544 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "163k" small small with s at last box.n + (0.0,0.0) fill grey
+text "44" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.01044452347083926 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "1.9k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.5545039118065433 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "103k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.9268741109530583 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "173k" small small with s at last box.n + (0.0,0.0) fill grey
+text "48" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.009788406827880512 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "1.8k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.576523826458037 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "108k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.9998684210526315 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "187k" small small with s at last box.n + (0.0,0.0) fill grey
+text "52" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.00950035561877667 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "1.7k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.5832076813655761 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "109k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 1.0484583926031295 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "196k" small small with s at last box.n + (0.0,0.0) fill grey
+text "56" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.009521692745376956 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "1.7k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.5875764580369843 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "110k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 1.1000515647226174 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "206k" small small with s at last box.n + (0.0,0.0) fill grey
+text "60" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.009265647226173542 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "1.7k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.6046354907539118 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "113k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 1.1643083214793741 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "218k" small small with s at last box.n + (0.0,0.0) fill grey
+text "64" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+line color grey from first box.sw to last box.se
+text "Threads:" with ne at last line.w
+VERT: line color grey from last line.sw up 1.2
+box width 0.5 height 0.2 color lightgreen fill lightgreen with nw at VERT.n + (0.1,0.0)
+text "bcw2" with n at previous.n
+box width 0.5 height 0.2 color lightsteelblue fill lightsteelblue with w at last box.e + (0.1,0.0)
+text "hctree" with n at previous.n
+box width 0.5 height 0.2 color pink fill pink with w at last box.e + (0.1,0.0)
+text "hct1024" with n at previous.n
+line color grey from first line.w + (0.0,0.13335704125177808) left 0.1
+PEG1: text "25K" with e at last line.w
+line color grey from first line.w + (0.0,0.26671408250355616) left 0.1
+PEG2: text "50K" with e at last line.w
+line color grey from first line.w + (0.0,0.40007112375533427) left 0.1
+PEG3: text "75K" with e at last line.w
+line color grey from first line.w + (0.0,0.5334281650071123) left 0.1
+PEG4: text "100K" with e at last line.w
+line color grey from first line.w + (0.0,0.6667852062588905) left 0.1
+PEG5: text "125K" with e at last line.w
+line color grey from first line.w + (0.0,0.8001422475106685) left 0.1
+PEG6: text "150K" with e at last line.w
+line color grey from first line.w + (0.0,0.9334992887624467) left 0.1
+PEG7: text "175K" with e at last line.w
+line color grey from first line.w + (0.0,1.0668563300142246) left 0.1
+PEG8: text "200K" with e at last line.w
+line invis from (PEG8.w - (0.1,0.0), PEG1.w) up until even with PEG8.w "transactions/second" aligned
+</verbatim></center>
+
+
+<h2>Test case update1_scan10 - nUpdate=1, nScan=10</h2>
+<center><verbatim type=pikchr>
+boxwid=0.10
+movewid=0.1
+FIRST: box color none fill none width 35%
+box color lightgreen fill lightgreen height 0.019581498009657736 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "5.0k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.024975180962111206 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "6.4k" small small with s at last box.n + (0.0,0.11460631704754652) fill grey
+box color pink fill pink height 0.02410771944366801 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "6.2k" small small with s at last box.n + (0.0,0.0) fill grey
+text "1" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.057125232527879245 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "14k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.0714749737351929 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "18k" small small with s at last box.n + (0.0,0.10565025879268633) fill grey
+box color pink fill pink height 0.0746209675087469 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "19k" small small with s at last box.n + (0.0,0.0) fill grey
+text "4" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.07276267216701525 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "18k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.14238706132952933 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "36k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.15099999036153866 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "39k" small small with s at last box.n + (0.0,0.11138707096799066) fill grey
+text "8" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.07762431205482356 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "20k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.20611656755115612 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "53k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.22946477624312053 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "59k" small small with s at last box.n + (0.0,0.09665179130803558) fill grey
+text "12" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.07207641372131353 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "18k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.2823336642538385 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "73k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.3043671868222957 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "78k" small small with s at last box.n + (0.0,0.0979664774315428) fill grey
+text "16" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.07536891210687126 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "19k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.3541594779809351 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "91k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.363689988530231 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "94k" small small with s at last box.n + (0.0,0.11046948945070412) fill grey
+text "20" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.07002920453778758 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "18k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.4300064577690817 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "111k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.45416429721159307 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "117k" small small with s at last box.n + (0.0,0.09584216055748862) fill grey
+text "24" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.07328700446260758 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "19k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.5013156499696388 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "130k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.5355745968713554 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "138k" small small with s at last box.n + (0.0,0.08574105309828339) fill grey
+text "28" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.06920029686460853 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "17k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.5692166822488457 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "147k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.6091430444043913 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "157k" small small with s at last box.n + (0.0,0.08007363784445443) fill grey
+text "32" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.06637430000674692 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "17k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.6388372160268334 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "165k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.6781582828117318 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "175k" small small with s at last box.n + (0.0,0.08067893321510156) fill grey
+text "36" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.06622779539474317 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "17k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.6986727838767819 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "181k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.7524245549440487 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "195k" small small with s at last box.n + (0.0,0.06624822893273319) fill grey
+text "40" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.06709140152865996 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "17k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.7620321731838728 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "197k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.8264248055440429 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "214k" small small with s at last box.n + (0.0,0.0) fill grey
+text "44" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.06678297076654682 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "17k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.8328902853948394 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "216k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.9114013358907384 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "236k" small small with s at last box.n + (0.0,0.0) fill grey
+text "48" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.06539503233703771 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "16k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.903459243766325 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "234k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.9786893620302454 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "253k" small small with s at last box.n + (0.0,0.0) fill grey
+text "52" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.06462781081628129 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "16k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.9492226580948616 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "246k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 1.0310609054370559 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "267k" small small with s at last box.n + (0.0,0.0) fill grey
+text "56" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.0646046785091228 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "16k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 1.0162677950092047 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "263k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 1.1201279987662769 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "290k" small small with s at last box.n + (0.0,0.0) fill grey
+text "60" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.06430010313153607 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "16k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 1.0792377904791277 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "279k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 1.186644948000501 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "307k" small small with s at last box.n + (0.0,0.0) fill grey
+text "64" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+line color grey from first box.sw to last box.se
+text "Threads:" with ne at last line.w
+VERT: line color grey from last line.sw up 1.2
+box width 0.5 height 0.2 color lightgreen fill lightgreen with nw at VERT.n + (0.1,0.0)
+text "bcw2" with n at previous.n
+box width 0.5 height 0.2 color lightsteelblue fill lightsteelblue with w at last box.e + (0.1,0.0)
+text "hctree" with n at previous.n
+box width 0.5 height 0.2 color pink fill pink with w at last box.e + (0.1,0.0)
+text "hct1024" with n at previous.n
+line color grey from first line.w + (0.0,0.19276922632071014) left 0.1
+PEG1: text "50K" with e at last line.w
+line color grey from first line.w + (0.0,0.3855384526414203) left 0.1
+PEG2: text "100K" with e at last line.w
+line color grey from first line.w + (0.0,0.5783076789621304) left 0.1
+PEG3: text "150K" with e at last line.w
+line color grey from first line.w + (0.0,0.7710769052828406) left 0.1
+PEG4: text "200K" with e at last line.w
+line color grey from first line.w + (0.0,0.9638461316035507) left 0.1
+PEG5: text "250K" with e at last line.w
+line color grey from first line.w + (0.0,1.1566153579242608) left 0.1
+PEG6: text "300K" with e at last line.w
+line invis from (PEG6.w - (0.1,0.0), PEG1.w) up until even with PEG6.w "transactions/second" aligned
+</verbatim></center>
+
+
+<h2>Test case update10_scan10 - nUpdate=10, nScan=10</h2>
+<center><verbatim type=pikchr>
+boxwid=0.10
+movewid=0.1
+FIRST: box color none fill none width 35%
+box color lightgreen fill lightgreen height 0.011936600799952242 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "1.3k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.028601277535669514 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "3.1k" small small with s at last box.n + (0.0,0.10333532326428273) fill grey
+box color pink fill pink height 0.031036953017730285 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "3.4k" small small with s at last box.n + (0.0,0.0) fill grey
+text "1" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.019001850635782937 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "2.1k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.07110023282192107 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "7.9k" small small with s at last box.n + (0.0,0.06790161781386186) fill grey
+box color pink fill pink height 0.08528446062921617 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "9.5k" small small with s at last box.n + (0.0,0.17371739000656677) fill grey
+text "4" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.021088293236224704 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "2.3k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.13653214733448749 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "15k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.15990388633514416 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "17k" small small with s at last box.n + (0.0,0.09662826099934332) fill grey
+text "8" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.021392752671482298 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "2.3k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.19401229777326726 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "21k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.2372903110262074 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "26k" small small with s at last box.n + (0.0,0.07672198674705985) fill grey
+text "12" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.021437526117843712 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "2.3k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.2531669751059638 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "28k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.31227687899229895 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "34k" small small with s at last box.n + (0.0,0.06089009611366486) fill grey
+text "16" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.020273416512447018 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "2.2k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.31310966509462124 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "34k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.37786997791176646 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "42k" small small with s at last box.n + (0.0,0.0) fill grey
+text "20" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.01941376634230792 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "2.1k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.37298967225837265 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "41k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.45896364396155453 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "51k" small small with s at last box.n + (0.0,0.0) fill grey
+text "24" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.019664497641931823 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "2.1k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.41956301116351263 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "46k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.532266730344457 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "59k" small small with s at last box.n + (0.0,0.0) fill grey
+text "28" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.018240702047638946 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "2.0k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.47408811414243923 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "52k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.6006268282490598 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "67k" small small with s at last box.n + (0.0,0.0) fill grey
+text "32" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.017604919109306907 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "1.9k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.5102561041131872 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "56k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.668431735418781 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "74k" small small with s at last box.n + (0.0,0.0) fill grey
+text "36" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.017309414363321594 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "1.9k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.5473553817682526 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "61k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.7381708554713151 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "82k" small small with s at last box.n + (0.0,0.0) fill grey
+text "40" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.017291504984777026 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "1.9k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.5930869798817981 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "66k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.809611366485583 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "90k" small small with s at last box.n + (0.0,0.0) fill grey
+text "44" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.01721986747059877 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "1.9k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.6305892185541162 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "70k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.8773535908303982 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "97k" small small with s at last box.n + (0.0,0.0) fill grey
+text "48" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.016879589278252043 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "1.8k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.6510865022983703 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "72k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.9176765566234851 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "102k" small small with s at last box.n + (0.0,0.0) fill grey
+text "52" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.016396036057548802 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "1.8k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.6788012655960838 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "75k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.9592710882932363 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "107k" small small with s at last box.n + (0.0,0.0) fill grey
+text "56" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.01657512984299445 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "1.8k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.6931914512566414 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "77k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 1.039182735359083 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "116k" small small with s at last box.n + (0.0,0.0) fill grey
+text "60" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.016288579786281416 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "1.8k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.7074920900244761 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "79k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 1.0906632439854338 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "121k" small small with s at last box.n + (0.0,0.0) fill grey
+text "64" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+line color grey from first box.sw to last box.se
+text "Threads:" with ne at last line.w
+VERT: line color grey from last line.sw up 1.2
+box width 0.5 height 0.2 color lightgreen fill lightgreen with nw at VERT.n + (0.1,0.0)
+text "bcw2" with n at previous.n
+box width 0.5 height 0.2 color lightsteelblue fill lightsteelblue with w at last box.e + (0.1,0.0)
+text "hctree" with n at previous.n
+box width 0.5 height 0.2 color pink fill pink with w at last box.e + (0.1,0.0)
+text "hct1024" with n at previous.n
+line color grey from first line.w + (0.0,0.22386723180705628) left 0.1
+PEG1: text "25K" with e at last line.w
+line color grey from first line.w + (0.0,0.44773446361411257) left 0.1
+PEG2: text "50K" with e at last line.w
+line color grey from first line.w + (0.0,0.6716016954211689) left 0.1
+PEG3: text "75K" with e at last line.w
+line color grey from first line.w + (0.0,0.8954689272282251) left 0.1
+PEG4: text "100K" with e at last line.w
+line color grey from first line.w + (0.0,1.1193361590352815) left 0.1
+PEG5: text "125K" with e at last line.w
+line invis from (PEG5.w - (0.1,0.0), PEG1.w) up until even with PEG5.w "transactions/second" aligned
+</verbatim></center>
+
+
+<h2>Test case scan10 - nScan=10</h2>
+<center><verbatim type=pikchr>
+boxwid=0.10
+movewid=0.1
+FIRST: box color none fill none width 35%
+box color lightgreen fill lightgreen height 0.02276704986108793 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "9.6k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.019591019310250042 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "8.3k" small small with s at last box.n + (0.0,0.12317603055083788) fill grey
+box color pink fill pink height 0.019383682004260626 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "8.2k" small small with s at last box.n + (0.0,0.0) fill grey
+text "1" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.07834758450075101 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "33k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.0659049900356361 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "27k" small small with s at last box.n + (0.0,0.13244259446511492) fill grey
+box color pink fill pink height 0.0675684006950512 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "28k" small small with s at last box.n + (0.0,0.0) fill grey
+text "4" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.1472189116754857 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "62k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.1279035567379716 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "54k" small small with s at last box.n + (0.0,0.1393153549375141) fill grey
+box color pink fill pink height 0.125250581663607 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "53k" small small with s at last box.n + (0.0,0.0) fill grey
+text "8" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.22174724875568166 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "94k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.1889596811403552 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "80k" small small with s at last box.n + (0.0,0.15278756761532647) fill grey
+box color pink fill pink height 0.1980401127003917 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "84k" small small with s at last box.n + (0.0,0.0) fill grey
+text "12" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.2992513473979757 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "127k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.2502608405407263 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "106k" small small with s at last box.n + (0.0,0.16899050685724942) fill grey
+box color pink fill pink height 0.26225813101911394 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "111k" small small with s at last box.n + (0.0,0.0) fill grey
+text "16" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.37817853391319717 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "160k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.31722843426955816 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "134k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.31998979020841717 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "135k" small small with s at last box.n + (0.0,0.11723864406114098) fill grey
+text "20" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.4545069357863012 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "192k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.3832253124294395 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "162k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.39313273710768387 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "166k" small small with s at last box.n + (0.0,0.11009257532175565) fill grey
+text "24" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.5305384683349205 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "225k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.4590094538743214 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "194k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.45702561283292265 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "193k" small small with s at last box.n + (0.0,0.12198384104139876) fill grey
+text "28" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.6113976615650433 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "259k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.5099578846097209 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "216k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.5219339701363597 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "221k" small small with s at last box.n + (0.0,0.10802391447336124) fill grey
+text "32" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.6813598657019723 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "289k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.5699726102706577 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "241k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.5776535150152656 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "245k" small small with s at last box.n + (0.0,0.11231909525539208) fill grey
+text "36" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.7497434789864819 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "318k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.635128358677832 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "269k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.6535908033338896 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "277k" small small with s at last box.n + (0.0,0.10153755534394238) fill grey
+text "40" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.8283125374277216 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "351k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.6974944778771487 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "296k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.7054769641577413 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "299k" small small with s at last box.n + (0.0,0.11201751371940738) fill grey
+text "44" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.9093625752235847 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "385k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.7598770898167146 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "322k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.7804388246959151 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "331k" small small with s at last box.n + (0.0,0.09943826512079956) fill grey
+text "48" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 0.9753759461237153 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "413k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.8315262656705575 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "352k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.8432549600934589 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "357k" small small with s at last box.n + (0.0,0.10827130557709863) fill grey
+text "52" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 1.0544845527816773 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "447k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.8974878022441908 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "380k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.897619744166184 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "380k" small small with s at last box.n + (0.0,0.11986805807800682) fill grey
+text "56" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 1.1087338876726585 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "470k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 0.9610814525391949 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "407k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 0.9738044235885455 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "413k" small small with s at last box.n + (0.0,0.10727702895064939) fill grey
+text "60" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+box color lightgreen fill lightgreen height 1.2 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "509k" small small with s at last box.n + (0.0,0.0) fill grey
+box color lightsteelblue fill lightsteelblue height 1.0185657206247607 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "432k" small small with s at last box.n + (0.0,0.0) fill grey
+box color pink fill pink height 1.0285579651100007 behind FIRST with sw at last box.se + (0.025, 0.00)
+text "436k" small small with s at last box.n + (0.0,0.11000775551475994) fill grey
+text "64" with n at 2nd last box.s
+box color none fill none width 30% with sw at last box.se
+line color grey from first box.sw to last box.se
+text "Threads:" with ne at last line.w
+VERT: line color grey from last line.sw up 1.2
+box width 0.5 height 0.2 color lightgreen fill lightgreen with nw at VERT.n + (0.1,0.0)
+text "bcw2" with n at previous.n
+box width 0.5 height 0.2 color lightsteelblue fill lightsteelblue with w at last box.e + (0.1,0.0)
+text "hctree" with n at previous.n
+box width 0.5 height 0.2 color pink fill pink with w at last box.e + (0.1,0.0)
+text "hct1024" with n at previous.n
+line color grey from first line.w + (0.0,0.23561057498797405) left 0.1
+PEG1: text "100K" with e at last line.w
+line color grey from first line.w + (0.0,0.4712211499759481) left 0.1
+PEG2: text "200K" with e at last line.w
+line color grey from first line.w + (0.0,0.7068317249639221) left 0.1
+PEG3: text "300K" with e at last line.w
+line color grey from first line.w + (0.0,0.9424422999518962) left 0.1
+PEG4: text "400K" with e at last line.w
+line color grey from first line.w + (0.0,1.1780528749398702) left 0.1
+PEG5: text "500K" with e at last line.w
+line invis from (PEG5.w - (0.1,0.0), PEG1.w) up until even with PEG5.w "transactions/second" aligned
+</verbatim></center>
+
+
+

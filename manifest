@@ -1,5 +1,5 @@
-C Set\sSQLITE_SHARED_MAPPING\sby\sdefault\son\sthis\sbranch.
-D 2024-07-19T18:27:42.669
+C Merge\schanges\sfrom\shctree\sbranch.
+D 2024-07-23T14:55:59.591
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -47,7 +47,7 @@ F doc/hctree/hctree_bedrock.md c4280b0fcf7aff496087633a160d821f1d71ef6bff3078128
 F doc/hctree/index.html 63cdbc4f98d0247279cb5ff580e4939c1fae661be16f3fd7bd2e18d26a4e9bcd
 F doc/hctree/mkthreadtest.tcl f51f8b4af2f60231b3e06c6bd63275bd9b0e5b18709da6241251526bbc7107ad
 F doc/hctree/pagetest.c 023b04fc4ceb8e6cffad66c2221472f68dc69a88282109c8235f57ebf945ad25
-F doc/hctree/perftest1.tcl d2d821301a3f50cb8ae2c0cfe5f45f57c3caf498e18c23ebe70cc009996a4186
+F doc/hctree/perftest1.tcl c9ecff62651c86a57e54528ce53266807da32b2c940ba46a0778af1a1154d0a3
 F doc/hctree/replication.md 45c7df44a05c9843d70e4cf8bccf001548c1b7e13080491666fee5800caeb5a9
 F doc/hctree/slides.html 763e1e5b40201595f0924a589c8e6e9a7ca3ca593ed0045d372e66e12ece7aef
 F doc/hctree/slides.wiki 4151889c5485fecd8a71d5d0089645998a2db5ebc3360b570f763e59effed60c
@@ -57,6 +57,8 @@ F doc/hctree/testserver_follower.tcl 6759659f7919955fc8c7699fa3721139b94a454aa17
 F doc/hctree/testserver_leader.tcl 5cdf83b88ecc64da60f1887244f1d050bef9c99a8a190733e34012fe2c5937af
 F doc/hctree/threadtest.data eb38fbd8a9742a2c6c0d3d7ec3b816476e546c909b5a40fce211e359cad175e7
 F doc/hctree/threadtest.wiki 7ed6703b7e38369ea64c6567fd251aeac2c1f237065775451a8e7d063042b74b
+F doc/hctree/threadtest2.data e522fcbe2e332aa21d32e2ec3875ba7b85a26f5cbe9ad0ba84135f3421d8f547
+F doc/hctree/threadtest2.wiki 618223ac8c1206f808ffc99382bb1df485a3360f591e7d86a7d14425f9818464
 F doc/json-enhancements.md e356fc834781f1f1aa22ee300027a270b2c960122468499bf347bb123ce1ea4f
 F doc/jsonb.md 5fab4b8613aa9153fbeb6259297bd4697988af8b3d23900deba588fa7841456b
 F doc/lemon.html 8b266ff711d2ec7f867c3dca37634963f48a630329908cc282beebfa8c708706
@@ -2328,8 +2330,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P 58daaa84e34a9db969c338db950989e7d8b85f78fcc98dbafcfd38e70e4886ba
-R 34aa1055f45007b055de2171361f59d5
+P e842ed36acbae3960a9c162745b5e19aa36d12e71bfd7547899fe679ff788a64 62f908b1fe0a16913ccd013c8530c80d1e5e91375dcece855458b7575f1cf672
+R bc85e5c77e231406f05943f0b70954d1
 U dan
-Z de6fecb8b0e3da8d10c98ecd5a2b45bd
+Z 5ffdf6aa03605b3904899a692858cfcc
 # Remove this line to create a well-formed Fossil manifest.
