@@ -27,7 +27,9 @@
 
 #define HCT_DEFAULT_PAGESIZE     4096
 
-#define HCT_DEFAULT_PAGEPERCHUNK 512
+#define HCT_DEFAULT_PAGEPERCHUNK  512
+
+#define HCT_MMAP_QUANTA          1024
 
 #define HCT_HEADER_PAGESIZE      4096
 
@@ -607,17 +609,6 @@ static void *hctFileMmap(int *pRc, int fd, i64 nByte, i64 iOff, int bRO){
   return pRet;
 }
 
-/*
-** Attempt to grow the mapping passed via pOld/nOld to nNew bytes in size.
-** Return SQLITE_OK if successful, or SQLITE_ERROR if not.
-*/
-static int hctFileRemap(int fd, void *pOld, i64 nOld, i64 nNew, int bRO){
-  void *pRet = 0;
-  pRet = mremap(pOld, nOld, nNew, 0);
-  assert( pRet==MAP_FAILED || pRet==pOld );
-  return (pRet==pOld) ? SQLITE_OK : SQLITE_ERROR;
-}
-
 static void hctFileMunmap(void *pMap, i64 nByte){
   if( pMap ) munmap(pMap, nByte);
 }
@@ -727,22 +718,44 @@ static void hctFileReadHdr(
 static void *hctFileMmapDbChunk(
   int *pRc,
   HctFileServer *p,
+  HctMapping *pMap,
   int iChunk
 ){
+  void *pRet = 0;
   i64 szChunk = p->nPagePerChunk * p->szPage;
   int iFd = iChunk % p->nFdDb;
-  i64 iOff = szChunk * (iChunk / p->nFdDb);
+  int iChunkOfFile = (iChunk / p->nFdDb);
 
-  return hctFileMmap(pRc, p->aFdDb[iFd], szChunk, iOff, p->bReadOnlyMap);
+  if( (iChunkOfFile % HCT_MMAP_QUANTA)==0 ){
+    i64 iOff = szChunk * iChunkOfFile;
+    pRet = hctFileMmap(
+        pRc, p->aFdDb[iFd], szChunk*HCT_MMAP_QUANTA, iOff, p->bReadOnlyMap
+    );
+  }else{
+    pRet = (void*)(((u8*)pMap->aChunk[iChunk - p->nFdDb].pData) + szChunk);
+  }
+
+  return pRet;
 }
 
 static void *hctFileMmapPagemapChunk(
   int *pRc,
   HctFileServer *p,
+  HctMapping *pMap,
   int iChunk
 ){
+  void *pRet = 0;
   i64 szChunk = p->nPagePerChunk * sizeof(u64);
-  return hctFileMmap(pRc, p->fdMap, szChunk, (szChunk*iChunk), 0);
+
+  if( (iChunk % HCT_MMAP_QUANTA)==0 ){
+    pRet = hctFileMmap(
+        pRc, p->fdMap, szChunk*HCT_MMAP_QUANTA, (szChunk*iChunk), 0
+    );
+  }else{
+    pRet = (void*)(((u8*)(pMap->aChunk[iChunk-1].aMap)) + szChunk);
+  }
+
+  return pRet;
 }
 
 static void hctFileOpenDataFiles(
@@ -769,6 +782,10 @@ static void hctFileOpenDataFiles(
   *pRc = rc;
 }
 
+static i64 round_up(i64 iVal, i64 nQuanta){
+  return ((iVal + nQuanta - 1) / nQuanta) * nQuanta;
+}
+
 static void hctFileAllocateMapping(
   int *pRc,
   HctFileServer *p, 
@@ -790,7 +807,8 @@ static void hctFileAllocateMapping(
 
   /* Map all chunks of the pagemap file using a single call to mmap() */
   {
-    u8 *pMap = (u8*)hctFileMmap(&rc, p->fdMap, nChunk*szChunkPagemap,0,0);
+    int nAll = round_up(nChunk, HCT_MMAP_QUANTA);
+    u8 *pMap = (u8*)hctFileMmap(&rc, p->fdMap, nAll*szChunkPagemap,0,0);
     for(i=0; rc==SQLITE_OK && i<nChunk; i++){
       pMapping->aChunk[i].aMap = (u64*)&pMap[i * szChunkPagemap];
     }
@@ -799,7 +817,7 @@ static void hctFileAllocateMapping(
   /* Map all chunks of the data files. One call to mmap() for each file. */
   for(iFd=0; iFd<p->nFdDb && rc==SQLITE_OK; iFd++){
     int nFileChunk = (nChunk / p->nFdDb) + (iFd < (nChunk % p->nFdDb));
-    i64 n = (i64)nFileChunk * szChunkData;
+    i64 n = round_up(nFileChunk, HCT_MMAP_QUANTA) * szChunkData;
     u8 *pMap = (u8*)hctFileMmap(&rc, p->aFdDb[iFd], n, 0, p->bReadOnlyMap);
     for(i=0; i<nFileChunk && rc==SQLITE_OK; i++){
       int iChunk = iFd + i*p->nFdDb;
@@ -1165,14 +1183,16 @@ static int hctFileGrowMapping(HctFile *pFile, int nChunk){
         hctFileTruncate(&rc, p->fdMap, nChunk*szChunkMap);
 
         for(i=nOld; i<nChunk; i++){
+          HctMappingChunk *pChunk = &pNew->aChunk[i];
+
           /* Grow the data file */
           int iFd = (i % p->nFdDb);
           i64 sz = ((i / p->nFdDb) + 1) * szChunkData;
           hctFileTruncate(&rc, p->aFdDb[iFd], sz);
 
           /* Map the new chunks of both the data and mapping files. */
-          pNew->aChunk[i].aMap = hctFileMmapPagemapChunk(&rc, p, i);
-          pNew->aChunk[i].pData = hctFileMmapDbChunk(&rc, p, i);
+          pChunk->aMap = hctFileMmapPagemapChunk(&rc, p, pNew, i);
+          pChunk->pData = hctFileMmapDbChunk(&rc, p, pNew, i);
         }
 
         if( rc==SQLITE_OK ){

@@ -150,7 +150,7 @@ setup_database
 #run_one_test 3 update10
 #exit
 
-if 0 {
+if 1 {
   # These values used for threadtest.wiki. For running on a 16 core workstation
   set lThread [list 16 15 14 13 12 11 10 9 8 7 6 5 4 3 2 1]
   set lTest [list update1 update10 update1_scan10 update10_scan10 scan10]

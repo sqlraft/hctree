@@ -1,5 +1,5 @@
-C Updates\sto\spagetest.c\sto\ssupport\slarger\sfiles\sand\smore\sthreads.
-D 2024-07-24T15:48:25.979
+C Avoid\shitting\sthe\sLinux\snumber-of-mappings\slimit\swhen\sbuilding\svery\slarge\sdatabases.
+D 2024-07-24T19:42:08.306
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -47,7 +47,7 @@ F doc/hctree/hctree_bedrock.md c4280b0fcf7aff496087633a160d821f1d71ef6bff3078128
 F doc/hctree/index.html 63cdbc4f98d0247279cb5ff580e4939c1fae661be16f3fd7bd2e18d26a4e9bcd
 F doc/hctree/mkthreadtest.tcl f51f8b4af2f60231b3e06c6bd63275bd9b0e5b18709da6241251526bbc7107ad
 F doc/hctree/pagetest.c 4d5f3aee508e32ff08dfd81b0c79f9ebfad04590f4d9283bd5df7e08674f9112
-F doc/hctree/perftest1.tcl c9ecff62651c86a57e54528ce53266807da32b2c940ba46a0778af1a1154d0a3
+F doc/hctree/perftest1.tcl 3fceaee9461a99d087b1f0ec8fe378a1e442ae9f5f20ed90a7f8982a8450a7e6
 F doc/hctree/replication.md 45c7df44a05c9843d70e4cf8bccf001548c1b7e13080491666fee5800caeb5a9
 F doc/hctree/slides.html 763e1e5b40201595f0924a589c8e6e9a7ca3ca593ed0045d372e66e12ece7aef
 F doc/hctree/slides.wiki 4151889c5485fecd8a71d5d0089645998a2db5ebc3360b570f763e59effed60c
@@ -749,7 +749,7 @@ F src/hctJrnlInt.h 49add7e14722d06836743f92619d4ba28c9d40317765e055c1f20c4c45d9e
 F src/hctPManInt.h 63805240f210f76e6f3896408930883538309dc3286d090d4b74b3cedfbaa63b
 F src/hctTMapInt.h bb7edd6282339ee6ac09be383a1f87267d9731f7bd384dd3b94cc7d2a3a99c10
 F src/hct_database.c 99e773c7e468c9041198a6fc9901ad177cf67a0ca79cd2b8a9a54a2cd237440a
-F src/hct_file.c ca32cc50e653480f6c39bf77cb822bf89188e9eb9ffa326a00592cf4d4778738
+F src/hct_file.c 69a84b10e6d8968ffd97c6d35f312253d0f3c518b184c1c7961ec7e3d81f29cf
 F src/hct_journal.c 1c96c0bdf39766fc1c7d3bb02da5515b1621d6144fd92bca4d497a2d2ed4c04d
 F src/hct_journalhash.c 5af4886fd8c126a96c78278f6e62a8e31de9b8e683b167c487b033a87fabb7a3
 F src/hct_pman.c bb397724fe6bc5547ac5233cc2cf4f6e6074dcebaf89d50927aaab2a2272ebc5
@@ -2330,8 +2330,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P bfef60c3a154746187fd715cc2bd25e4638fd23be20346abd13a654a5f208df3
-R ae37c8d0923df4caac2cdcfd8e227f59
+P f9c15d063f00c6107e48282c24fbd22b3fa4751c30973302581d1166205bcb99
+R 1a09275ce3329c972187a9f7c3d5b652
 U dan
-Z 84f937cec4c56d8d3a3aa86af3cffd55
+Z 4b01ffc65c5ebe2e22bcce5e1d742546
 # Remove this line to create a well-formed Fossil manifest.
