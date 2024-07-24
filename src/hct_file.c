@@ -559,7 +559,7 @@ static i64 hctFileSize(int *pRc, int fd){
   if( *pRc==SQLITE_OK ){
     struct stat sStat;
     if( fstat(fd, &sStat) ){
-      *pRc = SQLITE_IOERR_FSTAT;
+      *pRc = sqlite3HctIoerr(SQLITE_IOERR_FSTAT);
     }else{
       szRet = (i64)(sStat.st_size);
     }
@@ -571,7 +571,7 @@ static int hctFileTruncate(int *pRc, int fd, i64 sz){
   if( *pRc==SQLITE_OK ){
     int res = ftruncate(fd, (off_t)sz);
     if( res ){
-      *pRc = SQLITE_IOERR_TRUNCATE;
+      *pRc = sqlite3HctIoerr(SQLITE_IOERR_TRUNCATE);
     }
   }
   return *pRc;
@@ -601,10 +601,21 @@ static void *hctFileMmap(int *pRc, int fd, i64 nByte, i64 iOff, int bRO){
     pRet = mmap(0, nByte, flags, MAP_SHARED, fd, iOff);
     if( pRet==MAP_FAILED ){
       pRet = 0;
-      *pRc = SQLITE_IOERR_MMAP;
+      *pRc = sqlite3HctIoerr(SQLITE_IOERR_MMAP);
     }
   }
   return pRet;
+}
+
+/*
+** Attempt to grow the mapping passed via pOld/nOld to nNew bytes in size.
+** Return SQLITE_OK if successful, or SQLITE_ERROR if not.
+*/
+static int hctFileRemap(int fd, void *pOld, i64 nOld, i64 nNew, int bRO){
+  void *pRet = 0;
+  pRet = mremap(pOld, nOld, nNew, 0);
+  assert( pRet==MAP_FAILED || pRet==pOld );
+  return (pRet==pOld) ? SQLITE_OK : SQLITE_ERROR;
 }
 
 static void hctFileMunmap(void *pMap, i64 nByte){
@@ -2520,4 +2531,9 @@ int sqlite3HctFileVtabInit(sqlite3 *db){
   return sqlite3_create_module(db, "hctpgmap", &pgmapModule, 0);
 }
 
+int sqlite3HctIoerr(int rc){
+  assert( 0 );
+  abort();
+  return rc;
+}
 

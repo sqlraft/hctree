@@ -185,4 +185,5 @@ int sqlite3HctFileNFile(HctFile *pFile, int *pbFixed);
 void sqlite3HctFileSetJrnlPtr(HctFile *pFile, void *pPtr, void(*xDel)(void*));
 void *sqlite3HctFileGetJrnlPtr(HctFile *pFile);
 
+int sqlite3HctIoerr(int rc);
 

@@ -98,7 +98,7 @@ typedef struct TestCtx TestCtx;
 struct TestCtx {
   pthread_t tid;
   i64 iEnd;                       /* Time to finish */
-  int pgsz;                       /* Page size */
+  i64 pgsz;                       /* Page size */
   int nPg;                        /* Number of pages */
   int nPgPerFile;                 /* Number of pages per file */
   int nFile;
@@ -114,7 +114,7 @@ struct TestOptions {
   int nMB;                        /* Size of test file in MB */
   int nSecond;                    /* Number of seconds to run for */
   int nThread;                    /* Number of threads to run */
-  int pgsz;                       /* Page size to use */
+  i64 pgsz;                       /* Page size to use */
   int pwrite;                     /* Page size to use */
   int nFile;                      /* Number of files nMB of data is split */
 };
@@ -246,7 +246,8 @@ static void *do_test(void *pCtx){
       size_t res = pwrite(fd, p->pBuf, p->pgsz, iFilePg2*p->pgsz);
       if( res!=p->pgsz ) break;
     }else{
-      u8 *pTo = &p->aFile[iFile2].pMap[iFilePg2*p->pgsz];
+      i64 iOff = iFilePg2 * p->pgsz;
+      u8 *pTo = &p->aFile[iFile2].pMap[iOff];
       memcpy(pTo, pFrom, p->pgsz);
     }
 
@@ -258,7 +259,7 @@ static void *do_test(void *pCtx){
 
 int main(int argc, char **argv){
   TestOptions opt;
-  TestCtx aCtx[16];
+  TestCtx aCtx[128];
   TestFile aFile[MAX_NFILE];
   int rc = 0;
   int ii = 0;
@@ -267,7 +268,7 @@ int main(int argc, char **argv){
   int iFile = 0;
 
   int nPg = 0;
-  int nPgPerFile = 0;
+  i64 nPgPerFile = 0;
 
   memset(aFile, 0, sizeof(aFile));
   memset(aCtx, 0, sizeof(aCtx));
@@ -279,14 +280,16 @@ int main(int argc, char **argv){
   opt.nFile = 1;
   parse_options(argc, argv, &opt);
 
-  nPg = opt.nMB*(1024*1024)/opt.pgsz;
+  nPg = (i64)opt.nMB*(1024*1024)/opt.pgsz;
   nPgPerFile = (nPg+opt.nFile-1) / opt.nFile;
 
   for(iFile=0; iFile<opt.nFile; iFile++){
+    struct stat sStat;
     i64 sz = nPgPerFile * opt.pgsz;
     TestFile *f = &aFile[iFile];
-
     char zFile[128];
+    int bFileExists = 0;
+
     sprintf(zFile, "pagetest%d.db", iFile);
 
     /* Open the test file */
@@ -295,10 +298,18 @@ int main(int argc, char **argv){
       error_out("open() failed...");
     }
 
+    memset(&sStat, 0, sizeof(sStat));
+    fstat(f->fd, &sStat);
+    if( sStat.st_size==sz ){
+      bFileExists = 1;
+    }
+
     /* Populate the file to its required size */
-    rc = ftruncate(f->fd, sz);
-    if( rc<0 ){
-      error_out("ftruncate() failed...");
+    if( bFileExists==0 ){
+      rc = ftruncate(f->fd, sz);
+      if( rc<0 ){
+        error_out("ftruncate() failed...");
+      }
     }
 
     /* Memory map the file */
@@ -308,8 +319,10 @@ int main(int argc, char **argv){
     }
 
     /* Populate the file */
-    for(ii=0; ii<sz; ii+=8){
-      *(i64*)&f->pMap[ii] = ii;
+    if( bFileExists==0 ){
+      for(ii=0; ii<sz; ii+=8){
+        *(i64*)&f->pMap[ii] = ii;
+      }
     }
   }
 
@@ -330,7 +343,7 @@ int main(int argc, char **argv){
   }
 
   /* Launch the threads */
-  printf("%d threads for %d seconds. db=%dMB, pgsz=%d, nfile=%d. "
+  printf("%d threads for %d seconds. db=%dMB, pgsz=%lld, nfile=%d. "
       "%ssing pwrite().\n", 
       opt.nThread, opt.nSecond, (int)opt.nMB, opt.pgsz, opt.nFile,
       opt.pwrite ? "U" : "Not u"

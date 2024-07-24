@@ -411,7 +411,7 @@ static int hctLogReaderOpen(const char *zFile, HctLogReader *pReader){
   memset(pReader, 0, sizeof(*pReader));
   fd = open(zFile, O_RDONLY);
   if( fd<0 ){
-    rc = SQLITE_IOERR;
+    rc = sqlite3HctIoerr(SQLITE_IOERR);
   }else{
     struct stat sStat;
 
@@ -422,7 +422,7 @@ static int hctLogReaderOpen(const char *zFile, HctLogReader *pReader){
     if( pReader->aFile ){
       int nRead = read(fd, pReader->aFile, pReader->nFile);
       if( nRead!=pReader->nFile ){
-        rc = SQLITE_IOERR;
+        rc = sqlite3HctIoerr(SQLITE_IOERR);
       }else{
         memcpy(&pReader->iTid, pReader->aFile, sizeof(i64));
         pReader->iFile = sizeof(i64);
@@ -575,7 +575,7 @@ static int hctLogFileWrite(HctLogFile *pLog, const void *aData, int nData){
     }
 
     if( write(pLog->fd, pLog->aBuf, pLog->nBuf)!=pLog->nBuf ){
-      return SQLITE_IOERR_WRITE;
+      return sqlite3HctIoerr(SQLITE_IOERR_WRITE);
     }
     pLog->iFileOff += pLog->nBuf;
     pLog->iBufferOff = 0;
@@ -596,7 +596,7 @@ static void hctLogFileRestart(HctLogFile *pLog){
 static int hctLogFileWriteTid(HctLogFile *pLog, u64 iTid){
   lseek(pLog->fd, 0, SEEK_SET);
   if( write(pLog->fd, &iTid, sizeof(iTid))!=sizeof(iTid) ){
-    return SQLITE_IOERR_WRITE;
+    return sqlite3HctIoerr(SQLITE_IOERR_WRITE);
   }
   return SQLITE_OK;
 }
@@ -614,7 +614,7 @@ static int hctLogFileFinish(HctLogFile *pLog, u64 iTid){
     if( rc==SQLITE_OK ){
       assert( pLog->iBufferOff>0 );
       if( write(pLog->fd, pLog->aBuf, pLog->iBufferOff)!=pLog->iBufferOff ){
-        rc = SQLITE_IOERR_WRITE;
+        rc = sqlite3HctIoerr(SQLITE_IOERR_WRITE);
       }
     }
   }
@@ -1407,7 +1407,7 @@ static int btreeLogIndex(
    || hctLogFileWrite(pLog, &nData, sizeof(nData))
    || hctLogFileWrite(pLog, aData, nData)
   ){
-    return SQLITE_IOERR_WRITE;
+    return sqlite3HctIoerr(SQLITE_IOERR_WRITE);
   }
   return SQLITE_OK;
 }
