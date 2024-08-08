@@ -1839,6 +1839,8 @@ struct sqlite3 {
   /* The sqlite3_hct_journal_validation_hook() callback */
   void *pValidateArg;
   int (*xValidate)(void*, i64, const char*, const void*, int, i64);
+
+  int bHctMigrate;
 };
 
 /*
