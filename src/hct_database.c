@@ -3379,18 +3379,20 @@ static void print_out_page(const char *zCaption, const u8 *aData, int nData){
   if( hctPagetype(pPg)==HCT_PAGETYPE_INTKEY && pPg->nHeight==0 ){
     HctDbIntkeyLeaf *pLeaf = (HctDbIntkeyLeaf*)pPg;
     char *zPrint = 0;
+    char *zKeys = 0;
     const char *zSep = "";
     int ii;
 
     for(ii=0; ii<pLeaf->pg.nEntry; ii++){
       HctDbIntkeyEntry *pEntry = &pLeaf->aEntry[ii];
-      zPrint = sqlite3_mprintf("%z%s(%d..%d)", zPrint, zSep, 
+      zPrint = sqlite3_mprintf("%z%s(k=%lld f=%.2x %d..%d)", zPrint, zSep, 
+          pEntry->iKey, pEntry->flags,
           pEntry->iOff, pEntry->iOff+ hctDbIntkeyEntrySize(pEntry, nData)
       );
       zSep = ",";
     }
 
-    printf("%s: nFreeGap=%d nFreeBytes=%d\n", zCaption,
+    printf("%s: nFreeGap=%d nFreeBytes=%d (intkey leaf)\n", zCaption,
       pLeaf->hdr.nFreeGap,
       pLeaf->hdr.nFreeBytes
     );
@@ -3412,7 +3414,7 @@ static void print_out_page(const char *zCaption, const u8 *aData, int nData){
       zSep = ",";
     }
 
-    printf("%s: nFreeGap=%d nFreeBytes=%d\n", zCaption,
+    printf("%s: nFreeGap=%d nFreeBytes=%d (index leaf)\n", zCaption,
       pLeaf->hdr.nFreeGap,
       pLeaf->hdr.nFreeBytes
     );
@@ -5211,7 +5213,7 @@ static int hctDbInsert(
   }
 
   if( rc ){
-      assert( !"is this really possible?" );
+    assert( !"is this really possible?" );
     return rc;
   }
 
@@ -5265,11 +5267,12 @@ static int hctDbInsert(
             cell.iRangeTid = pDb->iTid;
             cell.iRangeOld = op.iOldPg;
           }
-        }else{
+        }else if( op.iInsert>0 ){
           HctDbCell prev;
-          hctDbCellGetByIdx(pDb, aTarget, op.iInsert - (bClobber?0:1), &prev);
+          hctDbCellGetByIdx(pDb, aTarget, op.iInsert-1, &prev);
           cell.iRangeTid = prev.iRangeTid;
           cell.iRangeOld = prev.iRangeOld;
+          assert( cell.iRangeTid==0 || cell.iRangeOld!=0 );
         }
       }
       rc = hctDbInsertOverflow(
