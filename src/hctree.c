@@ -28,6 +28,7 @@ typedef struct BtSchemaOp BtSchemaOp;
 typedef struct HBtree HBtree;
 typedef struct HBtCursor HBtCursor;
 typedef struct HctLogFile HctLogFile;
+typedef struct HctMainStats HctMainStats;
 
 
 /*
@@ -40,6 +41,12 @@ struct HctLogFile {
   int nBuf;                       /* Size of aBuf[] in bytes */
   i64 iFileOff;                   /* Current write offset in file */
   int iBufferOff;                 /* Current write offset in buffer */
+};
+
+struct HctMainStats {
+  i64 nRetry;
+  i64 nRetryKey;
+  i64 nKeyOp;
 };
 
 /*
@@ -88,6 +95,7 @@ struct HBtree {
   HctJournal *pHctJrnl;
 
   Pager *pFakePager;
+  HctMainStats stats;
 };
 
 /* 
@@ -1345,6 +1353,7 @@ static int btreeFlushOneToDisk(void *pCtx, u32 iRoot, KeyInfo *pKeyInfo){
       rc = sqlite3HctDbInsert(pDb, iRoot, pRec, iKey, bDel,nData,aData,&nRetry);
       p->nRollbackOp += (iRollbackDir * (1 - nRetry));
       if( rc ) break;
+      p->stats.nKeyOp++;
 
       if( pFC->bRollback && p->nRollbackOp==0 ){
         assert( nRetry==0 );
@@ -1373,6 +1382,9 @@ static int btreeFlushOneToDisk(void *pCtx, u32 iRoot, KeyInfo *pKeyInfo){
             break;
           }
         }
+      }else{
+        p->stats.nRetry++;
+        p->stats.nRetryKey += nRetry;
       }
       for(ii=1; ii<nRetry; ii++){
         assert( sqlite3HctTreeCsrEof(pCsr)==0 );
@@ -3323,6 +3335,31 @@ int sqlite3HctLockedErr(u32 pgno){
   return SQLITE_LOCKED;
 }
 
+i64 sqlite3HctMainStats(sqlite3 *db, int iStat, const char **pzStat){
+  Btree *pBt = db->aDb[0].pBt;
+
+  i64 iRet = 0;
+
+  if( sqlite3IsHct(pBt) ){
+    HBtree *pHct = (HBtree*)pBt;
+    switch( iStat ){
+      case 0:
+        *pzStat = "nretry";
+        iRet = pHct->stats.nRetry;
+        break;
+      case 1:
+        *pzStat = "nretrykey";
+        iRet = pHct->stats.nRetryKey;
+        break;
+      case 2:
+        *pzStat = "nkeyop";
+        iRet = pHct->stats.nKeyOp;
+        break;
+    }
+  }
+
+  return iRet;
+}
 
 
 #endif /* SQLITE_ENABLE_HCT */

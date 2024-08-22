@@ -841,7 +841,7 @@ static int migration_cmd(
 ){
   Migration *p = (Migration*)clientData;
   const char *azSub[] = {
-    "insert", "imposter", "run", "destroy", 0
+    "insert", "imposter", "run", "destroy", "stats", 0
   };
   int iSub;
 
@@ -905,9 +905,9 @@ static int migration_cmd(
         sqlite3_test_control(SQLITE_TESTCTRL_IMPOSTER, db, "src", 0, 0);
 
         if( rc==SQLITE_OK ){
-          sqlite3_test_control(SQLITE_TESTCTRL_IMPOSTER,db,"dest",1,(int)iDest);
+          sqlite3_test_control(SQLITE_TESTCTRL_IMPOSTER,db,"main",1,(int)iDest);
           rc = sqlite3_exec(db, zSql, 0, 0, 0);
-          sqlite3_test_control(SQLITE_TESTCTRL_IMPOSTER, db, "dest", 0, 0);
+          sqlite3_test_control(SQLITE_TESTCTRL_IMPOSTER, db, "main", 0, 0);
         }
 
         if( rc!=SQLITE_OK ){
@@ -951,6 +951,45 @@ static int migration_cmd(
       }else{
         Tcl_DeleteCommand(interp, Tcl_GetStringFromObj(objv[0], 0));
       }
+      break;
+    }
+    case 4: assert( 0==strcmp(azSub[iSub], "stats") ); {
+      int rc = TCL_OK;
+      int ii;
+      Tcl_Obj *pRes = 0;
+      if( objc!=2 ){
+        Tcl_WrongNumArgs(interp, 1, objv, "");
+        return TCL_ERROR;
+      }
+      pRes = Tcl_NewObj();
+      for(ii=0; ii<p->nJob; ii++){
+        sqlite3 *db = p->aJob[ii].db;
+        sqlite3_stmt *pStmt = 0;
+
+        rc = sqlite3_prepare_v2(db, "SELECT * FROM hctstats", -1, &pStmt, 0);
+        if( rc!=SQLITE_OK ){
+          Tcl_AppendResult(interp, "SQL error: ", sqlite3_errmsg(db), (char*)0);
+          return TCL_ERROR;
+        }
+        while( SQLITE_ROW==sqlite3_step(pStmt) ){
+          const char *zSubsys = 0;
+          const char *zStat = 0;
+          const char *zVal = 0;
+          char *zKey = 0;
+          assert( sqlite3_data_count(pStmt)==3 );
+
+          zSubsys = (const char*)sqlite3_column_text(pStmt, 0);
+          zStat = (const char*)sqlite3_column_text(pStmt, 1);
+          zVal = (const char*)sqlite3_column_text(pStmt, 2);
+          
+          zKey = sqlite3_mprintf("%d.%s.%s", ii, zSubsys, zStat);
+          Tcl_ListObjAppendElement(interp, pRes, Tcl_NewStringObj(zKey, -1));
+          sqlite3_free(zKey);
+          Tcl_ListObjAppendElement(interp, pRes, Tcl_NewStringObj(zVal, -1));
+        }
+      }
+
+      Tcl_SetObjResult(interp, pRes);
       break;
     }
   }
@@ -1003,9 +1042,7 @@ static int sqlite_migrate(
   memset(pNew, 0, nByte);
   pNew->mutex = sqlite3_mutex_alloc(SQLITE_MUTEX_FAST);
 
-  zAttach = sqlite3_mprintf(
-      "ATTACH %Q AS src; ATTACH %Q AS dest;", zSrc, zDest
-  );
+  zAttach = sqlite3_mprintf("ATTACH %Q AS src;", zSrc);
 
   /* Open a database connection for each job. And attach both source and
   ** destination databases to the handle. */
@@ -1013,7 +1050,7 @@ static int sqlite_migrate(
   for(ii=0; ii<nJob; ii++){
     MigrationJob *pJob = &pNew->aJob[ii];
     pJob->pMigration = pNew;
-    rc = sqlite3_open(":memory:", &pJob->db);
+    rc = sqlite3_open(zDest, &pJob->db);
     if( rc!=SQLITE_OK ){
       Tcl_AppendResult(interp, "error in sqlite3_open()", (char*)0);
       return TCL_ERROR;

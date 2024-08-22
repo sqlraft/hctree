@@ -304,4 +304,6 @@ HctJournal *sqlite3HctJrnlFind(sqlite3*);
 int sqlite3HctBtreeIsNewTable(Btree *pBt, u64 iRoot);
 u64 sqlite3HctBtreeSnapshotId(Btree *pBt);
 
+i64 sqlite3HctMainStats(sqlite3 *db, int iStat, const char **pzStat);
+
 

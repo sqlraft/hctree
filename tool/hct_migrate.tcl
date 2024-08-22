@@ -10,7 +10,7 @@ if {[llength $argv]!=2} {
 }
 
 # Divide large tables and indexes into this many jobs.
-set NJOB 4
+set NJOB 16
 
 # Only divide up a b-tree if it is at least this many nodes from root to leaf.
 set NMINDEPTH 3
@@ -21,6 +21,18 @@ set G(dest) [lindex $argv 1]
 if {[file exists $G(dest)]} {
   puts stderr "$G(dest) already exists"
   exit -1
+}
+
+proc lshuffle {lIn} {
+  set lInter [list]
+  foreach i $lIn {
+    lappend lInter [list [expr rand()] $i]
+  }
+  set lOut [list]
+  foreach i [lsort -index 0 $lInter] {
+    lappend lOut [lindex $i 1]
+  }
+  set lOut
 }
 
 # Load the dbdata.so extension into the supplied handle.
@@ -65,7 +77,7 @@ proc create_destination_schema {} {
       WHERE sql!='' AND name NOT LIKE 'sqlite_%'
     } {
       if {$virtual} {
-        put stderr "Error - source schema contains virtual tables"
+        puts stderr "Error - source schema contains virtual tables"
         exit -1
       }
       incr nItem
@@ -250,7 +262,7 @@ proc plan_migration {} {
     }
   
     if {$bIntkey} {
-      set p "INSERT INTO dest.imp$iImp"
+      set p "INSERT INTO main.imp$iImp"
       if {$bPrimaryKey} {
         set prefix "$p SELECT * FROM src.imp$iImp"
       } else {
@@ -258,7 +270,7 @@ proc plan_migration {} {
       }
       set pk rowid
     } else {
-      set prefix "INSERT INTO dest.imp$iImp SELECT * FROM src.imp$iImp"
+      set prefix "INSERT INTO main.imp$iImp SELECT * FROM src.imp$iImp"
       set pk "([join $lPk ,])"
     }
   
@@ -308,6 +320,7 @@ if 0 {
   puts "Running...."
   M run
   puts "DONE!"
+  foreach {k v} [M stats] { puts "$k  $v" }
 }
 
 
