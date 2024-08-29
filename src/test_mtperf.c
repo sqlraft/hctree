@@ -1072,6 +1072,55 @@ static int sqlite_migrate(
 }
 
 /*
+** Decode a pointer to an sqlite3 object.
+*/
+int getSqlite3Ptr(Tcl_Interp *interp, Tcl_Obj *pObj, sqlite3 **ppDb){
+  Tcl_CmdInfo cmdInfo;
+  if( Tcl_GetCommandInfo(interp, Tcl_GetString(pObj), &cmdInfo) ){
+    sqlite3 **p = (sqlite3 **)cmdInfo.objClientData;
+    *ppDb = *p;
+  }else{
+    return TCL_ERROR;
+  }
+  return TCL_OK;
+}
+
+/*
+** tclcmd: sqlite_imposter DB DBNAME ONOFF TNUM
+*/
+static int sqlite_imposter(
+  ClientData clientData,          /* Unused */
+  Tcl_Interp *interp,             /* The TCL interpreter */
+  int objc,                       /* Number of arguments */
+  Tcl_Obj *CONST objv[]           /* Command arguments */
+){
+  sqlite3 *db = 0;
+  const char *zDbname = 0;
+  int bOnoff = 0;
+  int tnum = 0;
+  int rc = SQLITE_OK;
+
+  if( objc!=5 ){
+    Tcl_WrongNumArgs(interp, 1, objv, "DB DBNAME ONOFF TNUM");
+    return TCL_ERROR;
+  }
+  zDbname = Tcl_GetString(objv[2]);
+  if( getSqlite3Ptr(interp, objv[1], &db) 
+   || Tcl_GetBooleanFromObj(interp, objv[3], &bOnoff) 
+   || Tcl_GetIntFromObj(interp, objv[4], &tnum) 
+  ){
+    return TCL_ERROR;
+  }
+
+  rc = sqlite3_test_control(SQLITE_TESTCTRL_IMPOSTER, db, zDbname, bOnoff,tnum);
+  if( rc!=SQLITE_OK ){
+    Tcl_SetObjResult(interp, Tcl_NewIntObj(rc));
+    return TCL_ERROR;
+  }
+  return TCL_OK;
+}
+
+/*
 ** Register commands with the TCL interpreter.
 */
 int SqliteThreadTest_Init(Tcl_Interp *interp){
@@ -1081,7 +1130,8 @@ int SqliteThreadTest_Init(Tcl_Interp *interp){
   } aCmd[] = {
     { sqlite_thread_test, "sqlite_thread_test" },
     { sqlite_thread_test_config, "sqlite_thread_test_config" },
-    { sqlite_migrate, "sqlite_migrate" }
+    { sqlite_migrate, "sqlite_migrate" },
+    { sqlite_imposter, "sqlite_imposter" }
   };
   int ii;
   for(ii=0; ii<sizeof(aCmd)/sizeof(aCmd[0]); ii++){

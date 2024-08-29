@@ -285,6 +285,7 @@ struct HctDatabaseStats {
   i64 nBalanceSingle;
   i64 nTMapLookup;
   i64 nUpdateInPlace;
+  i64 nInternalRetry;
 };
 
 /*
@@ -3211,6 +3212,7 @@ static int hctDbInsertFlushWrite(HctDatabase *pDb, HctDbWriter *p){
           assert( iOrig>=wr.nWriteKey );
           iOrig -= wr.nWriteKey;
           pDb->nCasFail++;
+          pDb->stats.nInternalRetry++;
         }
         hctDbWriterCleanup(pDb, &wr, (rc!=SQLITE_OK));
         wr.nWriteKey = 0;
@@ -6514,6 +6516,10 @@ i64 sqlite3HctDbStats(sqlite3 *db, int iStat, const char **pzStat){
     case 4:
       *pzStat = "update_in_place";
       iVal = pDb->stats.nUpdateInPlace;
+      break;
+    case 5:
+      *pzStat = "internal_retry";
+      iVal = pDb->stats.nInternalRetry;
       break;
     default:
       break;

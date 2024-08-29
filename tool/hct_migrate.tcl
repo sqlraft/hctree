@@ -9,8 +9,10 @@ if {[llength $argv]!=2} {
   exit -1
 }
 
-# Divide large tables and indexes into this many jobs.
+# $NJOB is the number of threads to use. $NDIV is the maximum number of
+# INSERT statements to divide populating a single table or index into.
 set NJOB 16
+set NDIV 16
 
 # Only divide up a b-tree if it is at least this many nodes from root to leaf.
 set NMINDEPTH 3
@@ -91,6 +93,44 @@ proc create_destination_schema {} {
   return $nItem
 }
 
+# This command inserts the blocks of divider data into the destination 
+# database. Argument $ct contains the imposter CREATE TABLE statement and
+# the root page numbers in the source and destination db, in the following
+# format:
+#
+#     CREATE-TABLE SOURCE-ROOT-PGNO DEST-ROOT-PGNO
+#
+# Paramter $lInsert is the list of INSERT statements that will be used to 
+# populate the table.
+#
+proc insert_dividers {ct lInsert} {
+  global G
+
+
+  # Open a new database handle on the destination and attach the source db.
+  sqlite3 db $G(dest)
+  db eval "ATTACH '$G(src)' AS src"
+
+  # Set up the IMPOSTER table on both the source and destination
+  #
+  foreach {zSql iSrc iDest} $ct {}
+  sqlite_imposter db main 1 $iDest
+  db eval $zSql
+  sqlite_imposter db main 0 0
+  sqlite_imposter db src 1 $iSrc
+  db eval $zSql
+  sqlite_imposter db src 0 0
+
+  set lRet [lrange $lInsert 0 0]
+  foreach i [lrange $lInsert 1 end] {
+    db eval "$i LIMIT 256"
+    lappend lRet "$i LIMIT -1 OFFSET 256"
+  }
+
+  db close
+  return $lRet
+}
+
 # Plan the migration. The outputs of this process are as follows:
 #
 #   * A series of CREATE TABLE statements to be used to create
@@ -110,7 +150,6 @@ proc create_destination_schema {} {
 #
 # The second element is a list of INSERT statements.
 #
-#
 proc plan_migration {} {
   global G
 
@@ -122,41 +161,56 @@ proc plan_migration {} {
   sqlite3 dest $G(dest)
   load_dbdata src
   
-  set iImp 0
+  # This loop runs one iteration for each non-virtual, non-schema table 
+  # or index in the database being migrated.
   src eval {
-    SELECT type, name, tbl_name, rootpage, sql FROM sqlite_schema WHERE 
+    SELECT 
+        type, name, tbl_name, rootpage, sql,
+        row_number() OVER () AS iImp
+    FROM sqlite_schema WHERE 
         sql!='' AND 
         name NOT LIKE 'sqlite_%' AND 
         sql NOT LIKE 'create virtual%' AND
         (type = 'table' OR type = 'index');
   } {
-    incr iImp
-    set lPk [list]
-    set lCol [list]
-  
     set bIntkey 0
     set bPrimaryKey 0
 
+    # Set zDisplayname to the name to use for this schema object when printing
+    # messages for users to read. For a regular table, this is just the table
+    # name. For an index "$table_name.$index_name".
     set zDisplayname $tbl_name
     if {$name!=$tbl_name} {
       append zDisplayname ".$name"
     }
   
+    # If this is an index or WITHOUT ROWID table, set lCol and lColCollate to 
+    # a list of the column names used by the imposter table. lColCollate 
+    # differs from lCol only in that it includes "COLLATE <collation>" 
+    # clauses for any columns that use something other than BINARY collation 
+    # for text values.
+    #
+    # If this is a regular rowid table, leave lCol and lColCollate set to 
+    # empty lists.
+    set lColCollate [list]
+    set lCol [list]
     src eval {
         SELECT seqno, coll FROM pragma_index_xinfo($name)
     } {
-      lappend lPk "c$seqno"
+      lappend lCol "c$seqno"
       if {$coll!="BINARY"} {
-        lappend lCol "c$seqno COLLATE $coll"
+        lappend lColCollate "c$seqno COLLATE $coll"
       } else {
-        lappend lCol "c$seqno"
+        lappend lColCollate "c$seqno"
       }
     }
   
-    if {[llength $lCol]>0} {
+    # This block populates the following variables:
+    #
+    if {[llength $lColCollate]>0} {
       # An index or WITHOUT ROWID table.
-      set cols [join $lCol { ,}]
-      set pk [join $lPk { ,}]
+      set cols [join $lColCollate { ,}]
+      set pk [join $lCol { ,}]
       set ct "CREATE TABLE imp$iImp ($cols, PRIMARY KEY($pk)) WITHOUT ROWID;"
       append ct " -- $zDisplayname"
       set bPrimaryKey 1
@@ -176,15 +230,15 @@ proc plan_migration {} {
         SELECT cid FROM pragma_table_info($name)
       } {
         if {$cid==$pkcid} {
-          lappend lCol "c$cid INTEGER PRIMARY KEY"
+          lappend lColCollate "c$cid INTEGER PRIMARY KEY"
           set bPrimaryKey 1
         } else {
-          lappend lCol "c$cid"
+          lappend lColCollate "c$cid"
         }
-        lappend lPk "c$cid"
+        lappend lCol "c$cid"
       }
   
-      set cols [join $lCol {, }]
+      set cols [join $lColCollate {, }]
       set ct "CREATE TABLE imp$iImp ($cols);"
       append ct " -- $zDisplayname"
       set bIntkey 1
@@ -204,9 +258,10 @@ proc plan_migration {} {
         src eval {
           WITH pages(path, pgno) AS (
             VALUES('/', $rootpage)
-            UNION ALL
-            SELECT format('/%03d/', row_number() OVER ()), child FROM sqlite_dbptr
-              WHERE pgno = $rootpage
+              UNION ALL
+            SELECT format('/%03d/', row_number() OVER ()), child 
+            FROM sqlite_dbptr
+            WHERE pgno = $rootpage
           )
     
           SELECT format('%s%03d', p.path, d.cell) AS path, value 
@@ -250,9 +305,9 @@ proc plan_migration {} {
         }
       }
   
-      set nJob $::NJOB
+      set nDiv $::NDIV
       set nKey [llength $lKey]
-      set nRegPerJob [expr (($nKey+1+$nJob-1) / $nJob)]
+      set nRegPerJob [expr (($nKey+1+$nDiv-1) / $nDiv)]
       set lKey2 [list]
       for {set ii [expr $nRegPerJob-1]} {$ii < $nKey} {incr ii $nRegPerJob} {
         lappend lKey2 [lindex $lKey $ii]
@@ -261,30 +316,35 @@ proc plan_migration {} {
       unset lKey2
     }
   
+    # By this point lKey is set to a list of the divider keys
     if {$bIntkey} {
       set p "INSERT INTO main.imp$iImp"
       if {$bPrimaryKey} {
         set prefix "$p SELECT * FROM src.imp$iImp"
       } else {
-        set prefix "$p (rowid,[join $lPk ,]) SELECT rowid, * FROM src.imp$iImp"
+        set prefix "$p (rowid,[join $lCol ,]) SELECT rowid, * FROM src.imp$iImp"
       }
       set pk rowid
     } else {
       set prefix "INSERT INTO main.imp$iImp SELECT * FROM src.imp$iImp"
-      set pk "([join $lPk ,])"
+      set pk "([join $lCol ,])"
     }
   
+    set lInsert [list]
     if {[llength $lKey]==0} {
-      lappend lInsertStmt $prefix
+      lappend lInsert $prefix
     } else {
-      lappend lInsertStmt "$prefix WHERE $pk < [lindex $lKey 0]"
+      lappend lInsert "$prefix WHERE $pk < [lindex $lKey 0]"
       for {set ii 0} {$ii < [llength $lKey]-1} {incr ii} {
         set one [lindex $lKey $ii]
         set two [lindex $lKey $ii+1]
-        lappend lInsertStmt "$prefix WHERE $pk >= $one AND $pk < $two"
+        lappend lInsert "$prefix WHERE $pk >= $one AND $pk < $two"
       }
-      lappend lInsertStmt "$prefix WHERE $pk >= [lindex $lKey end]"
+      lappend lInsert "$prefix WHERE $pk >= [lindex $lKey end]"
     } 
+
+    set lInsert [insert_dividers [list $ct $rootpage $destroot] $lInsert]
+    set lInsertStmt [concat $lInsertStmt $lInsert]
   }
 
   src close
