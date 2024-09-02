@@ -20,6 +20,8 @@ set NMINDEPTH 3
 set G(src)  [lindex $argv 0]
 set G(dest) [lindex $argv 1]
 
+set G(divkeys) 1024
+
 if {[file exists $G(dest)]} {
   puts stderr "$G(dest) already exists"
   exit -1
@@ -106,7 +108,6 @@ proc create_destination_schema {} {
 proc insert_dividers {ct lInsert} {
   global G
 
-
   # Open a new database handle on the destination and attach the source db.
   sqlite3 db $G(dest)
   db eval "ATTACH '$G(src)' AS src"
@@ -123,8 +124,8 @@ proc insert_dividers {ct lInsert} {
 
   set lRet [lrange $lInsert 0 0]
   foreach i [lrange $lInsert 1 end] {
-    db eval "$i LIMIT 256"
-    lappend lRet "$i LIMIT -1 OFFSET 256"
+    db eval "$i LIMIT $G(divkeys)"
+    lappend lRet "$i LIMIT -1 OFFSET $G(divkeys)"
   }
 
   db close
@@ -259,7 +260,7 @@ proc plan_migration {} {
           WITH pages(path, pgno) AS (
             VALUES('/', $rootpage)
               UNION ALL
-            SELECT format('/%03d/', row_number() OVER ()), child 
+            SELECT format('/%03d/', row_number() OVER () -1), child 
             FROM sqlite_dbptr
             WHERE pgno = $rootpage
           )
@@ -278,12 +279,12 @@ proc plan_migration {} {
           WITH pages(path, pgno) AS (
             VALUES('/', $rootpage)
             UNION ALL
-            SELECT format('/%03d/', row_number() OVER ()), child FROM sqlite_dbptr
+            SELECT format('/%03d/', row_number() OVER ()-1), child FROM sqlite_dbptr
               WHERE pgno = $rootpage
           )
     
           SELECT 
-            format('%s%03d', p.path, d.cell) AS path, 
+            format('%s%03d', p.path, d.cell+1) AS path, 
             '(' || group_concat(quote(value), ',') || ')' AS value,
             max(value IS NULL OR typeof(value)=='real') AS bnull
           FROM sqlite_dbdata AS d, pages p
@@ -304,7 +305,7 @@ proc plan_migration {} {
           puts "WARNING: Ignoring $nReject/$nKey keys for $zDisplayname"
         }
       }
-  
+
       set nDiv $::NDIV
       set nKey [llength $lKey]
       set nRegPerJob [expr (($nKey+1+$nDiv-1) / $nDiv)]

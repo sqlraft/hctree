@@ -1,5 +1,5 @@
-C Have\shct_migrate.tcl\sadd\sdivider-keys\sto\stables\sand\sindexes\sbefore\slaunching\sthreads\sto\spopulate\sthem.
-D 2024-08-29T19:15:33.038
+C Increase\sthe\snumber\sof\sdivider\skeys\sused\sby\shct_migrate.tcl.
+D 2024-09-02T20:12:57.412
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -2234,7 +2234,7 @@ F tool/fuzzershell.c 41480c8a1e4749351f381431ecfdfceba645396c5d836f8d26b51a33c4a
 F tool/genfkey.README cf68fddd4643bbe3ff8e31b8b6d8b0a1b85e20f4
 F tool/genfkey.test b6afd7b825d797a1e1274f519ab5695373552ecad5cd373530c63533638a5a4f
 F tool/getlock.c f4c39b651370156cae979501a7b156bdba50e7ce
-F tool/hct_migrate.tcl 26e628bd24f650a8c3a3667bd08ee4248846752552957dd8025537064e19428d
+F tool/hct_migrate.tcl d4f0fea1b1b11350e766c411970bc2940b7dcab87a65679f0eb92796acd9403b
 F tool/hct_mkbtreewrapper.tcl 04d44ac097919a056c2528e62eaf933fb66d208da614d250470f62560fd81c5b
 F tool/hct_mkspeedtable.tcl 30ae66edc2497bb6effdfe533a378519ab5e8749b7c23de79e3a95ec8aabae88
 F tool/hct_thread_test.c 8345b642e27b877b14c90ec2b866a5cbfcc6a8100fadfb947a61c129f33f93f6
@@ -2331,8 +2331,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P 1c9cc89f8465cf4f1fdc07b7e06ed10f063e63c4bb6398c570fd0735228410de
-R 91438928f3f890a231e331e54993cb82
+P cd46d29e4edeffcc78d11c66b189a2c5972a7b903579b0a549d8b92fb01d3ef0
+R ae4abca8dc0d8b7afc1c3a03818aa1b2
 U dan
-Z 09381428cfb6d9305794bede181c2c4a
+Z 77c3371ccb503d12b6f91f9654c91f86
 # Remove this line to create a well-formed Fossil manifest.
