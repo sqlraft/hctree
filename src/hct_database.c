@@ -3696,7 +3696,7 @@ static int hctDbFindLhsPeer(
     *pOut = csr.pg;
   }else{
     memset(pOut, 0, sizeof(HctFilePage));
-    rc = SQLITE_LOCKED_ERR(pPg->iPg);
+    rc = SQLITE_LOCKED_ERR(pPg->iPg, "peer");
   }
 
   return rc;
@@ -4031,8 +4031,8 @@ struct HctDbInsertOp {
 ** Values for HctDbInsertOp.eBalance
 */
 #define BALANCE_NONE 0
-#define BALANCE_OPT  1
-#define BALANCE_REQ  2
+#define BALANCE_OPTIONAL  1
+#define BALANCE_REQUIRED  2
 
 
 static int hctDbBalanceAppend(
@@ -4119,7 +4119,7 @@ static int hctDbBalance(
   hctMemcpy(aPgCopy[0], p->writepg.aPg[iPg].aNew, pDb->pgsz);
   hctDbBalanceGetCellSz(pDb, p, iIns, bClobber,pOp->nEntry,aPgCopy[0],aSz,&nSz);
 
-  if( pOp->eBalance==BALANCE_OPT ){
+  if( pOp->eBalance==BALANCE_OPTIONAL ){
     int nTotal = 0;
     for(ii=0; ii<nSz; ii++){
       nTotal += aSz[ii].nByte;
@@ -4146,9 +4146,11 @@ static int hctDbBalance(
     /* If the HctDbWriter.writepg.aPg[] array still contains a single page, 
     ** load some peer pages into it. */
     assert( p->discardpg.nPg>=0 );
-    rc = hctDbLoadPeers(pDb, p, &iPg);
-    if( rc!=SQLITE_OK ){
-      return rc;
+    if( pDb->pConfig->db->bHctMigrate==0 ){
+      rc = hctDbLoadPeers(pDb, p, &iPg);
+      if( rc!=SQLITE_OK ){
+        return rc;
+      }
     }
     assert_all_pages_ok(pDb, p);
 
@@ -4292,9 +4294,11 @@ static int hctDbBalanceIntkeyNode(
   u8 *pFree = 0;
 
   assert( p->writepg.aPg[p->writepg.nPg-1].aNew );
-  rc = hctDbLoadPeers(pDb, p, &iPg);
-  if( rc!=SQLITE_OK ){
-    return rc;
+  if( pDb->pConfig->db->bHctMigrate==0 ){
+    rc = hctDbLoadPeers(pDb, p, &iPg);
+    if( rc!=SQLITE_OK ){
+      return rc;
+    }
   }
 
   iLeftPg = iPg;
@@ -4754,7 +4758,7 @@ static int hctDbDelete(
     /* If deleting the first key on the first page, set the eBalance flag (as 
     ** deleting a FP key means the parent list must be adjusted) and load peer 
     ** pages into memory.  */
-    pOp->eBalance = BALANCE_REQ;
+    pOp->eBalance = BALANCE_REQUIRED;
     if( pOp->iPg==0 ){
       rc = hctDbLoadPeers(pDb, p, &pOp->iPg);
       if( rc!=SQLITE_OK ) return rc;
@@ -5335,10 +5339,10 @@ static int hctDbInsert(
      && (hctIsLeftmost(aTarget)==0 || hctPagePeer(aTarget)!=0)       /* (c) */
     ){
       /* Target page will be underfull following this op. Rebalance! */
-      op.eBalance = BALANCE_REQ;
+      op.eBalance = BALANCE_REQUIRED;
       bUpdateInPlace = 0;
     }else if( hctDbFreegap(aTarget)<nReq && bUpdateInPlace==0 ){
-      op.eBalance = BALANCE_OPT;
+      op.eBalance = BALANCE_OPTIONAL;
     }
   }
 

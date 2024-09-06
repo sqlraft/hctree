@@ -1650,7 +1650,7 @@ static int hctFilePageFlush(HctFilePage *pPg){
 
     if( rc==SQLITE_OK ){
       if( !hctFilePagemapSetLogical(pPg->pFile, pPg->iPg, iOld, pPg->iNewPg) ){
-        rc = SQLITE_LOCKED_ERR(pPg->iPg);
+        rc = SQLITE_LOCKED_ERR(pPg->iPg, "flush");
       }else{
         if( iOld ){
           u64 iTid = pPg->pFile->iCurrentTid;
@@ -1695,7 +1695,7 @@ int sqlite3HctFilePageEvict(HctFilePage *pPg, int bIrrevocable){
   DEBUG_SLOT_VALUE(pPg->pFile, pPg->iPg);
 
   ret = hctFileSetEvicted(pPg->pFile, pPg->iPg, pPg->iOldPg, bIrrevocable);
-  ret = (ret ? SQLITE_OK : SQLITE_LOCKED_ERR(pPg->iPg));
+  ret = (ret ? SQLITE_OK : SQLITE_LOCKED_ERR(pPg->iPg, "evict"));
 
   DEBUG_PRINTF(" rc=%d final=", ret);
   DEBUG_SLOT_VALUE(pPg->pFile, pPg->iPg);

@@ -27,6 +27,7 @@ struct HctConfig {
   int nTryBeforeUnevict;
   int bQuiescentIntegrityCheck;   /* PRAGMA hct_quiescent_integrity_check */
   int pgsz;
+  sqlite3 *db;
 };
 
 #define HCT_TID_MASK  ((((u64)0x00FFFFFF) << 32)|0xFFFFFFFF)
@@ -47,10 +48,10 @@ struct HctConfig {
 #include <hctFileInt.h>
 
 #ifdef SQLITE_DEBUG
-# define SQLITE_LOCKED_ERR(x) sqlite3HctLockedErr(x)
- int sqlite3HctLockedErr(u32 pgno);
+# define SQLITE_LOCKED_ERR(x,y) sqlite3HctLockedErr(x,y)
+ int sqlite3HctLockedErr(u32 pgno, const char *zReason);
 #else
-# define SQLITE_LOCKED_ERR(x) SQLITE_LOCKED
+# define SQLITE_LOCKED_ERR(x,y) SQLITE_LOCKED
 #endif
 
 #define HCT_TREE_SCHEMAOP_ROOT 3

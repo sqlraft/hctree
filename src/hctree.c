@@ -68,7 +68,6 @@ struct HctMainStats {
 struct HBtree {
   BtreeMethods *pMethods;
 
-  sqlite3 *db;
   HctConfig config;               /* Configuration for this connection */
   HctTree *pHctTree;              /* In-memory part of database */
   HctDatabase *pHctDb;            /* On-disk part of db, if any */
@@ -255,7 +254,7 @@ struct RecoverCsr {
 static void hctRecoverCursorClose(HBtree *p, RecoverCsr *pCsr){
   sqlite3HctDbCsrClose(pCsr->pCsr);
   sqlite3HctTreeCsrClose(pCsr->pTreeCsr);
-  sqlite3DbFree(p->db, pCsr->pRec);
+  sqlite3DbFree(p->config.db, pCsr->pRec);
   sqlite3KeyInfoUnref(pCsr->pKeyInfo);
   memset(pCsr, 0, sizeof(RecoverCsr));
 }
@@ -276,7 +275,7 @@ static int hctFindKeyInfo(HBtree *p, u32 iRoot, KeyInfo **ppKeyInfo){
         Parse sParse;
         Parse *pSave = 0;
         memset(&sParse, 0, sizeof(sParse));
-        sParse.db = p->db;
+        sParse.db = p->config.db;
         pSave = sParse.db->pParse;
         sParse.db->pParse = &sParse;
         pKeyInfo = sqlite3KeyInfoOfIndex(&sParse, pIdx);
@@ -675,7 +674,7 @@ int sqlite3HctBtreeOpen(
   if( pNew ){
     memset(pNew, 0, sizeof(HBtree));
     pNew->iNextRoot = 2;
-    pNew->db = db;
+    pNew->config.db = db;
     pNew->openFlags = flags;
     pNew->config.nDbFile = HCT_DEFAULT_NDBFILE;
     pNew->config.nPageSet = HCT_DEFAULT_NPAGESET;
@@ -1149,7 +1148,9 @@ static int hctRecoverFreeList(HBtree *p){
   ** ctx.aPg[] array.  */
   if( p->pHctJrnl ){
     void *pCtx = (void*)&ctx;
-    rc = sqlite3HctJrnlSavePhysical(p->db, p->pHctJrnl, hctSavePhysical, pCtx);
+    rc = sqlite3HctJrnlSavePhysical(
+        p->config.db, p->pHctJrnl, hctSavePhysical, pCtx
+    );
   }
 
   /* Also scan any log files, adding the list of physical pages that must
@@ -1240,11 +1241,11 @@ int sqlite3HctBtreeBeginTrans(Btree *pBt, int wrflag, int *pSchemaVersion){
 
   if( rc==SQLITE_OK && pSchemaVersion ){
     sqlite3HctBtreeGetMeta((Btree*)p, 1, (u32*)pSchemaVersion);
-    sqlite3HctDbTransIsConcurrent(p->pHctDb, p->db->eConcurrent);
+    sqlite3HctDbTransIsConcurrent(p->pHctDb, p->config.db->eConcurrent);
   }
 
   if( rc==SQLITE_OK && wrflag ){
-    rc = sqlite3HctTreeBegin(p->pHctTree, 1 + p->db->nSavepoint);
+    rc = sqlite3HctTreeBegin(p->pHctTree, 1 + p->config.db->nSavepoint);
   }
   if( rc==SQLITE_OK && p->eTrans<req ){
     p->eTrans = req;
@@ -1268,7 +1269,7 @@ int sqlite3HctBtreeSchemaLoaded(Btree *pBt){
     }
   }
   if( rc==SQLITE_OK && p->pHctJrnl ){
-    sqlite3HctJournalFixSchema(p->pHctJrnl, p->db, p->pSchema);
+    sqlite3HctJournalFixSchema(p->pHctJrnl, p->config.db, p->pSchema);
   }
   return rc;
 }
@@ -1506,7 +1507,9 @@ static int btreeFlushToDisk(HBtree *p){
 
   /* Write a log file for this transaction. The TID field is still set
   ** to zero at this point.  */
-  rc = btreeWriteLog(p);
+  if( p->config.db->bHctMigrate==0 ){
+    rc = btreeWriteLog(p);
+  }
 
   if( rc==SQLITE_OK ){
     /* Obtain the TID for this transaction.  */
@@ -1516,10 +1519,12 @@ static int btreeFlushToDisk(HBtree *p){
     }
 
     /* Invoke the SQLITE_TESTCTRL_HCT_MTCOMMIT hook, if applicable */
-    if( p->db->xMtCommit ) p->db->xMtCommit(p->db->pMtCommitCtx, 0);
+    if( p->config.db->xMtCommit ){
+      p->config.db->xMtCommit(p->config.db->pMtCommitCtx, 0);
+    }
 
     assert( iTid>0 );
-    rc = hctLogFileFinish(p->pLog, iTid);
+    if( p->pLog ) rc = hctLogFileFinish(p->pLog, iTid);
   }
 
   /* Initialize the root pages of any new tables or indexes created by this 
@@ -1558,17 +1563,19 @@ static int btreeFlushToDisk(HBtree *p){
   ** write/write conflict, allocate a CID and validate the transaction. */
   if( rc==SQLITE_OK ){
     /* Invoke the SQLITE_TESTCTRL_HCT_MTCOMMIT hook, if applicable */
-    if( p->db->xMtCommit ) p->db->xMtCommit(p->db->pMtCommitCtx, 1);
+    if( p->config.db->xMtCommit ){
+      p->config.db->xMtCommit(p->config.db->pMtCommitCtx, 1);
+    }
 
     /* Validate the transaction */
-    rc = sqlite3HctDbValidate(p->db, p->pHctDb, &iCid, &bTmapScan);
+    rc = sqlite3HctDbValidate(p->config.db, p->pHctDb, &iCid, &bTmapScan);
 
     /* If validation passed and this database is configured for replication,
     ** write the journal entry and invoke the custom validation hook */
     if( rc==SQLITE_OK && p->pHctJrnl ){
       rc = sqlite3HctJrnlLog(
         p->pHctJrnl,
-        p->db,
+        p->config.db,
         (Schema*)p->pSchema,
         iCid, iTid, &bCustomValid
       );
@@ -1583,7 +1590,7 @@ static int btreeFlushToDisk(HBtree *p){
     if( rc==SQLITE_DONE ) rc = SQLITE_OK;
     if( iCid>0 && p->pHctJrnl ){
       rc = sqlite3HctJrnlWriteEmpty(p->pHctJrnl, iCid, iTid, 
-          (bCustomValid ? 0 : p->db)
+          (bCustomValid ? 0 : p->config.db)
       );
     }
   }
@@ -1600,7 +1607,7 @@ static int btreeFlushToDisk(HBtree *p){
 
   /* Zero the log file and set the entry in the transaction-map to 
   ** finish the transaction. */
-  if( rc==SQLITE_OK ){
+  if( rc==SQLITE_OK && p->pLog ){
     rc = btreeLogFileZero(p->pLog);
   }
   if( rc==SQLITE_OK ){
@@ -1611,12 +1618,15 @@ static int btreeFlushToDisk(HBtree *p){
     sqlite3HctDbTMapScan(p->pHctDb);
   }
 
-  sqlite3HctJrnlInvokeHook(p->pHctJrnl, p->db);
+  sqlite3HctJrnlInvokeHook(p->pHctJrnl, p->config.db);
   return (rc==SQLITE_OK ? rcok : rc);
 }
 
 static void hctEndTransaction(HBtree *p){
-  if( p->eTrans>SQLITE_TXN_NONE && p->pCsrList==0 && p->db->nVdbeRead<=1 ){
+  if( p->eTrans>SQLITE_TXN_NONE 
+   && p->pCsrList==0 
+   && p->config.db->nVdbeRead<=1 
+  ){
     if( p->pHctDb ){
       sqlite3HctDbEndRead(p->pHctDb);
     }
@@ -2580,6 +2590,7 @@ int sqlite3HctBtreeInsert(
   int nData;
   int nZero;
   i64 iKey = 0;
+  int bMigrate = pCur->pBtree->config.db->bHctMigrate;
 
   hctBtreeClearIsLast(pCur->pBtree, pCur);
   if( pX->pKey ){
@@ -2605,7 +2616,7 @@ int sqlite3HctBtreeInsert(
     iKey = pX->nKey;
   }
 
-  if( pCur->isLast && seekResult<0 ){
+  if( (pCur->isLast && seekResult<0) || bMigrate ){
     rc = sqlite3HctTreeAppend(
         pTreeCsr, pCur->pKeyInfo, iKey, nData, aData, nZero
     );
@@ -2680,7 +2691,7 @@ int sqlite3HctBtreeDelete(BtCursor *pCursor, u8 flags){
     }else{
       sqlite3VdbeRecordUnpack(pCur->pKeyInfo, nKey, aKey, pRec);
       rc = sqlite3HctTreeDeleteKey(pCur->pHctTreeCsr, pRec, 0, nKey, aKey);
-      sqlite3DbFree(pCur->pBtree->db, pRec);
+      sqlite3DbFree(pCur->pBtree->config.db, pRec);
     }
   }
   return rc;
@@ -2721,7 +2732,7 @@ static int hctreeAddNewSchemaOp(HBtree *p, u32 iRoot, int eOp){
 
   p->aSchemaOp = aSchemaOp;
   p->aSchemaOp[p->nSchemaOp].pgnoRoot = iRoot;
-  p->aSchemaOp[p->nSchemaOp].iSavepoint = p->db->nSavepoint;
+  p->aSchemaOp[p->nSchemaOp].iSavepoint = p->config.db->nSavepoint;
   p->aSchemaOp[p->nSchemaOp].eSchemaOp = eOp;
   p->nSchemaOp++;
 
@@ -2823,7 +2834,7 @@ int sqlite3HctBtreeClearTable(Btree *pBt, int iTable, i64 *pnChange){
     sqlite3KeyInfoUnref(pKeyInfo);
     sqlite3HctBtreeCloseCursor(pCsr);
     sqlite3HctTreeCsrClose(pTreeCsr);
-    sqlite3DbFree(p->db, pRec);
+    sqlite3DbFree(p->config.db, pRec);
     sqlite3_free(pCsr);
   }
   return rc;
@@ -3331,7 +3342,7 @@ int sqlite3HctBtreeTransferRow(BtCursor *p1, BtCursor *p2, i64 iKey){
   return SQLITE_LOCKED;
 }
 
-int sqlite3HctLockedErr(u32 pgno){
+int sqlite3HctLockedErr(u32 pgno, const char *zReason){
   return SQLITE_LOCKED;
 }
 

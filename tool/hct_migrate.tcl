@@ -12,7 +12,7 @@ if {[llength $argv]!=2} {
 # $NJOB is the number of threads to use. $NDIV is the maximum number of
 # INSERT statements to divide populating a single table or index into.
 set NJOB 16
-set NDIV 16
+set NDIV 1600
 
 # Only divide up a b-tree if it is at least this many nodes from root to leaf.
 set NMINDEPTH 3
@@ -374,7 +374,7 @@ if 0 {
   foreach ct $lCreateTable {
     M imposter {*}$ct
   }
-  foreach ins $lInsertStmt {
+  foreach ins [lshuffle $lInsertStmt] {
     M insert $ins
   }
 
