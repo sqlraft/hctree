@@ -92,6 +92,8 @@ struct HctDbRangeCsr {
 #define HCT_RANGE_MERGE  1        /* Merge in data + follow range-pointers */
 #define HCT_RANGE_FAN    2        /* HctDbRangeCsr.pg is a fan page */
 
+#define IS_HCT_MIGRATE(pDb) (pDb->pConfig->db->bHctMigrate)
+
 /*
 ** iRoot:
 **   Logical root page of tree structure that this cursor is open on.
@@ -4146,7 +4148,7 @@ static int hctDbBalance(
     /* If the HctDbWriter.writepg.aPg[] array still contains a single page, 
     ** load some peer pages into it. */
     assert( p->discardpg.nPg>=0 );
-    if( pDb->pConfig->db->bHctMigrate==0 ){
+    if( IS_HCT_MIGRATE(pDb)==0 ){
       rc = hctDbLoadPeers(pDb, p, &iPg);
       if( rc!=SQLITE_OK ){
         return rc;
@@ -4294,7 +4296,7 @@ static int hctDbBalanceIntkeyNode(
   u8 *pFree = 0;
 
   assert( p->writepg.aPg[p->writepg.nPg-1].aNew );
-  if( pDb->pConfig->db->bHctMigrate==0 ){
+  if( IS_HCT_MIGRATE(pDb)==0 ){
     rc = hctDbLoadPeers(pDb, p, &iPg);
     if( rc!=SQLITE_OK ){
       return rc;
@@ -5259,9 +5261,16 @@ static int hctDbInsert(
       memset(&cell, 0, sizeof(cell));
 
       if( p->iHeight==0 ){
-        cell.iTid = pDb->iTid;
-        if( pDb->eMode==HCT_MODE_ROLLBACK ){
-          cell.iTid |= HCT_TID_ROLLBACK_OVERRIDE;
+      
+        /* There should never be a rollback operation while migrating a
+        ** database.  */
+        assert( IS_HCT_MIGRATE(pDb)==0 || pDb->eMode!=HCT_MODE_ROLLBACK );
+
+        if( IS_HCT_MIGRATE(pDb)==0 ){
+          cell.iTid = pDb->iTid;
+          if( pDb->eMode==HCT_MODE_ROLLBACK ){
+            cell.iTid |= HCT_TID_ROLLBACK_OVERRIDE;
+          }
         }
 
         if( bClobber ){
@@ -6559,6 +6568,7 @@ struct hctdb_cursor {
   u32 iPeerPg;
   u32 nEntry;
   u32 nHeight;
+  u32 nFree;
   char *zFpKey;
 };
 
@@ -6588,7 +6598,7 @@ static int hctdbConnect(
   rc = sqlite3_declare_vtab(db,
       "CREATE TABLE x("
         "pgno INTEGER, pgtype TEXT, nheight INTEGER, "
-        "peer INTEGER, nentry INTEGER, fpkey TEXT"
+        "peer INTEGER, nentry INTEGER, nfree INTEGER, fpkey TEXT"
       ")"
   );
 
@@ -6789,12 +6799,17 @@ static int hctdbLoadPage(
       char *zFpKey = sqlite3_mprintf("%lld", pLeaf->aEntry[0].iKey);
       if( zFpKey==0 ) rc = SQLITE_NOMEM_BKPT;
       pCur->zFpKey = zFpKey;
+      pCur->nFree = (int)pLeaf->hdr.nFreeBytes;
     }else{
       HctDbIntkeyNode *pNode = (HctDbIntkeyNode*)aPg;
       char *zFpKey = sqlite3_mprintf("%lld", pNode->aEntry[0].iKey);
       if( zFpKey==0 ) rc = SQLITE_NOMEM_BKPT;
       pCur->zFpKey = zFpKey;
+      pCur->nFree = (
+        hctDbMaxCellsPerIntkeyNode(pCur->pDb->pgsz) - pNode->pg.nEntry
+      ) * sizeof(HctDbIntkeyNodeEntry);
     }
+
   }else if( eType==HCT_PAGETYPE_INDEX ){
     HctBuffer buf = {0,0,0};
     const u8 *aRec = 0;
@@ -6807,6 +6822,7 @@ static int hctdbLoadPage(
       pCur->zFpKey = zFpKey;
     }
 
+    pCur->nFree = (int)(((HctDbIndexNode*)pHdr)->hdr.nFreeBytes);
     sqlite3HctBufferFree(&buf);
   }
   return rc;
@@ -6870,7 +6886,10 @@ static int hctdbColumn(
     case 4: /* nEntry */
       sqlite3_result_int64(ctx, (i64)pCur->nEntry);
       break;
-    case 5: /* fpkey */
+    case 5: /* nfree */
+      sqlite3_result_int64(ctx, (i64)pCur->nFree);
+      break;
+    case 6: /* fpkey */
       sqlite3_result_text(ctx, pCur->zFpKey, -1, SQLITE_TRANSIENT);
       break;
   }
