@@ -1121,6 +1121,32 @@ static int sqlite_imposter(
 }
 
 /*
+** tclcmd: sqlite_migrate_mode DB ONOFF
+*/
+static int sqlite_migrate_mode(
+  ClientData clientData,          /* Unused */
+  Tcl_Interp *interp,             /* The TCL interpreter */
+  int objc,                       /* Number of arguments */
+  Tcl_Obj *CONST objv[]           /* Command arguments */
+){
+  sqlite3 *db = 0;
+  int bOnoff = 0;
+
+  if( objc!=3 ){
+    Tcl_WrongNumArgs(interp, 1, objv, "DB ONOFF");
+    return TCL_ERROR;
+  }
+  if( getSqlite3Ptr(interp, objv[1], &db) 
+   || Tcl_GetBooleanFromObj(interp, objv[2], &bOnoff) 
+  ){
+    return TCL_ERROR;
+  }
+
+  sqlite3_hct_migrate_mode(db, bOnoff);
+  return TCL_OK;
+}
+
+/*
 ** Register commands with the TCL interpreter.
 */
 int SqliteThreadTest_Init(Tcl_Interp *interp){
@@ -1131,6 +1157,7 @@ int SqliteThreadTest_Init(Tcl_Interp *interp){
     { sqlite_thread_test, "sqlite_thread_test" },
     { sqlite_thread_test_config, "sqlite_thread_test_config" },
     { sqlite_migrate, "sqlite_migrate" },
+    { sqlite_migrate_mode, "sqlite_migrate_mode" },
     { sqlite_imposter, "sqlite_imposter" }
   };
   int ii;

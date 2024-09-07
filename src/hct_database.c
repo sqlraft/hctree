@@ -234,6 +234,8 @@ struct HctDbWriter {
   HctDbOverflowArray insOvfl;     /* Overflow chains to free on don't-write */
 
   int nOverflow;
+
+  int nMigrateKey;
 };
 
 /*
@@ -3093,6 +3095,8 @@ static int hctDbFilePageCommit(HctDbWriter *p, HctFilePage *pPg){
   return rc;
 }
 
+static int hctDbMigrateReinsertKeys(HctDatabase *pDb, HctDbWriter *p);
+
 static int hctDbInsertFlushWrite(HctDatabase *pDb, HctDbWriter *p){
   int rc = SQLITE_OK;
   int ii;
@@ -3102,15 +3106,20 @@ static int hctDbInsertFlushWrite(HctDatabase *pDb, HctDbWriter *p){
 
   memset(&root, 0, sizeof(root));
 
+  rc = hctDbMigrateReinsertKeys(pDb, p);
+
 #ifdef SQLITE_DEBUG
-  for(ii=1; ii<p->writepg.nPg; ii++){
+  for(ii=1; rc==SQLITE_OK && ii<p->writepg.nPg; ii++){
     u32 iPeer = ((HctDbPageHdr*)p->writepg.aPg[ii-1].aNew)->iPeerPg;
     assert( p->writepg.aPg[ii].iPg==iPeer );
   }
 #endif
 
   /* Test if this is a split of a root page of the tree. */
-  if( p->writepg.nPg>1 && p->writepg.aPg[0].iPg==p->writecsr.iRoot ){
+  if( rc==SQLITE_OK 
+   && p->writepg.nPg>1 
+   && p->writepg.aPg[0].iPg==p->writecsr.iRoot 
+  ){
     HctFilePage *pPg0 = &p->writepg.aPg[0];
     hctMemcpy(&root, pPg0, sizeof(HctFilePage));
     memset(pPg0, 0, sizeof(HctFilePage));
@@ -3383,7 +3392,6 @@ static void print_out_page(const char *zCaption, const u8 *aData, int nData){
   if( hctPagetype(pPg)==HCT_PAGETYPE_INTKEY && pPg->nHeight==0 ){
     HctDbIntkeyLeaf *pLeaf = (HctDbIntkeyLeaf*)pPg;
     char *zPrint = 0;
-    char *zKeys = 0;
     const char *zSep = "";
     int ii;
 
@@ -4277,6 +4285,7 @@ static int hctDbBalance(
   return rc;
 }
 
+
 static int hctDbBalanceIntkeyNode(
   HctDatabase *pDb,
   HctDbWriter *p,
@@ -4572,6 +4581,41 @@ static void hctDbRemoveCell(
 
 }
 
+
+/*
+** This is called as part of a bulk insert of contiguous keys. At present
+** this only occurs as part of a migrate, but in the future it could be
+** auto-detected.
+*/
+static int hctDbBalanceMigrate(
+  HctDatabase *pDb, 
+  HctDbWriter *p, 
+  HctDbInsertOp *pOp
+){
+  HctDbLeaf *pLeaf = (HctDbLeaf*)p->writepg.aPg[0].aNew;
+  int ii = 0;
+
+  assert( p->writepg.nPg==1 );
+  assert( p->bAppend==0 );
+  assert( p->iHeight==0 );
+  assert( pOp->iInsert<=pLeaf->pg.nEntry );
+  assert( pOp->eBalance==BALANCE_REQUIRED || pOp->eBalance==BALANCE_OPTIONAL );
+
+  /* Set nMigrateKey to the number of keys to copy from p->writepg.aPg[0].aOld
+  ** before flushing the current array of pages to disk.  */
+  p->nMigrateKey = pLeaf->pg.nEntry - pOp->iInsert;
+
+  /* Remove the last nMigrateKey cells from the page. */
+  for(ii=0; ii<p->nMigrateKey; ii++){
+    hctDbRemoveCell(pDb, 0, (u8*)pLeaf, pLeaf->pg.nEntry-1);
+  }
+  p->bAppend = 1;
+
+  /* Use a regular balance to make space for the new key */
+  pOp->eBalance = BALANCE_OPTIONAL;
+  return hctDbBalance(pDb, p, pOp, 0);
+}
+
 /*
 ** Buffer aTarget must contain the image of a page that uses variable 
 ** length records - an intkey leaf, or an index leaf or node. This
@@ -4621,6 +4665,57 @@ static void hctDbInsertEntry(
 
   /* Set the aEntry[].iOff field */
   ((HctDbIndexEntry*)aFrom)->iOff = iOff;
+}
+
+
+static int hctDbMigrateReinsertKeys(HctDatabase *pDb, HctDbWriter *p){
+  int rc = SQLITE_OK;
+  if( p->nMigrateKey>0 ){
+    assert( p->iHeight==0 );
+
+    /* Append a page to the write-array */
+    rc = hctDbExtendWriteArray(pDb, p, p->writepg.nPg, 1);
+
+
+    if( rc==SQLITE_OK ){
+      int ii = 0;
+      HctDbInsertOp op;
+      HctDbLeaf *pOld = (HctDbLeaf*)p->writepg.aPg[0].aOld;
+      HctDbLeaf *pNew = (HctDbLeaf*)p->writepg.aPg[p->writepg.nPg-1].aNew;
+
+      /* TODO: Might this not be a part of ExtendWriteArray() ? */
+      pNew->hdr.nFreeBytes = pDb->pgsz - sizeof(HctDbLeaf);
+      pNew->hdr.nFreeGap = pNew->hdr.nFreeBytes;
+
+      /* Loop through the last nMigrateKey on the old page, copying them
+      ** to the new page. */
+      for(ii=0; ii<p->nMigrateKey; ii++){
+        int iOld = (pOld->pg.nEntry - p->nMigrateKey) + ii;
+        HctDbIndexEntry *pOldE = 0;
+        HctDbIndexEntry *pNewE = 0;
+        int nEntry = 0;
+
+        pOldE = hctDbEntryEntry(pOld, iOld);
+        nEntry = hctDbPageRecordSize(pOld, pDb->pgsz, iOld);
+        hctDbInsertEntry(pDb, (u8*)pNew, ii, &((u8*)pOld)[pOldE->iOff], nEntry);
+
+        pNewE = hctDbEntryEntry(pNew, ii);
+        pNewE->nSize = pOldE->nSize;
+        pNewE->flags = pOldE->flags;
+        if( hctPagetype(pOld)==HCT_PAGETYPE_INTKEY ){
+          ((HctDbIntkeyEntry*)pNewE)->iKey = ((HctDbIntkeyEntry*)pOldE)->iKey;
+        }
+      }
+
+      memset(&op, 0, sizeof(op));
+      op.iPg = p->writepg.nPg-1;
+      op.iInsert = -1;
+      op.eBalance = BALANCE_OPTIONAL;
+      rc = hctDbBalance(pDb, p, &op, 0);
+    }
+  }
+
+  return rc;
 }
 
 /*
@@ -5361,6 +5456,8 @@ static int hctDbInsert(
     assert_all_pages_ok(pDb, p);
     if( p->bAppend ){
       rc = hctDbBalanceAppend(pDb, p, &op);
+    }else if( IS_HCT_MIGRATE(pDb) && p->iHeight==0 ){
+      rc = hctDbBalanceMigrate(pDb, p, &op);
     }else{
       rc = hctDbBalance(pDb, p, &op, bClobber);
     }

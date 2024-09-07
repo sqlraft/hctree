@@ -12,7 +12,7 @@ if {[llength $argv]!=2} {
 # $NJOB is the number of threads to use. $NDIV is the maximum number of
 # INSERT statements to divide populating a single table or index into.
 set NJOB 16
-set NDIV 1600
+set NDIV 16
 
 # Only divide up a b-tree if it is at least this many nodes from root to leaf.
 set NMINDEPTH 3
@@ -122,11 +122,13 @@ proc insert_dividers {ct lInsert} {
   db eval $zSql
   sqlite_imposter db src 0 0
 
+  sqlite_migrate_mode db 1
   set lRet [lrange $lInsert 0 0]
   foreach i [lrange $lInsert 1 end] {
     db eval "$i LIMIT $G(divkeys)"
     lappend lRet "$i LIMIT -1 OFFSET $G(divkeys)"
   }
+  sqlite_migrate_mode db 0
 
   db close
   return $lRet
