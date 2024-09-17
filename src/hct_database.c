@@ -5622,6 +5622,10 @@ int sqlite3HctDbStartWrite(HctDatabase *p, u64 *piTid){
   return rc;
 }
 
+i64 sqlite3HctDbTid(HctDatabase *p){
+  return p->iTid;
+}
+
 /*
 ** Set HctDatabase.iJrnlWriteCid.
 */

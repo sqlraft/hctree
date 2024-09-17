@@ -1635,6 +1635,61 @@ static void hctEndTransaction(HBtree *p){
   }
 }
 
+
+static int hctBtreeMigrateInsert(
+  HBtCursor *pCur,
+  UnpackedRecord *pRec,
+  i64 iKey,
+  int nData,
+  const u8 *aData
+){
+  int rc = SQLITE_OK;
+  HBtree *p = pCur->pBtree;
+  int nRetry = 0;
+
+  if( 0==sqlite3HctDbTid(p->pHctDb) ){
+    i64 iDummy = 0;
+    rc = sqlite3HctDbStartWrite(p->pHctDb, &iDummy);
+    if( rc!=SQLITE_OK ) return rc;
+  }
+
+  rc = sqlite3HctDbInsert(
+      p->pHctDb, 
+      sqlite3HctTreeCsrRoot(pCur->pHctTreeCsr),
+      pRec, iKey, 0, nData, aData, &nRetry
+  );
+  assert( nRetry==0 );
+
+  return rc;
+}
+
+static int hctBtreeMigrateCommit(HBtree *p){
+  int rc = SQLITE_OK;
+  i64 iCid = 0;
+  int bTmapScan = 0;
+  int nRetry = 0;
+
+  rc = sqlite3HctDbInsertFlush(p->pHctDb, &nRetry);
+  assert( nRetry==0 );
+
+  if( rc==SQLITE_OK ){
+    rc = sqlite3HctDbValidate(p->config.db, p->pHctDb, &iCid, &bTmapScan);
+  }
+
+  if( rc==SQLITE_OK ){
+    rc = sqlite3HctDbEndWrite(p->pHctDb, iCid, 0);
+  }
+
+  if( bTmapScan ){
+    sqlite3HctDbTMapScan(p->pHctDb);
+  }
+
+  return rc;
+}
+
+#define BT_IS_MIGRATE(pBt) (pBt->config.db->bHctMigrate)
+#define CSR_IS_MIGRATE(pCsr) (pCsr->pBtree->config.db->bHctMigrate)
+
 /*
 ** Commit the transaction currently in progress.
 **
@@ -1667,20 +1722,25 @@ int sqlite3HctBtreeCommitPhaseTwo(Btree *pBt, int bCleanup){
 
   if( p->eTrans==SQLITE_TXN_ERROR ) return SQLITE_BUSY_SNAPSHOT;
 
-  if( p->eTrans==SQLITE_TXN_WRITE ){
-    if( p->pCsrList ){
-      /* Cannot commit with open cursors in hctree */
-      return SQLITE_LOCKED;
-    }
+  if( BT_IS_MIGRATE(p) ){
+    rc = hctBtreeMigrateCommit(p);
+  }else{
+    if( p->eTrans==SQLITE_TXN_WRITE ){
+      if( p->pCsrList ){
+        /* Cannot commit with open cursors in hctree */
+        return SQLITE_LOCKED;
+      }
 
-    sqlite3HctTreeRelease(p->pHctTree, 0);
-    if( p->pHctDb ){
-      rc = btreeFlushToDisk(p);
-      sqlite3HctTreeClear(p->pHctTree);
-      p->nSchemaOp = 0;
+      sqlite3HctTreeRelease(p->pHctTree, 0);
+      if( p->pHctDb ){
+        rc = btreeFlushToDisk(p);
+        sqlite3HctTreeClear(p->pHctTree);
+        p->nSchemaOp = 0;
+      }
+      p->eTrans = SQLITE_TXN_READ;
     }
-    p->eTrans = SQLITE_TXN_READ;
   }
+
   if( rc==SQLITE_OK ){
     hctEndTransaction(p);
   }else{
@@ -1856,9 +1916,6 @@ u64 sqlite3HctBtreeSnapshotId(Btree *pBt){
   HBtree *const p = (HBtree*)pBt;
   return sqlite3HctDbSnapshotId(p->pHctDb);
 }
-
-#define BT_IS_MIGRATE(pBt) (pBt->config.db->bHctMigrate)
-#define CSR_IS_MIGRATE(pCsr) (pCsr->pBtree->config.db->bHctMigrate)
 
 /*
 ** Open a new cursor
@@ -2623,13 +2680,18 @@ int sqlite3HctBtreeInsert(
     iKey = pX->nKey;
   }
 
-  if( (pCur->isLast && seekResult<0) || bMigrate ){
-    rc = sqlite3HctTreeAppend(
-        pTreeCsr, pCur->pKeyInfo, iKey, nData, aData, nZero
-    );
+  if( CSR_IS_MIGRATE(pCur) ){
+    assert( nZero==0 );
+    rc = hctBtreeMigrateInsert(pCur, pRec, iKey, nData, aData);
   }else{
-    rc = sqlite3HctTreeInsert(pTreeCsr, pRec, iKey, nData, aData, nZero);
-    pCur->isLast = 0;
+    if( pCur->isLast && seekResult<0 ){
+      rc = sqlite3HctTreeAppend(
+          pTreeCsr, pCur->pKeyInfo, iKey, nData, aData, nZero
+          );
+    }else{
+      rc = sqlite3HctTreeInsert(pTreeCsr, pRec, iKey, nData, aData, nZero);
+      pCur->isLast = 0;
+    }
   }
 
   if( pRec && pRec!=&r ){
