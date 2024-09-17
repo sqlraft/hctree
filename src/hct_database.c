@@ -4612,7 +4612,7 @@ static int hctDbBalanceMigrate(
   p->bAppend = 1;
 
   /* Use a regular balance to make space for the new key */
-  pOp->eBalance = BALANCE_OPTIONAL;
+  pOp->eBalance = BALANCE_REQUIRED;
   return hctDbBalance(pDb, p, pOp, 0);
 }
 

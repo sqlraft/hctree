@@ -1148,6 +1148,12 @@ int sqlite3HctFileIsNewDb(HctFile *pFile){
   return bRet;
 }
 
+static sqlite3_int64 current_time(){
+  struct timeval sNow;
+  gettimeofday(&sNow, 0);
+  return (sqlite3_int64)sNow.tv_sec*1000 + sNow.tv_usec/1000;
+}
+
 static void hctFileEnterServerMutex(HctFile *pFile){
   sqlite3_mutex *pMutex = pFile->pServer->pMutex;
   pFile->stats.nMutex++;

@@ -4,21 +4,46 @@
 # using multiple threads.
 #
 
-if {[llength $argv]!=2} {
-  puts stderr "Usage: $argv0 <source> <destination>"
+proc usage {} {
+  puts stderr "Usage: $argv0 ?SWITCHES? <source> <destination>"
+  puts stderr ""
+  puts stderr "   --mbperjob MB (default 128)"
+  puts stderr "   --jobs NJOB (default 12)"
   exit -1
 }
 
-# $NJOB is the number of threads to use. $NDIV is the maximum number of
-# INSERT statements to divide populating a single table or index into.
-set NJOB 16
-set NDIV 16
+set G(-mbperjob) 128
+set G(-jobs)      12
+
+# Process any switches
+for {set i 0} {$i < [llength $argv]-2} {incr i 2} {
+  set x [lindex $argv $i]
+  set y [lindex $argv [expr $i+1]]
+
+  if {[string is integer -strict $y]==0} {
+    error "option requires integer argument: $x"
+  }
+
+  # If there are two leading "-" characters, trim one off.
+  if {[string range $x 0 1]=="--"} { set x [string range $x 1 end] }
+
+  set nX [string length $x]
+  if {$nX>=2 && [string compare -length $nX $x "-mbperjob"]==0} {
+    set G(-mbperjob) $y
+  } elseif {$nX>=2 && [string compare -length $nX $x "-jobs"]==0} {
+    set G(-jobs) $y
+  } else {
+    usage
+  }
+}
+
+set G(src)  [lindex $argv end-1]
+set G(dest) [lindex $argv end]
+
 
 # Only divide up a b-tree if it is at least this many nodes from root to leaf.
 set NMINDEPTH 3
 
-set G(src)  [lindex $argv 0]
-set G(dest) [lindex $argv 1]
 
 set G(divkeys) 1024
 
@@ -28,6 +53,7 @@ if {[file exists $G(dest)]} {
 }
 
 proc lshuffle {lIn} {
+return $lIn
   set lInter [list]
   foreach i $lIn {
     lappend lInter [list [expr rand()] $i]
@@ -65,6 +91,171 @@ proc btree_depth {db iRoot} {
   return $nPath
 }
 
+# Argument aData is a blob. This command decodes the value of the SQLite
+# varint stored at offset iOff of that blob and returns the value. It
+# throws an exception if the varint appears to be malformed.
+#
+proc decode_sqlite_varint {aData iOff} {
+
+  # Figure out how many bytes of data are available. If the varint appears
+  # to be longer than this, it is corrupt - throw an exception.
+  set nData [expr [string length $aData] - $iOff]
+  if {$nData>9} {set nData 9}
+
+  # Decode any bytes that may be required for decoding.
+  #
+  binary scan [string range $aData $iOff [expr $iOff+$nData-1]] c* lByte
+
+  set ret 0
+  set i 0
+  foreach b $lByte {
+    set ret [expr ($ret << 7) + ($b & 0x7F)]
+    incr i
+    if {($b & 0x80)==0 || $i==9} break
+    if {$i>=$nData} { error "malformed SQLite varint: $lByte" }
+  }
+
+  return $ret
+}
+
+proc decode_2byte_int {aData iOff} {
+  binary scan [string range $aData $iOff end] S val
+  expr {$val & 0xFFFF}
+}
+
+proc decode_4byte_int {aData iOff} {
+  binary scan [string range $aData $iOff end] I val
+  expr {$val & 0xFFFFFFFF}
+}
+
+# Argument aPg is a blob containing an SQLite b-tree page. This command 
+# returns the number of cells on the page.
+#
+proc btree_page_ncell {aPg} {
+  decode_2byte_int $aPg 3
+}
+
+proc btree_page_nchild {aPg} {
+  binary scan $aPg c b0
+  set ret 0
+  if {$b0==0x02 || $b0==0x05} {
+    set ret [expr [btree_page_ncell $aPg]+1]
+  }
+  return $ret
+}
+
+proc btree_page_child {aPg iChild} {
+  set nChild [btree_page_nchild $aPg]
+  if {$iChild==($nChild-1)} {
+    set ret [decode_4byte_int $aPg 8]
+  } else {
+    set iOff [decode_2byte_int $aPg [expr 12 + $iChild*2]]
+    set ret [decode_4byte_int $aPg $iOff]
+  }
+  return $ret
+}
+
+# Argument aPg is a blob containing an SQLite b-tree page. This command
+# returns, as an integer, the number of bytes of content stored on the
+# page and its overflow pages.
+#
+proc btree_data_on_page {aPg} {
+
+  binary scan $aPg c b0
+
+  switch -- $b0 {
+    2 { ;# Table b-tree interior cell
+      return 0
+    }
+    5 { ;# Index b-tree interior cell
+      set iHdr 12
+    }
+    10 { ;# Index b-tree leaf cell
+      set iHdr 8
+    }
+    13 { ;# Table b-tree leaf cell
+      set iHdr 8
+    }
+
+    default {
+      error "corrupt btree page b0=$b0"
+    }
+  }
+
+  set ret 0
+
+  set nCell [btree_page_ncell $aPg]
+  for {set i 0} {$i<$nCell} {incr i} {
+    set iOff [decode_2byte_int $aPg [expr ($i*2 + $iHdr)]]
+    if {$iHdr==12} {incr iOff 4}
+    set nByte [decode_sqlite_varint $aPg $iOff]
+    incr ret $nByte
+  }
+
+  return $ret
+}
+
+# Argument db is a database handle open on the source db. This command
+# returns a blob of data containing a copy of page number $pgno.
+#
+proc fetch_page {db pgno} {
+  $db one { SELECT data FROM sqlite_dbpage WHERE pgno=$pgno }
+}
+
+# Argument db is a database handle open on the source db. This command
+# attempts to estimate the size of the b-tree with root page iRoot within
+# that database.
+#
+proc btree_size {db iRoot} {
+  # Make a random walk to a leaf...
+  #
+  # In total, how much data is on the leaf - including overflow pages?
+  set nPath 10
+
+  set lnData [list]
+  set lnPage [list]
+
+  set nTotal 0
+
+  for {set i 0} {$i<$nPath} {incr i} {
+    set pgno $iRoot
+    set nLeaf 1
+    set nData 0
+    while {1} {
+      set aPg [fetch_page src $pgno]
+      set nChild [btree_page_nchild $aPg]
+      if {$nChild==0} break
+      set nLeaf [expr $nLeaf * $nChild]
+      set iChild [expr int(rand() * $nChild)]
+      set pgno [btree_page_child $aPg $iChild]
+    }
+
+    set nData [btree_data_on_page $aPg]
+    set nEst [expr $nLeaf * $nData]
+    puts "estimated data size: [expr $nEst/(1024*1024)] MB ($nLeaf leaves)"
+    incr nTotal $nEst
+  }
+
+  set ret [expr $nTotal / $nPath]
+  puts "estimate for $iRoot: [expr $nTotal / $nPath]"
+  return $ret
+}
+
+# Argument db is a database handle open on the source db. This command 
+# attempts to find if the rowid table named $name has an explicit INTEGER
+# PRIMARY KEY column. If it does, then the index of the column is returned.
+# Otherwise, if the table does not have an IPK column, the value returned 
+# is -1.
+#
+proc find_ipk_column {db name} {
+  $db one {
+    SELECT coalesce(cid, -1) FROM pragma_table_info($name)
+    WHERE pk AND (type='integer' COLLATE nocase) AND 1=(
+        SELECT count(*) FROM pragma_table_info($name) WHERE pk
+    );
+  }
+}
+
 # Create the hctree destination database and copy the source schema into
 # it.
 proc create_destination_schema {} {
@@ -72,8 +263,6 @@ proc create_destination_schema {} {
   set nItem 0                     ;# Number of schema items created
 
   sqlite3 src $G(src)
-  sqlite3 dest "file:$G(dest)?hctree=1" -uri 1
-  #sqlite3 dest $G(dest)
 
   dest transaction {
     src eval {
@@ -90,7 +279,6 @@ proc create_destination_schema {} {
   }
 
   src close
-  dest close
 
   return $nItem
 }
@@ -161,30 +349,38 @@ proc plan_migration {} {
   set lInsertStmt  [list]
 
   sqlite3 src $G(src)
-  sqlite3 dest $G(dest)
   load_dbdata src
   
   # This loop runs one iteration for each non-virtual, non-schema table 
   # or index in the database being migrated.
   src eval {
     SELECT 
-        type, name, tbl_name, rootpage, sql,
+        name, 
+        (
+          CASE WHEN name=tbl_name THEN name ELSE tbl_name||'.'||name END
+        ) AS display,
+        rootpage,
         row_number() OVER () AS iImp
-    FROM sqlite_schema WHERE 
-        sql!='' AND 
+    FROM sqlite_schema WHERE type='index' OR (
+        type = 'table' AND
         name NOT LIKE 'sqlite_%' AND 
-        sql NOT LIKE 'create virtual%' AND
-        (type = 'table' OR type = 'index');
+        sql NOT LIKE 'create virtual%'
+    );
   } {
     set bIntkey 0
     set bPrimaryKey 0
 
-    # Set zDisplayname to the name to use for this schema object when printing
-    # messages for users to read. For a regular table, this is just the table
-    # name. For an index "$table_name.$index_name".
-    set zDisplayname $tbl_name
-    if {$name!=$tbl_name} {
-      append zDisplayname ".$name"
+    # Find the depth of the current b-tree. A b-tree that consists of a 
+    # root page only has depth=1. Or, if the leaves are direct children of 
+    # the root page, depth=2. And so on.
+    set nBtreeDepth [btree_depth src $rootpage]
+
+    if {$nBtreeDepth>=3} {
+      # If the b-tree is at least 3 levels deep, then it may be broken up
+      # into multiple INSERT statements. Estimate the total size in bytes 
+      # of all data stored in the b-tree. This will be used to determine
+      # how many INSERT statements to divide the table contents into.
+      set nBtreeSize [btree_size src $rootpage]
     }
   
     # If this is an index or WITHOUT ROWID table, set lCol and lColCollate to 
@@ -215,19 +411,14 @@ proc plan_migration {} {
       set cols [join $lColCollate { ,}]
       set pk [join $lCol { ,}]
       set ct "CREATE TABLE imp$iImp ($cols, PRIMARY KEY($pk)) WITHOUT ROWID;"
-      append ct " -- $zDisplayname"
+      append ct " -- $display"
       set bPrimaryKey 1
     } else {
       # A regular rowid table.
   
       # Find table's INTEGER PRIMARY KEY if it has one. If it does, set $pkcid
-      # to the cid of the column. If it does not, set pkcid to "".
-      set pkcid [src one {
-        SELECT cid FROM pragma_table_info($name)
-        WHERE pk AND 1=(
-          SELECT count(*) FROM pragma_table_info($name) WHERE pk
-        )
-      }]
+      # to the cid of the column. If it does not, set pkcid to -1.
+      set pkcid [find_ipk_column src $name]
   
       src eval {
         SELECT cid FROM pragma_table_info($name)
@@ -243,7 +434,7 @@ proc plan_migration {} {
   
       set cols [join $lColCollate {, }]
       set ct "CREATE TABLE imp$iImp ($cols);"
-      append ct " -- $zDisplayname"
+      append ct " -- $display"
       set bIntkey 1
     }
   
@@ -304,11 +495,12 @@ proc plan_migration {} {
 
         set nKey [expr [llength $lKey] + $nReject]
         if {($nReject*5)>=$nKey} {
-          puts "WARNING: Ignoring $nReject/$nKey keys for $zDisplayname"
+          puts "WARNING: Ignoring $nReject/$nKey keys for $display"
         }
       }
 
-      set nDiv $::NDIV
+      set nDiv [expr $nBtreeSize / ($G(-mbperjob)*1024*1024)]
+      if {$nDiv<=0} {set nDiv 1}
       set nKey [llength $lKey]
       set nRegPerJob [expr (($nKey+1+$nDiv-1) / $nDiv)]
       set lKey2 [list]
@@ -355,6 +547,8 @@ proc plan_migration {} {
   list $lCreateTable $lInsertStmt
 }
 
+sqlite3 dest "file:$G(dest)?hctree=1" -uri 1
+#dest eval { PRAGMA hct_ndbfile = 16; }
 set n [create_destination_schema]
 puts "Created destination schema with $n items..."
 
@@ -363,8 +557,17 @@ set nTab    [llength [lindex $plan 0]]
 set nInsert [llength [lindex $plan 1]]
 puts "Created plan with $nInsert inserts on $nTab imposter tables..."
 
-set nJob $NJOB
+set nJob $G(-jobs)
 if {$nJob>$nInsert} { set nJob $nInsert }
+
+if 0 {
+set fsize [expr 13*1024*1024*1024]
+set msize [expr $fsize / 512]
+puts [time {
+fallocate $G(dest) $fsize
+fallocate $G(dest)-pagemap $msize
+}]
+}
 
 foreach {lCreateTable lInsertStmt} $plan {}
 if 0 {
@@ -385,6 +588,8 @@ if 0 {
   puts "DONE!"
   foreach {k v} [M stats] { puts "$k  $v" }
 }
+
+dest close
 
 
 

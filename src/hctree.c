@@ -1857,6 +1857,9 @@ u64 sqlite3HctBtreeSnapshotId(Btree *pBt){
   return sqlite3HctDbSnapshotId(p->pHctDb);
 }
 
+#define BT_IS_MIGRATE(pBt) (pBt->config.db->bHctMigrate)
+#define CSR_IS_MIGRATE(pCsr) (pCsr->pBtree->config.db->bHctMigrate)
+
 /*
 ** Open a new cursor
 */
@@ -1876,6 +1879,7 @@ int sqlite3HctBtreeCursor(
   assert( p->eTrans!=SQLITE_TXN_NONE );
   assert( p->eTrans!=SQLITE_TXN_ERROR );
   assert( pCur->pHctTreeCsr==0 );
+  assert( BT_IS_MIGRATE(p)==0 || wrFlag );
 
   /* If this is an attempt to open a read/write cursor on either the
   ** sqlite_hct_journal or sqlite_hct_baseline tables, return an error
@@ -2378,6 +2382,7 @@ int sqlite3HctBtreeTableMoveto(
   int *pRes                /* Write search results here */
 ){
   HBtCursor *const pCur = (HBtCursor*)pCursor;
+  assert( CSR_IS_MIGRATE(pCur)==0 );
   if( pCur->isLast && sqlite3HctBtreeIntegerKey(pCursor)<intKey ){
     *pRes = -1;
     return SQLITE_OK;
@@ -2390,6 +2395,7 @@ int sqlite3HctBtreeIndexMoveto(
   int *pRes                /* Write search results here */
 ){
   HBtCursor *const pCur = (HBtCursor*)pCursor;
+  assert( CSR_IS_MIGRATE(pCur)==0 );
   return hctBtreeMovetoUnpacked(pCur, pIdxKey, 0, 0, pRes);
 }
 
@@ -2399,6 +2405,7 @@ void sqlite3HctBtreeCursorDir(BtCursor *pCursor, int eDir){
        || eDir==BTREE_DIR_FORWARD 
        || eDir==BTREE_DIR_REVERSE
   );
+  assert( CSR_IS_MIGRATE(pCur)==0 );
   pCur->eDir = eDir;
   if( pCur->pHctDbCsr ){
     sqlite3HctDbCsrDir(pCur->pHctDbCsr, eDir);

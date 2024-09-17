@@ -1147,6 +1147,68 @@ static int sqlite_migrate_mode(
 }
 
 /*
+** tclcmd: fallocate FILE SIZE
+*/
+static int test_fallocate(
+  ClientData clientData,          /* Unused */
+  Tcl_Interp *interp,             /* The TCL interpreter */
+  int objc,                       /* Number of arguments */
+  Tcl_Obj *CONST objv[]           /* Command arguments */
+){
+  const char *zFile = 0;
+  Tcl_WideInt sz = 0;
+  int fd = -1;
+
+  struct stat sBuf;
+
+  if( objc!=3 ){
+    Tcl_WrongNumArgs(interp, 1, objv, "FILE SIZE");
+    return TCL_ERROR;
+  }
+  zFile = Tcl_GetString(objv[1]);
+  if( Tcl_GetWideIntFromObj(interp, objv[2], &sz) ){
+    return TCL_ERROR;
+  }
+
+  fd = open(zFile, O_CREAT|O_RDWR, 0755);
+  if( fd<0 ){
+    Tcl_SetObjResult(interp, Tcl_NewStringObj("error in open()", -1));
+    return TCL_ERROR;
+  }
+
+  memset(&sBuf, 0, sizeof(sBuf));
+  fstat(fd, &sBuf);
+  if( sBuf.st_size<sz ){
+    int rc = ftruncate(fd, (off_t)sz);
+    sqlite3_int64 iPg = 0;
+
+    if( rc!=0 ){
+      Tcl_SetObjResult(interp, Tcl_NewStringObj("error in ftruncate()", -1));
+      return TCL_ERROR;
+    }
+
+    for(iPg=(sBuf.st_size+4095)/4096; iPg<(sz+4095)/4096; iPg++){
+      lseek(fd, (iPg*4096), SEEK_SET);
+      rc = write(fd, "", 1);
+      if( rc!=1 ){
+        Tcl_SetObjResult(interp, Tcl_NewStringObj("error in write()", -1));
+        return TCL_ERROR;
+      }
+    }
+
+#if 0
+    rc = posix_fallocate(fd, 0, (off_t)sz);
+    if( rc!=0 ){
+      Tcl_SetObjResult(interp, Tcl_NewStringObj("error in fallocate()", -1));
+      return TCL_ERROR;
+    }
+#endif
+  }
+
+  return TCL_OK;
+}
+
+/*
 ** Register commands with the TCL interpreter.
 */
 int SqliteThreadTest_Init(Tcl_Interp *interp){
@@ -1158,7 +1220,8 @@ int SqliteThreadTest_Init(Tcl_Interp *interp){
     { sqlite_thread_test_config, "sqlite_thread_test_config" },
     { sqlite_migrate, "sqlite_migrate" },
     { sqlite_migrate_mode, "sqlite_migrate_mode" },
-    { sqlite_imposter, "sqlite_imposter" }
+    { sqlite_imposter, "sqlite_imposter" },
+    { test_fallocate, "fallocate" }
   };
   int ii;
   for(ii=0; ii<sizeof(aCmd)/sizeof(aCmd[0]); ii++){
