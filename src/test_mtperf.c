@@ -815,7 +815,6 @@ static void *migration_main(void *pArg){
     sqlite3_mutex_leave(p->mutex);
 
     if( zInsert==0 ) break;
-printf("SQL (%d): %s\n", (int)(pJob-p->aJob), zInsert);
     pJob->rc = sqlite3_exec(pJob->db, "BEGIN CONCURRENT", 0, 0, 0);
     if( pJob->rc==SQLITE_OK ){
       pJob->rc = sqlite3_exec(pJob->db, zInsert, 0, 0, 0);
@@ -1208,6 +1207,31 @@ static int test_fallocate(
   return TCL_OK;
 }
 
+int sqlite3_dbdata_init(sqlite3*, char**, const sqlite3_api_routines*);
+
+/*
+** tclcmd: sqlite3_dbdata_init DB
+*/
+static int test_dbdata_init(
+  ClientData clientData,          /* Unused */
+  Tcl_Interp *interp,             /* The TCL interpreter */
+  int objc,                       /* Number of arguments */
+  Tcl_Obj *CONST objv[]           /* Command arguments */
+){
+  sqlite3 *db = 0;
+
+  if( objc!=2 ){
+    Tcl_WrongNumArgs(interp, 1, objv, "DB");
+    return TCL_ERROR;
+  }
+  if( getSqlite3Ptr(interp, objv[1], &db) ){
+    return TCL_ERROR;
+  }
+
+  sqlite3_dbdata_init(db, 0, 0);
+  return TCL_OK;
+}
+
 /*
 ** Register commands with the TCL interpreter.
 */
@@ -1221,12 +1245,14 @@ int SqliteThreadTest_Init(Tcl_Interp *interp){
     { sqlite_migrate, "sqlite_migrate" },
     { sqlite_migrate_mode, "sqlite_migrate_mode" },
     { sqlite_imposter, "sqlite_imposter" },
-    { test_fallocate, "fallocate" }
+    { test_fallocate, "fallocate" },
+    { test_dbdata_init, "sqlite3_dbdata_init" }
   };
   int ii;
   for(ii=0; ii<sizeof(aCmd)/sizeof(aCmd[0]); ii++){
     Tcl_CreateObjCommand(interp, aCmd[ii].zName, aCmd[ii].xProc, 0, 0);
   }
+
   return TCL_OK;
 }
 

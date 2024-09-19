@@ -12,14 +12,18 @@ proc usage {} {
   exit -1
 }
 
-set G(-mbperjob) 128
+# Default values for the two options.
+#
+set G(-mbperjob)  64
 set G(-jobs)      12
 
-# Process any switches
+# Process command line arguments.
+#
 for {set i 0} {$i < [llength $argv]-2} {incr i 2} {
   set x [lindex $argv $i]
   set y [lindex $argv [expr $i+1]]
 
+  # Both extant options require an integer argument.
   if {[string is integer -strict $y]==0} {
     error "option requires integer argument: $x"
   }
@@ -36,42 +40,24 @@ for {set i 0} {$i < [llength $argv]-2} {incr i 2} {
     usage
   }
 }
-
 set G(src)  [lindex $argv end-1]
 set G(dest) [lindex $argv end]
 
+# Number of divider-keys written by this script for each divider block.
+# This needs to be large enough to guarantee all keys cannot be stored
+# on a single page in the destination database.
+set G(divkeys) 512
 
-# Only divide up a b-tree if it is at least this many nodes from root to leaf.
+# Only divide up a b-tree if it is at least this many nodes from root to 
+# leaf. The script reads all children of the root page in order to find
+# divider keys.
 set NMINDEPTH 3
 
-
-set G(divkeys) 1024
-
+# Do not run if the destination database already exists on disk.
+#
 if {[file exists $G(dest)]} {
   puts stderr "$G(dest) already exists"
   exit -1
-}
-
-proc lshuffle {lIn} {
-return $lIn
-  set lInter [list]
-  foreach i $lIn {
-    lappend lInter [list [expr rand()] $i]
-  }
-  set lOut [list]
-  foreach i [lsort -index 0 $lInter] {
-    lappend lOut [lindex $i 1]
-  }
-  set lOut
-}
-
-# Load the dbdata.so extension into the supplied handle.
-#
-proc load_dbdata {db} {
-  $db enable_load_extension 1
-  $db eval {
-    SELECT load_extension('./dbdata');
-  }
 }
 
 # Return the number of pages from root to leaf of the b-tree with root
@@ -118,11 +104,17 @@ proc decode_sqlite_varint {aData iOff} {
   return $ret
 }
 
+# Argument aData is a blob. This command returns the value of the 16-bit 
+# big-endian unsigned integer at offset iOff of the blob.
+#
 proc decode_2byte_int {aData iOff} {
   binary scan [string range $aData $iOff end] S val
   expr {$val & 0xFFFF}
 }
 
+# Argument aData is a blob. This command returns the value of the 32-bit 
+# big-endian unsigned integer at offset iOff of the blob.
+#
 proc decode_4byte_int {aData iOff} {
   binary scan [string range $aData $iOff end] I val
   expr {$val & 0xFFFFFFFF}
@@ -232,12 +224,10 @@ proc btree_size {db iRoot} {
 
     set nData [btree_data_on_page $aPg]
     set nEst [expr $nLeaf * $nData]
-    puts "estimated data size: [expr $nEst/(1024*1024)] MB ($nLeaf leaves)"
     incr nTotal $nEst
   }
 
   set ret [expr $nTotal / $nPath]
-  puts "estimate for $iRoot: [expr $nTotal / $nPath]"
   return $ret
 }
 
@@ -262,8 +252,6 @@ proc create_destination_schema {} {
   global G
   set nItem 0                     ;# Number of schema items created
 
-  sqlite3 src $G(src)
-
   dest transaction {
     src eval {
       SELECT sql, sql LIKE 'create virtual%' AS virtual FROM sqlite_schema 
@@ -277,8 +265,6 @@ proc create_destination_schema {} {
       dest eval $sql
     }
   }
-
-  src close
 
   return $nItem
 }
@@ -322,6 +308,11 @@ proc insert_dividers {ct lInsert} {
   return $lRet
 }
 
+proc max {x y} {
+  if {$x>$y} { return $x }
+  return $y
+}
+
 # Plan the migration. The outputs of this process are as follows:
 #
 #   * A series of CREATE TABLE statements to be used to create
@@ -348,9 +339,6 @@ proc plan_migration {} {
   set lCreateTable [list]
   set lInsertStmt  [list]
 
-  sqlite3 src $G(src)
-  load_dbdata src
-  
   # This loop runs one iteration for each non-virtual, non-schema table 
   # or index in the database being migrated.
   src eval {
@@ -381,6 +369,7 @@ proc plan_migration {} {
       # of all data stored in the b-tree. This will be used to determine
       # how many INSERT statements to divide the table contents into.
       set nBtreeSize [btree_size src $rootpage]
+      puts "estimating size of $display at [expr $nBtreeSize / (1024*1024)]MB"
     }
   
     # If this is an index or WITHOUT ROWID table, set lCol and lColCollate to 
@@ -499,56 +488,80 @@ proc plan_migration {} {
         }
       }
 
+      # Figure out how many ranges to divide the contents of this table
+      # or index into. Set nDiv to this value.
       set nDiv [expr $nBtreeSize / ($G(-mbperjob)*1024*1024)]
       if {$nDiv<=0} {set nDiv 1}
-      set nKey [llength $lKey]
-      set nRegPerJob [expr (($nKey+1+$nDiv-1) / $nDiv)]
+      if {$nDiv>($G(-jobs)*8)} {set nDiv [expr $G(-jobs)*8]}
+
+      # We now have a list of keys $lKey. Select ($nDiv-1) of these keys 
+      # from the list. Have them as evenly spaced as possible.
       set lKey2 [list]
-      for {set ii [expr $nRegPerJob-1]} {$ii < $nKey} {incr ii $nRegPerJob} {
-        lappend lKey2 [lindex $lKey $ii]
+      while {$nDiv>1 && [llength $lKey>0]} {
+        set nRegion [expr [llength $lKey]+1]
+        set nThis [max 1 [expr $nRegion / $nDiv]]
+        lappend lKey2 [lindex $lKey $nThis-1]
+        incr nDiv -1
+        set lKey [lrange $lKey $nThis end]
       }
       set lKey $lKey2
       unset lKey2
     }
   
-    # By this point lKey is set to a list of the divider keys
+    # Set variable zPrefix to an "INSERT INTO ... SELECT" statement to copy
+    # data between the source and destination imposter tables. This is called
+    # a prefix because a WHERE clause may be appended to it.
+    #
+    # Also set zPk to the name of the PK or PK columns. For a rowid table
+    # this is just the name of the rowid column - "rowid". For an index or
+    # WITHOUT ROWID table this is a vector of the imposter table column names
+    # that make up the primary key. e.g. "(c0, c1)".
+    #
     if {$bIntkey} {
       set p "INSERT INTO main.imp$iImp"
       if {$bPrimaryKey} {
-        set prefix "$p SELECT * FROM src.imp$iImp"
+        set zPrefix "$p SELECT * FROM src.imp$iImp"
       } else {
-        set prefix "$p (rowid,[join $lCol ,]) SELECT rowid, * FROM src.imp$iImp"
+        set zPrefix "$p (rowid,[join $lCol ,]) SELECT rowid,* FROM src.imp$iImp"
       }
-      set pk rowid
+      set zPk rowid
     } else {
-      set prefix "INSERT INTO main.imp$iImp SELECT * FROM src.imp$iImp"
-      set pk "([join $lCol ,])"
+      set zPrefix "INSERT INTO main.imp$iImp SELECT * FROM src.imp$iImp"
+      set zPk "([join $lCol ,])"
     }
   
-    set lInsert [list]
     if {[llength $lKey]==0} {
-      lappend lInsert $prefix
+      # There are no divider keys. In this case just use a single INSERT for
+      # all table/index content. 
+      set lInsert [list $zPrefix]
     } else {
-      lappend lInsert "$prefix WHERE $pk < [lindex $lKey 0]"
+      # Build a single INSERT statement to insert the table/index rows from
+      # each range into the destination database.
+      set lInsert [list]
+      lappend lInsert "$zPrefix WHERE $zPk < [lindex $lKey 0]"
       for {set ii 0} {$ii < [llength $lKey]-1} {incr ii} {
         set one [lindex $lKey $ii]
         set two [lindex $lKey $ii+1]
-        lappend lInsert "$prefix WHERE $pk >= $one AND $pk < $two"
+        lappend lInsert "$zPrefix WHERE $zPk >= $one AND $zPk < $two"
       }
-      lappend lInsert "$prefix WHERE $pk >= [lindex $lKey end]"
+      lappend lInsert "$zPrefix WHERE $zPk >= [lindex $lKey end]"
+
+      # Insert divider keys between each range. And add "LIMIT -1 OFFSET <n>"
+      # clauses to each INSERT statement so as to avoid inserting the divider
+      # keys twice.
+      set lInsert [insert_dividers [list $ct $rootpage $destroot] $lInsert]
     } 
 
-    set lInsert [insert_dividers [list $ct $rootpage $destroot] $lInsert]
-    set lInsertStmt [concat $lInsertStmt $lInsert]
+    lappend lInsertStmt {*}$lInsert
   }
-
-  src close
 
   list $lCreateTable $lInsertStmt
 }
 
 sqlite3 dest "file:$G(dest)?hctree=1" -uri 1
-#dest eval { PRAGMA hct_ndbfile = 16; }
+sqlite3 src $G(src)
+sqlite3_dbdata_init src
+  
 set n [create_destination_schema]
 puts "Created destination schema with $n items..."
 
@@ -557,39 +570,31 @@ set nTab    [llength [lindex $plan 0]]
 set nInsert [llength [lindex $plan 1]]
 puts "Created plan with $nInsert inserts on $nTab imposter tables..."
 
-set nJob $G(-jobs)
-if {$nJob>$nInsert} { set nJob $nInsert }
-
-if 0 {
-set fsize [expr 13*1024*1024*1024]
-set msize [expr $fsize / 512]
-puts [time {
-fallocate $G(dest) $fsize
-fallocate $G(dest)-pagemap $msize
-}]
-}
-
 foreach {lCreateTable lInsertStmt} $plan {}
+
 if 0 {
   foreach c $lCreateTable { puts $c }
   foreach ins $lInsertStmt { puts $ins }
 } else {
-  foreach c $lCreateTable { puts "TABLE: [lindex $c 0]" }
-  sqlite_migrate M $G(src) $G(dest) $nJob
+  # foreach c $lCreateTable { puts "TABLE: [lindex $c 0]" }
+  sqlite_migrate M $G(src) $G(dest) $G(-jobs)
   foreach ct $lCreateTable {
     M imposter {*}$ct
   }
-  foreach ins [lshuffle $lInsertStmt] {
+  foreach ins $lInsertStmt {
     M insert $ins
   }
 
-  puts "Running...."
+  puts -nonewline "Running...."
+  flush stdout
   M run
   puts "DONE!"
-  foreach {k v} [M stats] { puts "$k  $v" }
+  # foreach {k v} [M stats] { puts "$k  $v" }
+
+  dest close
+  puts [exec ls -lh {*}[glob $G(dest)*]]
 }
 
-dest close
 
 
 
