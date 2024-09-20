@@ -27,8 +27,20 @@
 
 #define HCT_DEFAULT_PAGESIZE     4096
 
+/*
+** The database file is extended and managed in chunks of
+** HCT_DEFAULT_PAGEPERCHUNK pages. Since pages are normally 4096 bytes, this
+** is 2MiB by default. But, if the file is mmap()ed 2MiB at a time, we 
+** quickly read the system limit for number of mappings (on Linux, this is
+** kernel parameter vm.max_map_count - 65530 by default). So, each mapping 
+** is made for HCT_MMAP_QUANTA times this amount. Since we need mappings for
+** both the database file and page-map, this means we can mmap() a database of:
+**
+**    32765 * 1024*512*4096 bytes
+**
+** or around 64TiB.
+*/
 #define HCT_DEFAULT_PAGEPERCHUNK  512
-
 #define HCT_MMAP_QUANTA          1024
 
 #define HCT_HEADER_PAGESIZE      4096

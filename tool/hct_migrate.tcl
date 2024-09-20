@@ -46,7 +46,7 @@ set G(dest) [lindex $argv end]
 # Number of divider-keys written by this script for each divider block.
 # This needs to be large enough to guarantee all keys cannot be stored
 # on a single page in the destination database.
-set G(divkeys) 512
+set G(divkeys) 10
 
 # Only divide up a b-tree if it is at least this many nodes from root to 
 # leaf. The script reads all children of the root page in order to find
@@ -395,6 +395,11 @@ proc plan_migration {} {
   
     # This block populates the following variables:
     #
+    #   $cols
+    #   $bPrimaryKey
+    #   $bIntkey
+    #   $ct
+    #
     if {[llength $lColCollate]>0} {
       # An index or WITHOUT ROWID table.
       set cols [join $lColCollate { ,}]
@@ -460,11 +465,11 @@ proc plan_migration {} {
         src eval {
           WITH pages(path, pgno) AS (
             VALUES('/', $rootpage)
-            UNION ALL
-            SELECT format('/%03d/', row_number() OVER ()-1), child FROM sqlite_dbptr
-              WHERE pgno = $rootpage
+              UNION ALL
+            SELECT format('/%03d/', row_number() OVER ()-1), child 
+            FROM sqlite_dbptr
+            WHERE pgno = $rootpage
           )
-    
           SELECT 
             format('%s%03d', p.path, d.cell+1) AS path, 
             '(' || group_concat(quote(value), ',') || ')' AS value,

@@ -1658,7 +1658,9 @@ static int hctBtreeMigrateInsert(
       sqlite3HctTreeCsrRoot(pCur->pHctTreeCsr),
       pRec, iKey, 0, nData, aData, &nRetry
   );
-  assert( nRetry==0 );
+  if( nRetry>0 ){
+    rc = SQLITE_ABORT;
+  }
 
   return rc;
 }
@@ -1670,7 +1672,9 @@ static int hctBtreeMigrateCommit(HBtree *p){
   int nRetry = 0;
 
   rc = sqlite3HctDbInsertFlush(p->pHctDb, &nRetry);
-  assert( nRetry==0 );
+  if( nRetry>0 ){
+    rc = SQLITE_ABORT;
+  }
 
   if( rc==SQLITE_OK ){
     rc = sqlite3HctDbValidate(p->config.db, p->pHctDb, &iCid, &bTmapScan);
