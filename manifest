@@ -1,5 +1,5 @@
-C Ensure\sthat\san\serror\sis\sreported\sif\sconflicts\sinterrupt\sa\srun\sof\shct_migrate.tcl.
-D 2024-09-20T16:20:16.050
+C Add\shct_migrate.wiki.
+D 2024-09-22T15:31:48.438
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -43,6 +43,7 @@ F doc/begin_concurrent.md 4bee2c3990d1eb800f1ce3726a911292a8e4b889300b2ffd4b08d3
 F doc/compile-for-windows.md e8635eea9153dcd6a51fd2740666ebc4492b3813cb1ac31cd8e99150df91762d
 F doc/hctree/design.wiki 4199137de3d95d13cd7abf3c72b64f64ef433227651153e4ebd65c3517ac7fe6
 F doc/hctree/fileformat.wiki 75d2923c1ab4953cafc50a6829ea6e857334b76a64b4a910a17a04710b73cccd
+F doc/hctree/hct_migrate.wiki 35227317dd0350002f921f6fb7cef916f134109eb4f3ade6030980a4d208c2bb
 F doc/hctree/hctree_bedrock.md c4280b0fcf7aff496087633a160d821f1d71ef6bff30781286d26fd66af6d476
 F doc/hctree/index.html 63cdbc4f98d0247279cb5ff580e4939c1fae661be16f3fd7bd2e18d26a4e9bcd
 F doc/hctree/mkthreadtest.tcl f51f8b4af2f60231b3e06c6bd63275bd9b0e5b18709da6241251526bbc7107ad
@@ -2331,8 +2332,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P 88f12e5dc5229e0900d5c231ffd7129dce166960f4749f5d2767db51c8c464b1
-R 41084df545809545ca560998fdeddc6f
+P 024fac4daeb954481b7ca3dd661307dedd893f5bf340947383d0283cd674e97e
+R 249eb99ac3e5501d72714d2bbd4fc332
 U dan
-Z 7df703b60b689ea97521584c27d229e4
+Z 49a976b020441983805dc8277e384129
 # Remove this line to create a well-formed Fossil manifest.

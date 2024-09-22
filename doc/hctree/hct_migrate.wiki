@@ -1,0 +1,84 @@
+<title>hct_migrate.tcl</title>
+
+<h1>Overview</h1>
+
+hct_migrate.tcl is a Tcl script used to convert a legacy SQLite database (the
+source db) into an hctree database (the destination db). It uses multiple
+threads in order to minimize runtime.  The script works as follows:
+
+  *  First, the source database schema is copied to the destination db.
+
+  *  Each table or index in the source database is modeled as an 
+     <a href=https://www.sqlite.org/imposter.html>SQLite imposter table</a>
+     in the destination db. This allows each table and index to be
+     written to individually, and in key-order, which is the fastest
+     way to write to any btree-like data structure.
+
+  *  Each source table or index that is not trivially small is divided
+     into N ranges of keys, where N depends on both the size of the table
+     and index, and the number of threads that will be used. The keys to
+     divide these ranges are found by inspecting the top two tiers of
+     the source b-trees directly - using SQLite virtual table 
+     <a href=https://www.sqlite.org/dbpage.html>sqlite_dbpage</i>.
+
+     Small tables and indexes are treated as a table containing a single range
+     of data.
+
+  *  A small number of "divider keys" - keys that separate the ranges of 
+     data in source tables and indexes identified in the previous step -
+     are written to the destination db. 
+
+     This is to reduce the chance of transient page conflicts when multiple
+     threads write to the database later on. These conflicts are more expensive
+     when large numbers of adjacent keys are written by a single transaction,
+     as they are when migrating a database, than they usually are. This is
+     because when such a conflict occurs when writing such a range of keys,
+     the entire range needs to be rewritten.
+
+  *  Multiple threads are used to run SQL statements similar to the following:
+<pre>
+      INSERT INTO dest.imp1 SELECT ... FROM src.tbl WHERE rowid BETWEEN 20000 AND 40000 ORDER BY rowid;
+</pre>
+     where "dest.imp1" is an imposter table in the destination db and "src.tbl"
+     is a table in the source database. There is one such statement for
+     each range of data identified earlier in the process. Once all these
+     statements have completed, the database has been migrated.
+
+<h1>Building and Usage</h1>
+
+To build, obtain hctree code from either the "hctree" or hctree-bedrock"
+branch of this project. Then, to build the "tclsqlite3" binary:
+
+<pre>  
+    ./configure && make tclsqlite3
+</pre>  
+
+and then, to run the script:
+
+<pre>
+  ./tclsqlite3 tool/hct_migrate.tcl -jobs &lt;njob&gt; &lt;path_to_source_db&gt; &lt;path_to_destintation_db&gt;
+</pre>
+
+where &lt;njob&gt; is the number of threads that should be used,
+&lt;path_to_source_db&gt; is the source database and
+&lt;path_to_destintation_db&gt; is the destination database. The destination db
+must not exist when the script is invoked.
+
+<h1>Limitations</h1>
+
+Known limitations are:
+
+  *  The script does not work if there are virtual tables in the source
+     database.
+
+  *  A range of data must begin and end with a key that does not contain
+     a NULL value. This restriction means that indexes containing many
+     NULL values may be divided into fewer ranges than they would otherwise,
+     possibly reducing the number of threads that can be used concurrently.
+
+In one test, a 100GB database was migrated in, on average, almost exactly 150
+seconds using 12 threads. This is not as fast as we would like. However, to
+make a copy of the same database, the single-threaded Linux "cp" command
+required roughly 195 seconds.
+
+
