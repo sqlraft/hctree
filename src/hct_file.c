@@ -674,7 +674,9 @@ static int hctFileFindLogs(
        && memcmp(zFile, zName, nName)==0
        && memcmp(&zFile[nName], "-log-", 5)==0
       ){
-        rc = xLog(pCtx, zFile);
+        char *zFull = sqlite3_mprintf("%s/%s", pServer->zDir, zFile);
+        rc = xLog(pCtx, zFull);
+        sqlite3_free(zFull);
       }
     }
     closedir(d);
