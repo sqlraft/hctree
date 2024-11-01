@@ -73,6 +73,17 @@ do_test 1.8 {
   db eval { COMMIT }
 } {}
 
+do_execsql_test 1.9 {
+  BEGIN CONCURRENT;
+    CREATE TABLE t2(x);
+    INSERT INTO t2(rowid) VALUES( 9_223_372_036_854_775_807 );
+    INSERT INTO t2 DEFAULT VALUES;
+  COMMIT;
+} {}
+
+#-------------------------------------------------------------------------
+
+
 # execsql_pp { SELECT rowid FROM t1 }
 
 finish_test

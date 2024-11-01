@@ -2360,7 +2360,7 @@ static int hctBtreeMovetoUnpacked(
 ){
   int rc = SQLITE_OK;
   int res1 = 0;
-  int res2 = 0;
+  int res2 = -1;
 
   pCur->isLast = 0;
   rc = sqlite3HctTreeCsrSeek(pCur->pHctTreeCsr, pIdxKey, intKey, &res1);
