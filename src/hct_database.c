@@ -2692,9 +2692,13 @@ int sqlite3HctDbCsrSeek(
           case BTREE_DIR_FORWARD:
             *pRes = 1;
             rc = sqlite3HctDbCsrNext(pCsr);
+            *pRes = sqlite3HctDbCsrEof(pCsr) ? -1 : +1;
             break;
           case BTREE_DIR_REVERSE:
             rc = sqlite3HctDbCsrPrev(pCsr);
+            /* Either the cursor is is now at EOF or it points to a key 
+            ** smaller than iKey/pRec. Either way, set (*pRes) to -ve. */
+            *pRes = -1;
             break;
           default: assert( pCsr->eDir==BTREE_DIR_NONE );
             hctDbCsrReset(pCsr);

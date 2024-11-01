@@ -1,5 +1,5 @@
-C Fix\sopening\sand\sreplaying\slog\sfiles\swhen\sdatabase\sis\snot\sin\scwd.
-D 2024-10-31T21:54:00.874
+C Fix\sa\sproblem\swith\sinserting\srecords\swith\srandomly\sselected\srowids\swhen\sthe\sonly\sdata\sin\sthe\stable\sis\sthe\srowid=9,223,372,036,854,775,807\srecord\sand\sone\sor\smore\sdelete\skeys.
+D 2024-11-01T18:04:30.748
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -749,7 +749,7 @@ F src/hctInt.h d443f1ec3a2cb66902f84f94f05f10ad6c164d085538ec7153b96b9a8cbf8848
 F src/hctJrnlInt.h 49add7e14722d06836743f92619d4ba28c9d40317765e055c1f20c4c45d9e936
 F src/hctPManInt.h 63805240f210f76e6f3896408930883538309dc3286d090d4b74b3cedfbaa63b
 F src/hctTMapInt.h bb7edd6282339ee6ac09be383a1f87267d9731f7bd384dd3b94cc7d2a3a99c10
-F src/hct_database.c ed34349df4d659ccaec4a997087270663d7cb589f740ced87d9315d0d5084370
+F src/hct_database.c 8f1e665ea48ac0778f92c7cbeee790acb2d88b5b558140115f1d966caa022056
 F src/hct_file.c 37f6c6e6a1522f076321a4363b383c1a3b2dff54931aa27fa0bc24b4d102e13f
 F src/hct_journal.c 7302bce8a4b394aa2b9c15c327f27f7c6e7d051407f2ea088189452572c04449
 F src/hct_journalhash.c 5af4886fd8c126a96c78278f6e62a8e31de9b8e683b167c487b033a87fabb7a3
@@ -1380,6 +1380,7 @@ F test/hct_recover2.test e786de4ff83901a5d8b431a432cde4316e7baf8c8ca5c1ffaa84d84
 F test/hct_recover3.test f9550908517e4cd965d9e3208f7b5c99adcd7b14c26ac52a55e4a2576f620f00
 F test/hct_reopen1.test bcd17e7dbe8038ea1e54f47ea809a1a7584e0e17d88309bc3e6e701a5db2abe3
 F test/hct_rollback1.test 0d72b3e136081f2218e62da16461337884328264d5b89c3b1633998aa1107ba0
+F test/hct_rowid.test d9f22384bb03e54ab9bc003b4ae16cb49b162d1493403fc9774505264ff0b800
 F test/hct_schema1.test 5786b753d3b6e1a646e749a31ebc086906c84afba4a02d784c3015576b8aa6b6
 F test/hct_simple_rollback.test 951ac7844d53f9ab45d1d36afde9b629a1e97ac7e8091399fcccd462b89c0ecd
 F test/hct_thread1.test 7059d1ba2657e49738d60c59a3f806252da39b89a1547480175b7249f335cd8f
@@ -2332,8 +2333,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P c996ec8608eb188710dda63a3138f0d6a89b2ba928e477e6462263fac27d55ca
-R e14d9a001e506a404834ba8dd7053c0d
+P 042b57ff58f9c15b9d0727da9a1a1b2030a6c266726aacd12d2b50d5fceb5539
+R 6af7e1ce36294594d228dc2ba093156c
 U dan
-Z faf48a02919dac8646b366ae2a1e285e
+Z dd30f72aafb8460b8fab65f63511ccb3
 # Remove this line to create a well-formed Fossil manifest.
