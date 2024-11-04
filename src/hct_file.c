@@ -547,7 +547,7 @@ static int hctFileOpen(int *pRc, const char *zFile, const char *zPost){
 ** Take an exclusive POSIX lock on the file-descriptor passed as the 
 ** second argument.
 */
-static void hctFileLock(int *pRc, int fd){
+static void hctFileLock(int *pRc, int fd, const char *zFile){
   if( *pRc==SQLITE_OK ){
     int res;
     struct flock l;
@@ -557,7 +557,13 @@ static void hctFileLock(int *pRc, int fd){
     l.l_start = HCT_LOCK_OFFSET;
     l.l_len = HCT_LOCK_SIZE;
     res = fcntl(fd, F_SETLK, &l);
-    if( res!=0 ) *pRc = SQLITE_BUSY;
+    if( res!=0 ){
+      fcntl(fd, F_GETLK, &l);
+      sqlite3_log(SQLITE_BUSY, "hct file \"%s\" locked by process %lld",
+          zFile, (i64)l.l_pid
+      );
+      *pRc = SQLITE_BUSY;
+    }
   }
 }
 
@@ -1266,7 +1272,7 @@ static int hctFileServerFind(HctFile *pFile, const char *zFile){
   if( pServer==0 ){
     int fd = hctFileOpen(&rc, zFile, "");
     if( rc==SQLITE_OK ){
-      hctFileLock(&rc, fd);
+      hctFileLock(&rc, fd, zFile);
       pServer = (HctFileServer*)sqlite3HctMalloc(&rc, sizeof(*pServer));
       if( pServer==0 ){
         if( fd ) close(fd);
