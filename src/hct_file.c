@@ -24,6 +24,7 @@
 #include <sys/mman.h>
 
 #include <dirent.h>
+#include <errno.h>
 
 #define HCT_DEFAULT_PAGESIZE     4096
 
@@ -2578,6 +2579,7 @@ int sqlite3HctFileVtabInit(sqlite3 *db){
 }
 
 int sqlite3HctIoerr(int rc){
+  sqlite3_log(rc, "sqlite3HctIoerr() - rc=%d errno=%d\n", rc, (int)errno);
   assert( 0 );
   abort();
   return rc;
