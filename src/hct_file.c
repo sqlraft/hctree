@@ -1294,10 +1294,11 @@ static int hctFileServerFind(HctFile *pFile, const char *zFile){
   if( pServer==0 ){
     int fd = hctFileOpen(&rc, zFile, "");
     if( rc==SQLITE_OK ){
+      assert( fd>0 );
       hctFileLock(&rc, fd, zFile);
       pServer = (HctFileServer*)sqlite3HctMalloc(&rc, sizeof(*pServer));
       if( pServer==0 ){
-        if( fd>0 ) close(fd);
+        close(fd);
       }else{
         int ii;
         for(ii=0; ii<HCT_MAX_NDBFILE; ii++){
@@ -1446,7 +1447,9 @@ void sqlite3HctFileClose(HctFile *pFile){
       }
 
       /* Close the data files and the mapping file. */
-      for(i=0; i<pDel->nFdDb; i++){ close(pDel->aFdDb[i]); }
+      for(i=0; i<pDel->nFdDb; i++){ 
+        if( pDel->aFdDb[i]>0 ) close(pDel->aFdDb[i]); 
+      }
       if( pDel->fdMap ) close(pDel->fdMap);
 
       if( pDel->xJrnlDel ){

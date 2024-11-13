@@ -1,5 +1,5 @@
-C Avoid\susing\sfile\sdescriptor\s0,\s1\sor\s2\swhen\sopening\san\shct\sdatabase\sor\spagemap.
-D 2024-11-13T17:10:32.352
+C Further\sdefensive\scode\sto\savoid\saccidentally\sclosing\sfd\s0.
+D 2024-11-13T17:19:26.980
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md df5091916dbb40e6e9686186587125e1b2ff51f022cc334e886c19a0e9982724
@@ -750,7 +750,7 @@ F src/hctJrnlInt.h 49add7e14722d06836743f92619d4ba28c9d40317765e055c1f20c4c45d9e
 F src/hctPManInt.h 63805240f210f76e6f3896408930883538309dc3286d090d4b74b3cedfbaa63b
 F src/hctTMapInt.h bb7edd6282339ee6ac09be383a1f87267d9731f7bd384dd3b94cc7d2a3a99c10
 F src/hct_database.c 8f1e665ea48ac0778f92c7cbeee790acb2d88b5b558140115f1d966caa022056
-F src/hct_file.c c6772617edd7a02f9afe67122c16e1a1a75dd0178b66da0a007185463f062587
+F src/hct_file.c 24d0bbd3b09a470bc2ab4cca512335c890316bddc1421da9601404c1e24fb6aa
 F src/hct_journal.c 7302bce8a4b394aa2b9c15c327f27f7c6e7d051407f2ea088189452572c04449
 F src/hct_journalhash.c 5af4886fd8c126a96c78278f6e62a8e31de9b8e683b167c487b033a87fabb7a3
 F src/hct_pman.c bb397724fe6bc5547ac5233cc2cf4f6e6074dcebaf89d50927aaab2a2272ebc5
@@ -2333,8 +2333,8 @@ F vsixtest/vsixtest.tcl 6a9a6ab600c25a91a7acc6293828957a386a8a93
 F vsixtest/vsixtest.vcxproj.data 2ed517e100c66dc455b492e1a33350c1b20fbcdc
 F vsixtest/vsixtest.vcxproj.filters 37e51ffedcdb064aad6ff33b6148725226cd608e
 F vsixtest/vsixtest_TemporaryKey.pfx e5b1b036facdb453873e7084e1cae9102ccc67a0
-P de6d01500ee54daab74d946c98868226cbfa28ee917a22592a06600a8fcaa9dd
-R 39a2d5fafa301681ab5f3b66236c66f6
+P e8ae97b9dd28f3e6bb5d24472070360ba3c7e65a0f9006f52528a8d38935fb94
+R 87b6398a5a196c9a45a26d6104e4d26b
 U dan
-Z f60b023bbc63cd01cc3379faae616082
+Z fc7e5b67deb85f6c07f0e91e575a8a22
 # Remove this line to create a well-formed Fossil manifest.
