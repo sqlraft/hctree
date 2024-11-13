@@ -527,16 +527,36 @@ static void hctFilePagemapZeroValue(HctFile *pFile, u32 iSlot){
   }
 }
 
+/*
+** Open a file descriptor for read/write access on the filename formed by
+** concatenating arguments zFile and zPost (e.g. "test.db" and "-pagemap").
+** Return the file descriptor if successful.
+*/
 static int hctFileOpen(int *pRc, const char *zFile, const char *zPost){
-  int fd = 0;
+  int fd = -1;
   if( *pRc==SQLITE_OK ){
     char *zPath = sqlite3_mprintf("%s%s", zFile, zPost);
     if( zPath==0 ){
       *pRc = SQLITE_NOMEM_BKPT;
     }else{
-      fd = open(zPath, O_CREAT|O_RDWR, 0644);
-      if( fd<0 ){
-        *pRc = SQLITE_CANTOPEN_BKPT;
+      while( fd<0 ){
+        fd = open(zPath, O_CREAT|O_RDWR, 0644);
+        if( fd<0 ){
+          *pRc = SQLITE_CANTOPEN_BKPT;
+          break;
+        }
+        if( fd<3 ){
+          /* Do not use any file-descriptor with values 0, 1 or 2. Using 
+          ** these means that stray calls to printf() etc. may corrupt the
+          ** database.  */
+          close(fd);
+          fd = open("/dev/null", O_RDONLY, 0644);
+          if( fd<0 ){
+            *pRc = SQLITE_CANTOPEN_BKPT;
+            break;
+          }
+          fd = -1;
+        }
       }
       sqlite3_free(zPath);
     }
@@ -796,7 +816,8 @@ static void hctFileOpenDataFiles(
 
   if( rc!=SQLITE_OK ){
     for(ii=1; ii<p->nFdDb; ii++){
-      close(p->aFdDb[ii]);
+      if( p->aFdDb[ii]>0 ) close(p->aFdDb[ii]);
+      p->aFdDb[ii] = -1;
     }
     p->nFdDb = 1;
   }
@@ -1276,8 +1297,12 @@ static int hctFileServerFind(HctFile *pFile, const char *zFile){
       hctFileLock(&rc, fd, zFile);
       pServer = (HctFileServer*)sqlite3HctMalloc(&rc, sizeof(*pServer));
       if( pServer==0 ){
-        if( fd ) close(fd);
+        if( fd>0 ) close(fd);
       }else{
+        int ii;
+        for(ii=0; ii<HCT_MAX_NDBFILE; ii++){
+          pServer->aFdDb[ii] = -1;
+        }
         fstat(fd, &sStat);
         pServer->st_dev = (i64)sStat.st_dev;
         pServer->st_ino = (i64)sStat.st_ino;
