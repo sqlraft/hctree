@@ -1,5 +1,5 @@
-C Merge\slatest\schanges\sfrom\sbedrock\sbranch.
-D 2024-11-15T17:44:15.405
+C Merge\stclsqlite3\sbuild\sfix\sfrom\sbranch\shctree.
+D 2024-11-15T18:34:38.272
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md e108e1e69ae8e8a59e93c455654b8ac9356a11720d3345df2a4743e9590fb20d
@@ -64,7 +64,7 @@ F doc/hctree/hctree_bedrock.md c4280b0fcf7aff496087633a160d821f1d71ef6bff3078128
 F doc/hctree/index.html 63cdbc4f98d0247279cb5ff580e4939c1fae661be16f3fd7bd2e18d26a4e9bcd
 F doc/hctree/mkthreadtest.tcl f51f8b4af2f60231b3e06c6bd63275bd9b0e5b18709da6241251526bbc7107ad
 F doc/hctree/pagetest.c 4d5f3aee508e32ff08dfd81b0c79f9ebfad04590f4d9283bd5df7e08674f9112
-F doc/hctree/perftest1.tcl 3fceaee9461a99d087b1f0ec8fe378a1e442ae9f5f20ed90a7f8982a8450a7e6
+F doc/hctree/perftest1.tcl 36625793f84a33d12b19677a5494520d6a30fcc9532d4a332c74cf9423614a54
 F doc/hctree/replication.md 45c7df44a05c9843d70e4cf8bccf001548c1b7e13080491666fee5800caeb5a9
 F doc/hctree/slides.html 763e1e5b40201595f0924a589c8e6e9a7ca3ca593ed0045d372e66e12ece7aef
 F doc/hctree/slides.wiki 4151889c5485fecd8a71d5d0089645998a2db5ebc3360b570f763e59effed60c
@@ -724,7 +724,7 @@ F ext/wasm/tests/opfs/concurrency/test.js d08889a5bb6e61937d0b8cbb78c9efbefbf65a
 F ext/wasm/tests/opfs/concurrency/worker.js 0a8c1a3e6ebb38aabbee24f122693f1fb29d599948915c76906681bb7da1d3d2
 F ext/wasm/wasmfs.make bc8bb227f35d5bd3863a7bd2233437c37472a0d81585979f058f9b9b503bef35
 F magic.txt 5ade0bc977aa135e79e3faaea894d5671b26107cc91e70783aa7dc83f22f3ba0
-F main.mk 500cf7a68d3832283da90ed0f87b61c02141897cd0ce1a527daf52614b557b51
+F main.mk 43587262b08302c7e32e0ed2271249279e83b80d00341f8e9ee8e071125e7f3a
 F mptest/config01.test 3c6adcbc50b991866855f1977ff172eb6d901271
 F mptest/config02.test 4415dfe36c48785f751e16e32c20b077c28ae504
 F mptest/crash01.test 61e61469e257df0850df4293d7d4d6c2af301421
@@ -2336,8 +2336,8 @@ F tool/version-info.c 3b36468a90faf1bbd59c65fd0eb66522d9f941eedd364fabccd7227350
 F tool/warnings-clang.sh bbf6a1e685e534c92ec2bfba5b1745f34fb6f0bc2a362850723a9ee87c1b31a7
 F tool/warnings.sh 49a486c5069de041aedcbde4de178293e0463ae9918ecad7539eedf0ec77a139
 F tool/win/sqlite.vsix deb315d026cc8400325c5863eef847784a219a2f
-P 734ae341420b0a8731c4cfbd770230c7fee1339306d39fca54ce75cbc1931a61 86a305b9005b178c56adfdd93a4504309a83453fbd40731f4e4df7e5340265af
-R 7f276f9d819ba94468daff00f1e5a4d0
+P 135adb1eb8c6ce4cd24ceb1e5af76d9d1b3eb01226df4357dd878464fdc7e277 291014b1e3e36d0bdae4929af975c820c9f1d085c804a87884390e3b2e2366a5
+R 49cedcc08c9909650f1df564c8be114a
 U dan
-Z e8dd06f9dc993d3580794ab74387fff0
+Z 63d26aef67a28c45a10c8ad0b2136d6e
 # Remove this line to create a well-formed Fossil manifest.
