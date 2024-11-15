@@ -28,6 +28,8 @@
 # define TCLSH 1
 #endif
 
+#define SQLITE_ENABLE_PREUPDATE_HOOK 1
+
 /*
 ** If requested, include the SQLite compiler options file for MSVC.
 */
