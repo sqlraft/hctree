@@ -116,6 +116,8 @@ void sqlite3_hct_journal_hashentry(
   sqlite3_int64 iSchemaCid
 );
 
+void sqlite3_hct_migrate_mode(sqlite3 *db, int bActivate);
+
 #ifdef __cplusplus
 }
 #endif

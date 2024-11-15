@@ -24,10 +24,25 @@
 #include <sys/mman.h>
 
 #include <dirent.h>
+#include <errno.h>
 
 #define HCT_DEFAULT_PAGESIZE     4096
 
-#define HCT_DEFAULT_PAGEPERCHUNK 512
+/*
+** The database file is extended and managed in chunks of
+** HCT_DEFAULT_PAGEPERCHUNK pages. Since pages are normally 4096 bytes, this
+** is 2MiB by default. But, if the file is mmap()ed 2MiB at a time, we 
+** quickly read the system limit for number of mappings (on Linux, this is
+** kernel parameter vm.max_map_count - 65530 by default). So, each mapping 
+** is made for HCT_MMAP_QUANTA times this amount. Since we need mappings for
+** both the database file and page-map, this means we can mmap() a database of:
+**
+**    32765 * 1024*512*4096 bytes
+**
+** or around 64TiB.
+*/
+#define HCT_DEFAULT_PAGEPERCHUNK  512
+#define HCT_MMAP_QUANTA          1024
 
 #define HCT_HEADER_PAGESIZE      4096
 
@@ -512,16 +527,36 @@ static void hctFilePagemapZeroValue(HctFile *pFile, u32 iSlot){
   }
 }
 
+/*
+** Open a file descriptor for read/write access on the filename formed by
+** concatenating arguments zFile and zPost (e.g. "test.db" and "-pagemap").
+** Return the file descriptor if successful.
+*/
 static int hctFileOpen(int *pRc, const char *zFile, const char *zPost){
-  int fd = 0;
+  int fd = -1;
   if( *pRc==SQLITE_OK ){
     char *zPath = sqlite3_mprintf("%s%s", zFile, zPost);
     if( zPath==0 ){
       *pRc = SQLITE_NOMEM_BKPT;
     }else{
-      fd = open(zPath, O_CREAT|O_RDWR, 0644);
-      if( fd<0 ){
-        *pRc = SQLITE_CANTOPEN_BKPT;
+      while( fd<0 ){
+        fd = open(zPath, O_CREAT|O_RDWR, 0644);
+        if( fd<0 ){
+          *pRc = SQLITE_CANTOPEN_BKPT;
+          break;
+        }
+        if( fd<3 ){
+          /* Do not use any file-descriptor with values 0, 1 or 2. Using 
+          ** these means that stray calls to printf() etc. may corrupt the
+          ** database.  */
+          close(fd);
+          fd = open("/dev/null", O_RDONLY, 0644);
+          if( fd<0 ){
+            *pRc = SQLITE_CANTOPEN_BKPT;
+            break;
+          }
+          fd = -1;
+        }
       }
       sqlite3_free(zPath);
     }
@@ -533,7 +568,7 @@ static int hctFileOpen(int *pRc, const char *zFile, const char *zPost){
 ** Take an exclusive POSIX lock on the file-descriptor passed as the 
 ** second argument.
 */
-static void hctFileLock(int *pRc, int fd){
+static void hctFileLock(int *pRc, int fd, const char *zFile){
   if( *pRc==SQLITE_OK ){
     int res;
     struct flock l;
@@ -543,7 +578,13 @@ static void hctFileLock(int *pRc, int fd){
     l.l_start = HCT_LOCK_OFFSET;
     l.l_len = HCT_LOCK_SIZE;
     res = fcntl(fd, F_SETLK, &l);
-    if( res!=0 ) *pRc = SQLITE_BUSY;
+    if( res!=0 ){
+      fcntl(fd, F_GETLK, &l);
+      sqlite3_log(SQLITE_BUSY, "hct file \"%s\" locked by process %lld",
+          zFile, (i64)l.l_pid
+      );
+      *pRc = SQLITE_BUSY;
+    }
   }
 }
 
@@ -559,7 +600,7 @@ static i64 hctFileSize(int *pRc, int fd){
   if( *pRc==SQLITE_OK ){
     struct stat sStat;
     if( fstat(fd, &sStat) ){
-      *pRc = SQLITE_IOERR_FSTAT;
+      *pRc = sqlite3HctIoerr(SQLITE_IOERR_FSTAT);
     }else{
       szRet = (i64)(sStat.st_size);
     }
@@ -571,7 +612,7 @@ static int hctFileTruncate(int *pRc, int fd, i64 sz){
   if( *pRc==SQLITE_OK ){
     int res = ftruncate(fd, (off_t)sz);
     if( res ){
-      *pRc = SQLITE_IOERR_TRUNCATE;
+      *pRc = sqlite3HctIoerr(SQLITE_IOERR_TRUNCATE);
     }
   }
   return *pRc;
@@ -601,7 +642,7 @@ static void *hctFileMmap(int *pRc, int fd, i64 nByte, i64 iOff, int bRO){
     pRet = mmap(0, nByte, flags, MAP_SHARED, fd, iOff);
     if( pRet==MAP_FAILED ){
       pRet = 0;
-      *pRc = SQLITE_IOERR_MMAP;
+      *pRc = sqlite3HctIoerr(SQLITE_IOERR_MMAP);
     }
   }
   return pRet;
@@ -660,7 +701,9 @@ static int hctFileFindLogs(
        && memcmp(zFile, zName, nName)==0
        && memcmp(&zFile[nName], "-log-", 5)==0
       ){
-        rc = xLog(pCtx, zFile);
+        char *zFull = sqlite3_mprintf("%s/%s", pServer->zDir, zFile);
+        rc = xLog(pCtx, zFull);
+        sqlite3_free(zFull);
       }
     }
     closedir(d);
@@ -716,22 +759,44 @@ static void hctFileReadHdr(
 static void *hctFileMmapDbChunk(
   int *pRc,
   HctFileServer *p,
+  HctMapping *pMap,
   int iChunk
 ){
+  void *pRet = 0;
   i64 szChunk = p->nPagePerChunk * p->szPage;
   int iFd = iChunk % p->nFdDb;
-  i64 iOff = szChunk * (iChunk / p->nFdDb);
+  int iChunkOfFile = (iChunk / p->nFdDb);
 
-  return hctFileMmap(pRc, p->aFdDb[iFd], szChunk, iOff, p->bReadOnlyMap);
+  if( (iChunkOfFile % HCT_MMAP_QUANTA)==0 ){
+    i64 iOff = szChunk * iChunkOfFile;
+    pRet = hctFileMmap(
+        pRc, p->aFdDb[iFd], szChunk*HCT_MMAP_QUANTA, iOff, p->bReadOnlyMap
+    );
+  }else{
+    pRet = (void*)(((u8*)pMap->aChunk[iChunk - p->nFdDb].pData) + szChunk);
+  }
+
+  return pRet;
 }
 
 static void *hctFileMmapPagemapChunk(
   int *pRc,
   HctFileServer *p,
+  HctMapping *pMap,
   int iChunk
 ){
+  void *pRet = 0;
   i64 szChunk = p->nPagePerChunk * sizeof(u64);
-  return hctFileMmap(pRc, p->fdMap, szChunk, (szChunk*iChunk), 0);
+
+  if( (iChunk % HCT_MMAP_QUANTA)==0 ){
+    pRet = hctFileMmap(
+        pRc, p->fdMap, szChunk*HCT_MMAP_QUANTA, (szChunk*iChunk), 0
+    );
+  }else{
+    pRet = (void*)(((u8*)(pMap->aChunk[iChunk-1].aMap)) + szChunk);
+  }
+
+  return pRet;
 }
 
 static void hctFileOpenDataFiles(
@@ -751,11 +816,16 @@ static void hctFileOpenDataFiles(
 
   if( rc!=SQLITE_OK ){
     for(ii=1; ii<p->nFdDb; ii++){
-      close(p->aFdDb[ii]);
+      if( p->aFdDb[ii]>0 ) close(p->aFdDb[ii]);
+      p->aFdDb[ii] = -1;
     }
     p->nFdDb = 1;
   }
   *pRc = rc;
+}
+
+static i64 round_up(i64 iVal, i64 nQuanta){
+  return ((iVal + nQuanta - 1) / nQuanta) * nQuanta;
 }
 
 static void hctFileAllocateMapping(
@@ -779,7 +849,8 @@ static void hctFileAllocateMapping(
 
   /* Map all chunks of the pagemap file using a single call to mmap() */
   {
-    u8 *pMap = (u8*)hctFileMmap(&rc, p->fdMap, nChunk*szChunkPagemap,0,0);
+    int nAll = round_up(nChunk, HCT_MMAP_QUANTA);
+    u8 *pMap = (u8*)hctFileMmap(&rc, p->fdMap, nAll*szChunkPagemap,0,0);
     for(i=0; rc==SQLITE_OK && i<nChunk; i++){
       pMapping->aChunk[i].aMap = (u64*)&pMap[i * szChunkPagemap];
     }
@@ -788,7 +859,7 @@ static void hctFileAllocateMapping(
   /* Map all chunks of the data files. One call to mmap() for each file. */
   for(iFd=0; iFd<p->nFdDb && rc==SQLITE_OK; iFd++){
     int nFileChunk = (nChunk / p->nFdDb) + (iFd < (nChunk % p->nFdDb));
-    i64 n = (i64)nFileChunk * szChunkData;
+    i64 n = round_up(nFileChunk, HCT_MMAP_QUANTA) * szChunkData;
     u8 *pMap = (u8*)hctFileMmap(&rc, p->aFdDb[iFd], n, 0, p->bReadOnlyMap);
     for(i=0; i<nFileChunk && rc==SQLITE_OK; i++){
       int iChunk = iFd + i*p->nFdDb;
@@ -1119,6 +1190,12 @@ int sqlite3HctFileIsNewDb(HctFile *pFile){
   return bRet;
 }
 
+static sqlite3_int64 current_time(){
+  struct timeval sNow;
+  gettimeofday(&sNow, 0);
+  return (sqlite3_int64)sNow.tv_sec*1000 + sNow.tv_usec/1000;
+}
+
 static void hctFileEnterServerMutex(HctFile *pFile){
   sqlite3_mutex *pMutex = pFile->pServer->pMutex;
   pFile->stats.nMutex++;
@@ -1154,14 +1231,16 @@ static int hctFileGrowMapping(HctFile *pFile, int nChunk){
         hctFileTruncate(&rc, p->fdMap, nChunk*szChunkMap);
 
         for(i=nOld; i<nChunk; i++){
+          HctMappingChunk *pChunk = &pNew->aChunk[i];
+
           /* Grow the data file */
           int iFd = (i % p->nFdDb);
           i64 sz = ((i / p->nFdDb) + 1) * szChunkData;
           hctFileTruncate(&rc, p->aFdDb[iFd], sz);
 
           /* Map the new chunks of both the data and mapping files. */
-          pNew->aChunk[i].aMap = hctFileMmapPagemapChunk(&rc, p, i);
-          pNew->aChunk[i].pData = hctFileMmapDbChunk(&rc, p, i);
+          pChunk->aMap = hctFileMmapPagemapChunk(&rc, p, pNew, i);
+          pChunk->pData = hctFileMmapDbChunk(&rc, p, pNew, i);
         }
 
         if( rc==SQLITE_OK ){
@@ -1215,11 +1294,16 @@ static int hctFileServerFind(HctFile *pFile, const char *zFile){
   if( pServer==0 ){
     int fd = hctFileOpen(&rc, zFile, "");
     if( rc==SQLITE_OK ){
-      hctFileLock(&rc, fd);
+      assert( fd>0 );
+      hctFileLock(&rc, fd, zFile);
       pServer = (HctFileServer*)sqlite3HctMalloc(&rc, sizeof(*pServer));
       if( pServer==0 ){
-        if( fd ) close(fd);
+        close(fd);
       }else{
+        int ii;
+        for(ii=0; ii<HCT_MAX_NDBFILE; ii++){
+          pServer->aFdDb[ii] = -1;
+        }
         fstat(fd, &sStat);
         pServer->st_dev = (i64)sStat.st_dev;
         pServer->st_ino = (i64)sStat.st_ino;
@@ -1363,7 +1447,9 @@ void sqlite3HctFileClose(HctFile *pFile){
       }
 
       /* Close the data files and the mapping file. */
-      for(i=0; i<pDel->nFdDb; i++){ close(pDel->aFdDb[i]); }
+      for(i=0; i<pDel->nFdDb; i++){ 
+        if( pDel->aFdDb[i]>0 ) close(pDel->aFdDb[i]); 
+      }
       if( pDel->fdMap ) close(pDel->fdMap);
 
       if( pDel->xJrnlDel ){
@@ -1619,7 +1705,7 @@ static int hctFilePageFlush(HctFilePage *pPg){
 
     if( rc==SQLITE_OK ){
       if( !hctFilePagemapSetLogical(pPg->pFile, pPg->iPg, iOld, pPg->iNewPg) ){
-        rc = SQLITE_LOCKED_ERR(pPg->iPg);
+        rc = SQLITE_LOCKED_ERR(pPg->iPg, "flush");
       }else{
         if( iOld ){
           u64 iTid = pPg->pFile->iCurrentTid;
@@ -1664,7 +1750,7 @@ int sqlite3HctFilePageEvict(HctFilePage *pPg, int bIrrevocable){
   DEBUG_SLOT_VALUE(pPg->pFile, pPg->iPg);
 
   ret = hctFileSetEvicted(pPg->pFile, pPg->iPg, pPg->iOldPg, bIrrevocable);
-  ret = (ret ? SQLITE_OK : SQLITE_LOCKED_ERR(pPg->iPg));
+  ret = (ret ? SQLITE_OK : SQLITE_LOCKED_ERR(pPg->iPg, "evict"));
 
   DEBUG_PRINTF(" rc=%d final=", ret);
   DEBUG_SLOT_VALUE(pPg->pFile, pPg->iPg);
@@ -2520,4 +2606,10 @@ int sqlite3HctFileVtabInit(sqlite3 *db){
   return sqlite3_create_module(db, "hctpgmap", &pgmapModule, 0);
 }
 
+int sqlite3HctIoerr(int rc){
+  sqlite3_log(rc, "sqlite3HctIoerr() - rc=%d errno=%d\n", rc, (int)errno);
+  assert( 0 );
+  abort();
+  return rc;
+}
 

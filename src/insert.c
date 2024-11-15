@@ -1564,6 +1564,7 @@ void sqlite3Insert(
       ** VdbeCursor.seekResult variable, disabling the OPFLAG_USESEEKRESULT
       ** functionality.  */
       bUseSeek = (isReplace==0 || !sqlite3VdbeHasSubProgram(v));
+      if( db->bHctMigrate ) bUseSeek = 0;
       sqlite3CompleteInsertion(pParse, pTab, iDataCur, iIdxCur,
           regIns, aRegIdx, 0, appendFlag, bUseSeek
       );
@@ -2273,7 +2274,11 @@ void sqlite3GenerateConstraintChecks(
     ** the following conflict logic if it does not. */
     VdbeNoopComment((v, "uniqueness check for ROWID"));
     sqlite3VdbeVerifyAbortable(v, onError);
-    sqlite3VdbeAddOp3(v, OP_NotExists, iDataCur, addrRowidOk, regNewData);
+    if( db->bHctMigrate ){
+      sqlite3VdbeAddOp2(v, OP_Goto, 0, addrRowidOk);
+    }else{
+      sqlite3VdbeAddOp3(v, OP_NotExists, iDataCur, addrRowidOk, regNewData);
+    }
     VdbeCoverage(v);
 
     switch( onError ){
@@ -2489,9 +2494,13 @@ void sqlite3GenerateConstraintChecks(
 
     /* Check to see if the new index entry will be unique */
     sqlite3VdbeVerifyAbortable(v, onError);
-    addrConflictCk =
-      sqlite3VdbeAddOp4Int(v, OP_NoConflict, iThisCur, addrUniqueOk,
-                           regIdx, pIdx->nKeyCol); VdbeCoverage(v);
+    if( db->bHctMigrate ){
+      addrConflictCk = sqlite3VdbeAddOp2(v, OP_Goto, 0, addrUniqueOk);
+    }else{
+      addrConflictCk =
+        sqlite3VdbeAddOp4Int(v, OP_NoConflict, iThisCur, addrUniqueOk,
+            regIdx, pIdx->nKeyCol); VdbeCoverage(v);
+    }
 
     /* Generate code to handle collisions */
     regR = pIdx==pPk ? regIdx : sqlite3GetTempRange(pParse, nPkField);

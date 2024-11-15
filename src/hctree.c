@@ -28,6 +28,7 @@ typedef struct BtSchemaOp BtSchemaOp;
 typedef struct HBtree HBtree;
 typedef struct HBtCursor HBtCursor;
 typedef struct HctLogFile HctLogFile;
+typedef struct HctMainStats HctMainStats;
 
 
 /*
@@ -40,6 +41,12 @@ struct HctLogFile {
   int nBuf;                       /* Size of aBuf[] in bytes */
   i64 iFileOff;                   /* Current write offset in file */
   int iBufferOff;                 /* Current write offset in buffer */
+};
+
+struct HctMainStats {
+  i64 nRetry;
+  i64 nRetryKey;
+  i64 nKeyOp;
 };
 
 /*
@@ -61,7 +68,6 @@ struct HctLogFile {
 struct HBtree {
   BtreeMethods *pMethods;
 
-  sqlite3 *db;
   HctConfig config;               /* Configuration for this connection */
   HctTree *pHctTree;              /* In-memory part of database */
   HctDatabase *pHctDb;            /* On-disk part of db, if any */
@@ -88,6 +94,7 @@ struct HBtree {
   HctJournal *pHctJrnl;
 
   Pager *pFakePager;
+  HctMainStats stats;
 };
 
 /* 
@@ -247,7 +254,7 @@ struct RecoverCsr {
 static void hctRecoverCursorClose(HBtree *p, RecoverCsr *pCsr){
   sqlite3HctDbCsrClose(pCsr->pCsr);
   sqlite3HctTreeCsrClose(pCsr->pTreeCsr);
-  sqlite3DbFree(p->db, pCsr->pRec);
+  sqlite3DbFree(p->config.db, pCsr->pRec);
   sqlite3KeyInfoUnref(pCsr->pKeyInfo);
   memset(pCsr, 0, sizeof(RecoverCsr));
 }
@@ -268,7 +275,7 @@ static int hctFindKeyInfo(HBtree *p, u32 iRoot, KeyInfo **ppKeyInfo){
         Parse sParse;
         Parse *pSave = 0;
         memset(&sParse, 0, sizeof(sParse));
-        sParse.db = p->db;
+        sParse.db = p->config.db;
         pSave = sParse.db->pParse;
         sParse.db->pParse = &sParse;
         pKeyInfo = sqlite3KeyInfoOfIndex(&sParse, pIdx);
@@ -411,7 +418,7 @@ static int hctLogReaderOpen(const char *zFile, HctLogReader *pReader){
   memset(pReader, 0, sizeof(*pReader));
   fd = open(zFile, O_RDONLY);
   if( fd<0 ){
-    rc = SQLITE_IOERR;
+    rc = sqlite3HctIoerr(SQLITE_IOERR);
   }else{
     struct stat sStat;
 
@@ -422,7 +429,7 @@ static int hctLogReaderOpen(const char *zFile, HctLogReader *pReader){
     if( pReader->aFile ){
       int nRead = read(fd, pReader->aFile, pReader->nFile);
       if( nRead!=pReader->nFile ){
-        rc = SQLITE_IOERR;
+        rc = sqlite3HctIoerr(SQLITE_IOERR);
       }else{
         memcpy(&pReader->iTid, pReader->aFile, sizeof(i64));
         pReader->iFile = sizeof(i64);
@@ -575,7 +582,7 @@ static int hctLogFileWrite(HctLogFile *pLog, const void *aData, int nData){
     }
 
     if( write(pLog->fd, pLog->aBuf, pLog->nBuf)!=pLog->nBuf ){
-      return SQLITE_IOERR_WRITE;
+      return sqlite3HctIoerr(SQLITE_IOERR_WRITE);
     }
     pLog->iFileOff += pLog->nBuf;
     pLog->iBufferOff = 0;
@@ -596,7 +603,7 @@ static void hctLogFileRestart(HctLogFile *pLog){
 static int hctLogFileWriteTid(HctLogFile *pLog, u64 iTid){
   lseek(pLog->fd, 0, SEEK_SET);
   if( write(pLog->fd, &iTid, sizeof(iTid))!=sizeof(iTid) ){
-    return SQLITE_IOERR_WRITE;
+    return sqlite3HctIoerr(SQLITE_IOERR_WRITE);
   }
   return SQLITE_OK;
 }
@@ -614,7 +621,7 @@ static int hctLogFileFinish(HctLogFile *pLog, u64 iTid){
     if( rc==SQLITE_OK ){
       assert( pLog->iBufferOff>0 );
       if( write(pLog->fd, pLog->aBuf, pLog->iBufferOff)!=pLog->iBufferOff ){
-        rc = SQLITE_IOERR_WRITE;
+        rc = sqlite3HctIoerr(SQLITE_IOERR_WRITE);
       }
     }
   }
@@ -667,7 +674,7 @@ int sqlite3HctBtreeOpen(
   if( pNew ){
     memset(pNew, 0, sizeof(HBtree));
     pNew->iNextRoot = 2;
-    pNew->db = db;
+    pNew->config.db = db;
     pNew->openFlags = flags;
     pNew->config.nDbFile = HCT_DEFAULT_NDBFILE;
     pNew->config.nPageSet = HCT_DEFAULT_NPAGESET;
@@ -1141,7 +1148,9 @@ static int hctRecoverFreeList(HBtree *p){
   ** ctx.aPg[] array.  */
   if( p->pHctJrnl ){
     void *pCtx = (void*)&ctx;
-    rc = sqlite3HctJrnlSavePhysical(p->db, p->pHctJrnl, hctSavePhysical, pCtx);
+    rc = sqlite3HctJrnlSavePhysical(
+        p->config.db, p->pHctJrnl, hctSavePhysical, pCtx
+    );
   }
 
   /* Also scan any log files, adding the list of physical pages that must
@@ -1232,11 +1241,11 @@ int sqlite3HctBtreeBeginTrans(Btree *pBt, int wrflag, int *pSchemaVersion){
 
   if( rc==SQLITE_OK && pSchemaVersion ){
     sqlite3HctBtreeGetMeta((Btree*)p, 1, (u32*)pSchemaVersion);
-    sqlite3HctDbTransIsConcurrent(p->pHctDb, p->db->bConcurrent);
+    sqlite3HctDbTransIsConcurrent(p->pHctDb, p->config.db->bConcurrent);
   }
 
   if( rc==SQLITE_OK && wrflag ){
-    rc = sqlite3HctTreeBegin(p->pHctTree, 1 + p->db->nSavepoint);
+    rc = sqlite3HctTreeBegin(p->pHctTree, 1 + p->config.db->nSavepoint);
   }
   if( rc==SQLITE_OK && p->eTrans<req ){
     p->eTrans = req;
@@ -1260,7 +1269,7 @@ int sqlite3HctBtreeSchemaLoaded(Btree *pBt){
     }
   }
   if( rc==SQLITE_OK && p->pHctJrnl ){
-    sqlite3HctJournalFixSchema(p->pHctJrnl, p->db, p->pSchema);
+    sqlite3HctJournalFixSchema(p->pHctJrnl, p->config.db, p->pSchema);
   }
   return rc;
 }
@@ -1345,6 +1354,7 @@ static int btreeFlushOneToDisk(void *pCtx, u32 iRoot, KeyInfo *pKeyInfo){
       rc = sqlite3HctDbInsert(pDb, iRoot, pRec, iKey, bDel,nData,aData,&nRetry);
       p->nRollbackOp += (iRollbackDir * (1 - nRetry));
       if( rc ) break;
+      p->stats.nKeyOp++;
 
       if( pFC->bRollback && p->nRollbackOp==0 ){
         assert( nRetry==0 );
@@ -1373,6 +1383,9 @@ static int btreeFlushOneToDisk(void *pCtx, u32 iRoot, KeyInfo *pKeyInfo){
             break;
           }
         }
+      }else{
+        p->stats.nRetry++;
+        p->stats.nRetryKey += nRetry;
       }
       for(ii=1; ii<nRetry; ii++){
         assert( sqlite3HctTreeCsrEof(pCsr)==0 );
@@ -1407,7 +1420,7 @@ static int btreeLogIndex(
    || hctLogFileWrite(pLog, &nData, sizeof(nData))
    || hctLogFileWrite(pLog, aData, nData)
   ){
-    return SQLITE_IOERR_WRITE;
+    return sqlite3HctIoerr(SQLITE_IOERR_WRITE);
   }
   return SQLITE_OK;
 }
@@ -1494,7 +1507,9 @@ static int btreeFlushToDisk(HBtree *p){
 
   /* Write a log file for this transaction. The TID field is still set
   ** to zero at this point.  */
-  rc = btreeWriteLog(p);
+  if( p->config.db->bHctMigrate==0 ){
+    rc = btreeWriteLog(p);
+  }
 
   if( rc==SQLITE_OK ){
     /* Obtain the TID for this transaction.  */
@@ -1504,10 +1519,12 @@ static int btreeFlushToDisk(HBtree *p){
     }
 
     /* Invoke the SQLITE_TESTCTRL_HCT_MTCOMMIT hook, if applicable */
-    if( p->db->xMtCommit ) p->db->xMtCommit(p->db->pMtCommitCtx, 0);
+    if( p->config.db->xMtCommit ){
+      p->config.db->xMtCommit(p->config.db->pMtCommitCtx, 0);
+    }
 
     assert( iTid>0 );
-    rc = hctLogFileFinish(p->pLog, iTid);
+    if( p->pLog ) rc = hctLogFileFinish(p->pLog, iTid);
   }
 
   /* Initialize the root pages of any new tables or indexes created by this 
@@ -1546,17 +1563,19 @@ static int btreeFlushToDisk(HBtree *p){
   ** write/write conflict, allocate a CID and validate the transaction. */
   if( rc==SQLITE_OK ){
     /* Invoke the SQLITE_TESTCTRL_HCT_MTCOMMIT hook, if applicable */
-    if( p->db->xMtCommit ) p->db->xMtCommit(p->db->pMtCommitCtx, 1);
+    if( p->config.db->xMtCommit ){
+      p->config.db->xMtCommit(p->config.db->pMtCommitCtx, 1);
+    }
 
     /* Validate the transaction */
-    rc = sqlite3HctDbValidate(p->db, p->pHctDb, &iCid, &bTmapScan);
+    rc = sqlite3HctDbValidate(p->config.db, p->pHctDb, &iCid, &bTmapScan);
 
     /* If validation passed and this database is configured for replication,
     ** write the journal entry and invoke the custom validation hook */
     if( rc==SQLITE_OK && p->pHctJrnl ){
       rc = sqlite3HctJrnlLog(
         p->pHctJrnl,
-        p->db,
+        p->config.db,
         (Schema*)p->pSchema,
         iCid, iTid, &bCustomValid
       );
@@ -1571,7 +1590,7 @@ static int btreeFlushToDisk(HBtree *p){
     if( rc==SQLITE_DONE ) rc = SQLITE_OK;
     if( iCid>0 && p->pHctJrnl ){
       rc = sqlite3HctJrnlWriteEmpty(p->pHctJrnl, iCid, iTid, 
-          (bCustomValid ? 0 : p->db)
+          (bCustomValid ? 0 : p->config.db)
       );
     }
   }
@@ -1588,7 +1607,7 @@ static int btreeFlushToDisk(HBtree *p){
 
   /* Zero the log file and set the entry in the transaction-map to 
   ** finish the transaction. */
-  if( rc==SQLITE_OK ){
+  if( rc==SQLITE_OK && p->pLog ){
     rc = btreeLogFileZero(p->pLog);
   }
   if( rc==SQLITE_OK ){
@@ -1599,12 +1618,15 @@ static int btreeFlushToDisk(HBtree *p){
     sqlite3HctDbTMapScan(p->pHctDb);
   }
 
-  sqlite3HctJrnlInvokeHook(p->pHctJrnl, p->db);
+  sqlite3HctJrnlInvokeHook(p->pHctJrnl, p->config.db);
   return (rc==SQLITE_OK ? rcok : rc);
 }
 
 static void hctEndTransaction(HBtree *p){
-  if( p->eTrans>SQLITE_TXN_NONE && p->pCsrList==0 && p->db->nVdbeRead<=1 ){
+  if( p->eTrans>SQLITE_TXN_NONE 
+   && p->pCsrList==0 
+   && p->config.db->nVdbeRead<=1 
+  ){
     if( p->pHctDb ){
       sqlite3HctDbEndRead(p->pHctDb);
     }
@@ -1612,6 +1634,65 @@ static void hctEndTransaction(HBtree *p){
     p->eMetaState = HCT_METASTATE_NONE;
   }
 }
+
+
+static int hctBtreeMigrateInsert(
+  HBtCursor *pCur,
+  UnpackedRecord *pRec,
+  i64 iKey,
+  int nData,
+  const u8 *aData
+){
+  int rc = SQLITE_OK;
+  HBtree *p = pCur->pBtree;
+  int nRetry = 0;
+
+  if( 0==sqlite3HctDbTid(p->pHctDb) ){
+    i64 iDummy = 0;
+    rc = sqlite3HctDbStartWrite(p->pHctDb, &iDummy);
+    if( rc!=SQLITE_OK ) return rc;
+  }
+
+  rc = sqlite3HctDbInsert(
+      p->pHctDb, 
+      sqlite3HctTreeCsrRoot(pCur->pHctTreeCsr),
+      pRec, iKey, 0, nData, aData, &nRetry
+  );
+  if( nRetry>0 ){
+    rc = SQLITE_ABORT;
+  }
+
+  return rc;
+}
+
+static int hctBtreeMigrateCommit(HBtree *p){
+  int rc = SQLITE_OK;
+  i64 iCid = 0;
+  int bTmapScan = 0;
+  int nRetry = 0;
+
+  rc = sqlite3HctDbInsertFlush(p->pHctDb, &nRetry);
+  if( nRetry>0 ){
+    rc = SQLITE_ABORT;
+  }
+
+  if( rc==SQLITE_OK ){
+    rc = sqlite3HctDbValidate(p->config.db, p->pHctDb, &iCid, &bTmapScan);
+  }
+
+  if( rc==SQLITE_OK ){
+    rc = sqlite3HctDbEndWrite(p->pHctDb, iCid, 0);
+  }
+
+  if( bTmapScan ){
+    sqlite3HctDbTMapScan(p->pHctDb);
+  }
+
+  return rc;
+}
+
+#define BT_IS_MIGRATE(pBt) (pBt->config.db->bHctMigrate)
+#define CSR_IS_MIGRATE(pCsr) (pCsr->pBtree->config.db->bHctMigrate)
 
 /*
 ** Commit the transaction currently in progress.
@@ -1645,20 +1726,25 @@ int sqlite3HctBtreeCommitPhaseTwo(Btree *pBt, int bCleanup){
 
   if( p->eTrans==SQLITE_TXN_ERROR ) return SQLITE_BUSY_SNAPSHOT;
 
-  if( p->eTrans==SQLITE_TXN_WRITE ){
-    if( p->pCsrList ){
-      /* Cannot commit with open cursors in hctree */
-      return SQLITE_LOCKED;
-    }
+  if( BT_IS_MIGRATE(p) ){
+    rc = hctBtreeMigrateCommit(p);
+  }else{
+    if( p->eTrans==SQLITE_TXN_WRITE ){
+      if( p->pCsrList ){
+        /* Cannot commit with open cursors in hctree */
+        return SQLITE_LOCKED;
+      }
 
-    sqlite3HctTreeRelease(p->pHctTree, 0);
-    if( p->pHctDb ){
-      rc = btreeFlushToDisk(p);
-      sqlite3HctTreeClear(p->pHctTree);
-      p->nSchemaOp = 0;
+      sqlite3HctTreeRelease(p->pHctTree, 0);
+      if( p->pHctDb ){
+        rc = btreeFlushToDisk(p);
+        sqlite3HctTreeClear(p->pHctTree);
+        p->nSchemaOp = 0;
+      }
+      p->eTrans = SQLITE_TXN_READ;
     }
-    p->eTrans = SQLITE_TXN_READ;
   }
+
   if( rc==SQLITE_OK ){
     hctEndTransaction(p);
   }else{
@@ -1854,6 +1940,7 @@ int sqlite3HctBtreeCursor(
   assert( p->eTrans!=SQLITE_TXN_NONE );
   assert( p->eTrans!=SQLITE_TXN_ERROR );
   assert( pCur->pHctTreeCsr==0 );
+  assert( BT_IS_MIGRATE(p)==0 || wrFlag );
 
   /* If this is an attempt to open a read/write cursor on either the
   ** sqlite_hct_journal or sqlite_hct_baseline tables, return an error
@@ -2273,7 +2360,7 @@ static int hctBtreeMovetoUnpacked(
 ){
   int rc = SQLITE_OK;
   int res1 = 0;
-  int res2 = 0;
+  int res2 = -1;
 
   pCur->isLast = 0;
   rc = sqlite3HctTreeCsrSeek(pCur->pHctTreeCsr, pIdxKey, intKey, &res1);
@@ -2356,6 +2443,7 @@ int sqlite3HctBtreeTableMoveto(
   int *pRes                /* Write search results here */
 ){
   HBtCursor *const pCur = (HBtCursor*)pCursor;
+  assert( CSR_IS_MIGRATE(pCur)==0 );
   if( pCur->isLast && sqlite3HctBtreeIntegerKey(pCursor)<intKey ){
     *pRes = -1;
     return SQLITE_OK;
@@ -2368,6 +2456,7 @@ int sqlite3HctBtreeIndexMoveto(
   int *pRes                /* Write search results here */
 ){
   HBtCursor *const pCur = (HBtCursor*)pCursor;
+  assert( CSR_IS_MIGRATE(pCur)==0 );
   return hctBtreeMovetoUnpacked(pCur, pIdxKey, 0, 0, pRes);
 }
 
@@ -2377,6 +2466,7 @@ void sqlite3HctBtreeCursorDir(BtCursor *pCursor, int eDir){
        || eDir==BTREE_DIR_FORWARD 
        || eDir==BTREE_DIR_REVERSE
   );
+  assert( CSR_IS_MIGRATE(pCur)==0 );
   pCur->eDir = eDir;
   if( pCur->pHctDbCsr ){
     sqlite3HctDbCsrDir(pCur->pHctDbCsr, eDir);
@@ -2568,6 +2658,7 @@ int sqlite3HctBtreeInsert(
   int nData;
   int nZero;
   i64 iKey = 0;
+  int bMigrate = pCur->pBtree->config.db->bHctMigrate;
 
   hctBtreeClearIsLast(pCur->pBtree, pCur);
   if( pX->pKey ){
@@ -2593,13 +2684,18 @@ int sqlite3HctBtreeInsert(
     iKey = pX->nKey;
   }
 
-  if( pCur->isLast && seekResult<0 ){
-    rc = sqlite3HctTreeAppend(
-        pTreeCsr, pCur->pKeyInfo, iKey, nData, aData, nZero
-    );
+  if( CSR_IS_MIGRATE(pCur) ){
+    assert( nZero==0 );
+    rc = hctBtreeMigrateInsert(pCur, pRec, iKey, nData, aData);
   }else{
-    rc = sqlite3HctTreeInsert(pTreeCsr, pRec, iKey, nData, aData, nZero);
-    pCur->isLast = 0;
+    if( pCur->isLast && seekResult<0 ){
+      rc = sqlite3HctTreeAppend(
+          pTreeCsr, pCur->pKeyInfo, iKey, nData, aData, nZero
+          );
+    }else{
+      rc = sqlite3HctTreeInsert(pTreeCsr, pRec, iKey, nData, aData, nZero);
+      pCur->isLast = 0;
+    }
   }
 
   if( pRec && pRec!=&r ){
@@ -2668,7 +2764,7 @@ int sqlite3HctBtreeDelete(BtCursor *pCursor, u8 flags){
     }else{
       sqlite3VdbeRecordUnpack(pCur->pKeyInfo, nKey, aKey, pRec);
       rc = sqlite3HctTreeDeleteKey(pCur->pHctTreeCsr, pRec, 0, nKey, aKey);
-      sqlite3DbFree(pCur->pBtree->db, pRec);
+      sqlite3DbFree(pCur->pBtree->config.db, pRec);
     }
   }
   return rc;
@@ -2709,7 +2805,7 @@ static int hctreeAddNewSchemaOp(HBtree *p, u32 iRoot, int eOp){
 
   p->aSchemaOp = aSchemaOp;
   p->aSchemaOp[p->nSchemaOp].pgnoRoot = iRoot;
-  p->aSchemaOp[p->nSchemaOp].iSavepoint = p->db->nSavepoint;
+  p->aSchemaOp[p->nSchemaOp].iSavepoint = p->config.db->nSavepoint;
   p->aSchemaOp[p->nSchemaOp].eSchemaOp = eOp;
   p->nSchemaOp++;
 
@@ -2811,7 +2907,7 @@ int sqlite3HctBtreeClearTable(Btree *pBt, int iTable, i64 *pnChange){
     sqlite3KeyInfoUnref(pKeyInfo);
     sqlite3HctBtreeCloseCursor(pCsr);
     sqlite3HctTreeCsrClose(pTreeCsr);
-    sqlite3DbFree(p->db, pRec);
+    sqlite3DbFree(p->config.db, pRec);
     sqlite3_free(pCsr);
   }
   return rc;
@@ -3315,10 +3411,35 @@ int sqlite3HctBtreeTransferRow(BtCursor *p1, BtCursor *p2, i64 iKey){
   return SQLITE_LOCKED;
 }
 
-int sqlite3HctLockedErr(u32 pgno){
+int sqlite3HctLockedErr(u32 pgno, const char *zReason){
   return SQLITE_LOCKED;
 }
 
+i64 sqlite3HctMainStats(sqlite3 *db, int iStat, const char **pzStat){
+  Btree *pBt = db->aDb[0].pBt;
+
+  i64 iRet = 0;
+
+  if( sqlite3IsHct(pBt) ){
+    HBtree *pHct = (HBtree*)pBt;
+    switch( iStat ){
+      case 0:
+        *pzStat = "nretry";
+        iRet = pHct->stats.nRetry;
+        break;
+      case 1:
+        *pzStat = "nretrykey";
+        iRet = pHct->stats.nRetryKey;
+        break;
+      case 2:
+        *pzStat = "nkeyop";
+        iRet = pHct->stats.nKeyOp;
+        break;
+    }
+  }
+
+  return iRet;
+}
 
 
 #endif /* SQLITE_ENABLE_HCT */

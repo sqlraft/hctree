@@ -24,7 +24,8 @@
 **       cell INTEGER,
 **       field INTEGER,
 **       value ANY,
-**       schema TEXT HIDDEN
+**       schema TEXT HIDDEN,
+**       iintkey BOOLEAN HIDDEN
 **     );
 **
 **   IMPORTANT: THE VIRTUAL TABLE SCHEMA ABOVE IS SUBJECT TO CHANGE. IN THE
@@ -72,13 +73,17 @@
 **   child page in the database.
 */
 
-#if !defined(SQLITEINT_H) 
+#include "sqlite3ext.h"
+SQLITE_EXTENSION_INIT1
+
+#ifndef SQLITE_AMALGAMATION
 #include "sqlite3.h"
 
 typedef unsigned char u8;
 typedef unsigned int u32;
 
 #endif
+
 #include <string.h>
 #include <assert.h>
 
@@ -120,6 +125,7 @@ struct DbdataCursor {
   u8 *pHdrPtr;
   u8 *pPtr;
   u32 enc;                        /* Text encoding */
+  int bIIntkey;
   
   sqlite3_int64 iIntkey;          /* Integer key value */
 };
@@ -138,13 +144,15 @@ struct DbdataTable {
 #define DBDATA_COLUMN_FIELD       2
 #define DBDATA_COLUMN_VALUE       3
 #define DBDATA_COLUMN_SCHEMA      4
+#define DBDATA_COLUMN_IINTKEY     5
 #define DBDATA_SCHEMA             \
       "CREATE TABLE x("           \
       "  pgno INTEGER,"           \
       "  cell INTEGER,"           \
       "  field INTEGER,"          \
       "  value ANY,"              \
-      "  schema TEXT HIDDEN"      \
+      "  schema TEXT HIDDEN,"     \
+      "  iintkey BOOLEAN HIDDEN"  \
       ")"
 
 /* Column and schema definitions for sqlite_dbptr */
@@ -246,6 +254,8 @@ static int dbdataBestIndex(sqlite3_vtab *tab, sqlite3_index_info *pIdx){
   int i;
   int iSchema = -1;
   int iPgno = -1;
+  int iIIntkey = -1;
+  int iArg = 0;
   int colSchema = (pTab->bPtr ? DBPTR_COLUMN_SCHEMA : DBDATA_COLUMN_SCHEMA);
 
   for(i=0; i<pIdx->nConstraint; i++){
@@ -258,15 +268,22 @@ static int dbdataBestIndex(sqlite3_vtab *tab, sqlite3_index_info *pIdx){
       if( p->iColumn==DBDATA_COLUMN_PGNO && p->usable ){
         iPgno = i;
       }
+      if( p->iColumn==DBDATA_COLUMN_IINTKEY && p->usable ){
+        iIIntkey = i;
+      }
     }
   }
 
   if( iSchema>=0 ){
-    pIdx->aConstraintUsage[iSchema].argvIndex = 1;
+    pIdx->aConstraintUsage[iSchema].argvIndex = ++iArg;
     pIdx->aConstraintUsage[iSchema].omit = 1;
   }
+  if( iIIntkey>=0 ){
+    pIdx->aConstraintUsage[iIIntkey].argvIndex = ++iArg;
+    pIdx->aConstraintUsage[iIIntkey].omit = 1;
+  }
   if( iPgno>=0 ){
-    pIdx->aConstraintUsage[iPgno].argvIndex = 1 + (iSchema>=0);
+    pIdx->aConstraintUsage[iPgno].argvIndex = ++iArg;
     pIdx->aConstraintUsage[iPgno].omit = 1;
     pIdx->estimatedCost = 100;
     pIdx->estimatedRows =  50;
@@ -284,7 +301,10 @@ static int dbdataBestIndex(sqlite3_vtab *tab, sqlite3_index_info *pIdx){
     pIdx->estimatedCost = 100000000;
     pIdx->estimatedRows = 1000000000;
   }
-  pIdx->idxNum = (iSchema>=0 ? 0x01 : 0x00) | (iPgno>=0 ? 0x02 : 0x00);
+  pIdx->idxNum = (iSchema>=0 ? 0x01 : 0x00) 
+               | (iPgno>=0 ? 0x02 : 0x00)
+               | (iIIntkey>=0 ? 0x04 : 0x00);
+
   return SQLITE_OK;
 }
 
@@ -575,7 +595,7 @@ static int dbdataNext(sqlite3_vtab_cursor *pCursor){
       }
 
       assert( iOff+3+2<=pCsr->nPage );
-      pCsr->iCell = pTab->bPtr ? -2 : 0;
+      pCsr->iCell = pTab->bPtr ? -1 : 0;
       pCsr->nCell = get_uint16(&pCsr->aPage[iOff+3]);
       if( pCsr->nCell>DBDATA_MX_CELL(pCsr->nPage) ){
         pCsr->nCell = DBDATA_MX_CELL(pCsr->nPage);
@@ -587,7 +607,7 @@ static int dbdataNext(sqlite3_vtab_cursor *pCursor){
         pCsr->iCell = pCsr->nCell;
       }
       pCsr->iCell++;
-      if( pCsr->iCell>=pCsr->nCell ){
+      if( pCsr->iCell>pCsr->nCell ){
         sqlite3_free(pCsr->aPage);
         pCsr->aPage = 0;
         if( pCsr->bOnePage ) return SQLITE_OK;
@@ -595,6 +615,24 @@ static int dbdataNext(sqlite3_vtab_cursor *pCursor){
       }else{
         return SQLITE_OK;
       }
+    }else if( pCsr->bIIntkey && pCsr->aPage[iOff]==0x05 ){
+      pCsr->iCell++;
+
+      /* Interior intkey page */
+      if( pCsr->iCell>pCsr->nCell ){
+        sqlite3_free(pCsr->aPage);
+        pCsr->aPage = 0;
+        if( pCsr->bOnePage ) return SQLITE_OK;
+        pCsr->iPgno++;
+      }else{
+        int iCellPtr = iOff + 8 + 4 + (pCsr->iCell-1)*2;
+        iOff = get_uint16(&pCsr->aPage[iCellPtr]);
+        iOff += 4;
+        dbdataGetVarint(&pCsr->aPage[iOff], &pCsr->iIntkey);
+        pCsr->iField = -1;
+        return SQLITE_OK;
+      }
+
     }else{
       /* If there is no record loaded, load it now. */
       assert( pCsr->rec.aBuf!=0 || pCsr->nRec==0 );
@@ -636,10 +674,10 @@ static int dbdataNext(sqlite3_vtab_cursor *pCursor){
           /* For an interior node cell, skip past the child-page number */
           iOff += nPointer;
     
-          /* Load the "byte of payload including overflow" field */
+          /* Load the "bytes of payload including overflow" field */
           if( bNextPage || iOff>pCsr->nPage || iOff<=iCellPtr ){
             bNextPage = 1;
-          }else{
+          }else if( bHasRowid==0 || nPointer==0 ){
             iOff += dbdataGetVarintU32(&pCsr->aPage[iOff], &nPayload);
             if( nPayload>0x7fffff00 ) nPayload &= 0x3fff;
             if( nPayload==0 ) nPayload = 1;
@@ -842,6 +880,7 @@ static int dbdataFilter(
   DbdataCursor *pCsr = (DbdataCursor*)pCursor;
   DbdataTable *pTab = (DbdataTable*)pCursor->pVtab;
   int rc = SQLITE_OK;
+  int iArg = 0;
   const char *zSchema = "main";
   (void)idxStr;
   (void)argc;
@@ -849,11 +888,14 @@ static int dbdataFilter(
   dbdataResetCursor(pCsr);
   assert( pCsr->iPgno==1 );
   if( idxNum & 0x01 ){
-    zSchema = (const char*)sqlite3_value_text(argv[0]);
+    zSchema = (const char*)sqlite3_value_text(argv[iArg++]);
     if( zSchema==0 ) zSchema = "";
   }
+  if( idxNum & 0x04 ){
+    pCsr->bIIntkey = sqlite3_value_int(argv[iArg++]);
+  }
   if( idxNum & 0x02 ){
-    pCsr->iPgno = sqlite3_value_int(argv[(idxNum & 0x01)]);
+    pCsr->iPgno = sqlite3_value_int(argv[iArg++]);
     pCsr->bOnePage = 1;
   }else{
     rc = dbdataDbsize(pCsr, zSchema);
@@ -916,7 +958,7 @@ static int dbdataColumn(
         break;
       case DBPTR_COLUMN_CHILD: {
         int iOff = pCsr->iPgno==1 ? 100 : 0;
-        if( pCsr->iCell<0 ){
+        if( pCsr->iCell==pCsr->nCell ){
           iOff += 8;
         }else{
           iOff += 12 + pCsr->iCell*2;
@@ -1012,6 +1054,7 @@ int sqlite3_dbdata_init(
   char **pzErrMsg, 
   const sqlite3_api_routines *pApi
 ){
+  SQLITE_EXTENSION_INIT2(pApi);
   (void)pzErrMsg;
   return sqlite3DbdataRegister(db);
 }

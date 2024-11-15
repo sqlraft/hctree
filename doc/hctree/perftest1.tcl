@@ -156,9 +156,11 @@ if 1 {
     20 24 28 32
     36 40 44 48
     52 56 60 64
-    80 96 128
+    68 72 76 80
+    84 88 92 96
   }
-  set lTest [list update1 update10 update1_scan10 update10_scan10 scan10]
+  #set lTest [list update1 update10 update1_scan10 update10_scan10 scan10]
+  set lTest [list update1 update10]
 }
 
 foreach nThread $lThread {

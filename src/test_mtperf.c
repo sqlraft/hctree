@@ -57,6 +57,29 @@
 **   -truncate INTEGER
 */
 
+/**************************************************************************
+**
+** To create a new migration object:
+**
+**     sqlite_migrate CMD-NAME SOURCE DEST NJOB
+**
+** Then, to add imposter table definitions:
+**
+**     $cmd imposter SQL SOURCE-ROOT DEST-ROOT
+**
+** To add INSERT statements:
+**
+**     $cmd insert INSERT
+**
+** Finally, to run the migration:
+**
+**     $cmd run
+**
+** Then:
+**
+**     $cmd destroy
+*/
+
 #include <tcl.h>
 #include <sqlite3.h>
 #include <sqlite3hct.h>
@@ -308,7 +331,7 @@ static void *ttThreadMain(void *pArg){
   int nTrans = p->nTrans;
 
   while( 1 ){
-    int rc;
+    int rc = SQLITE_OK;
     int ii;
     if( nTrans==0 && tt_current_time()>=iStop ) break;
     if( nTrans>0 && (pThread->nTransOk+pThread->nTransBusy)>=nTrans ) break;
@@ -695,10 +718,535 @@ static int sqlite_thread_test(
 }
 
 /*
+** tclcmd: sqlite_thread_test_config
+**
+** Set the SQLite global configuration for best multi-threaded performance.
+*/
+static int sqlite_thread_test_config(
+  ClientData clientData,          /* Unused */
+  Tcl_Interp *interp,             /* The TCL interpreter */
+  int objc,                       /* Number of arguments */
+  Tcl_Obj *CONST objv[]           /* Command arguments */
+){
+  int rc;
+
+  if( objc!=1 ){
+    Tcl_WrongNumArgs(interp, 1, objv, "");
+    return TCL_ERROR;
+  }
+
+#ifdef SQLITE_TEST
+  Tcl_SetObjResult(interp, Tcl_NewStringObj(
+        "Do not run multi-threaded performance tests with testfixture!", -1
+  ));
+  return TCL_ERROR;
+#endif
+
+  rc = sqlite3_config(SQLITE_CONFIG_MEMSTATUS, (int)0);
+  if( rc==SQLITE_OK ){
+    rc = sqlite3_config(SQLITE_CONFIG_MULTITHREAD);
+  }
+
+  if( rc!=SQLITE_OK ){
+    Tcl_SetObjResult(interp, Tcl_NewStringObj("error configuring sqlite", -1));
+    return TCL_ERROR;
+  }
+
+  return TCL_OK;
+}
+
+typedef struct Migration Migration;
+typedef struct MigrationJob MigrationJob;
+
+struct MigrationJob {
+  sqlite3 *db;
+  int rc;
+  pthread_t tid;
+  Migration *pMigration;
+};
+
+/*
+** mutex:
+**   Mutex used to protect nInsertDone within the [run] sub-command.
+*/
+struct Migration {
+  sqlite3_mutex *mutex;
+  int nInsertDone;
+
+  int nInsert;
+  char **azInsert;
+
+  int nJob;
+  MigrationJob aJob[1];
+};
+
+static void migration_del(ClientData clientData){
+  Migration *p = (Migration*)clientData;
+  int ii;
+  for(ii=0; ii<p->nJob; ii++){
+    sqlite3_close(p->aJob[ii].db);
+  }
+  for(ii=0; ii<p->nInsert; ii++){
+    ckfree(p->azInsert[ii]);
+  }
+  ckfree(p->azInsert);
+  ckfree(p);
+}
+
+static void *migration_main(void *pArg){
+  MigrationJob *pJob = (MigrationJob*)pArg;
+  Migration *p = pJob->pMigration;
+
+  sqlite3_hct_migrate_mode(pJob->db, 1);
+
+  while( pJob->rc==SQLITE_OK ){
+    const char *zInsert = 0;
+    sqlite3_mutex_enter(p->mutex);
+    if( p->nInsertDone<p->nInsert ){
+      zInsert = p->azInsert[p->nInsertDone];
+      p->nInsertDone++;
+    }
+    sqlite3_mutex_leave(p->mutex);
+
+    if( zInsert==0 ) break;
+    pJob->rc = sqlite3_exec(pJob->db, "BEGIN CONCURRENT", 0, 0, 0);
+    if( pJob->rc==SQLITE_OK ){
+      pJob->rc = sqlite3_exec(pJob->db, zInsert, 0, 0, 0);
+    }
+    if( pJob->rc==SQLITE_OK ){
+      pJob->rc = sqlite3_exec(pJob->db, "COMMIT", 0, 0, 0);
+    }
+  }
+
+  sqlite3_hct_migrate_mode(pJob->db, 0);
+
+  return 0;
+}
+
+/*
+** tclcmd: $cmd SUB-COMMAND ARGS...
+*/
+static int migration_cmd(
+  ClientData clientData,          /* Migration object */
+  Tcl_Interp *interp,             /* The TCL interpreter */
+  int objc,                       /* Number of arguments */
+  Tcl_Obj *CONST objv[]           /* Command arguments */
+){
+  Migration *p = (Migration*)clientData;
+  const char *azSub[] = {
+    "insert", "imposter", "run", "destroy", "stats", 0
+  };
+  int iSub;
+
+  if( objc<2 ){
+    Tcl_WrongNumArgs(interp, 1, objv, "SUB-COMMAND");
+    return TCL_ERROR;
+  }
+  if( Tcl_GetIndexFromObj(interp, objv[1], azSub, "SUB-COMMAND", 0, &iSub) ){
+    return TCL_ERROR;
+  }
+
+  switch( iSub ){
+    case 0: assert( 0==strcmp(azSub[iSub], "insert") ); {
+      int nByte = 0;
+      const char *zInsert = 0;
+      char *zCopy = 0;
+      if( objc!=3 ){
+        Tcl_WrongNumArgs(interp, 2, objv, "SQL");
+        return TCL_ERROR;
+      }
+      zInsert = Tcl_GetString(objv[2]);
+      nByte = strlen(zInsert) + 1;
+
+      if( 0==(p->nInsert & (p->nInsert-1)) ){
+        int nNew = (p->nInsert==0 ? 16 : p->nInsert*2);
+        char **azNew = ckrealloc(p->azInsert, sizeof(char*)*nNew);
+        memset(&azNew[p->nInsert], 0, sizeof(char*) * (nNew - p->nInsert));
+        p->azInsert = azNew;
+      }
+
+      zCopy = ckalloc(nByte);
+      memcpy(zCopy, zInsert, nByte);
+      p->azInsert[p->nInsert] = zCopy;
+      p->nInsert++;
+      break;
+    }
+
+    case 1: assert( 0==strcmp(azSub[iSub], "imposter") ); {
+      const char *zSql = 0;
+      sqlite3_int64 iSrc = 0;
+      sqlite3_int64 iDest = 0;
+      int ii = 0;
+
+      if( objc!=5 ){
+        Tcl_WrongNumArgs(interp, 2, objv, "SQL SOURCE-ROOT DEST-ROOT");
+        return TCL_ERROR;
+      }
+
+      zSql = Tcl_GetString(objv[2]);
+      if( Tcl_GetWideIntFromObj(interp, objv[3], &iSrc)
+       || Tcl_GetWideIntFromObj(interp, objv[4], &iDest)
+      ){
+        return TCL_ERROR;
+      }
+
+      for(ii=0; ii<p->nJob; ii++){
+        int rc = SQLITE_OK;
+        sqlite3 *db = p->aJob[ii].db;
+        sqlite3_test_control(SQLITE_TESTCTRL_IMPOSTER, db, "src", 1, (int)iSrc);
+        rc = sqlite3_exec(db, zSql, 0, 0, 0);
+        sqlite3_test_control(SQLITE_TESTCTRL_IMPOSTER, db, "src", 0, 0);
+
+        if( rc==SQLITE_OK ){
+          sqlite3_test_control(SQLITE_TESTCTRL_IMPOSTER,db,"main",1,(int)iDest);
+          rc = sqlite3_exec(db, zSql, 0, 0, 0);
+          sqlite3_test_control(SQLITE_TESTCTRL_IMPOSTER, db, "main", 0, 0);
+        }
+
+        if( rc!=SQLITE_OK ){
+          Tcl_AppendResult(interp, 
+              "error installing imposters: ", sqlite3_errmsg(db), (char*)0
+          );
+          return TCL_ERROR;
+        }
+      }
+
+      break;
+    }
+
+    case 2: assert( 0==strcmp(azSub[iSub], "run") ); {
+      int rc = TCL_OK;
+      int ii;
+      for(ii=0; ii<p->nJob; ii++){
+        MigrationJob *pJob = &p->aJob[ii];
+        pthread_create(&pJob->tid, NULL, migration_main, (void*)pJob);
+      }
+
+      for(ii=0; ii<p->nJob; ii++){
+        void *ret = 0;
+        MigrationJob *pJob = &p->aJob[ii];
+        pthread_join(pJob->tid, &ret);
+        if( rc==TCL_OK && pJob->rc!=SQLITE_OK ){
+          rc = TCL_ERROR;
+          Tcl_AppendResult(interp, 
+              "SQL error in job: ", sqlite3_errmsg(pJob->db), (char*)0
+          );
+        }
+      }
+
+      return rc;
+    }
+
+    case 3: assert( 0==strcmp(azSub[iSub], "destroy") ); {
+      if( objc!=2 ){
+        Tcl_WrongNumArgs(interp, 1, objv, "");
+        return TCL_ERROR;
+      }else{
+        Tcl_DeleteCommand(interp, Tcl_GetStringFromObj(objv[0], 0));
+      }
+      break;
+    }
+    case 4: assert( 0==strcmp(azSub[iSub], "stats") ); {
+      int rc = TCL_OK;
+      int ii;
+      Tcl_Obj *pRes = 0;
+      if( objc!=2 ){
+        Tcl_WrongNumArgs(interp, 1, objv, "");
+        return TCL_ERROR;
+      }
+      pRes = Tcl_NewObj();
+      for(ii=0; ii<p->nJob; ii++){
+        sqlite3 *db = p->aJob[ii].db;
+        sqlite3_stmt *pStmt = 0;
+
+        rc = sqlite3_prepare_v2(db, "SELECT * FROM hctstats", -1, &pStmt, 0);
+        if( rc!=SQLITE_OK ){
+          Tcl_AppendResult(interp, "SQL error: ", sqlite3_errmsg(db), (char*)0);
+          return TCL_ERROR;
+        }
+        while( SQLITE_ROW==sqlite3_step(pStmt) ){
+          const char *zSubsys = 0;
+          const char *zStat = 0;
+          const char *zVal = 0;
+          char *zKey = 0;
+          assert( sqlite3_data_count(pStmt)==3 );
+
+          zSubsys = (const char*)sqlite3_column_text(pStmt, 0);
+          zStat = (const char*)sqlite3_column_text(pStmt, 1);
+          zVal = (const char*)sqlite3_column_text(pStmt, 2);
+          
+          zKey = sqlite3_mprintf("%d.%s.%s", ii, zSubsys, zStat);
+          Tcl_ListObjAppendElement(interp, pRes, Tcl_NewStringObj(zKey, -1));
+          sqlite3_free(zKey);
+          Tcl_ListObjAppendElement(interp, pRes, Tcl_NewStringObj(zVal, -1));
+        }
+      }
+
+      Tcl_SetObjResult(interp, pRes);
+      break;
+    }
+  }
+
+  return TCL_OK;
+}
+
+/*
+** tclcmd: sqlite_migrate CMD-NAME SOURCE DEST NJOB
+*/
+static int sqlite_migrate(
+  ClientData clientData,          /* Unused */
+  Tcl_Interp *interp,             /* The TCL interpreter */
+  int objc,                       /* Number of arguments */
+  Tcl_Obj *CONST objv[]           /* Command arguments */
+){
+  Migration *pNew = 0;
+  int nByte = 0;
+  int ii = 0;
+  int rc = SQLITE_OK;
+
+  /* Command arguments */
+  const char *zCmd = 0;
+  const char *zSrc = 0;
+  const char *zDest = 0;
+  int nJob = 0;
+
+  char *zAttach = 0;
+
+  if( objc!=5 ){
+    Tcl_WrongNumArgs(interp, 1, objv, "CMD-NAME SOURCE DEST NJOB");
+    return TCL_ERROR;
+  }
+
+  /* Extract the command line arguments into stack variables. */
+  zCmd = Tcl_GetString(objv[1]);
+  zSrc = Tcl_GetString(objv[2]);
+  zDest = Tcl_GetString(objv[3]);
+  if( TCL_OK!=Tcl_GetIntFromObj(interp, objv[4], &nJob) ){
+    return TCL_ERROR;
+  }
+  if( nJob<1 ){
+    Tcl_AppendResult(interp, "NJOB must be greater than 0", (char*)0);
+    return TCL_ERROR;
+  }
+
+  /* Allocate the new migration handle */
+  nByte = sizeof(Migration) + nJob * sizeof(MigrationJob);
+  pNew = (Migration*)ckalloc(nByte);
+  memset(pNew, 0, nByte);
+  pNew->mutex = sqlite3_mutex_alloc(SQLITE_MUTEX_FAST);
+
+  zAttach = sqlite3_mprintf("ATTACH %Q AS src;", zSrc);
+
+  /* Open a database connection for each job. And attach both source and
+  ** destination databases to the handle. */
+  pNew->nJob = nJob;
+  for(ii=0; ii<nJob; ii++){
+    MigrationJob *pJob = &pNew->aJob[ii];
+    pJob->pMigration = pNew;
+    rc = sqlite3_open(zDest, &pJob->db);
+    if( rc!=SQLITE_OK ){
+      Tcl_AppendResult(interp, "error in sqlite3_open()", (char*)0);
+      return TCL_ERROR;
+    }
+    rc = sqlite3_exec(pJob->db, zAttach, 0, 0, 0);
+    if( rc!=SQLITE_OK ){
+      Tcl_AppendResult(interp, 
+          "error attaching databases: ", sqlite3_errmsg(pJob->db), (char*)0
+      );
+      return TCL_ERROR;
+    }
+  }
+  sqlite3_free(zAttach);
+
+  /* Create the new command. */
+  Tcl_CreateObjCommand(interp, zCmd, migration_cmd, (void*)pNew, migration_del);
+  Tcl_SetObjResult(interp, objv[1]);
+  return TCL_OK;
+}
+
+/*
+** Decode a pointer to an sqlite3 object.
+*/
+int getSqlite3Ptr(Tcl_Interp *interp, Tcl_Obj *pObj, sqlite3 **ppDb){
+  Tcl_CmdInfo cmdInfo;
+  if( Tcl_GetCommandInfo(interp, Tcl_GetString(pObj), &cmdInfo) ){
+    sqlite3 **p = (sqlite3 **)cmdInfo.objClientData;
+    *ppDb = *p;
+  }else{
+    return TCL_ERROR;
+  }
+  return TCL_OK;
+}
+
+/*
+** tclcmd: sqlite_imposter DB DBNAME ONOFF TNUM
+*/
+static int sqlite_imposter(
+  ClientData clientData,          /* Unused */
+  Tcl_Interp *interp,             /* The TCL interpreter */
+  int objc,                       /* Number of arguments */
+  Tcl_Obj *CONST objv[]           /* Command arguments */
+){
+  sqlite3 *db = 0;
+  const char *zDbname = 0;
+  int bOnoff = 0;
+  int tnum = 0;
+  int rc = SQLITE_OK;
+
+  if( objc!=5 ){
+    Tcl_WrongNumArgs(interp, 1, objv, "DB DBNAME ONOFF TNUM");
+    return TCL_ERROR;
+  }
+  zDbname = Tcl_GetString(objv[2]);
+  if( getSqlite3Ptr(interp, objv[1], &db) 
+   || Tcl_GetBooleanFromObj(interp, objv[3], &bOnoff) 
+   || Tcl_GetIntFromObj(interp, objv[4], &tnum) 
+  ){
+    return TCL_ERROR;
+  }
+
+  rc = sqlite3_test_control(SQLITE_TESTCTRL_IMPOSTER, db, zDbname, bOnoff,tnum);
+  if( rc!=SQLITE_OK ){
+    Tcl_SetObjResult(interp, Tcl_NewIntObj(rc));
+    return TCL_ERROR;
+  }
+  return TCL_OK;
+}
+
+/*
+** tclcmd: sqlite_migrate_mode DB ONOFF
+*/
+static int sqlite_migrate_mode(
+  ClientData clientData,          /* Unused */
+  Tcl_Interp *interp,             /* The TCL interpreter */
+  int objc,                       /* Number of arguments */
+  Tcl_Obj *CONST objv[]           /* Command arguments */
+){
+  sqlite3 *db = 0;
+  int bOnoff = 0;
+
+  if( objc!=3 ){
+    Tcl_WrongNumArgs(interp, 1, objv, "DB ONOFF");
+    return TCL_ERROR;
+  }
+  if( getSqlite3Ptr(interp, objv[1], &db) 
+   || Tcl_GetBooleanFromObj(interp, objv[2], &bOnoff) 
+  ){
+    return TCL_ERROR;
+  }
+
+  sqlite3_hct_migrate_mode(db, bOnoff);
+  return TCL_OK;
+}
+
+/*
+** tclcmd: fallocate FILE SIZE
+*/
+static int test_fallocate(
+  ClientData clientData,          /* Unused */
+  Tcl_Interp *interp,             /* The TCL interpreter */
+  int objc,                       /* Number of arguments */
+  Tcl_Obj *CONST objv[]           /* Command arguments */
+){
+  const char *zFile = 0;
+  Tcl_WideInt sz = 0;
+  int fd = -1;
+
+  struct stat sBuf;
+
+  if( objc!=3 ){
+    Tcl_WrongNumArgs(interp, 1, objv, "FILE SIZE");
+    return TCL_ERROR;
+  }
+  zFile = Tcl_GetString(objv[1]);
+  if( Tcl_GetWideIntFromObj(interp, objv[2], &sz) ){
+    return TCL_ERROR;
+  }
+
+  fd = open(zFile, O_CREAT|O_RDWR, 0755);
+  if( fd<0 ){
+    Tcl_SetObjResult(interp, Tcl_NewStringObj("error in open()", -1));
+    return TCL_ERROR;
+  }
+
+  memset(&sBuf, 0, sizeof(sBuf));
+  fstat(fd, &sBuf);
+  if( sBuf.st_size<sz ){
+    int rc = ftruncate(fd, (off_t)sz);
+    sqlite3_int64 iPg = 0;
+
+    if( rc!=0 ){
+      Tcl_SetObjResult(interp, Tcl_NewStringObj("error in ftruncate()", -1));
+      return TCL_ERROR;
+    }
+
+    for(iPg=(sBuf.st_size+4095)/4096; iPg<(sz+4095)/4096; iPg++){
+      lseek(fd, (iPg*4096), SEEK_SET);
+      rc = write(fd, "", 1);
+      if( rc!=1 ){
+        Tcl_SetObjResult(interp, Tcl_NewStringObj("error in write()", -1));
+        return TCL_ERROR;
+      }
+    }
+
+#if 0
+    rc = posix_fallocate(fd, 0, (off_t)sz);
+    if( rc!=0 ){
+      Tcl_SetObjResult(interp, Tcl_NewStringObj("error in fallocate()", -1));
+      return TCL_ERROR;
+    }
+#endif
+  }
+
+  return TCL_OK;
+}
+
+int sqlite3_dbdata_init(sqlite3*, char**, const sqlite3_api_routines*);
+
+/*
+** tclcmd: sqlite3_dbdata_init DB
+*/
+static int test_dbdata_init(
+  ClientData clientData,          /* Unused */
+  Tcl_Interp *interp,             /* The TCL interpreter */
+  int objc,                       /* Number of arguments */
+  Tcl_Obj *CONST objv[]           /* Command arguments */
+){
+  sqlite3 *db = 0;
+
+  if( objc!=2 ){
+    Tcl_WrongNumArgs(interp, 1, objv, "DB");
+    return TCL_ERROR;
+  }
+  if( getSqlite3Ptr(interp, objv[1], &db) ){
+    return TCL_ERROR;
+  }
+
+  sqlite3_dbdata_init(db, 0, 0);
+  return TCL_OK;
+}
+
+/*
 ** Register commands with the TCL interpreter.
 */
 int SqliteThreadTest_Init(Tcl_Interp *interp){
-  Tcl_CreateObjCommand(interp, "sqlite_thread_test", sqlite_thread_test, 0, 0);
+  struct Cmd {
+    Tcl_ObjCmdProc *xProc;
+    const char *zName;
+  } aCmd[] = {
+    { sqlite_thread_test, "sqlite_thread_test" },
+    { sqlite_thread_test_config, "sqlite_thread_test_config" },
+    { sqlite_migrate, "sqlite_migrate" },
+    { sqlite_migrate_mode, "sqlite_migrate_mode" },
+    { sqlite_imposter, "sqlite_imposter" },
+    { test_fallocate, "fallocate" },
+    { test_dbdata_init, "sqlite3_dbdata_init" }
+  };
+  int ii;
+  for(ii=0; ii<sizeof(aCmd)/sizeof(aCmd[0]); ii++){
+    Tcl_CreateObjCommand(interp, aCmd[ii].zName, aCmd[ii].xProc, 0, 0);
+  }
+
   return TCL_OK;
 }
 
