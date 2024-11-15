@@ -580,8 +580,7 @@ static void walidxSetMxFrame(WalIndexHdr *pHdr, int iWal, u32 mxFrame){
   assert( walidxGetMxFrame(pHdr, iWal)==mxFrame );
 }
 
-#define walidxGetFile(pHdr) ((pHdr)->mxFrame2 >> 31)
-
+#define walidxGetFile(pHdr) (int)((pHdr)->mxFrame2 >> 31)
 #define walidxSetFile(pHdr, iWal) (                                          \
     (pHdr)->mxFrame2 = ((pHdr)->mxFrame2 & 0x7FFFFFFF) | (((u32)(iWal))<<31) \
 )
@@ -3767,7 +3766,7 @@ static int walTryBeginRead(Wal *pWal, int *pChanged, int useWal, int *pCnt){
     u32 mxFrame;                  /* Wal frame to lock to */
     if( !useWal && pInfo->nBackfill==pWal->hdr.mxFrame
   #ifdef SQLITE_ENABLE_SNAPSHOT
-     && ((pWal->bGetSnapshot && pWal->pSnapshot==0) || pWal->hdr.mxFrame==0)
+     && ((pWal->bGetSnapshot==0 && pWal->pSnapshot==0) || pWal->hdr.mxFrame==0)
   #endif
     ){
       /* The WAL has been completely backfilled (or it is empty).
@@ -4592,7 +4591,7 @@ static int walLockForCommit(
       assert( nLoop==1 || nLoop==2 );
       for(iLoop=0; rc==SQLITE_OK && iLoop<nLoop; iLoop++){
         u32 iFirst;               /* First (external) wal frame to check */
-        u32 iLastHash;            /* Last hash to check this loop */
+        int iLastHash;            /* Last hash to check this loop */
         u32 mxFrame;              /* Last (external) wal frame to check */
 
         if( bWal2==0 ){
@@ -4889,7 +4888,7 @@ void sqlite3WalSavepoint(Wal *pWal, u32 *aWalData){
   aWalData[0] = walidxGetMxFrame(&pWal->hdr, iWal);
   aWalData[1] = pWal->hdr.aFrameCksum[0];
   aWalData[2] = pWal->hdr.aFrameCksum[1];
-  aWalData[3] = isWalMode2(pWal) ? iWal : pWal->nCkpt;
+  aWalData[3] = isWalMode2(pWal) ? (u32)iWal : pWal->nCkpt;
 }
 
 /*
@@ -4901,7 +4900,7 @@ void sqlite3WalSavepoint(Wal *pWal, u32 *aWalData){
 int sqlite3WalSavepointUndo(Wal *pWal, u32 *aWalData){
   int rc = SQLITE_OK;
   int iWal = walidxGetFile(&pWal->hdr);
-  int iCmp = isWalMode2(pWal) ? iWal : pWal->nCkpt;
+  u32 iCmp = isWalMode2(pWal) ? (u32)iWal : pWal->nCkpt;
 
   assert( pWal->writeLock || aWalData[0]==pWal->hdr.mxFrame );
   assert( isWalMode2(pWal) || iWal==0 );
@@ -4946,7 +4945,7 @@ static int walRestartLog(Wal *pWal){
 
   if( isWalMode2(pWal) ){
     int iApp = walidxGetFile(&pWal->hdr);
-    int nWalSize = WAL_DEFAULT_WALSIZE;
+    u32 nWalSize = WAL_DEFAULT_WALSIZE;
     if( pWal->mxWalSize>0 ){
       nWalSize = (pWal->mxWalSize-WAL_HDRSIZE+pWal->szPage+WAL_FRAME_HDRSIZE-1) 
         / (pWal->szPage+WAL_FRAME_HDRSIZE);

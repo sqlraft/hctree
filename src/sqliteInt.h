@@ -1808,6 +1808,7 @@ struct sqlite3 {
   int bHctMigrate;
 };
 
+
 /*
 ** Candidate values for sqlite3.eConcurrent
 */

@@ -3963,7 +3963,6 @@ case OP_AutoCommit: {
   assert( desiredAutoCommit==0 || bConcurrent==0 );
   assert( db->autoCommit==0 || db->eConcurrent==CONCURRENT_NONE );
   assert( db->nVdbeActive>0 );  /* At least this one VM is active */
-  assert( db->nVdbeActive>0 );  /* At least this one VM is active */
   assert( p->bIsReader );
 
   if( desiredAutoCommit!=db->autoCommit ){
