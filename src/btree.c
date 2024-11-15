@@ -5228,6 +5228,25 @@ int sqlite3BtreeCursorSize(void){
   return ROUND8(sizeof(BtCursor));
 }
 
+#ifdef SQLITE_DEBUG
+/*
+** Return true if and only if the Btree object will be automatically
+** closed with the BtCursor closes.  This is used within assert() statements
+** only.
+*/
+int sqlite3BtreeClosesWithCursor(
+  Btree *pBtree,       /* the btree object */
+  BtCursor *pCur       /* Corresponding cursor */
+){
+  BtShared *pBt = pBtree->pBt;
+  if( (pBt->openFlags & BTREE_SINGLE)==0 ) return 0;
+  if( pBt->pCursor!=pCur ) return 0;
+  if( pCur->pNext!=0 ) return 0;
+  if( pCur->pBtree!=pBtree ) return 0;
+  return 1;
+}
+#endif
+
 /*
 ** Initialize memory that will be converted into a BtCursor object.
 **
@@ -6479,7 +6498,7 @@ int sqlite3BtreeIndexMoveto(
      && indexCellCompare(pCur, 0, pIdxKey, xRecordCompare)<=0
      && pIdxKey->errCode==SQLITE_OK
     ){
-      pCur->curFlags &= ~BTCF_ValidOvfl;
+      pCur->curFlags &= ~(BTCF_ValidOvfl|BTCF_AtLast);
       if( !pCur->pPage->isInit ){
         return SQLITE_CORRUPT_BKPT;
       }

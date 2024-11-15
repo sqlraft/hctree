@@ -22,6 +22,15 @@
 #include "vdbeInt.h"
 
 /*
+** High-resolution hardware timer used for debugging and testing only.
+*/
+#if defined(VDBE_PROFILE)  \
+ || defined(SQLITE_PERFORMANCE_TRACE) \
+ || defined(SQLITE_ENABLE_STMT_SCANSTATUS)
+# include "hwtime.h"
+#endif
+
+/*
 ** Invoke this macro on memory cells just prior to changing the
 ** value of the cell.  This macro verifies that shallow copies are
 ** not misused.  A shallow copy of a string or blob just copies a
@@ -2096,7 +2105,7 @@ case OP_RealAffinity: {                  /* in1 */
 }
 #endif
 
-#if !defined(SQLITE_OMIT_CAST) && !defined(SQLITE_OMIT_ANALYZE)
+#if !defined(SQLITE_OMIT_CAST) || !defined(SQLITE_OMIT_ANALYZE)
 /* Opcode: Cast P1 P2 * * *
 ** Synopsis: affinity(r[P1])
 **
@@ -4573,8 +4582,13 @@ case OP_OpenEphemeral: {     /* ncycle */
         }
       }
       pCx->isOrdered = (pOp->p5!=BTREE_UNORDERED);
+      assert( p->apCsr[pOp->p1]==pCx );
       if( rc ){
+        assert( !sqlite3BtreeClosesWithCursor(pCx->ub.pBtx, pCx->uc.pCursor) );
         sqlite3BtreeClose(pCx->ub.pBtx);
+        p->apCsr[pOp->p1] = 0;  /* Not required; helps with static analysis */
+      }else{
+        assert( sqlite3BtreeClosesWithCursor(pCx->ub.pBtx, pCx->uc.pCursor) );
       }
     }
   }
@@ -5361,6 +5375,7 @@ case OP_Found: {        /* jump, in3, ncycle */
     r.pKeyInfo = pC->pKeyInfo;
     r.default_rc = 0;
 #ifdef SQLITE_DEBUG
+    (void)sqlite3FaultSim(50);  /* For use by --counter in TH3 */
     for(ii=0; ii<r.nField; ii++){
       assert( memIsValid(&r.aMem[ii]) );
       assert( (r.aMem[ii].flags & MEM_Zero)==0 || r.aMem[ii].n==0 );
@@ -7728,18 +7743,29 @@ case OP_AggInverse:
 case OP_AggStep: {
   int n;
   sqlite3_context *pCtx;
+  u64 nAlloc;
 
   assert( pOp->p4type==P4_FUNCDEF );
   n = pOp->p5;
   assert( pOp->p3>0 && pOp->p3<=(p->nMem+1 - p->nCursor) );
   assert( n==0 || (pOp->p2>0 && pOp->p2+n<=(p->nMem+1 - p->nCursor)+1) );
   assert( pOp->p3<pOp->p2 || pOp->p3>=pOp->p2+n );
-  pCtx = sqlite3DbMallocRawNN(db, n*sizeof(sqlite3_value*) +
-               (sizeof(pCtx[0]) + sizeof(Mem) - sizeof(sqlite3_value*)));
+
+  /* Allocate space for (a) the context object and (n-1) extra pointers
+  ** to append to the sqlite3_context.argv[1] array, and (b) a memory
+  ** cell in which to store the accumulation. Be careful that the memory
+  ** cell is 8-byte aligned, even on platforms where a pointer is 32-bits.
+  **
+  ** Note: We could avoid this by using a regular memory cell from aMem[] for 
+  ** the accumulator, instead of allocating one here. */
+  nAlloc = ROUND8P( sizeof(pCtx[0]) + (n-1)*sizeof(sqlite3_value*) );
+  pCtx = sqlite3DbMallocRawNN(db, nAlloc + sizeof(Mem));
   if( pCtx==0 ) goto no_mem;
-  pCtx->pMem = 0;
-  pCtx->pOut = (Mem*)&(pCtx->argv[n]);
+  pCtx->pOut = (Mem*)((u8*)pCtx + nAlloc);
+  assert( EIGHT_BYTE_ALIGNMENT(pCtx->pOut) );
+
   sqlite3VdbeMemInit(pCtx->pOut, db, MEM_Null);
+  pCtx->pMem = 0;
   pCtx->pFunc = pOp->p4.pFunc;
   pCtx->iOp = (int)(pOp - aOp);
   pCtx->pVdbe = p;
@@ -9112,7 +9138,7 @@ case OP_ReleaseReg: {
 ** As with all opcodes, the meanings of the parameters for OP_Explain
 ** are subject to change from one release to the next.  Applications
 ** should not attempt to interpret or use any of the information
-** contined in the OP_Explain opcode.  The information provided by this
+** contained in the OP_Explain opcode.  The information provided by this
 ** opcode is intended for testing and debugging use only.
 */
 default: {          /* This is really OP_Noop, OP_Explain */
