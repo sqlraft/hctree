@@ -1,10 +1,10 @@
-C Merge\strunk\schanges\sinto\sthis\sbranch.
-D 2024-11-15T16:09:56.128
+C Fix\sbuilding\stclsqlite3\sfor\sperformance\stests.
+D 2024-11-15T18:33:42.797
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md e108e1e69ae8e8a59e93c455654b8ac9356a11720d3345df2a4743e9590fb20d
 F Makefile.in 6b8dd4c654bd0bddc2ac4d38e57521482896ebc6249a1a445a180100bc60826f
-F Makefile.linux-generic bd3e3cacd369821a6241d4ea1967395c962dfe3057e38cb0a435cee0e8b789d0 w Makefile.linux-gcc
+F Makefile.linux-generic bd3e3cacd369821a6241d4ea1967395c962dfe3057e38cb0a435cee0e8b789d0
 F Makefile.msc a92237976eb92c5efaa0dd2524746aec12c196e12df8d4dbff9543a4648c3312
 F README.md c3c0f19532ce28f6297a71870f3c7b424729f0e6d9ab889616d3587dd2332159
 F VERSION 8dc0c3df15fd5ff0622f88fc483533fce990b1cbb2f5fb9fdfb4dbd71eef2889
@@ -22,7 +22,7 @@ F autoconf/README.first 6c4f34fe115ff55d4e8dbfa3cecf04a0188292f7
 F autoconf/README.txt 5e946ffb6fbdbb114c81e1bdc862df27fce8beab557d7b0421820b0fe8fc048f
 F autoconf/configure.ac ec7fa914c5e74ff212fe879f9bb6918e1234497e05facfb641f30c4d5893b277
 F autoconf/tea/Makefile.in ba0556fee8da09c066bad85a4457904e46ee2c2eabaa309c0e83a78f2f151a8e
-F autoconf/tea/README.txt 61e62e519579e4a112791354d6d440f8b51ea6db3b0bab58d59f29df42d2dfe3 w autoconf/tea/README
+F autoconf/tea/README.txt 61e62e519579e4a112791354d6d440f8b51ea6db3b0bab58d59f29df42d2dfe3
 F autoconf/tea/aclocal.m4 52c47aac44ce0ddb1f918b6993e8beb8eee88f43
 F autoconf/tea/configure.ac ff2d745f88e493080810b67958d88b4f7a7d79f19e2ee8e7f72ffd6fc04eabc7
 F autoconf/tea/doc/sqlite3.n e1fe45d4f5286ee3d0ccc877aca2a0def488e9bb
@@ -63,7 +63,7 @@ F doc/hctree/hctree_bedrock.md c4280b0fcf7aff496087633a160d821f1d71ef6bff3078128
 F doc/hctree/index.html 63cdbc4f98d0247279cb5ff580e4939c1fae661be16f3fd7bd2e18d26a4e9bcd
 F doc/hctree/mkthreadtest.tcl 58b1c401b35dcabd978f5a9663376a5beee441bdd9d1e49536772dbd68086876
 F doc/hctree/pagetest.c 4d5f3aee508e32ff08dfd81b0c79f9ebfad04590f4d9283bd5df7e08674f9112
-F doc/hctree/perftest1.tcl d664af46c9c345edc190bc6b0857ec77d047896f1471ec5d66e66ef6dddfc2f5
+F doc/hctree/perftest1.tcl f886f47adfd660a6e0648c8272227a037a209a4abdc5b6451a87224249beff1b
 F doc/hctree/replication.md 45c7df44a05c9843d70e4cf8bccf001548c1b7e13080491666fee5800caeb5a9
 F doc/hctree/slides.html 763e1e5b40201595f0924a589c8e6e9a7ca3ca593ed0045d372e66e12ece7aef
 F doc/hctree/slides.wiki 4151889c5485fecd8a71d5d0089645998a2db5ebc3360b570f763e59effed60c
@@ -470,7 +470,7 @@ F ext/misc/urifuncs.c f71360d14fa9e7626b563f1f781c6148109462741c5235ac63ae0f8917
 F ext/misc/uuid.c 5bb2264c1b64d163efa46509544fd7500cb8769cb7c16dd52052da8d961505cf
 F ext/misc/vfslog.c 3932ab932eeb2601dbc4447cb14d445aaa9fbe43b863ef5f014401c3420afd20
 F ext/misc/vfsstat.c a85df08654743922a19410d7b1e3111de41bb7cd07d20dd16eda4e2b808d269d
-F ext/misc/vfstrace.c 72b7cda31777173b0ca78c6c92968c17aba635682205945e394fff27b377bb81 w src/test_vfstrace.c
+F ext/misc/vfstrace.c 72b7cda31777173b0ca78c6c92968c17aba635682205945e394fff27b377bb81
 F ext/misc/vtablog.c 1100250ce8782db37c833e3a9a5c9a3ecf1af5e15b8325572b82e6e0a138ffb5
 F ext/misc/vtshim.c 1976e6dd68dd0d64508c91a6dfab8e75f8aaf6cd
 F ext/misc/wholenumber.c 0fa0c082676b7868bf2fa918e911133f2b349bcdceabd1198bba5f65b4fc0668
@@ -653,10 +653,10 @@ F ext/wasm/api/post-js-footer.js cd0a8ec768501d9bd45d325ab0442037fb0e33d1f3b4f08
 F ext/wasm/api/post-js-header.js 04dc12c3edd666b64a1b4ef3b6690c88dcc653f26451fd4734472d8e29c1c122
 F ext/wasm/api/pre-js.c-pp.js a614a2c82b12c4d96d8e3ba77330329efc53c4d56a8a7e60ade900f341866cfb
 F ext/wasm/api/sqlite3-api-cleanup.js d235ad237df6954145404305040991c72ef8b1881715d2a650dda7b3c2576d0e
-F ext/wasm/api/sqlite3-api-glue.c-pp.js fb6dbfe692cc23000a65a4cd95a1a47ed5eb592dc9d8b55363b3c2952a787244 w ext/wasm/api/sqlite3-api-glue.js
-F ext/wasm/api/sqlite3-api-oo1.c-pp.js f3a8e2004c6625d17946c11f2fb32008be78bc5207bf746fc77d59848813225f w ext/wasm/api/sqlite3-api-oo1.js
+F ext/wasm/api/sqlite3-api-glue.c-pp.js fb6dbfe692cc23000a65a4cd95a1a47ed5eb592dc9d8b55363b3c2952a787244
+F ext/wasm/api/sqlite3-api-oo1.c-pp.js f3a8e2004c6625d17946c11f2fb32008be78bc5207bf746fc77d59848813225f
 F ext/wasm/api/sqlite3-api-prologue.js 6f1257e04885632ed9f44d43aba200b86e0bc16709ffdba29abbbeb1bc8e8b76
-F ext/wasm/api/sqlite3-api-worker1.c-pp.js 5cc22a3c0d52828cb32aad8691488719f47d27567e63e8bc8b832d74371c352d w ext/wasm/api/sqlite3-api-worker1.js
+F ext/wasm/api/sqlite3-api-worker1.c-pp.js 5cc22a3c0d52828cb32aad8691488719f47d27567e63e8bc8b832d74371c352d
 F ext/wasm/api/sqlite3-license-version-header.js 0c807a421f0187e778dc1078f10d2994b915123c1223fe752b60afdcd1263f89
 F ext/wasm/api/sqlite3-opfs-async-proxy.js 3774befd97cd1a5e2895c8225a894aad946848c6d9b4028acc988b5d123475af
 F ext/wasm/api/sqlite3-vfs-helper.c-pp.js 3f828cc66758acb40e9c5b4dcfd87fd478a14c8fb7f0630264e6c7fa0e57515d
@@ -716,7 +716,7 @@ F ext/wasm/tests/opfs/concurrency/test.js d08889a5bb6e61937d0b8cbb78c9efbefbf65a
 F ext/wasm/tests/opfs/concurrency/worker.js 0a8c1a3e6ebb38aabbee24f122693f1fb29d599948915c76906681bb7da1d3d2
 F ext/wasm/wasmfs.make bc8bb227f35d5bd3863a7bd2233437c37472a0d81585979f058f9b9b503bef35
 F magic.txt 5ade0bc977aa135e79e3faaea894d5671b26107cc91e70783aa7dc83f22f3ba0
-F main.mk 84c7f34d88c24d822b8e69adad40be1508d7713ae9a2ad7d665be25297379592
+F main.mk 1efdfe9204eddcc94180d495fc920745780f2e954bc1590300c6791433c1620a
 F mptest/config01.test 3c6adcbc50b991866855f1977ff172eb6d901271
 F mptest/config02.test 4415dfe36c48785f751e16e32c20b077c28ae504
 F mptest/crash01.test 61e61469e257df0850df4293d7d4d6c2af301421
@@ -2299,8 +2299,8 @@ F tool/version-info.c 3b36468a90faf1bbd59c65fd0eb66522d9f941eedd364fabccd7227350
 F tool/warnings-clang.sh bbf6a1e685e534c92ec2bfba5b1745f34fb6f0bc2a362850723a9ee87c1b31a7
 F tool/warnings.sh 49a486c5069de041aedcbde4de178293e0463ae9918ecad7539eedf0ec77a139
 F tool/win/sqlite.vsix deb315d026cc8400325c5863eef847784a219a2f
-P cf83194aabd1bcde77c804c880de9eb31bb441d658f72ca0ca0f2a147ef24e99 3e5b8077c6c6ce72ecab3110eb45943b9765372df789088982dbd6046a7c2523
-R 6bfb596bd6b6284602817beaf98edc22
+P 9bf30dfae11f6a9cb2e4c7e4a0f2d2707c3b1d52140ff1b705d1928ae5b64b20
+R 6fca37e69613869348d2f96c8c81c354
 U dan
-Z c578ee94b5927658935e5500a5856ef0
+Z dfcd35287f99ff61531e7afefa7b19f7
 # Remove this line to create a well-formed Fossil manifest.

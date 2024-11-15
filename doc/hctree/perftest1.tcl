@@ -4,7 +4,7 @@
 set G(filename) test.db
 set G(nRow)     1000000
 
-set G(nRow)          [expr 100 * 1000000]
+#set G(nRow)          [expr 100 * 1000000]
 
 set G(nRowPerCommit) [expr 1000000]
 

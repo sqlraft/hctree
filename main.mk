@@ -1395,14 +1395,14 @@ tclsqlite.o:	$(T.tcl.env.sh) $(TOP)/src/tclsqlite.c $(DEPS_OBJ_COMMON)
 		-c $(TOP)/src/tclsqlite.c
 
 tclsqlite-shell.o:	$(T.tcl.env.sh) $(TOP)/src/tclsqlite.c $(DEPS_OBJ_COMMON)
-	$(T.compile.tcl) -DTCLSH -o $@ -c $(TOP)/src/tclsqlite.c $$TCL_INCLUDE_SPEC
+	$(T.compile.tcl) -DTCLSQLITE3_EXTRA_INIT=SqliteThreadTest_Init -DTCLSH -o $@ -c $(TOP)/src/tclsqlite.c $$TCL_INCLUDE_SPEC
 
 tclsqlite-stubs.o:	$(T.tcl.env.sh) $(TOP)/src/tclsqlite.c $(DEPS_OBJ_COMMON)
 	$(T.compile.tcl) -DUSE_TCL_STUBS=1 -o $@ -c $(TOP)/src/tclsqlite.c $$TCL_INCLUDE_SPEC
 
-tclsqlite3$(T.exe):	$(T.tcl.env.sh) tclsqlite-shell.o $(libsqlite3.SO)
-	$(T.link.tcl) -o $@ tclsqlite-shell.o \
-		$(libsqlite3.SO) $$TCL_INCLUDE_SPEC $$TCL_LIB_SPEC \
+tclsqlite3$(T.exe):	$(T.tcl.env.sh) tclsqlite-shell.o $(TOP)/src/test_mtperf.c $(TOP)/ext/recover/dbdata.c $(libsqlite3.LIB)
+	$(T.link.tcl) -o $@ tclsqlite-shell.o $(TOP)/src/test_mtperf.c $(TOP)/ext/recover/dbdata.c \
+		$(libsqlite3.LIB) $$TCL_INCLUDE_SPEC $$TCL_LIB_SPEC \
 		$(LDFLAGS.libsqlite3)
 tclsqlite3$(T.exe)-1: tclsqlite3$(T.exe)
 tclsqlite3$(T.exe)-0 tclsqlite3$(T.exe)-:
