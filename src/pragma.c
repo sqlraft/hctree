@@ -1147,12 +1147,6 @@ void sqlite3Pragma(
         ** in auto-commit mode.  */
         mask &= ~(SQLITE_ForeignKeys);
       }
-#if SQLITE_USER_AUTHENTICATION
-      if( db->auth.authLevel==UAUTH_User ){
-        /* Do not allow non-admin users to modify the schema arbitrarily */
-        mask &= ~(SQLITE_WriteSchema);
-      }
-#endif
 
       if( sqlite3GetBoolean(zRight, 0) ){
         if( (mask & SQLITE_WriteSchema)==0
@@ -1764,6 +1758,7 @@ void sqlite3Pragma(
 
       /* Make sure sufficient number of registers have been allocated */
       sqlite3TouchRegister(pParse, 8+cnt);
+      sqlite3VdbeAddOp3(v, OP_Null, 0, 8, 8+cnt);
       sqlite3ClearTempRegCache(pParse);
 
       /* Do the b-tree integrity checks */

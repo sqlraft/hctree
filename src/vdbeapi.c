@@ -1621,6 +1621,17 @@ const void *sqlite3_column_origin_name16(sqlite3_stmt *pStmt, int N){
 **
 ** The error code stored in database p->db is overwritten with the return
 ** value in any case.
+**
+** (tag-20240917-01) If  vdbeUnbind(p,(u32)(i-1))  returns SQLITE_OK,
+** that means all of the the following will be true:
+**
+**     p!=0
+**     p->pVar!=0
+**     i>0
+**     i<=p->nVar
+**
+** An assert() is normally added after vdbeUnbind() to help static analyzers
+** realize this.
 */
 static int vdbeUnbind(Vdbe *p, unsigned int i){
   Mem *pVar;
@@ -1678,6 +1689,7 @@ static int bindText(
 
   rc = vdbeUnbind(p, (u32)(i-1));
   if( rc==SQLITE_OK ){
+    assert( p!=0 && p->aVar!=0 && i>0 && i<=p->nVar ); /* tag-20240917-01 */
     if( zData!=0 ){
       pVar = &p->aVar[i-1];
       rc = sqlite3VdbeMemSetStr(pVar, zData, nData, encoding, xDel);
@@ -1727,6 +1739,7 @@ int sqlite3_bind_double(sqlite3_stmt *pStmt, int i, double rValue){
   Vdbe *p = (Vdbe *)pStmt;
   rc = vdbeUnbind(p, (u32)(i-1));
   if( rc==SQLITE_OK ){
+    assert( p!=0 && p->aVar!=0 && i>0 && i<=p->nVar ); /* tag-20240917-01 */
     sqlite3VdbeMemSetDouble(&p->aVar[i-1], rValue);
     sqlite3_mutex_leave(p->db->mutex);
   }
@@ -1740,6 +1753,7 @@ int sqlite3_bind_int64(sqlite3_stmt *pStmt, int i, sqlite_int64 iValue){
   Vdbe *p = (Vdbe *)pStmt;
   rc = vdbeUnbind(p, (u32)(i-1));
   if( rc==SQLITE_OK ){
+    assert( p!=0 && p->aVar!=0 && i>0 && i<=p->nVar ); /* tag-20240917-01 */
     sqlite3VdbeMemSetInt64(&p->aVar[i-1], iValue);
     sqlite3_mutex_leave(p->db->mutex);
   }
@@ -1750,6 +1764,7 @@ int sqlite3_bind_null(sqlite3_stmt *pStmt, int i){
   Vdbe *p = (Vdbe*)pStmt;
   rc = vdbeUnbind(p, (u32)(i-1));
   if( rc==SQLITE_OK ){
+    assert( p!=0 && p->aVar!=0 && i>0 && i<=p->nVar ); /* tag-20240917-01 */
     sqlite3_mutex_leave(p->db->mutex);
   }
   return rc;
@@ -1765,6 +1780,7 @@ int sqlite3_bind_pointer(
   Vdbe *p = (Vdbe*)pStmt;
   rc = vdbeUnbind(p, (u32)(i-1));
   if( rc==SQLITE_OK ){
+    assert( p!=0 && p->aVar!=0 && i>0 && i<=p->nVar ); /* tag-20240917-01 */
     sqlite3VdbeMemSetPointer(&p->aVar[i-1], pPtr, zPTtype, xDestructor);
     sqlite3_mutex_leave(p->db->mutex);
   }else if( xDestructor ){
@@ -1846,6 +1862,7 @@ int sqlite3_bind_zeroblob(sqlite3_stmt *pStmt, int i, int n){
   Vdbe *p = (Vdbe *)pStmt;
   rc = vdbeUnbind(p, (u32)(i-1));
   if( rc==SQLITE_OK ){
+    assert( p!=0 && p->aVar!=0 && i>0 && i<=p->nVar ); /* tag-20240917-01 */
 #ifndef SQLITE_OMIT_INCRBLOB
     sqlite3VdbeMemSetZeroBlob(&p->aVar[i-1], n);
 #else
@@ -2180,37 +2197,64 @@ int sqlite3_preupdate_old(sqlite3 *db, int iIdx, sqlite3_value **ppValue){
     goto preupdate_old_out;
   }
 
-  /* If the old.* record has not yet been loaded into memory, do so now. */
-  if( p->pUnpacked==0 ){
-    u32 nRec;
-    u8 *aRec;
-
-    assert( p->pCsr->eCurType==CURTYPE_BTREE );
-    nRec = sqlite3BtreePayloadSize(p->pCsr->uc.pCursor);
-    aRec = sqlite3DbMallocRaw(db, nRec);
-    if( !aRec ) goto preupdate_old_out;
-    rc = sqlite3BtreePayload(p->pCsr->uc.pCursor, 0, nRec, aRec);
-    if( rc==SQLITE_OK ){
-      p->pUnpacked = vdbeUnpackRecord(&p->keyinfo, nRec, aRec);
-      if( !p->pUnpacked ) rc = SQLITE_NOMEM;
-    }
-    if( rc!=SQLITE_OK ){
-      sqlite3DbFree(db, aRec);
-      goto preupdate_old_out;
-    }
-    p->aRecord = aRec;
-  }
-
-  pMem = *ppValue = &p->pUnpacked->aMem[iIdx];
   if( iIdx==p->pTab->iPKey ){
+    *ppValue = pMem = &p->oldipk;
     sqlite3VdbeMemSetInt64(pMem, p->iKey1);
-  }else if( iIdx>=p->pUnpacked->nField ){
-    *ppValue = (sqlite3_value *)columnNullValue();
-  }else if( p->pTab->aCol[iIdx].affinity==SQLITE_AFF_REAL ){
-    if( pMem->flags & (MEM_Int|MEM_IntReal) ){
-      testcase( pMem->flags & MEM_Int );
-      testcase( pMem->flags & MEM_IntReal );
-      sqlite3VdbeMemRealify(pMem);
+  }else{
+
+    /* If the old.* record has not yet been loaded into memory, do so now. */
+    if( p->pUnpacked==0 ){
+      u32 nRec;
+      u8 *aRec;
+
+      assert( p->pCsr->eCurType==CURTYPE_BTREE );
+      nRec = sqlite3BtreePayloadSize(p->pCsr->uc.pCursor);
+      aRec = sqlite3DbMallocRaw(db, nRec);
+      if( !aRec ) goto preupdate_old_out;
+      rc = sqlite3BtreePayload(p->pCsr->uc.pCursor, 0, nRec, aRec);
+      if( rc==SQLITE_OK ){
+        p->pUnpacked = vdbeUnpackRecord(&p->keyinfo, nRec, aRec);
+        if( !p->pUnpacked ) rc = SQLITE_NOMEM;
+      }
+      if( rc!=SQLITE_OK ){
+        sqlite3DbFree(db, aRec);
+        goto preupdate_old_out;
+      }
+      p->aRecord = aRec;
+    }
+
+    pMem = *ppValue = &p->pUnpacked->aMem[iIdx];
+    if( iIdx>=p->pUnpacked->nField ){
+      /* This occurs when the table has been extended using ALTER TABLE
+      ** ADD COLUMN. The value to return is the default value of the column. */
+      Column *pCol = &p->pTab->aCol[iIdx];
+      if( pCol->iDflt>0 ){
+        if( p->apDflt==0 ){
+          int nByte = sizeof(sqlite3_value*)*p->pTab->nCol;
+          p->apDflt = (sqlite3_value**)sqlite3DbMallocZero(db, nByte);
+          if( p->apDflt==0 ) goto preupdate_old_out;
+        }
+        if( p->apDflt[iIdx]==0 ){
+          sqlite3_value *pVal = 0;
+          Expr *pDflt;
+          assert( p->pTab!=0 && IsOrdinaryTable(p->pTab) );
+          pDflt = p->pTab->u.tab.pDfltList->a[pCol->iDflt-1].pExpr;
+          rc = sqlite3ValueFromExpr(db, pDflt, ENC(db), pCol->affinity, &pVal);
+          if( rc==SQLITE_OK && pVal==0 ){
+            rc = SQLITE_CORRUPT_BKPT;
+          }
+          p->apDflt[iIdx] = pVal;
+        }
+        *ppValue = p->apDflt[iIdx];
+      }else{
+        *ppValue = (sqlite3_value *)columnNullValue();
+      }
+    }else if( p->pTab->aCol[iIdx].affinity==SQLITE_AFF_REAL ){
+      if( pMem->flags & (MEM_Int|MEM_IntReal) ){
+        testcase( pMem->flags & MEM_Int );
+        testcase( pMem->flags & MEM_IntReal );
+        sqlite3VdbeMemRealify(pMem);
+      }
     }
   }
 

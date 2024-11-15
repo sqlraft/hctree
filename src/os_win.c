@@ -3599,6 +3599,11 @@ static int winFileControl(sqlite3_file *id, int op, void *pArg){
       return SQLITE_OK;
     }
 #endif
+    case SQLITE_FCNTL_NULL_IO: {
+      (void)osCloseHandle(pFile->h);
+      pFile->h = NULL;
+      return SQLITE_OK;
+    }
     case SQLITE_FCNTL_TEMPFILENAME: {
       char *zTFile = 0;
       int rc = winGetTempname(pFile->pVfs, &zTFile);
@@ -3660,7 +3665,7 @@ static int winSectorSize(sqlite3_file *id){
 */
 static int winDeviceCharacteristics(sqlite3_file *id){
   winFile *p = (winFile*)id;
-  return SQLITE_IOCAP_UNDELETABLE_WHEN_OPEN |
+  return SQLITE_IOCAP_UNDELETABLE_WHEN_OPEN | SQLITE_IOCAP_SUBPAGE_READ |
          ((p->ctrlFlags & WINFILE_PSOW)?SQLITE_IOCAP_POWERSAFE_OVERWRITE:0);
 }
 
