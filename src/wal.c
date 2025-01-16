@@ -884,7 +884,6 @@ struct WalIterator {
     sizeof(ht_slot)*HASHTABLE_NSLOT + HASHTABLE_NPAGE*sizeof(u32) \
 )
 
-
 /*
 ** Structured Exception Handling (SEH) is a Windows-specific technique
 ** for catching exceptions raised while accessing memory-mapped files.
@@ -990,6 +989,7 @@ static void sehInjectFault(Wal *pWal){
 # define SEH_FREE_ON_ERROR(X,Y)
 # define SEH_SET_ON_ERROR(X,Y)
 #endif /* ifdef SQLITE_USE_SEH */
+
 
 /*
 ** Obtain a pointer to the iPage'th page of the wal-index. The wal-index
@@ -3759,15 +3759,16 @@ static int walTryBeginRead(Wal *pWal, int *pChanged, int useWal, int *pCnt){
       pWal->readLock = eLock;
     }
     assert( pWal->minFrame==0 && walFramePage(pWal->minFrame)==0 );
-  }else{
+  }else
+  {
     u32 mxReadMark;               /* Largest aReadMark[] value */
     int mxI;                      /* Index of largest aReadMark[] value */
     int i;                        /* Loop counter */
     u32 mxFrame;                  /* Wal frame to lock to */
     if( !useWal && pInfo->nBackfill==pWal->hdr.mxFrame
-  #ifdef SQLITE_ENABLE_SNAPSHOT
+#ifdef SQLITE_ENABLE_SNAPSHOT
      && ((pWal->bGetSnapshot==0 && pWal->pSnapshot==0) || pWal->hdr.mxFrame==0)
-  #endif
+#endif
     ){
       /* The WAL has been completely backfilled (or it is empty).
       ** and can be safely ignored.
@@ -3783,7 +3784,7 @@ static int walTryBeginRead(Wal *pWal, int *pChanged, int useWal, int *pCnt){
           ** snapshot. Since holding READ_LOCK(0) prevents a checkpoint from
           ** happening, this is usually correct.
           **
-          ** However, if frames have been appended to the log (or if the log 
+          ** However, if frames have been appended to the log (or if the log
           ** is wrapped and written for that matter) before the READ_LOCK(0)
           ** is obtained, that is not necessarily true. A checkpointer may
           ** have started to backfill the appended frames but crashed before
@@ -3807,11 +3808,11 @@ static int walTryBeginRead(Wal *pWal, int *pChanged, int useWal, int *pCnt){
     mxReadMark = 0;
     mxI = 0;
     mxFrame = pWal->hdr.mxFrame;
-  #ifdef SQLITE_ENABLE_SNAPSHOT
+#ifdef SQLITE_ENABLE_SNAPSHOT
     if( pWal->pSnapshot && pWal->pSnapshot->mxFrame<mxFrame ){
       mxFrame = pWal->pSnapshot->mxFrame;
     }
-  #endif
+#endif
     for(i=1; i<WAL_NREADER; i++){
       u32 thisMark = AtomicLoad(pInfo->aReadMark+i); SEH_INJECT_FAULT;
       if( mxReadMark<=thisMark && thisMark<=mxFrame ){
@@ -3854,7 +3855,6 @@ static int walTryBeginRead(Wal *pWal, int *pChanged, int useWal, int *pCnt){
 #endif
       assert((rc&0xFF)!=SQLITE_BUSY||rc==SQLITE_BUSY||rc==SQLITE_BUSY_TIMEOUT);
       return (rc&0xFF)==SQLITE_BUSY ? WAL_RETRY : rc;
-
     }
     /* Now that the read-lock has been obtained, check that neither the
     ** value in the aReadMark[] array or the contents of the wal-index
@@ -3876,9 +3876,9 @@ static int walTryBeginRead(Wal *pWal, int *pChanged, int useWal, int *pCnt){
     ** to read any frames earlier than minFrame from the wal file - they
     ** can be safely read directly from the database file.
     **
-    ** Because a ShmBarrier() call is made between taking the copy of 
+    ** Because a ShmBarrier() call is made between taking the copy of
     ** nBackfill and checking that the wal-header in shared-memory still
-    ** matches the one cached in pWal->hdr, it is guaranteed that the 
+    ** matches the one cached in pWal->hdr, it is guaranteed that the
     ** checkpointer that set nBackfill was not working with a wal-index
     ** header newer than that cached in pWal->hdr. If it were, that could
     ** cause a problem. The checkpointer could omit to checkpoint
@@ -4150,7 +4150,6 @@ int sqlite3WalBeginReadTransaction(Wal *pWal, int *pChanged){
   SEH_EXCEPT( rc = walHandleException(pWal); )
   return rc;
 }
-
 
 /*
 ** Finish with a read transaction.  All this does is release the
@@ -4693,7 +4692,6 @@ static int walLockForCommit(
       }
     }
   }
-
   pWal->nPriorFrame = walGetPriorFrame(&pWal->hdr);
   return rc;
 }
@@ -4947,37 +4945,61 @@ static int walRestartLog(Wal *pWal){
     int iApp = walidxGetFile(&pWal->hdr);
     u32 nWalSize = WAL_DEFAULT_WALSIZE;
     if( pWal->mxWalSize>0 ){
+      /* mxWalSize is in bytes. Convert this to a number of frames. */
       nWalSize = (pWal->mxWalSize-WAL_HDRSIZE+pWal->szPage+WAL_FRAME_HDRSIZE-1) 
         / (pWal->szPage+WAL_FRAME_HDRSIZE);
       nWalSize = MAX(nWalSize, 1);
     }
 
-    assert( 1==WAL_LOCK_PART1 );
-    assert( 4==WAL_LOCK_PART2 );
-    assert( 1+(iApp*3)==WAL_LOCK_PART1 || 1+(iApp*3)==WAL_LOCK_PART2 );
-    if( pWal->readLock==1+(iApp*3)
+    /* With a BEGIN CONCURRENT transaction, it is possible for a connection
+    ** to hold the WAL_LOCK_PART1 lock even if iApp==1 (or WAL_LOCK_PART2
+    ** when iApp==0). This is because a connection running concurrent to this
+    ** one may have switched the wal file after this connection took the
+    ** read lock.
+    **
+    ** This is not a problem, as if this happens it means the current lock 
+    ** is more restrictive, not less, than required. And a BEGIN CONCURRENT
+    ** transaction cannot be committed and downgraded to a read-transaction,
+    ** so there is no chance of continuing while holding the wrong lock.
+    */
+    assert( iApp==0 || pWal->readLock==WAL_LOCK_PART2 
+                    || pWal->readLock==WAL_LOCK_PART2_FULL1 
+                    || pWal->readLock==WAL_LOCK_PART1 );
+    assert( iApp==1 || pWal->readLock==WAL_LOCK_PART1 
+                    || pWal->readLock==WAL_LOCK_PART1_FULL2 
+                    || pWal->readLock==WAL_LOCK_PART2 );
+
+    /* Switch to wal file !iApp if 
+    **
+    **   (a) Wal file iApp (the current wal file) contains >= nWalSize frames.
+    **   (b) This client is not reading from wal file !iApp.
+    **   (c) No other client is reading from wal file !iApp.
+    **
+    ** Condition (b) guarantees that wal file !iApp is either empty or
+    ** completely checkpointed. 
+    */
+    assert( (0*3)+1==WAL_LOCK_PART1 ); /* iApp==0 -> require WAL_LOCK_PART1 */
+    assert( (1*3)+1==WAL_LOCK_PART2 ); /* iApp==1 -> require WAL_LOCK_PART2 */
+    if( pWal->readLock==(iApp*3)+1
      && walidxGetMxFrame(&pWal->hdr, iApp)>=nWalSize 
     ){
-      volatile WalCkptInfo *pInfo = walCkptInfo(pWal);
-      u32 mxFrame = walidxGetMxFrame(&pWal->hdr, !iApp);
-      if( mxFrame==0 || pInfo->nBackfill ){
-        rc = wal2RestartOk(pWal, iApp);
-        if( rc==SQLITE_OK ){
-          int iNew = !iApp;
-          pWal->nCkpt++;
-          walidxSetFile(&pWal->hdr, iNew);
-          walidxSetMxFrame(&pWal->hdr, iNew, 0);
-          sqlite3Put4byte((u8*)&pWal->hdr.aSalt[0], pWal->hdr.aFrameCksum[0]);
-          sqlite3Put4byte((u8*)&pWal->hdr.aSalt[1], pWal->hdr.aFrameCksum[1]);
-          walIndexWriteHdr(pWal);
-          pInfo->nBackfill = 0;
-          wal2RestartFinished(pWal, iApp);
-          walUnlockShared(pWal, WAL_READ_LOCK(pWal->readLock));
-          pWal->readLock = iNew ? WAL_LOCK_PART2_FULL1 : WAL_LOCK_PART1_FULL2;
-          rc = walLockShared(pWal, WAL_READ_LOCK(pWal->readLock));
-        }else if( rc==SQLITE_BUSY ){
-          rc = SQLITE_OK;
-        }
+      rc = wal2RestartOk(pWal, iApp);
+      if( rc==SQLITE_OK ){
+        volatile WalCkptInfo *pInfo = walCkptInfo(pWal);
+        int iNew = !iApp;
+        pWal->nCkpt++;
+        walidxSetFile(&pWal->hdr, iNew);
+        walidxSetMxFrame(&pWal->hdr, iNew, 0);
+        sqlite3Put4byte((u8*)&pWal->hdr.aSalt[0], pWal->hdr.aFrameCksum[0]);
+        sqlite3Put4byte((u8*)&pWal->hdr.aSalt[1], pWal->hdr.aFrameCksum[1]);
+        walIndexWriteHdr(pWal);
+        pInfo->nBackfill = 0;
+        wal2RestartFinished(pWal, iApp);
+        walUnlockShared(pWal, WAL_READ_LOCK(pWal->readLock));
+        pWal->readLock = iNew ? WAL_LOCK_PART2_FULL1 : WAL_LOCK_PART1_FULL2;
+        rc = walLockShared(pWal, WAL_READ_LOCK(pWal->readLock));
+      }else if( rc==SQLITE_BUSY ){
+        rc = SQLITE_OK;
       }
     }
   }else if( pWal->readLock==0 ){
@@ -5015,7 +5037,6 @@ static int walRestartLog(Wal *pWal){
     ** to the wal file. */
     rc = walUpgradeReadlock(pWal);
   }
-
   pWal->nPriorFrame = walGetPriorFrame(&pWal->hdr);
   return rc;
 }
@@ -5416,7 +5437,6 @@ static int walFrames(
   return rc;
 }
 
-
 /* 
 ** Write a set of frames to the log. The caller must hold the write-lock
 ** on the log file (obtained using sqlite3WalBeginWriteTransaction()).
@@ -5504,7 +5524,7 @@ int sqlite3WalCheckpoint(
     ** writer lock retried until either the busy-handler returns 0 or the
     ** lock is successfully obtained.
     */
-    if( eMode!=SQLITE_CHECKPOINT_PASSIVE ){
+    if( eMode!=SQLITE_CHECKPOINT_PASSIVE && isWalMode2(pWal)==0 ){
       rc = walBusyLock(pWal, xBusy2, pBusyArg, WAL_WRITE_LOCK, 1);
       if( rc==SQLITE_OK ){
         pWal->writeLock = 1;
@@ -5542,7 +5562,7 @@ int sqlite3WalCheckpoint(
       }else{
         rc = walCheckpoint(pWal, db, eMode2, xBusy2, pBusyArg, sync_flags,zBuf);
       }
-  
+
       /* If no error occurred, set the output variables. */
       if( rc==SQLITE_OK || rc==SQLITE_BUSY ){
         if( pnLog ){
@@ -5636,7 +5656,6 @@ int sqlite3WalCallback(Wal *pWal){
 */
 int sqlite3WalExclusiveMode(Wal *pWal, int op){
   int rc;
-
   assert( pWal->writeLock==0 );
   assert( pWal->exclusiveMode!=WAL_HEAPMEMORY_MODE || op==-1 );
 
@@ -5699,7 +5718,7 @@ int sqlite3WalSnapshotGet(Wal *pWal, sqlite3_snapshot **ppSnapshot){
 
   assert( pWal->readLock>=0 && pWal->writeLock==0 );
 
-  if( memcmp(&pWal->hdr.aFrameCksum[0],aZero,8)==0 ){
+  if( memcmp(&pWal->hdr.aFrameCksum[0],aZero,16)==0 ){
     *ppSnapshot = 0;
     return SQLITE_ERROR;
   }
@@ -5782,7 +5801,7 @@ int sqlite3WalSnapshotCheck(Wal *pWal, sqlite3_snapshot *pSnapshot){
       }
     }
   }
-  SEH_EXCEPT( rc = walHandleException(pWal) );
+  SEH_EXCEPT( rc = walHandleException(pWal); )
   return rc;
 }
 

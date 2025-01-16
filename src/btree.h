@@ -424,6 +424,7 @@ void sqlite3BtreeClearCache(Btree*);
 # define sqlite3BtreeHoldsAllMutexes(X) 1
 # define sqlite3SchemaMutexHeld(X,Y,Z) 1
 #endif
+
 #define BTREE_DIR_NONE    0
 #define BTREE_DIR_FORWARD 1
 #define BTREE_DIR_REVERSE 2
