@@ -1190,6 +1190,7 @@ int sqlite3HctFileIsNewDb(HctFile *pFile){
   return bRet;
 }
 
+#include <sys/time.h>
 static sqlite3_int64 current_time(){
   struct timeval sNow;
   gettimeofday(&sNow, 0);
@@ -1904,6 +1905,7 @@ int sqlite3HctFilePageDirectWrite(HctFilePage *pPg){
     assert( pPg->pFile->pServer->bReadOnlyMap==0 );
     pPg->aNew = pPg->aOld;
   }
+  return SQLITE_OK;
 }
 
 

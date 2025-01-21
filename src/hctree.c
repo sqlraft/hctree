@@ -2056,6 +2056,7 @@ int sqlite3HctBtreeCursor(
          && sqlite3HctTreeCsrIsEmpty(pCur->pHctTreeCsr)
         ){
           pCur->isDirectWrite = 1;
+          bNosnap = 1;
         }
       }
     }
