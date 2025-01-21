@@ -387,19 +387,22 @@ typedef struct FreeTreeCtx FreeTreeCtx;
 struct FreeTreeCtx {
   HctFile *pFile;
   HctPManClient *pPManClient;
+  u32 iRoot;                      /* If not zero, preserve this page */
 };
 
 static int pmanFreeTreeCb(void *pCtx, u32 iLogic, u32 iPhys){
   FreeTreeCtx *p = (FreeTreeCtx*)pCtx;
   int rc = SQLITE_OK;
 
-  if( iLogic && !sqlite3HctFilePageIsFree(p->pFile, iLogic, 1) ){
-    rc = sqlite3HctFilePageClearInUse(p->pFile, iLogic, 1);
-    sqlite3HctPManFreePg(&rc, p->pPManClient, 0, iLogic, 1);
-  }
-  if( iPhys && !sqlite3HctFilePageIsFree(p->pFile, iPhys, 0) && rc==SQLITE_OK ){
-    rc = sqlite3HctFilePageClearInUse(p->pFile, iPhys, 0);
-    sqlite3HctPManFreePg(&rc, p->pPManClient, 0, iPhys, 0);
+  if( iLogic!=p->iRoot ){
+    if( iLogic && !sqlite3HctFilePageIsFree(p->pFile, iLogic, 1) ){
+      rc = sqlite3HctFilePageClearInUse(p->pFile, iLogic, 1);
+      sqlite3HctPManFreePg(&rc, p->pPManClient, 0, iLogic, 1);
+    }
+    if( iPhys && !sqlite3HctFilePageIsFree(p->pFile,iPhys,0) && rc==SQLITE_OK ){
+      rc = sqlite3HctFilePageClearInUse(p->pFile, iPhys, 0);
+      sqlite3HctPManFreePg(&rc, p->pPManClient, 0, iPhys, 0);
+    }
   }
 
   return rc;
@@ -408,14 +411,16 @@ static int pmanFreeTreeCb(void *pCtx, u32 iLogic, u32 iPhys){
 static int hctPManFreeTreeNow(
   HctPManClient *p, 
   HctFile *pFile, 
-  u32 iRoot
+  u32 iRoot,
+  int bSaveRoot
 ){
   int rc = SQLITE_OK;
   FreeTreeCtx ctx;
   ctx.pPManClient = p;
   ctx.pFile = pFile;
+  ctx.iRoot = bSaveRoot ? iRoot : 0;
   rc = sqlite3HctDbWalkTree(pFile, iRoot, pmanFreeTreeCb, (void*)&ctx);
-  if( rc==SQLITE_OK ){
+  if( rc==SQLITE_OK && !bSaveRoot ){
     rc = sqlite3HctFilePageClearIsRoot(pFile, iRoot);
   }
   return rc;
@@ -569,7 +574,7 @@ u32 sqlite3HctPManAllocPg(
     ** all physical and logical pages to the server. Then retry the above.
     */
     if( iRoot ){
-      rc = hctPManFreeTreeNow(pClient, pFile, iRoot);
+      rc = hctPManFreeTreeNow(pClient, pFile, iRoot, 0);
     }
   }while( iRoot );
   
@@ -635,11 +640,13 @@ int sqlite3HctPManFreeTree(
   HctPManClient *p, 
   HctFile *pFile, 
   u32 iRoot, 
-  u64 iTid
+  u64 iTid,
+  int bSaveRoot
 ){
   int rc = SQLITE_OK;
+  assert( bSaveRoot==0 || iTid==0 );
   if( iTid==0 ){
-    rc = hctPManFreeTreeNow(p, pFile, iRoot);
+    rc = hctPManFreeTreeNow(p, pFile, iRoot, bSaveRoot);
   }else{
     HctPManServer *pServer = p->pServer;
     int nNew;

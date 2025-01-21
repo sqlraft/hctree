@@ -97,7 +97,7 @@ int sqlite3HctPManVtabInit(sqlite3 *db);
 ** SQLITE_OK is returned if successful, or an error code (e.g. SQLITE_NOMEM)
 ** otherwise.
 */
-int sqlite3HctPManFreeTree(HctPManClient *p, HctFile*, u32 iRoot, u64 iTid);
+int sqlite3HctPManFreeTree(HctPManClient *p, HctFile*, u32 iRoot, u64 iTid,int);
 
 int sqlite3HctPManServerInitRoot(int *pRc, HctPManServer*, u64, HctFile*, u32);
 i64 sqlite3HctPManStats(sqlite3 *db, int iStat, const char **pzStat);

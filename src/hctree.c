@@ -110,12 +110,20 @@ struct HBtree {
 #define HCT_METASTATE_READ  1
 
 /*
-** A schema op.
+** A schema op. An ordered list of these objects is stored in the
+** HBtree.aSchemaOp[] array.
+**
+** eSchemaOp:
+**   An HCT_SCHEMAOP_XXX constant (see below).
+**
+** iSavepoint:
+**   The number of open savepoints + statement transactions when 
+**   the schema operation was performed.
 */ 
 struct BtSchemaOp {
-  int iSavepoint;
   int eSchemaOp;
-  u32 pgnoRoot;
+  int iSavepoint;
+  u32 pgnoRoot;                   /* Root page created/dropped or populated */
 };
 
 /*
@@ -124,6 +132,7 @@ struct BtSchemaOp {
 #define HCT_SCHEMAOP_DROP          1
 #define HCT_SCHEMAOP_CREATE_INTKEY 2
 #define HCT_SCHEMAOP_CREATE_INDEX  3
+#define HCT_SCHEMAOP_POPULATE      4
 
 
 struct HBtCursor {
@@ -136,6 +145,7 @@ struct HBtCursor {
   int eDir;                       /* One of BTREE_DIR_NONE, FORWARD, REVERSE */
 
   int isLast;                     /* Csr has not moved since BtreeLast() */
+  int isDirectWrite;              /* True to write directly to db */
 
   KeyInfo *pKeyInfo;              /* For non-intkey tables */
   int errCode;
@@ -1224,6 +1234,7 @@ static int hctAttemptRecovery(HBtree *p){
 **      sqlite3HctBtreeDropTable()
 **      sqlite3HctBtreeInsert()
 **      sqlite3HctBtreeDelete()
+**      sqlite3HctBtreeIdxDelete()
 **      sqlite3HctBtreeUpdateMeta()
 */
 int sqlite3HctBtreeBeginTrans(Btree *pBt, int wrflag, int *pSchemaVersion){
@@ -1527,31 +1538,6 @@ static int btreeFlushToDisk(HBtree *p){
     if( p->pLog ) rc = hctLogFileFinish(p->pLog, iTid);
   }
 
-  /* Initialize the root pages of any new tables or indexes created by this 
-  ** transaction. At this point the logical root page numbers have been
-  ** assigned by the page-manager, but there is no mapped physical page,
-  ** and the LOGICAL_IN_USE and LOGICAL_IS_ROOT flags are not yet set
-  ** for the page. This allocates and populates the physical root page,
-  ** and sets the two flags on the logical page slot.  
-  **
-  ** If the current transaction does not commit (i.e. failed validiation),
-  ** then the new tree is returned to the page-manage to be recycled 
-  ** immediately. Or, if a crash occurs, then recovery will see the
-  ** LOGICAL_IS_ROOT flag on a root page that is not in the sqlite_schema
-  ** table and free the pages then.  */
-  for(i=0; rc==SQLITE_OK && i<p->nSchemaOp; i++){
-    BtSchemaOp *pOp = &p->aSchemaOp[i];
-    assert(
-        pOp->eSchemaOp==HCT_SCHEMAOP_DROP
-     || pOp->eSchemaOp==HCT_SCHEMAOP_CREATE_INTKEY
-     || pOp->eSchemaOp==HCT_SCHEMAOP_CREATE_INDEX
-    );
-    if( pOp->eSchemaOp!=HCT_SCHEMAOP_DROP ){
-      int bIndex = (pOp->eSchemaOp==HCT_SCHEMAOP_CREATE_INDEX);
-      rc = sqlite3HctDbRootInit(p->pHctDb, bIndex, pOp->pgnoRoot);
-    }
-  }
-
   /* Write all the new database entries to the database. Any write/write
   ** conflicts are detected here - SQLITE_BUSY is returned in that case.  */
   p->nRollbackOp = 0;
@@ -1595,10 +1581,10 @@ static int btreeFlushToDisk(HBtree *p){
     }
   }
 
+  /* Do any DROP TABLE commands */
   for(i=0; rc==SQLITE_OK && i<p->nSchemaOp; i++){
     BtSchemaOp *pOp = &p->aSchemaOp[i];
     if( (rcok==SQLITE_OK && pOp->eSchemaOp==HCT_SCHEMAOP_DROP)
-     || (rcok!=SQLITE_OK && pOp->eSchemaOp!=HCT_SCHEMAOP_DROP)
     ){
       HctFile *pFile = sqlite3HctDbFile(p->pHctDb);
       rc = sqlite3HctFileTreeFree(pFile, pOp->pgnoRoot, rcok!=SQLITE_OK);
@@ -1633,6 +1619,38 @@ static void hctEndTransaction(HBtree *p){
     p->eTrans = SQLITE_TXN_NONE;
     p->eMetaState = HCT_METASTATE_NONE;
   }
+}
+
+/*
+** Cursor pCur is a direct-write cursor. This function writes the new entry
+** specified by the following 4 parameters to the database b-tree opened 
+** by the cursor.
+**
+** SQLITE_OK is returned if successful, or an SQLite error code otherwise.
+*/
+static int hctBtreeDirectInsert(
+  HBtCursor *pCur,
+  UnpackedRecord *pRec,           /* Unpacked record for index b-tree */
+  i64 iKey,                       /* Key value for table b-tree */
+  int nData,                      /* Size of aData[] in bytes */
+  const u8 *aData                 /* Pointer to record to insert */
+){
+  int rc = SQLITE_OK;
+  HBtree *p = pCur->pBtree;
+  int bFail = 0;
+
+  assert( pCur->isDirectWrite );
+
+  rc = sqlite3HctDbDirectInsert(
+      p->pHctDb, 
+      sqlite3HctTreeCsrRoot(pCur->pHctTreeCsr),
+      pRec, iKey, nData, aData, &bFail
+  );
+  if( bFail ){
+    pCur->isDirectWrite = 0;
+  }
+
+  return rc;
 }
 
 
@@ -1695,6 +1713,35 @@ static int hctBtreeMigrateCommit(HBtree *p){
 #define CSR_IS_MIGRATE(pCsr) (pCsr->pBtree->config.db->bHctMigrate)
 
 /*
+** Roll back any schema operations performed during the current transaction.
+**
+** iSavepoint==0 means rollback the entire transaction. iSavepoint=1 means
+** roll back the outermost savepoint, etc.
+*/
+static void hctreeRollbackSchema(HBtree *p, int iSavepoint){
+  int ii;
+  assert( p->eTrans>=SQLITE_TXN_WRITE );
+
+  for(ii=p->nSchemaOp-1; ii>=0; ii--){
+    BtSchemaOp *pOp = &p->aSchemaOp[ii];
+
+    if( iSavepoint>pOp->iSavepoint ) break;
+    p->nSchemaOp = ii;
+
+    if( pOp->eSchemaOp==HCT_SCHEMAOP_POPULATE ){
+      sqlite3HctDbDirectClear(p->pHctDb, pOp->pgnoRoot);
+    }
+
+    if( pOp->eSchemaOp==HCT_SCHEMAOP_CREATE_INTKEY
+     || pOp->eSchemaOp==HCT_SCHEMAOP_CREATE_INDEX
+    ){
+      HctFile *pFile = sqlite3HctDbFile(p->pHctDb);
+      sqlite3HctFileTreeFree(pFile, pOp->pgnoRoot, 1);
+    }
+  }
+}
+
+/*
 ** Commit the transaction currently in progress.
 **
 ** This routine implements the second phase of a 2-phase commit.  The
@@ -1739,6 +1786,9 @@ int sqlite3HctBtreeCommitPhaseTwo(Btree *pBt, int bCleanup){
       if( p->pHctDb ){
         rc = btreeFlushToDisk(p);
         sqlite3HctTreeClear(p->pHctTree);
+        if( rc!=SQLITE_OK ){
+          hctreeRollbackSchema(p, 0);
+        }
         p->nSchemaOp = 0;
       }
       p->eTrans = SQLITE_TXN_READ;
@@ -1827,12 +1877,12 @@ int sqlite3HctBtreeRollback(Btree *pBt, int tripCode, int writeOnly){
   assert( p->eTrans!=SQLITE_TXN_ERROR || p->pCsrList==0 );
 
   if( p->eTrans>=SQLITE_TXN_WRITE ){
+    hctreeRollbackSchema(p, 0);
     sqlite3HctTreeRollbackTo(p->pHctTree, 0);
     if( p->pHctDb ){
       sqlite3HctTreeClear(p->pHctTree);
     }
     p->eTrans = SQLITE_TXN_READ;
-    p->nSchemaOp = 0;
   }
   hctEndTransaction(p);
   return SQLITE_OK;
@@ -1864,17 +1914,6 @@ int sqlite3HctBtreeBeginStmt(Btree *pBt, int iStatement){
   return rc;
 }
 
-static int btreeRollbackRoot(HBtree *p, int iSavepoint){
-  int i;
-  int rc = SQLITE_OK;
-  for(i=p->nSchemaOp-1; rc==SQLITE_OK && i>=0; i--){
-    if( p->aSchemaOp[i].iSavepoint<=iSavepoint ) break;
-    rc = sqlite3HctDbRootFree(p->pHctDb, p->aSchemaOp[i].pgnoRoot);
-  }
-  p->nSchemaOp = i+1;
-  return rc;
-}
-
 /*
 ** The second argument to this function, op, is always SAVEPOINT_ROLLBACK
 ** or SAVEPOINT_RELEASE. This function either releases or rolls back the
@@ -1894,6 +1933,7 @@ int sqlite3HctBtreeSavepoint(Btree *pBt, int op, int iSavepoint){
     int i;
     assert( op==SAVEPOINT_ROLLBACK || op==SAVEPOINT_RELEASE );
     if( op==SAVEPOINT_RELEASE ){
+      assert( iSavepoint>=0 );
       for(i=0; i<p->nSchemaOp; i++){
         if( p->aSchemaOp[i].iSavepoint>iSavepoint ){
           p->aSchemaOp[i].iSavepoint = iSavepoint;
@@ -1902,7 +1942,7 @@ int sqlite3HctBtreeSavepoint(Btree *pBt, int op, int iSavepoint){
       sqlite3HctTreeRelease(p->pHctTree, iSavepoint+1);
     }else{
       sqlite3HctTreeRollbackTo(p->pHctTree, iSavepoint+2);
-      btreeRollbackRoot(p, iSavepoint);
+      hctreeRollbackSchema(p, iSavepoint+1);
       p->eMetaState = HCT_METASTATE_NONE;
     }
   }
@@ -1919,6 +1959,32 @@ int sqlite3HctBtreeIsNewTable(Btree *pBt, u64 iRoot){
 u64 sqlite3HctBtreeSnapshotId(Btree *pBt){
   HBtree *const p = (HBtree*)pBt;
   return sqlite3HctDbSnapshotId(p->pHctDb);
+}
+
+static int hctreeAddNewSchemaOp(HBtree *p, u32 iRoot, int eOp){
+  BtSchemaOp *aSchemaOp;
+  sqlite3 *db = p->config.db;
+  int iSavepoint = db->nSavepoint + db->nStatement;
+
+  /* Grow the Btree.aSchemaOp array */
+  assert( p->pHctDb );
+  aSchemaOp = (BtSchemaOp*)sqlite3_realloc(
+      p->aSchemaOp, sizeof(BtSchemaOp)*(p->nSchemaOp+1)
+  );
+  if( aSchemaOp==0 ) return SQLITE_NOMEM_BKPT;
+
+  p->aSchemaOp = aSchemaOp;
+  p->aSchemaOp[p->nSchemaOp].pgnoRoot = iRoot;
+  p->aSchemaOp[p->nSchemaOp].iSavepoint = iSavepoint;
+  p->aSchemaOp[p->nSchemaOp].eSchemaOp = eOp;
+  p->nSchemaOp++;
+
+  return SQLITE_OK;
+}
+
+static int hctreeAddNewRoot(HBtree *p, u32 iRoot, int bIndex){
+  int eOp = bIndex ? HCT_SCHEMAOP_CREATE_INDEX : HCT_SCHEMAOP_CREATE_INTKEY;
+  return hctreeAddNewSchemaOp(p, iRoot, eOp);
 }
 
 /*
@@ -1952,9 +2018,49 @@ int sqlite3HctBtreeCursor(
   pCur->pKeyInfo = pKeyInfo;
   rc = sqlite3HctTreeCsrOpen(p->pHctTree, iTable, &pCur->pHctTreeCsr);
   if( rc==SQLITE_OK && p->pHctDb ){
-    int ii;
-    for(ii=0; ii<p->nSchemaOp && p->aSchemaOp[ii].pgnoRoot!=iTable; ii++);
-    if( ii==p->nSchemaOp ){
+    int bTreeOnly = 0;
+    BtSchemaOp *pOp;
+
+    if( p->nSchemaOp>0 ){
+      for(pOp=&p->aSchemaOp[p->nSchemaOp-1]; 1; pOp--){
+  
+        if( pOp->pgnoRoot==iTable ){
+          assert( pOp->eSchemaOp==HCT_SCHEMAOP_CREATE_INTKEY
+               || pOp->eSchemaOp==HCT_SCHEMAOP_CREATE_INDEX 
+               || pOp->eSchemaOp==HCT_SCHEMAOP_POPULATE 
+          );
+          if( pOp->eSchemaOp!=HCT_SCHEMAOP_POPULATE ){
+  
+            if( wrFlag==0 ){
+              bTreeOnly = 1;
+            }else{
+              if( rc==SQLITE_OK ){
+                hctreeAddNewSchemaOp(p, iTable, HCT_SCHEMAOP_POPULATE);
+                pOp = &p->aSchemaOp[p->nSchemaOp-1];
+              }
+            }
+          }
+  
+          break;
+        }
+  
+        if( pOp==p->aSchemaOp ){
+          pOp = 0;
+          break;
+        }
+      }
+  
+      if( wrFlag && pOp ){
+        sqlite3 *db = p->config.db;
+        if( pOp->iSavepoint==(db->nSavepoint+db->nStatement)
+         && sqlite3HctTreeCsrIsEmpty(pCur->pHctTreeCsr)
+        ){
+          pCur->isDirectWrite = 1;
+        }
+      }
+    }
+
+    if( bTreeOnly==0 ){
       rc = sqlite3HctDbCsrOpen(p->pHctDb, pKeyInfo, iTable, &pCur->pHctDbCsr);
       sqlite3HctDbCsrNosnap(pCur->pHctDbCsr, bNosnap);
     }
@@ -2684,17 +2790,23 @@ int sqlite3HctBtreeInsert(
     iKey = pX->nKey;
   }
 
-  if( CSR_IS_MIGRATE(pCur) ){
-    assert( nZero==0 );
-    rc = hctBtreeMigrateInsert(pCur, pRec, iKey, nData, aData);
-  }else{
-    if( pCur->isLast && seekResult<0 ){
-      rc = sqlite3HctTreeAppend(
-          pTreeCsr, pCur->pKeyInfo, iKey, nData, aData, nZero
-          );
+  if( pCur->isDirectWrite ){
+    rc = hctBtreeDirectInsert(pCur, pRec, iKey, nData, aData);
+  }
+
+  if( pCur->isDirectWrite==0 ){
+    if( CSR_IS_MIGRATE(pCur) ){
+      assert( nZero==0 );
+      rc = hctBtreeMigrateInsert(pCur, pRec, iKey, nData, aData);
     }else{
-      rc = sqlite3HctTreeInsert(pTreeCsr, pRec, iKey, nData, aData, nZero);
-      pCur->isLast = 0;
+      if( pCur->isLast && seekResult<0 ){
+        rc = sqlite3HctTreeAppend(
+            pTreeCsr, pCur->pKeyInfo, iKey, nData, aData, nZero
+        );
+      }else{
+        rc = sqlite3HctTreeInsert(pTreeCsr, pRec, iKey, nData, aData, nZero);
+        pCur->isLast = 0;
+      }
     }
   }
 
@@ -2748,6 +2860,10 @@ int sqlite3HctBtreeDelete(BtCursor *pCursor, u8 flags){
   HBtCursor *const pCur = (HBtCursor*)pCursor;
   int rc = SQLITE_OK;
 
+  /* TODO: If this happens, switch the cursor out of direct write mode
+  ** before proceeding with the rest of this function. */
+  assert( pCur->isDirectWrite==0 );
+
   hctBtreeClearIsLast(pCur->pBtree, 0);
   if( pCur->pHctDbCsr==0 ){
     rc = sqlite3HctTreeDelete(pCur->pHctTreeCsr);
@@ -2774,6 +2890,10 @@ int sqlite3HctBtreeIdxDelete(BtCursor *pCursor, UnpackedRecord *pKey){
   HBtCursor *const pCur = (HBtCursor*)pCursor;
   int rc = SQLITE_OK;
 
+  /* TODO: If this happens, switch the cursor out of direct write mode
+  ** before proceeding with the rest of this function. */
+  assert( pCur->isDirectWrite==0 );
+
   hctBtreeClearIsLast(pCur->pBtree, 0);
   if( pCur->pHctDbCsr ){
     u8 *aRec = 0;
@@ -2793,30 +2913,6 @@ int sqlite3HctBtreeIdxDelete(BtCursor *pCursor, UnpackedRecord *pKey){
   return rc;
 }
 
-static int hctreeAddNewSchemaOp(HBtree *p, u32 iRoot, int eOp){
-  BtSchemaOp *aSchemaOp;
-
-  /* Grow the Btree.aSchemaOp array */
-  assert( p->pHctDb );
-  aSchemaOp = (BtSchemaOp*)sqlite3_realloc(
-      p->aSchemaOp, sizeof(BtSchemaOp)*(p->nSchemaOp+1)
-  );
-  if( aSchemaOp==0 ) return SQLITE_NOMEM_BKPT;
-
-  p->aSchemaOp = aSchemaOp;
-  p->aSchemaOp[p->nSchemaOp].pgnoRoot = iRoot;
-  p->aSchemaOp[p->nSchemaOp].iSavepoint = p->config.db->nSavepoint;
-  p->aSchemaOp[p->nSchemaOp].eSchemaOp = eOp;
-  p->nSchemaOp++;
-
-  return SQLITE_OK;
-}
-
-static int hctreeAddNewRoot(HBtree *p, u32 iRoot, int bIndex){
-  int eOp = bIndex ? HCT_SCHEMAOP_CREATE_INDEX : HCT_SCHEMAOP_CREATE_INTKEY;
-  return hctreeAddNewSchemaOp(p, iRoot, eOp);
-}
-
 /*
 ** Create a new BTree table.  Write into *piTable the page
 ** number for the root page of the new table.
@@ -2834,6 +2930,9 @@ int sqlite3HctBtreeCreateTable(Btree *pBt, Pgno *piTable, int flags){
   int rc = SQLITE_OK;
   if( p->pHctDb ){
     rc = sqlite3HctDbRootNew(p->pHctDb, &iNew);
+    if( rc==SQLITE_OK ){
+      rc = sqlite3HctDbRootInit(p->pHctDb, (flags & BTREE_INTKEY)==0, iNew);
+    }
     if( rc==SQLITE_OK ){
       rc = hctreeAddNewRoot(p, iNew, (flags & BTREE_INTKEY)==0);
     }

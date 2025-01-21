@@ -672,10 +672,6 @@ int sqlite3HctDbRootNew(HctDatabase *p, u32 *piRoot){
   return sqlite3HctFileRootPgno(p->pFile, piRoot);
 }
 
-int sqlite3HctDbRootFree(HctDatabase *p, u32 iRoot){
-  return sqlite3HctFileRootFree(p->pFile, iRoot);
-}
-
 void sqlite3HctDbRootPageInit(
   int bIndex,                     /* True for an index, false for intkey */
   u8 *aPage,                      /* Buffer to initialize */
@@ -965,6 +961,19 @@ int sqlite3HctDbRootInit(HctDatabase *p, int bIndex, u32 iRoot){
   if( rc==SQLITE_OK ){
     sqlite3HctDbRootPageInit(bIndex, pg.aNew, p->pgsz);
     rc = sqlite3HctFilePageRelease(&pg);
+  }
+  return rc;
+}
+
+int sqlite3HctDbDirectClear(HctDatabase *pDb, u32 iRoot){
+  int rc = sqlite3HctFileTreeClear(pDb->pFile, iRoot);
+  if( rc==SQLITE_OK ){
+    HctFilePage pg;
+    rc = sqlite3HctFilePageGet(pDb->pFile, iRoot, &pg);
+    if( rc==SQLITE_OK ){
+      int bIndex = hctPagetype(pg.aOld)==HCT_PAGETYPE_INDEX;
+      sqlite3HctDbRootPageInit(bIndex, pg.aOld, pDb->pgsz);
+    }
   }
   return rc;
 }
@@ -4514,7 +4523,7 @@ static int hctDbInsertOverflow(
     *ppgOvfl = iPg;
     *pnWrite = nLocal;
 
-    if( rc==SQLITE_OK ){
+    if( rc==SQLITE_OK && pWriter ){
       rc = hctDbOverflowArrayAppend(&pWriter->insOvfl, iPg, nOvfl);
     }
   }
@@ -5194,7 +5203,7 @@ static int hctDbInsert(
   int bDel,                       /* True for a delete operation */
   int nData, const u8 *aData      /* Record/key to insert */
 ){
-  const RecordCompare xCompare = pRec ? sqlite3VdbeFindCompare(pRec) : 0;
+  const RecordCompare xCompare = (pRec ? sqlite3VdbeFindCompare(pRec) : 0);
   int rc = SQLITE_OK;
   int bClobber = 0;
   u8 *aTarget;                    /* Page to write new entry to */
@@ -5603,6 +5612,215 @@ int sqlite3HctDbInsert(
 
  insert_done:
   if( pRec ) pRec->nField = nRecField;
+  return rc;
+}
+
+/*
+** Page pPg is currently the root page of a table being written by a 
+** direct-write cursor.
+*/
+static int hctDbDirectSplitRoot(HctDatabase *pDb, HctFilePage *pPg){
+  HctFilePage peer;
+  int rc = SQLITE_OK;
+
+  rc = sqlite3HctFilePageNew(pDb->pFile, &peer);
+  if( rc==SQLITE_OK ){
+    HctDbIntkeyNode *pNode;
+    memcpy(peer.aNew, pPg->aOld, pDb->pgsz);
+    pNode = (HctDbIntkeyNode*)pPg->aOld;
+    pNode->pg.hdrFlags = HCT_PAGETYPE_INTKEY | HCT_PAGETYPE_LEFTMOST;
+    pNode->pg.nHeight = hctPageheight(peer.aNew) + 1;
+    pNode->pg.nEntry = 1;
+    pNode->pg.iPeerPg = 0;
+    pNode->aEntry[0].iKey = SMALLEST_INT64;
+    pNode->aEntry[0].iChildPg = peer.iPg;
+    rc = sqlite3HctFilePageRelease(pPg);
+    memcpy(pPg, &peer, sizeof(HctFilePage));
+  }
+
+  return rc;
+}
+
+static int hctDbDirectInsertAt(
+  HctDatabase *pDb,
+  u32 iRoot,
+  int nHeight, int iChildPg,
+  UnpackedRecord *pRec, i64 iKey, 
+  int nData, const u8 *aData,
+  int *pbFail                     /* Set to true if insert NOT handled */
+){
+  HctFilePage pg;                 /* Page object to write to */
+  u32 iPg = iRoot;                /* Logical page number */
+  int rc = SQLITE_OK;             /* Return Code */
+  HctDbCell cell;                 /* New cell to insert */
+  int nLocal;                     /* Bytes of local payload */
+
+  memset(&pg, 0, sizeof(pg));
+  memset(&cell, 0, sizeof(cell));
+
+  /* Set object pg to refer to the rightmost page of the level to write. */
+  while( rc==SQLITE_OK ){
+    rc = sqlite3HctFilePageGet(pDb->pFile, iPg, &pg);
+    if( rc==SQLITE_OK ){
+      HctDbPageHdr *pPg = (HctDbPageHdr*)pg.aOld;
+      if( pPg->nHeight==nHeight ) break;
+      iPg = hctDbGetChildPage((u8*)pPg, pPg->nEntry-1);
+      sqlite3HctFilePageRelease(&pg);
+    }
+  }
+  if( rc!=SQLITE_OK ) goto direct_insert_out;
+
+  /* Page pg is now the rightmost page of the b-tree level to write to. 
+  ** If nHeight==0, check to see if this operation really is an append. 
+  ** If nHeight>0, it is guaranteed to be.  */
+  if( nHeight==0 ){
+    if( hctPagetype(pg.aOld)==HCT_PAGETYPE_INTKEY ){
+      HctDbIntkeyLeaf *pLeaf = (HctDbIntkeyLeaf*)pg.aOld;
+      if( pLeaf->pg.nEntry>0 && pLeaf->aEntry[pLeaf->pg.nEntry-1].iKey>=iKey ){
+        *pbFail = 1;
+        goto direct_insert_out;
+      }
+    }else{
+      *pbFail = 1;
+      goto direct_insert_out;
+    }
+  }
+
+  /* Write any required overflow pages. Figure out how much space is required
+  ** by the new entry at the same time. */
+  rc = hctDbInsertOverflow(pDb, 0, pg.aOld, nData, aData, &nLocal, &cell.iOvfl);
+  if( rc!=SQLITE_OK ) goto direct_insert_out;
+  cell.aPayload = aData;
+
+  if( hctPagetype(pg.aOld)==HCT_PAGETYPE_INTKEY ){
+    if( hctPageheight(pg.aOld)==0 ){
+      int nReq = sizeof(HctDbIntkeyEntry) + nLocal + (cell.iOvfl ? 4 : 0);
+      int iOff = 0;
+      HctDbIntkeyLeaf *pLeaf = (HctDbIntkeyLeaf*)pg.aOld;
+      HctDbIntkeyEntry *pE;
+
+      assert( pLeaf->hdr.nFreeGap==pLeaf->hdr.nFreeBytes );
+      if( nReq>pLeaf->hdr.nFreeGap ){
+        /* The new entry will not fit on this page. */
+        HctDbIntkeyLeaf *pPeer;
+        HctFilePage peer;
+
+        /* If this operation causes the root page to split, handle that. */
+        if( pg.iPg==iRoot ){
+          rc = hctDbDirectSplitRoot(pDb, &pg);
+          if( rc ) goto direct_insert_out;
+          pLeaf = (HctDbIntkeyLeaf*)pg.aNew;
+        }
+
+        rc = sqlite3HctFilePageNew(pDb->pFile, &peer);
+        if( rc ) goto direct_insert_out;
+        pLeaf->pg.iPeerPg = peer.iPg;
+        pPeer = (HctDbIntkeyLeaf*)peer.aNew;
+        memset(pPeer, 0, sizeof(*pPeer));
+        pPeer->pg.hdrFlags = hctPagetype(pLeaf);
+        pPeer->pg.nHeight = pLeaf->pg.nHeight;
+        pPeer->hdr.nFreeGap = pPeer->hdr.nFreeBytes = pDb->pgsz-sizeof(*pPeer);
+
+        rc = hctDbDirectInsertAt(
+            pDb, iRoot, nHeight+1, peer.iPg, 0, iKey, 0, 0, 0
+        );
+        if( rc ) goto direct_insert_out;
+
+
+        rc = sqlite3HctFilePageRelease(&pg);
+        if( rc ){
+          sqlite3HctFilePageRelease(&peer);
+          goto direct_insert_out;
+        }
+
+        memcpy(&pg, &peer, sizeof(HctFilePage));
+        pLeaf = pPeer;
+      }else{
+        /* TODO - hct_file.c call for writing in place! */
+      }
+      iOff = sizeof(HctDbIntkeyLeaf) 
+           + pLeaf->pg.nEntry * sizeof(HctDbIntkeyEntry) 
+           + pLeaf->hdr.nFreeGap - (nLocal + (cell.iOvfl ? 4 : 0));
+
+      hctDbCellPut(&((u8*)pLeaf)[iOff], &cell, nLocal);
+      pE = &pLeaf->aEntry[pLeaf->pg.nEntry];
+      pE->nSize = nData;
+      pE->iOff = iOff;
+      pE->flags = hctDbCellToFlags(&cell);
+      pE->iKey = iKey;
+
+      pLeaf->pg.nEntry++;
+      pLeaf->hdr.nFreeGap -= nReq;
+      pLeaf->hdr.nFreeBytes -= nReq;
+
+    }else{
+      int nMax = hctDbMaxCellsPerIntkeyNode(pDb->pgsz);
+      HctDbIntkeyNode *pNode = (HctDbIntkeyNode*)pg.aOld;
+
+      if( pNode->pg.nEntry>=nMax ){
+        /* The new entry will not fit on this page. */
+        HctDbIntkeyNode *pPeer;
+        HctFilePage peer;
+
+        if( pg.iPg==iRoot ){
+          rc = hctDbDirectSplitRoot(pDb, &pg);
+          if( rc ) goto direct_insert_out;
+          pNode = (HctDbIntkeyNode*)pg.aNew;
+        }
+
+        rc = sqlite3HctFilePageNew(pDb->pFile, &peer);
+        if( rc ) goto direct_insert_out;
+        pNode->pg.iPeerPg = peer.iPg;
+        pPeer = (HctDbIntkeyNode*)peer.aNew;
+
+        memset(pPeer, 0, sizeof(*pPeer));
+        pPeer->pg.hdrFlags = hctPagetype(pNode);
+        pPeer->pg.nHeight = pNode->pg.nHeight;
+
+        rc = hctDbDirectInsertAt(
+            pDb, iRoot, nHeight+1, peer.iPg, 0, iKey, 0, 0, 0
+        );
+        if( rc ) goto direct_insert_out;
+
+        rc = sqlite3HctFilePageRelease(&pg);
+        if( rc ){
+          sqlite3HctFilePageRelease(&peer);
+          goto direct_insert_out;
+        }
+
+        memcpy(&pg, &peer, sizeof(HctFilePage));
+        pNode = pPeer;
+      }
+
+      pNode->aEntry[pNode->pg.nEntry].iChildPg = iChildPg;
+      pNode->aEntry[pNode->pg.nEntry].iKey = iKey;
+      pNode->pg.nEntry++;
+    }
+  }else{
+    assert( 0 );
+  }
+
+  rc = sqlite3HctFilePageRelease(&pg);
+  return rc;
+
+ direct_insert_out:
+  sqlite3HctFilePageRelease(&pg);
+  return rc;
+}
+
+int sqlite3HctDbDirectInsert(
+  HctDatabase *pDb, 
+  u32 iRoot,
+  UnpackedRecord *pRec, i64 iKey, 
+  int nData, const u8 *aData,
+  int *pbFail
+){
+  int rc = SQLITE_OK;
+
+  /* The TID has not yet been allocated */
+  assert( pDb->iTid==0 );
+
+  rc = hctDbDirectInsertAt(pDb, iRoot, 0, 0, pRec, iKey, nData, aData, pbFail);
   return rc;
 }
 
@@ -6549,6 +6767,18 @@ static int hctDbIntegrityCheckCb(
   return (p->nErr>=p->nMaxErr) ? -1 : 0;
 }
 
+/*
+** Parameter aVal[] is an array nVal values in size. If this array contains
+** the value passed as the 3rd parameter (val), return true. Otherwise return
+** false.
+*/
+static int arrayContainsValue(u32 *aVal, int nVal, u32 val){
+  int ii;
+  for(ii=0; ii<nVal; ii++){
+    if( aVal[ii]==val ) return 1;
+  }
+  return 0;
+}
 
 char *sqlite3HctDbIntegrityCheck(
   HctDatabase *pDb, 
@@ -6578,7 +6808,6 @@ char *sqlite3HctDbIntegrityCheck(
       u32 r = aFileRoot[ii];
       c.nEntry = 0;
       sqlite3HctDbWalkTree(pFile, r, hctDbIntegrityCheckCb, (void*)&c);
-
 #if 0
       if( r!=2 ){
         int jj;
@@ -6974,7 +7203,7 @@ static int hctdbColumn(
   int i                       /* Which column to return */
 ){
   hctdb_cursor *pCur = (hctdb_cursor*)cur;
-  assert( i>=0 && i<=5 );
+  assert( i>=0 && i<=6 );
   switch( i ){
     case 0: /* pgno */
       sqlite3_result_int64(ctx, (i64)pCur->pgno);

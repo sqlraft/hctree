@@ -1517,7 +1517,11 @@ int sqlite3HctFilePageClearInUse(HctFile *pFile, u32 iPg, int bLogic){
 
 int sqlite3HctFileTreeFree(HctFile *pFile, u32 iRoot, int bImmediate){
   u64 iTid = bImmediate ? 0 : pFile->iCurrentTid;
-  return sqlite3HctPManFreeTree(pFile->pPManClient, pFile, iRoot, iTid);
+  return sqlite3HctPManFreeTree(pFile->pPManClient, pFile, iRoot, iTid, 0);
+}
+
+int sqlite3HctFileTreeClear(HctFile *pFile, u32 iRoot){
+  sqlite3HctPManFreeTree(pFile->pPManClient, pFile, iRoot, 0, 1);
 }
 
 static int hctFilePagemapGetGrow(HctFile *pFile, u32 iPg, u64 *piVal){
@@ -1787,7 +1791,9 @@ int sqlite3HctFilePageIsFree(HctFile *pFile, u32 iPgno, int bLogical){
 int sqlite3HctFilePageRelease(HctFilePage *pPg){
   int rc = SQLITE_OK;
   if( pPg->iPg ){
-    rc = hctFilePageFlush(pPg);
+    if( pPg->aNew!=pPg->aOld ){
+      rc = hctFilePageFlush(pPg);
+    }
   }else if( pPg->aNew && pPg->pFile->pServer->bReadOnlyMap ){
     rc = hctPageWriteToDisk(pPg->pFile->pServer, pPg->iNewPg, pPg->aNew);
     sqlite3_free(pPg->aNew);
@@ -1892,6 +1898,14 @@ int sqlite3HctFilePageWrite(HctFilePage *pPg){
   hctFilePageMakeWritable(&rc, pPg);
   return rc;
 }
+
+int sqlite3HctFilePageDirectWrite(HctFilePage *pPg){
+  if( pPg->aNew==0 ){
+    assert( pPg->pFile->pServer->bReadOnlyMap==0 );
+    pPg->aNew = pPg->aOld;
+  }
+}
+
 
 u64 sqlite3HctFileAllocateTransid(HctFile *pFile){
   u64 iVal = hctFilePagemapIncr(pFile, HCT_PAGEMAP_TRANSID_EOF, 1);

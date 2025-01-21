@@ -138,6 +138,7 @@ void sqlite3HctTreeCsrClear(HctTreeCsr *pCsr);
 
 u32 sqlite3HctTreeCsrRoot(HctTreeCsr *pCsr);
 
+int sqlite3HctTreeCsrIsEmpty(HctTreeCsr *pCsr);
 
 /* 
 ** Iterate through non-empty tables/indexes within an HctTree structure. Used
@@ -176,7 +177,6 @@ HctDatabase *sqlite3HctDbOpen(int*, const char *zFile, HctConfig*);
 void sqlite3HctDbClose(HctDatabase *pDb);
 
 int sqlite3HctDbRootNew(HctDatabase *p, u32 *piRoot);
-int sqlite3HctDbRootFree(HctDatabase *p, u32 iRoot);
 
 int sqlite3HctDbRootInit(HctDatabase *p, int bIndex, u32 iRoot);
 void sqlite3HctDbRootPageInit(int bIndex, u8 *aPage, int szPage);
@@ -273,6 +273,15 @@ int sqlite3HctDbCsrFindLastWrite(
 );
 
 void sqlite3HctDbJrnlWriteCid(HctDatabase *pDb, u64 iVal);
+
+int sqlite3HctDbDirectInsert(
+  HctDatabase *pDb, 
+  u32 iRoot,
+  UnpackedRecord *pRec, i64 iKey, 
+  int nData, const u8 *aData,
+  int *pbFail
+);
+int sqlite3HctDbDirectClear(HctDatabase *pDb, u32 iRoot);
 
 /*************************************************************************
 ** Interface to code in hct_file.c
