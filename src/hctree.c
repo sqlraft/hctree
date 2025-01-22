@@ -84,7 +84,7 @@ struct HBtree {
   HctLogFile *pLog;               /* Object for writing to log file */
   u32 iNextRoot;                  /* Next root page to allocate if pHctDb==0 */
   u32 aMeta[SQLITE_N_BTREE_META]; /* 16 database meta values */
-  int eMetaState;
+  int eMetaState;                 /* HCT_METASTATE_XXX value */
 
   int bRecoveryDone;
 #if 0
@@ -1630,6 +1630,7 @@ static void hctEndTransaction(HBtree *p){
 */
 static int hctBtreeDirectInsert(
   HBtCursor *pCur,
+  int bDirectAppend,
   UnpackedRecord *pRec,           /* Unpacked record for index b-tree */
   i64 iKey,                       /* Key value for table b-tree */
   int nData,                      /* Size of aData[] in bytes */
@@ -1642,8 +1643,7 @@ static int hctBtreeDirectInsert(
   assert( pCur->isDirectWrite );
 
   rc = sqlite3HctDbDirectInsert(
-      p->pHctDb, 
-      sqlite3HctTreeCsrRoot(pCur->pHctTreeCsr),
+      pCur->pHctDbCsr, bDirectAppend,
       pRec, iKey, nData, aData, &bFail
   );
   if( bFail ){
@@ -2001,6 +2001,7 @@ int sqlite3HctBtreeCursor(
   HBtree *const p = (HBtree*)pBt;
   int rc = SQLITE_OK;
   int bNosnap = 0;
+  int bNoscan = (iTable==1);
   int bReadonly = sqlite3HctJournalIsReadonly(p->pHctJrnl, iTable, &bNosnap);
 
   assert( p->eTrans!=SQLITE_TXN_NONE );
@@ -2056,7 +2057,7 @@ int sqlite3HctBtreeCursor(
          && sqlite3HctTreeCsrIsEmpty(pCur->pHctTreeCsr)
         ){
           pCur->isDirectWrite = 1;
-          bNosnap = 1;
+          bNoscan = 1;
         }
       }
     }
@@ -2064,6 +2065,7 @@ int sqlite3HctBtreeCursor(
     if( bTreeOnly==0 ){
       rc = sqlite3HctDbCsrOpen(p->pHctDb, pKeyInfo, iTable, &pCur->pHctDbCsr);
       sqlite3HctDbCsrNosnap(pCur->pHctDbCsr, bNosnap);
+      sqlite3HctDbCsrNoscan(pCur->pHctDbCsr, bNoscan);
     }
   }
   if( rc==SQLITE_OK ){
@@ -2766,24 +2768,38 @@ int sqlite3HctBtreeInsert(
   int nZero;
   i64 iKey = 0;
   int bMigrate = pCur->pBtree->config.db->bHctMigrate;
+  int bDirectAppend = 0;
 
   hctBtreeClearIsLast(pCur->pBtree, pCur);
+
+  if( pCur->isDirectWrite 
+   && seekResult<0
+   && sqlite3HctDbCsrIsLast(pCur->pHctDbCsr)
+  ){
+    bDirectAppend = 1;
+  }
+
   if( pX->pKey ){
     aData = pX->pKey;
     nData = pX->nKey;
     nZero = 0;
-    if( pX->nMem ){
-      memset(&r, 0, sizeof(r));
-      r.pKeyInfo = pCur->pKeyInfo;
-      r.aMem = pX->aMem;
-      r.nField = pX->nMem;
-      pRec = &r;
-    }else{
-      pRec = sqlite3VdbeAllocUnpackedRecord(pCur->pKeyInfo);
-      if( pRec==0 ) return SQLITE_NOMEM_BKPT;
-      sqlite3VdbeRecordUnpack(pCur->pKeyInfo, nData, aData, pRec);
-    }
     iKey = 0;
+    if( bDirectAppend==0 ){
+      /* If bDirectAppend is set, then it is already known that this will 
+      ** be an append to the table. So there is no need for an unpacked 
+      ** record.  */
+      if( pX->nMem ){
+        memset(&r, 0, sizeof(r));
+        r.pKeyInfo = pCur->pKeyInfo;
+        r.aMem = pX->aMem;
+        r.nField = pX->nMem;
+        pRec = &r;
+      }else{
+        pRec = sqlite3VdbeAllocUnpackedRecord(pCur->pKeyInfo);
+        if( pRec==0 ) return SQLITE_NOMEM_BKPT;
+        sqlite3VdbeRecordUnpack(pCur->pKeyInfo, nData, aData, pRec);
+      }
+    }
   }else{
     aData = pX->pData;
     nData = pX->nData;
@@ -2792,7 +2808,8 @@ int sqlite3HctBtreeInsert(
   }
 
   if( pCur->isDirectWrite ){
-    rc = hctBtreeDirectInsert(pCur, pRec, iKey, nData, aData);
+    rc = hctBtreeDirectInsert(pCur, bDirectAppend, pRec, iKey, nData, aData);
+    assert( bDirectAppend==0 || pCur->isDirectWrite );
   }
 
   if( pCur->isDirectWrite==0 ){
@@ -3103,13 +3120,17 @@ void sqlite3HctBtreeGetMeta(Btree *pBt, int idx, u32 *pMeta){
 ** read-only and may not be written.
 */
 int sqlite3HctBtreeUpdateMeta(Btree *pBt, int idx, u32 iMeta){
+  int rc = SQLITE_OK;
   HBtree *const p = (HBtree*)pBt;
   u32 dummy;
   sqlite3HctBtreeGetMeta((Btree*)p, 0, &dummy);
-  p->aMeta[idx] = iMeta;
-  return sqlite3HctTreeUpdateMeta(
-      p->pHctTree, (u8*)p->aMeta, SQLITE_N_BTREE_META*4
-  );
+  if( p->aMeta[idx]!=iMeta ){
+    p->aMeta[idx] = iMeta;
+    rc = sqlite3HctTreeUpdateMeta(
+        p->pHctTree, (u8*)p->aMeta, SQLITE_N_BTREE_META*4
+    );
+  }
+  return rc;
 }
 
 static char *hctDbMPrintf(int *pRc, const char *zFormat, ...){

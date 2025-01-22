@@ -154,6 +154,41 @@ do_execsql_test 3.10 {
   SELECT rowid, length(t) FROM t4;
 } {ok 3 32000}
 
+#-------------------------------------------------------------------------
+hct_reset_db
+
+do_execsql_test 4.0 {
+  CREATE TABLE x1(a);
+}
+sqlite3 db2 test.db
+
+do_execsql_test 4.1 {
+  BEGIN CONCURRENT;
+    CREATE TABLE x2(a, b);
+    INSERT INTO x2 VALUES(1, 2);
+}
+
+do_execsql_test -db db2 4.1.2 {
+  BEGIN CONCURRENT;
+    CREATE TABLE x3(a, b);
+    INSERT INTO x3 VALUES(3, 4);
+}
+
+do_execsql_test         4.2.1 { COMMIT }
+do_execsql_test -db db2 4.2.2 { COMMIT }
+
+do_execsql_test 4.3 {
+  SELECT * FROM x3
+} {3 4}
+
+do_execsql_test 4.4.1 {
+  SELECT * FROM x3
+} {3 4}
+
+do_execsql_test -db db2 4.4.2 {
+  SELECT * FROM x2
+} {1 2}
+
 #dump_pagemap
 
 finish_test

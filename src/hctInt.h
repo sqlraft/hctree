@@ -204,6 +204,7 @@ int sqlite3HctDbCsrOpen(HctDatabase*, struct KeyInfo*, u32 iRoot, HctDbCsr**);
 void sqlite3HctDbCsrClose(HctDbCsr *pCsr);
 
 void sqlite3HctDbCsrNosnap(HctDbCsr *pCsr, int bNosnap);
+void sqlite3HctDbCsrNoscan(HctDbCsr *pCsr, int bNoscan);
 
 void sqlite3HctDbCsrDir(HctDbCsr*, int eDir);
 int sqlite3HctDbCsrSeek(HctDbCsr*, UnpackedRecord*, i64 iKey, int *pRes);
@@ -275,13 +276,15 @@ int sqlite3HctDbCsrFindLastWrite(
 void sqlite3HctDbJrnlWriteCid(HctDatabase *pDb, u64 iVal);
 
 int sqlite3HctDbDirectInsert(
-  HctDatabase *pDb, 
-  u32 iRoot,
+  HctDbCsr *pCsr, 
+  int bStrictAppend,
   UnpackedRecord *pRec, i64 iKey, 
   int nData, const u8 *aData,
   int *pbFail
 );
 int sqlite3HctDbDirectClear(HctDatabase *pDb, u32 iRoot);
+
+int sqlite3HctDbCsrIsLast(HctDbCsr *pCsr);
 
 /*************************************************************************
 ** Interface to code in hct_file.c

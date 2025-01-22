@@ -208,6 +208,7 @@ int sqlite3InitOne(sqlite3 *db, int iDb, char **pzErrMsg, u32 mFlags){
   const char *zSchemaTabName;
   int openedTransaction = 0;
   int mask = ((db->mDbFlags & DBFLAG_EncodingFixed) | ~DBFLAG_EncodingFixed);
+  u8 bConcurrentSaved = db->bConcurrent;
 
   assert( (db->mDbFlags & DBFLAG_SchemaKnownOk)==0 );
   assert( iDb>=0 && iDb<db->nDb );
@@ -216,6 +217,7 @@ int sqlite3InitOne(sqlite3 *db, int iDb, char **pzErrMsg, u32 mFlags){
   assert( iDb==1 || sqlite3BtreeHoldsMutex(db->aDb[iDb].pBt) );
 
   db->init.busy = 1;
+  db->bConcurrent = 0;
 
   /* Construct the in-memory representation schema tables (sqlite_schema or
   ** sqlite_temp_schema) by invoking the parser directly.  The appropriate
@@ -422,6 +424,7 @@ error_out:
     sqlite3ResetOneSchema(db, iDb);
   }
   db->init.busy = 0;
+  db->bConcurrent = bConcurrentSaved;
   return rc;
 }
 
@@ -527,7 +530,11 @@ static void schemaIsValid(Parse *pParse){
     ** set Parse.rc to SQLITE_SCHEMA. */
     sqlite3BtreeGetMeta(pBt, BTREE_SCHEMA_VERSION, (u32 *)&cookie);
     assert( sqlite3SchemaMutexHeld(db, iDb, 0) );
-    if( cookie!=db->aDb[iDb].pSchema->schema_cookie ){
+    if( cookie!=db->aDb[iDb].pSchema->schema_cookie
+#ifdef SQLITE_ENABLE_HCT
+     || sqlite3IsHct(db->aDb[iDb].pBt)
+#endif
+    ){
       if( DbHasProperty(db, iDb, DB_SchemaLoaded) ) pParse->rc = SQLITE_SCHEMA;
       sqlite3ResetOneSchema(db, iDb);
     }
