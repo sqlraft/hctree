@@ -63,19 +63,15 @@
 **
 **     sqlite_migrate CMD-NAME SOURCE DEST NJOB
 **
-** Then, to add imposter table definitions:
+** Then, to copy an object from 
 **
-**     $cmd imposter SQL SOURCE-ROOT DEST-ROOT
-**
-** To add INSERT statements:
-**
-**     $cmd insert INSERT
+**     $cmd copy SOURCE-ROOT CREATE-TABLE INSERT-STMT
 **
 ** Finally, to run the migration:
 **
 **     $cmd run
 **
-** Then:
+** Then to clean up:
 **
 **     $cmd destroy
 */
@@ -757,12 +753,21 @@ static int sqlite_thread_test_config(
 
 typedef struct Migration Migration;
 typedef struct MigrationJob MigrationJob;
+typedef struct MigrationInsert MigrationInsert;
 
 struct MigrationJob {
   sqlite3 *db;
   int rc;
   pthread_t tid;
   Migration *pMigration;
+};
+
+struct MigrationInsert {
+  char *zCreate1;
+  char *zCreate2;
+  char *zInsert;
+  char *zTableName;
+  sqlite3_int64 srcRoot;
 };
 
 /*
@@ -774,7 +779,7 @@ struct Migration {
   int nInsertDone;
 
   int nInsert;
-  char **azInsert;
+  MigrationInsert *aInsert;
 
   int nJob;
   MigrationJob aJob[1];
@@ -787,40 +792,94 @@ static void migration_del(ClientData clientData){
     sqlite3_close(p->aJob[ii].db);
   }
   for(ii=0; ii<p->nInsert; ii++){
-    ckfree(p->azInsert[ii]);
+    ckfree(p->aInsert[ii].zCreate1);
+    ckfree(p->aInsert[ii].zCreate2);
+    ckfree(p->aInsert[ii].zTableName);
+    ckfree(p->aInsert[ii].zInsert);
   }
-  ckfree(p->azInsert);
+  ckfree(p->aInsert);
   ckfree(p);
+}
+
+static int rootPageOfTable(sqlite3 *db, const char *zName, int *piRoot){
+  const char *zSql = "SELECT rootpage FROM sqlite_schema WHERE name=?";
+  sqlite3_stmt *pStmt = 0;
+  int rc = SQLITE_OK;
+
+  rc = sqlite3_prepare_v2(db, zSql, -1, &pStmt, 0);
+  if( rc!=SQLITE_OK ) return rc;
+
+  *piRoot = 0;
+  sqlite3_bind_text(pStmt, 1, zName, -1, SQLITE_STATIC);
+  if( SQLITE_ROW==sqlite3_step(pStmt) ){
+    *piRoot = sqlite3_column_int(pStmt, 0);
+  }
+  return sqlite3_finalize(pStmt);
 }
 
 static void *migration_main(void *pArg){
   MigrationJob *pJob = (MigrationJob*)pArg;
   Migration *p = pJob->pMigration;
 
-  sqlite3_hct_migrate_mode(pJob->db, 1);
-
   while( pJob->rc==SQLITE_OK ){
-    const char *zInsert = 0;
+    MigrationInsert *pInsert = 0;
     sqlite3_mutex_enter(p->mutex);
     if( p->nInsertDone<p->nInsert ){
-      zInsert = p->azInsert[p->nInsertDone];
+      pInsert = &p->aInsert[p->nInsertDone];
       p->nInsertDone++;
     }
     sqlite3_mutex_leave(p->mutex);
 
-    if( zInsert==0 ) break;
-    pJob->rc = sqlite3_exec(pJob->db, "BEGIN CONCURRENT", 0, 0, 0);
+    if( pInsert==0 ) break;
+
+    /* First create the imposter table in the source database. */
+    sqlite3_test_control(
+        SQLITE_TESTCTRL_IMPOSTER, pJob->db, "src", 1, (int)pInsert->srcRoot 
+    );
+    pJob->rc = sqlite3_exec(pJob->db, pInsert->zCreate2, 0, 0, 0);
+      assert( pJob->rc==SQLITE_OK );
+    sqlite3_test_control(SQLITE_TESTCTRL_IMPOSTER, pJob->db, "src", 0, (int)0);
+    sqlite3_test_control(SQLITE_TESTCTRL_IMPOSTER, pJob->db, "main", 0, (int)0);
+
     if( pJob->rc==SQLITE_OK ){
-      pJob->rc = sqlite3_exec(pJob->db, zInsert, 0, 0, 0);
+      pJob->rc = sqlite3_exec(pJob->db, "BEGIN CONCURRENT", 0, 0, 0);
+    }
+    if( pJob->rc==SQLITE_OK ){
+      pJob->rc = sqlite3_exec(pJob->db, pInsert->zCreate1, 0, 0, 0);
+      assert( pJob->rc==SQLITE_OK );
+    }
+    if( pJob->rc==SQLITE_OK ){
+      int iRoot = 0;
+      pJob->rc = rootPageOfTable(pJob->db, pInsert->zTableName, &iRoot);
+      if( pJob->rc==SQLITE_OK ){
+        assert( iRoot!=0 );
+        sqlite3_test_control(
+            SQLITE_TESTCTRL_IMPOSTER, pJob->db, "main", 1, iRoot
+        );
+        pJob->rc = sqlite3_exec(pJob->db, pInsert->zCreate2, 0, 0, 0);
+        sqlite3_test_control(SQLITE_TESTCTRL_IMPOSTER, pJob->db, "main", 0, 0);
+      }
+    }
+
+    if( pJob->rc==SQLITE_OK ){
+      pJob->rc = sqlite3_exec(pJob->db, pInsert->zInsert, 0, 0, 0);
     }
     if( pJob->rc==SQLITE_OK ){
       pJob->rc = sqlite3_exec(pJob->db, "COMMIT", 0, 0, 0);
     }
   }
 
-  sqlite3_hct_migrate_mode(pJob->db, 0);
-
   return 0;
+}
+
+static char *migration_strdup(const char *zIn){
+  char *zRet = 0;
+  if( zIn ){
+    int nIn = strlen(zIn);
+    zRet = ckalloc(nIn+1);
+    memcpy(zRet, zIn, nIn+1);
+  }
+  return zRet;
 }
 
 /*
@@ -834,7 +893,7 @@ static int migration_cmd(
 ){
   Migration *p = (Migration*)clientData;
   const char *azSub[] = {
-    "insert", "imposter", "run", "destroy", "stats", 0
+    "copy", "run", "destroy", "stats", 0
   };
   int iSub;
 
@@ -847,74 +906,44 @@ static int migration_cmd(
   }
 
   switch( iSub ){
-    case 0: assert( 0==strcmp(azSub[iSub], "insert") ); {
+    case 0: assert( 0==strcmp(azSub[iSub], "copy") ); {
       int nByte = 0;
+      const char *zCreate1 = 0;
+      const char *zCreate2 = 0;
       const char *zInsert = 0;
+      const char *zName = 0;
+      sqlite3_int64 pgno = 0;
       char *zCopy = 0;
-      if( objc!=3 ){
-        Tcl_WrongNumArgs(interp, 2, objv, "SQL");
+      /* $cmd copy SOURCE-ROOT NAME INSERT CREATE-TABLE-1 CREATE-TABLE-2 */
+      if( objc!=7 ){
+        Tcl_WrongNumArgs(interp, 2, objv, "ROOT NAME INSERT CT1 CT2");
         return TCL_ERROR;
       }
-      zInsert = Tcl_GetString(objv[2]);
-      nByte = strlen(zInsert) + 1;
+      if( Tcl_GetWideIntFromObj(interp, objv[2], &pgno) ) return TCL_ERROR;
+      zName = Tcl_GetString(objv[3]);
+      zInsert = Tcl_GetString(objv[4]);
+      zCreate1 = Tcl_GetString(objv[5]);
+      zCreate2 = Tcl_GetString(objv[6]);
 
       if( 0==(p->nInsert & (p->nInsert-1)) ){
-        int nNew = (p->nInsert==0 ? 16 : p->nInsert*2);
-        char **azNew = ckrealloc(p->azInsert, sizeof(char*)*nNew);
-        memset(&azNew[p->nInsert], 0, sizeof(char*) * (nNew - p->nInsert));
-        p->azInsert = azNew;
+        int nNew = (p->nInsert==0 ? 1 : p->nInsert*2);
+        MigrationInsert *aNew = 0;
+
+        aNew = ckrealloc(p->aInsert, sizeof(MigrationInsert) * nNew);
+        memset(&aNew[p->nInsert], 0, sizeof(MigrationInsert)*(nNew-p->nInsert));
+        p->aInsert = aNew;
       }
 
-      zCopy = ckalloc(nByte);
-      memcpy(zCopy, zInsert, nByte);
-      p->azInsert[p->nInsert] = zCopy;
+      p->aInsert[p->nInsert].zTableName = migration_strdup(zName);
+      p->aInsert[p->nInsert].zCreate1 = migration_strdup(zCreate1);
+      p->aInsert[p->nInsert].zCreate2 = migration_strdup(zCreate2);
+      p->aInsert[p->nInsert].zInsert = migration_strdup(zInsert);
+      p->aInsert[p->nInsert].srcRoot = pgno;
       p->nInsert++;
       break;
     }
 
-    case 1: assert( 0==strcmp(azSub[iSub], "imposter") ); {
-      const char *zSql = 0;
-      sqlite3_int64 iSrc = 0;
-      sqlite3_int64 iDest = 0;
-      int ii = 0;
-
-      if( objc!=5 ){
-        Tcl_WrongNumArgs(interp, 2, objv, "SQL SOURCE-ROOT DEST-ROOT");
-        return TCL_ERROR;
-      }
-
-      zSql = Tcl_GetString(objv[2]);
-      if( Tcl_GetWideIntFromObj(interp, objv[3], &iSrc)
-       || Tcl_GetWideIntFromObj(interp, objv[4], &iDest)
-      ){
-        return TCL_ERROR;
-      }
-
-      for(ii=0; ii<p->nJob; ii++){
-        int rc = SQLITE_OK;
-        sqlite3 *db = p->aJob[ii].db;
-        sqlite3_test_control(SQLITE_TESTCTRL_IMPOSTER, db, "src", 1, (int)iSrc);
-        rc = sqlite3_exec(db, zSql, 0, 0, 0);
-        sqlite3_test_control(SQLITE_TESTCTRL_IMPOSTER, db, "src", 0, 0);
-
-        if( rc==SQLITE_OK ){
-          sqlite3_test_control(SQLITE_TESTCTRL_IMPOSTER,db,"main",1,(int)iDest);
-          rc = sqlite3_exec(db, zSql, 0, 0, 0);
-          sqlite3_test_control(SQLITE_TESTCTRL_IMPOSTER, db, "main", 0, 0);
-        }
-
-        if( rc!=SQLITE_OK ){
-          Tcl_AppendResult(interp, 
-              "error installing imposters: ", sqlite3_errmsg(db), (char*)0
-          );
-          return TCL_ERROR;
-        }
-      }
-
-      break;
-    }
-
-    case 2: assert( 0==strcmp(azSub[iSub], "run") ); {
+    case 1: assert( 0==strcmp(azSub[iSub], "run") ); {
       int rc = TCL_OK;
       int ii;
       for(ii=0; ii<p->nJob; ii++){
@@ -937,7 +966,7 @@ static int migration_cmd(
       return rc;
     }
 
-    case 3: assert( 0==strcmp(azSub[iSub], "destroy") ); {
+    case 2: assert( 0==strcmp(azSub[iSub], "destroy") ); {
       if( objc!=2 ){
         Tcl_WrongNumArgs(interp, 1, objv, "");
         return TCL_ERROR;
@@ -946,7 +975,7 @@ static int migration_cmd(
       }
       break;
     }
-    case 4: assert( 0==strcmp(azSub[iSub], "stats") ); {
+    case 3: assert( 0==strcmp(azSub[iSub], "stats") ); {
       int rc = TCL_OK;
       int ii;
       Tcl_Obj *pRes = 0;
