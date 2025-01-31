@@ -2885,9 +2885,17 @@ void sqlite3EndTable(
       pParse->regRowid
     );
     sqlite3DbFree(db, zStmt);
+    sqlite3ChangeCookie(pParse, iDb);
 #ifdef SQLITE_ENABLE_HCT
-    if( !sqlite3IsHct(db->aDb[iDb].pBt) ){
-      sqlite3ChangeCookie(pParse, iDb);
+    if( db->bCTNoCookie 
+     && sqlite3IsHct(db->aDb[iDb].pBt) 
+     && !IsView(p) && !IsVirtual(p)
+     && p->pSchema->schema_cookie!=0
+    ){
+      VdbeOp *pOp = sqlite3VdbeGetOp(v, sqlite3VdbeCurrentAddr(v)-1);
+      assert( pOp->opcode==OP_SetCookie );
+      assert( pOp->p2==BTREE_SCHEMA_VERSION );
+      pOp->p3 = (unsigned int)p->pSchema->schema_cookie;
     }
 #endif
 

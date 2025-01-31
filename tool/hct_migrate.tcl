@@ -8,7 +8,6 @@ proc usage {} {
   puts stderr "Usage: $::argv0 ?SWITCHES? <source> <destination>"
   puts stderr ""
   puts stderr "   --jobs NJOB (default 12)"
-  puts stderr "   --preserverowids"
   puts stderr ""
   exit -1
 }
@@ -16,7 +15,6 @@ proc usage {} {
 # Default values for the two options.
 #
 set G(-jobs)           12
-set G(-preserverowids) 0
 
 if {[llength $argv]<2} usage
 
@@ -35,8 +33,8 @@ for {set i 0} {$i < [llength $argv]-2} {incr i} {
     set val [lindex $argv $i]
     if {[string is integer -strict $val]==0} { usage }
     set G(-jobs) $val
-  } elseif {$nX>=2 && [string compare -length $nX $x "-preserverowids"]==0} {
-    set G(-preserverowids) 1
+  } else {
+    usage
   }
 
 }
@@ -176,22 +174,15 @@ proc plan_migration {} {
     # data between the source and destination imposter tables. This is called
     # a prefix because a WHERE clause may be appended to it.
     #
-    # Also set zPk to the name of the PK or PK columns. For a rowid table
-    # this is just the name of the rowid column - "rowid". For an index or
-    # WITHOUT ROWID table this is a vector of the imposter table column names
-    # that make up the primary key. e.g. "(c0, c1)".
-    #
-    if {$bIntkey && $G(-preserverowids)} {
+    if {$bIntkey} {
       set p "INSERT INTO main.imp$iImp"
       if {$bPrimaryKey} {
         set zPrefix "$p SELECT * FROM src.imp$iImp"
       } else {
         set zPrefix "$p (rowid,[join $lCol ,]) SELECT rowid,* FROM src.imp$iImp"
       }
-      set zPk rowid
     } else {
       set zPrefix "INSERT INTO main.imp$iImp SELECT * FROM src.imp$iImp"
-      set zPk "([join $lCol ,])"
     }
 
     lappend lRet [list $rootpage "real$iImp" "imp$iImp" $zPrefix $ct1 $ct2"]

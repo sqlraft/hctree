@@ -1505,6 +1505,38 @@ static int btreeWriteLog(HBtree *p){
 }
 
 /*
+** This function is called to validate CREATE TABLE statements made as
+** part of the transaction being validated.
+*/
+static int hctValidateSchema(HBtree *p, u64 iTid){
+  int rc = SQLITE_OK;
+  HctTreeCsr *pCsr = 0;
+
+  rc = sqlite3HctTreeCsrOpen(p->pHctTree, 1, &pCsr);
+  if( rc==SQLITE_OK ){
+    for(rc=sqlite3HctTreeCsrFirst(pCsr); 
+        rc==SQLITE_OK && !sqlite3HctTreeCsrEof(pCsr);
+        rc=sqlite3HctTreeCsrNext(pCsr)
+    ){
+      int nData = 0;
+      const u8 *aData = 0;
+      const u8 *pName = 0;
+      int nName = 0;
+
+      sqlite3HctTreeCsrData(pCsr, &nData, &aData);
+      nName = sqlite3HctNameFromSchemaRecord(aData, nData, &pName);
+      if( nName>0 ){
+        rc = sqlite3HctDbValidateTablename(p->pHctDb, pName, nName, iTid);
+        if( rc!=SQLITE_OK ) break;
+      }
+    }
+  }
+  sqlite3HctTreeCsrClose(pCsr);
+
+  return rc;
+}
+
+/*
 ** Flush the contents of Btree.pHctTree to Btree.pHctDb.
 */
 static int btreeFlushToDisk(HBtree *p){
@@ -1518,9 +1550,7 @@ static int btreeFlushToDisk(HBtree *p){
 
   /* Write a log file for this transaction. The TID field is still set
   ** to zero at this point.  */
-  if( p->config.db->bHctMigrate==0 ){
-    rc = btreeWriteLog(p);
-  }
+  rc = btreeWriteLog(p);
 
   if( rc==SQLITE_OK ){
     /* Obtain the TID for this transaction.  */
@@ -1553,8 +1583,15 @@ static int btreeFlushToDisk(HBtree *p){
       p->config.db->xMtCommit(p->config.db->pMtCommitCtx, 1);
     }
 
-    /* Validate the transaction */
+    /* Validate the transaction. */
     rc = sqlite3HctDbValidate(p->config.db, p->pHctDb, &iCid, &bTmapScan);
+    if( rc==SQLITE_OK && p->nSchemaOp ){
+      /* If there have been any schema operations, there may have been
+      ** CREATE TABLE statements. For each CREATE TABLE statement, check
+      ** that the write to the sqlite_schema table did not create a duplicate
+      ** table name.  */
+      rc = hctValidateSchema(p, iTid);
+    }
 
     /* If validation passed and this database is configured for replication,
     ** write the journal entry and invoke the custom validation hook */
@@ -1773,26 +1810,22 @@ int sqlite3HctBtreeCommitPhaseTwo(Btree *pBt, int bCleanup){
 
   if( p->eTrans==SQLITE_TXN_ERROR ) return SQLITE_BUSY_SNAPSHOT;
 
-  if( BT_IS_MIGRATE(p) ){
-    rc = hctBtreeMigrateCommit(p);
-  }else{
-    if( p->eTrans==SQLITE_TXN_WRITE ){
-      if( p->pCsrList ){
-        /* Cannot commit with open cursors in hctree */
-        return SQLITE_LOCKED;
-      }
-
-      sqlite3HctTreeRelease(p->pHctTree, 0);
-      if( p->pHctDb ){
-        rc = btreeFlushToDisk(p);
-        sqlite3HctTreeClear(p->pHctTree);
-        if( rc!=SQLITE_OK ){
-          hctreeRollbackSchema(p, 0);
-        }
-        p->nSchemaOp = 0;
-      }
-      p->eTrans = SQLITE_TXN_READ;
+  if( p->eTrans==SQLITE_TXN_WRITE ){
+    if( p->pCsrList ){
+      /* Cannot commit with open cursors in hctree */
+      return SQLITE_LOCKED;
     }
+
+    sqlite3HctTreeRelease(p->pHctTree, 0);
+    if( p->pHctDb ){
+      rc = btreeFlushToDisk(p);
+      sqlite3HctTreeClear(p->pHctTree);
+      if( rc!=SQLITE_OK ){
+        hctreeRollbackSchema(p, 0);
+      }
+      p->nSchemaOp = 0;
+    }
+    p->eTrans = SQLITE_TXN_READ;
   }
 
   if( rc==SQLITE_OK ){
@@ -2007,7 +2040,6 @@ int sqlite3HctBtreeCursor(
   assert( p->eTrans!=SQLITE_TXN_NONE );
   assert( p->eTrans!=SQLITE_TXN_ERROR );
   assert( pCur->pHctTreeCsr==0 );
-  assert( BT_IS_MIGRATE(p)==0 || wrFlag );
 
   /* If this is an attempt to open a read/write cursor on either the
   ** sqlite_hct_journal or sqlite_hct_baseline tables, return an error
@@ -2552,7 +2584,6 @@ int sqlite3HctBtreeTableMoveto(
   int *pRes                /* Write search results here */
 ){
   HBtCursor *const pCur = (HBtCursor*)pCursor;
-  assert( CSR_IS_MIGRATE(pCur)==0 );
   if( pCur->isLast && sqlite3HctBtreeIntegerKey(pCursor)<intKey ){
     *pRes = -1;
     return SQLITE_OK;
@@ -2565,7 +2596,6 @@ int sqlite3HctBtreeIndexMoveto(
   int *pRes                /* Write search results here */
 ){
   HBtCursor *const pCur = (HBtCursor*)pCursor;
-  assert( CSR_IS_MIGRATE(pCur)==0 );
   return hctBtreeMovetoUnpacked(pCur, pIdxKey, 0, 0, pRes);
 }
 
@@ -2575,7 +2605,6 @@ void sqlite3HctBtreeCursorDir(BtCursor *pCursor, int eDir){
        || eDir==BTREE_DIR_FORWARD 
        || eDir==BTREE_DIR_REVERSE
   );
-  assert( CSR_IS_MIGRATE(pCur)==0 );
   pCur->eDir = eDir;
   if( pCur->pHctDbCsr ){
     sqlite3HctDbCsrDir(pCur->pHctDbCsr, eDir);
@@ -2767,7 +2796,6 @@ int sqlite3HctBtreeInsert(
   int nData;
   int nZero;
   i64 iKey = 0;
-  int bMigrate = pCur->pBtree->config.db->bHctMigrate;
   int bDirectAppend = 0;
 
   hctBtreeClearIsLast(pCur->pBtree, pCur);
@@ -2813,18 +2841,13 @@ int sqlite3HctBtreeInsert(
   }
 
   if( pCur->isDirectWrite==0 ){
-    if( CSR_IS_MIGRATE(pCur) ){
-      assert( nZero==0 );
-      rc = hctBtreeMigrateInsert(pCur, pRec, iKey, nData, aData);
+    if( pCur->isLast && seekResult<0 ){
+      rc = sqlite3HctTreeAppend(
+          pTreeCsr, pCur->pKeyInfo, iKey, nData, aData, nZero
+          );
     }else{
-      if( pCur->isLast && seekResult<0 ){
-        rc = sqlite3HctTreeAppend(
-            pTreeCsr, pCur->pKeyInfo, iKey, nData, aData, nZero
-        );
-      }else{
-        rc = sqlite3HctTreeInsert(pTreeCsr, pRec, iKey, nData, aData, nZero);
-        pCur->isLast = 0;
-      }
+      rc = sqlite3HctTreeInsert(pTreeCsr, pRec, iKey, nData, aData, nZero);
+      pCur->isLast = 0;
     }
   }
 
@@ -3078,13 +3101,14 @@ void sqlite3HctBtreeGetMeta(Btree *pBt, int idx, u32 *pMeta){
 
   assert( idx>=0 && idx<SQLITE_N_BTREE_META );
   assert( p->pHctDb );
+
   if( idx==BTREE_DATA_VERSION ){
     /* TODO: Fix this so that the data_version does not change when the
     ** database is written by the current connection. */
     i64 iSnapshot = sqlite3HctDbSnapshotId(p->pHctDb);
     *pMeta = (u32)iSnapshot;
   }else{
-    if( p->eMetaState==HCT_METASTATE_NONE ){
+    if( p->eMetaState==HCT_METASTATE_NONE && p->eTrans!=SQLITE_TXN_ERROR ){
       int rc = SQLITE_OK;
       if( p->eTrans==SQLITE_TXN_NONE ){
         rc = sqlite3HctDbGetMeta(
@@ -3125,6 +3149,7 @@ int sqlite3HctBtreeUpdateMeta(Btree *pBt, int idx, u32 iMeta){
   u32 dummy;
   sqlite3HctBtreeGetMeta((Btree*)p, 0, &dummy);
   if( p->aMeta[idx]!=iMeta ){
+    p->aMeta[BTREE_SCHEMA_VERSION] += 1234;
     p->aMeta[idx] = iMeta;
     rc = sqlite3HctTreeUpdateMeta(
         p->pHctTree, (u8*)p->aMeta, SQLITE_N_BTREE_META*4
@@ -3213,6 +3238,15 @@ int sqlite3HctBtreePragma(Btree *pBt, char **aFnctl){
       p->config.bQuiescentIntegrityCheck = (iVal==0 ? 0 : 1);
     }
     zRet = hctDbMPrintf(&rc, "%d", p->config.bQuiescentIntegrityCheck);
+  }else if( 0==sqlite3_stricmp("hct_create_table_no_cookie", zLeft) ){
+    int iVal = 0;
+    if( zRight ){
+      iVal = sqlite3Atoi(zRight);
+    }
+    if( iVal>0 ){
+      p->config.db->bCTNoCookie = (iVal==0 ? 0 : 1);
+    }
+    zRet = hctDbMPrintf(&rc, "%d", p->config.db->bCTNoCookie);
   }else{
     rc = SQLITE_NOTFOUND;
   }

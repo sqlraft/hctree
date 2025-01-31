@@ -186,3 +186,32 @@ int sqlite3HctSerializeRecord(
   return SQLITE_OK;
 }
 
+int sqlite3HctNameFromSchemaRecord(
+  const u8 *aData, 
+  int nData, 
+  const u8 **ppName
+){
+  int nRet = 0;
+  if( nData>0 ){
+    int iOff = 0;
+    int nHdr = 0;
+    int aType[5];
+    int ii;
+
+    iOff += getVarint32(&aData[iOff], nHdr);
+    for(ii=0; ii<ArraySize(aType); ii++){
+      iOff += getVarint32(&aData[iOff], aType[ii]);
+    }
+
+    if( aType[0]==27 || aType[0]==40 ){
+      /* A trigger */
+      *ppName = "";
+      nRet = 0;
+    }else{
+      *ppName = &aData[iOff + sqlite3VdbeSerialTypeLen(aType[0])];
+      nRet = sqlite3VdbeSerialTypeLen(aType[1]);
+    }
+  }
+  return nRet;
+}
+

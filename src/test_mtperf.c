@@ -832,7 +832,7 @@ static void *migration_main(void *pArg){
 
     if( pInsert==0 ) break;
 
-    /* First create the imposter table in the source database. */
+    /* Create the imposter table in the source database. */
     sqlite3_test_control(
         SQLITE_TESTCTRL_IMPOSTER, pJob->db, "src", 1, (int)pInsert->srcRoot 
     );
@@ -848,6 +848,7 @@ static void *migration_main(void *pArg){
       pJob->rc = sqlite3_exec(pJob->db, pInsert->zCreate1, 0, 0, 0);
       assert( pJob->rc==SQLITE_OK );
     }
+
     if( pJob->rc==SQLITE_OK ){
       int iRoot = 0;
       pJob->rc = rootPageOfTable(pJob->db, pInsert->zTableName, &iRoot);
@@ -1143,32 +1144,6 @@ static int sqlite_imposter(
 }
 
 /*
-** tclcmd: sqlite_migrate_mode DB ONOFF
-*/
-static int sqlite_migrate_mode(
-  ClientData clientData,          /* Unused */
-  Tcl_Interp *interp,             /* The TCL interpreter */
-  int objc,                       /* Number of arguments */
-  Tcl_Obj *CONST objv[]           /* Command arguments */
-){
-  sqlite3 *db = 0;
-  int bOnoff = 0;
-
-  if( objc!=3 ){
-    Tcl_WrongNumArgs(interp, 1, objv, "DB ONOFF");
-    return TCL_ERROR;
-  }
-  if( getSqlite3Ptr(interp, objv[1], &db) 
-   || Tcl_GetBooleanFromObj(interp, objv[2], &bOnoff) 
-  ){
-    return TCL_ERROR;
-  }
-
-  sqlite3_hct_migrate_mode(db, bOnoff);
-  return TCL_OK;
-}
-
-/*
 ** tclcmd: fallocate FILE SIZE
 */
 static int test_fallocate(
@@ -1266,7 +1241,6 @@ int SqliteThreadTest_Init(Tcl_Interp *interp){
     { sqlite_thread_test, "sqlite_thread_test" },
     { sqlite_thread_test_config, "sqlite_thread_test_config" },
     { sqlite_migrate, "sqlite_migrate" },
-    { sqlite_migrate_mode, "sqlite_migrate_mode" },
     { sqlite_imposter, "sqlite_imposter" },
     { test_fallocate, "fallocate" },
     { test_dbdata_init, "sqlite3_dbdata_init" }

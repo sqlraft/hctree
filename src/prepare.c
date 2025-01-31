@@ -530,11 +530,7 @@ static void schemaIsValid(Parse *pParse){
     ** set Parse.rc to SQLITE_SCHEMA. */
     sqlite3BtreeGetMeta(pBt, BTREE_SCHEMA_VERSION, (u32 *)&cookie);
     assert( sqlite3SchemaMutexHeld(db, iDb, 0) );
-    if( cookie!=db->aDb[iDb].pSchema->schema_cookie
-#ifdef SQLITE_ENABLE_HCT
-     || sqlite3IsHct(db->aDb[iDb].pBt)
-#endif
-    ){
+    if( cookie!=db->aDb[iDb].pSchema->schema_cookie ){
       if( DbHasProperty(db, iDb, DB_SchemaLoaded) ) pParse->rc = SQLITE_SCHEMA;
       sqlite3ResetOneSchema(db, iDb);
     }

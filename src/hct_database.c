@@ -92,8 +92,6 @@ struct HctDbRangeCsr {
 #define HCT_RANGE_MERGE  1        /* Merge in data + follow range-pointers */
 #define HCT_RANGE_FAN    2        /* HctDbRangeCsr.pg is a fan page */
 
-#define IS_HCT_MIGRATE(pDb) (pDb->pConfig->db->bHctMigrate)
-
 /*
 ** iRoot:
 **   Logical root page of tree structure that this cursor is open on.
@@ -4188,11 +4186,9 @@ static int hctDbBalance(
     /* If the HctDbWriter.writepg.aPg[] array still contains a single page, 
     ** load some peer pages into it. */
     assert( p->discardpg.nPg>=0 );
-    if( IS_HCT_MIGRATE(pDb)==0 ){
-      rc = hctDbLoadPeers(pDb, p, &iPg);
-      if( rc!=SQLITE_OK ){
-        return rc;
-      }
+    rc = hctDbLoadPeers(pDb, p, &iPg);
+    if( rc!=SQLITE_OK ){
+      return rc;
     }
     assert_all_pages_ok(pDb, p);
 
@@ -4337,11 +4333,9 @@ static int hctDbBalanceIntkeyNode(
   u8 *pFree = 0;
 
   assert( p->writepg.aPg[p->writepg.nPg-1].aNew );
-  if( IS_HCT_MIGRATE(pDb)==0 ){
-    rc = hctDbLoadPeers(pDb, p, &iPg);
-    if( rc!=SQLITE_OK ){
-      return rc;
-    }
+  rc = hctDbLoadPeers(pDb, p, &iPg);
+  if( rc!=SQLITE_OK ){
+    return rc;
   }
 
   iLeftPg = iPg;
@@ -5389,15 +5383,9 @@ static int hctDbInsert(
 
       if( p->iHeight==0 ){
       
-        /* There should never be a rollback operation while migrating a
-        ** database.  */
-        assert( IS_HCT_MIGRATE(pDb)==0 || pDb->eMode!=HCT_MODE_ROLLBACK );
-
-        if( IS_HCT_MIGRATE(pDb)==0 ){
-          cell.iTid = pDb->iTid;
-          if( pDb->eMode==HCT_MODE_ROLLBACK ){
-            cell.iTid |= HCT_TID_ROLLBACK_OVERRIDE;
-          }
+        cell.iTid = pDb->iTid;
+        if( pDb->eMode==HCT_MODE_ROLLBACK ){
+          cell.iTid |= HCT_TID_ROLLBACK_OVERRIDE;
         }
 
         if( bClobber ){
@@ -5488,8 +5476,6 @@ static int hctDbInsert(
     assert_all_pages_ok(pDb, p);
     if( p->bAppend ){
       rc = hctDbBalanceAppend(pDb, p, &op);
-    }else if( IS_HCT_MIGRATE(pDb) && p->iHeight==0 ){
-      rc = hctDbBalanceMigrate(pDb, p, &op);
     }else{
       rc = hctDbBalance(pDb, p, &op, bClobber);
     }
@@ -6671,6 +6657,64 @@ sqlite3HctDbValidate(
   }
 
   *piCid = iCid;
+  return rc;
+}
+
+
+static u64 hctDbCsrTid(HctDbCsr *pCsr){
+  u64 iTid = 0;
+  u8 flags = 0;
+  int iOff = hctDbCellOffset(pCsr->pg.aOld, pCsr->iCell, &flags);
+  if( flags & HCTDB_HAS_TID ){
+    iTid = hctGetU64(&pCsr->pg.aOld[iOff]);
+  }
+  return iTid;
+}
+
+static int compareName(const u8 *a, const u8 *b, int n){
+  int ii;
+  for(ii=0; ii<n; ii++){
+    if( sqlite3UpperToLower[a[ii]]!=sqlite3UpperToLower[b[ii]] ){
+      return 1;
+    }
+  }
+  return 0;
+}
+
+int sqlite3HctDbValidateTablename(
+  HctDatabase *pDb, 
+  const u8 *pName, int nName, 
+  u64 iTid
+){
+  HctDbCsr *pCsr = 0;
+  int rc = SQLITE_OK;
+
+  rc = sqlite3HctDbCsrOpen(pDb, 0, 1, &pCsr);
+  if( rc==SQLITE_OK ){
+    pCsr->eDir = BTREE_DIR_FORWARD;
+    for(rc=hctDbCsrFirst(pCsr);
+        rc==SQLITE_OK && sqlite3HctDbCsrEof(pCsr)==0;
+        rc=hctDbCsrNext(pCsr)
+    ){
+      u64 iDbTid = hctDbCsrTid(pCsr);
+      if( iDbTid && iDbTid!=iTid ){
+        int nData = 0;
+        const u8 *aData = 0;
+        int nDbName = 0;
+        const u8 *pDbName = 0;
+
+        rc = sqlite3HctDbCsrData(pCsr, &nData, &aData);
+        if( rc!=SQLITE_OK ) break;
+        nDbName = sqlite3HctNameFromSchemaRecord(aData, nData, &pDbName);
+
+        if( nDbName==nName && compareName(pDbName, pName, nName)==0 ){
+          rc = HCT_SQLITE_BUSY;
+          break;
+        }
+      }
+    }
+  }
+  sqlite3HctDbCsrClose(pCsr);
   return rc;
 }
 

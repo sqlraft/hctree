@@ -1784,7 +1784,7 @@ struct sqlite3 {
   void *pValidateArg;
   int (*xValidate)(void*, i64, const char*, const void*, int, i64);
 
-  int bHctMigrate;
+  int bCTNoCookie;
 };
 
 /*

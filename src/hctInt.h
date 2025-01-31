@@ -139,6 +139,7 @@ void sqlite3HctTreeCsrClear(HctTreeCsr *pCsr);
 u32 sqlite3HctTreeCsrRoot(HctTreeCsr *pCsr);
 
 int sqlite3HctTreeCsrIsEmpty(HctTreeCsr *pCsr);
+int sqlite3HctTreeCsrTblIsEmpty(HctTree *p, u32 pgnoRoot);
 
 /* 
 ** Iterate through non-empty tables/indexes within an HctTree structure. Used
@@ -286,6 +287,8 @@ int sqlite3HctDbDirectClear(HctDatabase *pDb, u32 iRoot);
 
 int sqlite3HctDbCsrIsLast(HctDbCsr *pCsr);
 
+int sqlite3HctDbValidateTablename(HctDatabase*, const u8*, int, u64);
+
 /*************************************************************************
 ** Interface to code in hct_file.c
 */
@@ -298,6 +301,8 @@ int sqlite3HctSerializeRecord(
   u8 **ppRec,                     /* OUT: buffer containing serialization */
   int *pnRec                      /* OUT: size of (*ppRec) in bytes */
 );
+
+int sqlite3HctNameFromSchemaRecord(const u8*, int, const u8**);
 
 /*************************************************************************
 ** Interface to code in hct_stats.c
