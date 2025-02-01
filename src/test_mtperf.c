@@ -832,6 +832,8 @@ static void *migration_main(void *pArg){
 
     if( pInsert==0 ) break;
 
+    sqlite3_exec(pJob->db, "PRAGMA hct_create_table_no_cookie = 1", 0, 0, 0);
+
     /* Create the imposter table in the source database. */
     sqlite3_test_control(
         SQLITE_TESTCTRL_IMPOSTER, pJob->db, "src", 1, (int)pInsert->srcRoot 

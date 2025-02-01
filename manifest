@@ -1,5 +1,5 @@
-C Remove\sthe\sold\ssqlite3_hct_migrate_mode()\sbits.\sMigration\snow\suses\sdirect-write\stables.
-D 2025-01-31T17:00:56.146
+C Ensure\shct_migrate.tcl\screates\snew\stables\sin\sparallel.
+D 2025-02-01T15:56:19.559
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md e108e1e69ae8e8a59e93c455654b8ac9356a11720d3345df2a4743e9590fb20d
@@ -859,7 +859,7 @@ F src/test_loadext.c 337056bae59f80b9eb00ba82088b39d0f4fe6dfd
 F src/test_malloc.c 4954125ee89aa51d9f641d5cb272cc93ca4cb03dcc7c9c941d70210354c69567
 F src/test_md5.c 811a45330c9391933360f998156a8907ee29909c828ab83ac05d329942cbea8f
 F src/test_mtcommit.c f8e9094d07b6a18f609a0dfe2b3fd28432b8768b8663cfe993a7b6b7588d4272
-F src/test_mtperf.c 4ed14e70f6595e5fb00607342c64090218b2462c25109892e0ed23e0f87cfccf
+F src/test_mtperf.c 2fbd74c28df9cf25172c7e8e41a37f989bdc182e18ade19fc403a62c27cd03f6
 F src/test_multiplex.c b99d7f43ec859e6b93a40aaa5455420b3ad133053cce3db739498d29ea30735f
 F src/test_multiplex.h f0ff5b6f4462bfd46dac165d6375b9530d08089b7bcbe75e88e0926110db5363
 F src/test_mutex.c f10fcbc2086b19c7b0ddf2752caf2095e42be74d8d7f6093619445b43b1f777b
@@ -2307,8 +2307,8 @@ F tool/version-info.c 3b36468a90faf1bbd59c65fd0eb66522d9f941eedd364fabccd7227350
 F tool/warnings-clang.sh bbf6a1e685e534c92ec2bfba5b1745f34fb6f0bc2a362850723a9ee87c1b31a7
 F tool/warnings.sh 49a486c5069de041aedcbde4de178293e0463ae9918ecad7539eedf0ec77a139
 F tool/win/sqlite.vsix deb315d026cc8400325c5863eef847784a219a2f
-P 0104ecd99279efc69d8499fd2afeabe73f58cd5b007496512031fc87b59a140b
-R 2904ca6f29c1802970698c248f88ec60
+P 2d46c87dfa9f2f1599761b0e1d409e883428b5a0206c2e70cb61ff3c15f40505
+R 407ac42a10d31eb2e452e5bd52d59867
 U dan
-Z d59a7fe222a65b6ee907234eba506c6b
+Z 8005b4aad82f5fb3eb8a68f6256b4133
 # Remove this line to create a well-formed Fossil manifest.
