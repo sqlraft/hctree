@@ -208,6 +208,7 @@ int sqlite3InitOne(sqlite3 *db, int iDb, char **pzErrMsg, u32 mFlags){
   const char *zSchemaTabName;
   int openedTransaction = 0;
   int mask = ((db->mDbFlags & DBFLAG_EncodingFixed) | ~DBFLAG_EncodingFixed);
+  u8 eConcurrentSaved = db->eConcurrent;
 
   assert( (db->mDbFlags & DBFLAG_SchemaKnownOk)==0 );
   assert( iDb>=0 && iDb<db->nDb );
@@ -216,6 +217,7 @@ int sqlite3InitOne(sqlite3 *db, int iDb, char **pzErrMsg, u32 mFlags){
   assert( iDb==1 || sqlite3BtreeHoldsMutex(db->aDb[iDb].pBt) );
 
   db->init.busy = 1;
+  db->eConcurrent = 0;
 
   /* Construct the in-memory representation schema tables (sqlite_schema or
   ** sqlite_temp_schema) by invoking the parser directly.  The appropriate
@@ -422,6 +424,7 @@ error_out:
     sqlite3ResetOneSchema(db, iDb);
   }
   db->init.busy = 0;
+  db->eConcurrent = eConcurrentSaved;
   return rc;
 }
 

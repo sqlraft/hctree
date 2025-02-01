@@ -71,6 +71,8 @@ int sqlite3HctFilePageGet(HctFile *pFile, u32 iPg, HctFilePage *pPg);
 */
 int sqlite3HctFilePageWrite(HctFilePage *pPg);
 
+int sqlite3HctFilePageDirectWrite(HctFilePage *pPg);
+
 /*
 ** This is a no-op if the page is not writable.
 **
@@ -157,6 +159,7 @@ u32 sqlite3HctFilePageMapping(HctFile *pFile, u32 iLogical, int *pbEvicted);
 
 void sqlite3HctFileICArrays(HctFile*, u8**, u32*, u8**, u32*);
 int sqlite3HctFileTreeFree(HctFile *, u32, int);
+int sqlite3HctFileTreeClear(HctFile *, u32);
 int sqlite3HctFilePageClearIsRoot(HctFile*, u32);
 int sqlite3HctFilePageClearInUse(HctFile *pFile, u32 iPg, int bLogic);
 

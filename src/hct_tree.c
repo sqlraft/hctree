@@ -1359,6 +1359,14 @@ u32 sqlite3HctTreeCsrRoot(HctTreeCsr *pCsr){
   return pCsr->pRoot->iRoot;
 }
 
+/*
+** Return true if the tree that the cursor is open on is empty. Otherwise,
+** if it contains one or more keys or delete-keys, return false.
+*/
+int sqlite3HctTreeCsrIsEmpty(HctTreeCsr *pCsr){
+  return (pCsr->pRoot->pNode==0);
+}
+
 int sqlite3HctTreeForeach(
   HctTree *pTree,
   int bSchemaOp,

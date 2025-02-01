@@ -270,10 +270,6 @@ int sqlite3_hct_journal_hook(
   return SQLITE_OK;
 }
 
-void sqlite3_hct_migrate_mode(sqlite3 *db, int bActivate){
-  db->bHctMigrate = bActivate;
-}
-
 /*
 ** Value iVal is to be stored as an integer in an SQLite record. This 
 ** function returns the number of bytes that it will use for storage.

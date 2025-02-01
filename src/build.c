@@ -1352,6 +1352,21 @@ void sqlite3StartTable(
     }
     sqlite3OpenSchemaTable(pParse, iDb);
     sqlite3VdbeAddOp2(v, OP_NewRowid, 0, reg1);
+#ifdef SQLITE_ENABLE_HCT
+    if( sqlite3IsHct(db->aDb[iDb].pBt) ){
+      /* Special for hctree builds. Add a random 32-bit value to the rowid
+      ** used for the sqlite_schema entry for the new table. */
+      FuncDef *pFunc = sqlite3FindFunction(db, "random", 0, ENC(db), 0);
+      if( pFunc ){
+        int incrReg = ++pParse->nMem;
+        int maskReg = ++pParse->nMem;
+        sqlite3VdbeAddFunctionCall(pParse, 0, 0, incrReg, 0, pFunc, 0);
+        sqlite3VdbeAddOp2(v, OP_Integer, 0x7FFFFFFF, maskReg);
+        sqlite3VdbeAddOp3(v, OP_BitAnd, incrReg, maskReg, incrReg);
+        sqlite3VdbeAddOp3(v, OP_Add, reg1, incrReg, reg1);
+      }
+    }
+#endif
     sqlite3VdbeAddOp4(v, OP_Blob, 6, reg3, 0, nullRow, P4_STATIC);
     sqlite3VdbeAddOp3(v, OP_Insert, 0, reg3, reg1);
     sqlite3VdbeChangeP5(v, OPFLAG_APPEND);
@@ -2871,6 +2886,18 @@ void sqlite3EndTable(
     );
     sqlite3DbFree(db, zStmt);
     sqlite3ChangeCookie(pParse, iDb);
+#ifdef SQLITE_ENABLE_HCT
+    if( db->bCTNoCookie 
+     && sqlite3IsHct(db->aDb[iDb].pBt) 
+     && !IsView(p) && !IsVirtual(p)
+     && p->pSchema->schema_cookie!=0
+    ){
+      VdbeOp *pOp = sqlite3VdbeGetOp(v, sqlite3VdbeCurrentAddr(v)-1);
+      assert( pOp->opcode==OP_SetCookie );
+      assert( pOp->p2==BTREE_SCHEMA_VERSION );
+      pOp->p3 = (unsigned int)p->pSchema->schema_cookie;
+    }
+#endif
 
 #ifndef SQLITE_OMIT_AUTOINCREMENT
     /* Check to see if we need to create an sqlite_sequence table for

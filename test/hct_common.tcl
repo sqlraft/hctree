@@ -144,5 +144,20 @@ proc do_perm_test {tn sql} {
   }
 }
 
+proc dump_pagemap {} {
+  execsql_pp { 
+    SELECT slot, value, comment, 
+        CASE WHEN physical_in_use THEN 'P' ELSE '' END ||
+        CASE WHEN logical_in_use THEN 'L' ELSE '' END ||
+        CASE WHEN logical_evicted THEN 'E' ELSE '' END ||
+        CASE WHEN logical_irrevicted THEN 'I' ELSE '' END ||
+        CASE WHEN logical_is_root THEN 'R' ELSE '' END
+        AS flags
+    FROM hctpgmap WHERE flags!='';
+  }
+}
+
+
+
 
 

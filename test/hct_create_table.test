@@ -1,0 +1,247 @@
+# 2025 January 17
+#
+# The author disclaims copyright to this source code.  In place of
+# a legal notice, here is a blessing:
+#
+#    May you do good and not evil.
+#    May you find forgiveness for yourself and forgive others.
+#    May you share freely, never taking more than you give.
+#
+#*************************************************************************
+# This file implements regression tests for SQLite library.
+#
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+set testprefix hct_create_table
+
+#-------------------------------------------------------------------------
+# Smoke test - do writes to direct-write table work at all?
+#
+hct_reset_db
+
+do_execsql_test 1.0 {
+  BEGIN CONCURRENT;
+    CREATE TABLE x1(a INTEGER PRIMARY KEY, b);
+}
+do_execsql_test 1.1.1 {   INSERT INTO x1 VALUES(1, 'one'); }
+do_execsql_test 1.1.2 {   INSERT INTO x1 VALUES(2, 'two'); }
+do_execsql_test 1.1.3 {   INSERT INTO x1 VALUES(3, 'one'); }
+do_execsql_test 1.2 { COMMIT; }
+
+do_execsql_test 1.3 {
+  SELECT * FROM x1;
+} {1 one 2 two 3 one}
+
+do_catchsql_test 1.4 {
+  CREATE UNIQUE INDEX x1b ON x1(b);
+} {1 {UNIQUE constraint failed: x1.b}}
+
+#-------------------------------------------------------------------------
+# Larger test - one with internal nodes.
+#
+hct_reset_db
+
+do_execsql_test 2.0 {
+  BEGIN CONCURRENT;
+    CREATE TABLE x1(a INTEGER PRIMARY KEY, b);
+}
+do_execsql_test 2.1 {
+    WITH s(i) AS (
+      VALUES(1) UNION ALL SELECT i+1 FROM s WHERE i<50_000
+    )
+    INSERT INTO x1 SELECT i, hex( randomblob(80) ) FROM s;
+}
+do_execsql_test 2.2 {
+  COMMIT;
+}
+
+#execsql_pp { SELECT * FROM hctdb }
+#execsql_pp { SELECT * FROM hctentry }
+
+do_execsql_test 2.3 {
+  SELECT count(*) FROM x1
+} 50000
+
+do_execsql_test 2.4 {
+  PRAGMA hct_quiescent_integrity_check = 1;
+  PRAGMA integrity_check
+} {1 ok}
+
+#-------------------------------------------------------------------------
+# Check that ROLLBACK of a transaction that writes a direct-write table
+# seems to work. And does not leak database pages.
+#
+hct_reset_db
+
+do_execsql_test 3.1 {
+  CREATE TABLE xyz(a);
+
+  BEGIN;
+    CREATE TABLE t1(x INTEGER PRIMARY KEY, y);
+    INSERT INTO t1 VALUES(1, 'one');
+    INSERT INTO t1 VALUES(100, 'one hundred');
+  ROLLBACK;
+}
+
+do_execsql_test 3.2 {
+  SELECT name FROM sqlite_schema
+} {xyz}
+
+do_execsql_test 3.3 {
+  PRAGMA hct_quiescent_integrity_check = 1;
+  PRAGMA integrity_check;
+} {1 ok}
+
+
+do_execsql_test 3.4.1 {
+  BEGIN;
+    INSERT INTO xyz VALUES(1000);
+    SAVEPOINT abc;
+      CREATE TABLE t2(x INTEGER PRIMARY KEY, y);
+      INSERT INTO t2 VALUES(2, 'two');
+      INSERT INTO t2 VALUES(200, 'two hundred');
+}
+do_execsql_test 3.4.2 {
+    ROLLBACK TO abc;
+  COMMIT;
+}
+
+do_execsql_test 3.5 {
+  PRAGMA integrity_check;
+} {ok}
+
+do_execsql_test 3.6 {
+  BEGIN;
+    CREATE TABLE t3(o INTEGER PRIMARY KEY, t);
+    SAVEPOINT one;
+      INSERT INTO t3 VALUES(1, 1);
+      INSERT INTO t3 VALUES(2, 2);
+    ROLLBACK TO one;
+  COMMIT;
+
+  SELECT * FROM t3;
+} {}
+
+do_execsql_test 3.7 {
+  PRAGMA integrity_check;
+} {ok}
+
+do_execsql_test 3.8.1 {
+  SELECT count(*) FROM hctpgmap WHERE physical_in_use
+} {4}
+
+do_execsql_test 3.8.2 {
+  BEGIN;
+    CREATE TABLE t4(o INTEGER PRIMARY KEY, t);
+    SAVEPOINT one;
+      INSERT INTO t4 VALUES(1, 1);
+      INSERT INTO t4 VALUES(2, 2);
+    ROLLBACK TO one;
+    INSERT INTO t4 VALUES(3, hex( randomblob(16000) ));
+} {}
+
+do_execsql_test 3.8.3 {
+  SELECT count(*) FROM hctpgmap WHERE physical_in_use
+} {12}
+
+do_execsql_test 3.9 {
+  COMMIT;
+}
+
+do_execsql_test 3.10 {
+  PRAGMA integrity_check;
+  SELECT rowid, length(t) FROM t4;
+} {ok 3 32000}
+
+#-------------------------------------------------------------------------
+hct_reset_db
+
+do_execsql_test 4.0 {
+  CREATE TABLE x1(a);
+}
+sqlite3 db2 test.db
+
+do_execsql_test 4.1 {
+  PRAGMA hct_create_table_no_cookie = 1;
+  BEGIN CONCURRENT;
+    CREATE TABLE x2(a, b);
+    INSERT INTO x2 VALUES(1, 2);
+} 1
+
+do_execsql_test -db db2 4.1.2 {
+  PRAGMA hct_create_table_no_cookie = 1;
+  BEGIN CONCURRENT;
+    CREATE TABLE x3(a, b);
+    INSERT INTO x3 VALUES(3, 4);
+} 1
+
+do_execsql_test         4.2.1 { COMMIT }
+do_execsql_test -db db2 4.2.2 { COMMIT }
+
+do_catchsql_test 4.3.1 {
+  SELECT * FROM x3
+} {1 {no such table: x3}}
+
+do_execsql_test 4.3.2 {
+  PRAGMA writable_schema = reset;
+  SELECT * FROM x3
+} {3 4}
+
+do_execsql_test 4.4.1 {
+  SELECT * FROM x3
+} {3 4}
+
+do_execsql_test -db db2 4.4.2 {
+  PRAGMA writable_schema = reset;
+  SELECT * FROM x2
+} {1 2}
+
+#dump_pagemap
+
+#-------------------------------------------------------------------------
+hct_reset_db
+
+do_execsql_test 5.0 {
+  CREATE tABLE b1(a);
+}
+
+sqlite3 db2 test.db
+do_execsql_test 5.1.1 {
+  BEGIN CONCURRENT;
+    CREATE TABLE x1(a, b, c);
+}
+do_execsql_test -db db2 5.1.2 {
+  CREATE TABLE x1(d, e, f);
+}
+do_catchsql_test 5.1.3 {
+  COMMIT
+} {1 {database is locked}}
+execsql ROLLBACK
+
+do_execsql_test 5.2.1 {
+  PRAGMA hct_create_table_no_cookie = 1;
+  BEGIN CONCURRENT;
+    CREATE TABLE x2(a, b, c);
+} {1}
+do_execsql_test -db db2 5.2.2 {
+  PRAGMA hct_create_table_no_cookie = 1;
+  CREATE TABLE x3(d, e, f);
+} 1
+do_catchsql_test 5.2.3 {
+  COMMIT
+} {0 {}}
+
+do_execsql_test 5.3 {
+  SELECT sql FROM sqlite_schema ORDER BY name
+} {
+  {CREATE TABLE b1(a)} 
+  {CREATE TABLE x1(d, e, f)} 
+  {CREATE TABLE x2(a, b, c)}
+  {CREATE TABLE x3(d, e, f)} 
+}
+
+finish_test
+
+
+

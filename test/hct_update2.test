@@ -80,11 +80,10 @@ do_execsql_test -db db2 1.6 {
   SELECT count(*) FROM t2 WHERE a=rowid;
 } {0}
 
-show_db_entries
-show_page_contents 69
-
-show_page_contents 26
-show_page_contents 44
+#show_db_entries
+#show_page_contents 69
+#show_page_contents 26
+#show_page_contents 44
 
 
 finish_test
