@@ -4029,6 +4029,9 @@ EXTERN int Sqlite_SafeUnload(Tcl_Interp *interp, int flags){return TCL_ERROR;}
 EXTERN int sqlite3_Init(Tcl_Interp *interp){ return Sqlite3_Init(interp);}
 EXTERN int sqlite_Init(Tcl_Interp *interp){ return Sqlite3_Init(interp);}
 
+#ifdef TCLSQLITE3_EXTRA_INIT
+EXTERN int TCLSQLITE3_EXTRA_INIT (Tcl_Interp*);
+#endif
 
 /*
 ** If the TCLSH macro is defined, add code to make a stand-alone program.

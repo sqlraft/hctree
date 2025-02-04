@@ -1,5 +1,5 @@
-C Ensure\shct_migrate.tcl\screates\snew\stables\sin\sparallel.
-D 2025-02-01T15:56:19.559
+C Avoid\san\simplicit\sfunction\sdeclaration\swhen\sbuilding\stclsqlite3\son\sthis\sbranch.
+D 2025-02-04T14:01:49.455
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md e108e1e69ae8e8a59e93c455654b8ac9356a11720d3345df2a4743e9590fb20d
@@ -827,7 +827,7 @@ F src/sqliteInt.h c3c52433683abb5cdbbace84e918d99fe0ce84aff06f07138cbad6b123583e
 F src/sqliteLimit.h 1bbdbf72bd0411d003267ffebc59a262f061df5653027a75627d03f48ca30523
 F src/status.c cb11f8589a6912af2da3bb1ec509a94dd8ef27df4d4c1a97e0bcf2309ece972b
 F src/table.c 0f141b58a16de7e2fbe81c308379e7279f4c6b50eb08efeec5892794a0ba30d1
-F src/tclsqlite.c 14fc4f9694377266e785fcb719837b5d44a063048e6e7111d6c3eff5af6194b3
+F src/tclsqlite.c c8c77d1cf4aa535494e1f8456a167c542f414d31969e89831d808d3cb114b133
 F src/tclsqlite.h 65e2c761446e1c9fa0342b7d2612a703483643c8b6a316d12a65b745a4727395
 F src/test1.c e97e9995fabaa2392cab0f8adb98fecc6f61d1e81ae374598a3d22945654eddd
 F src/test2.c 7ebc518e6735939d8979273a6f7b1d9b5702babf059f6ad62499f7f60a9eb9a3
@@ -2307,8 +2307,8 @@ F tool/version-info.c 3b36468a90faf1bbd59c65fd0eb66522d9f941eedd364fabccd7227350
 F tool/warnings-clang.sh bbf6a1e685e534c92ec2bfba5b1745f34fb6f0bc2a362850723a9ee87c1b31a7
 F tool/warnings.sh 49a486c5069de041aedcbde4de178293e0463ae9918ecad7539eedf0ec77a139
 F tool/win/sqlite.vsix deb315d026cc8400325c5863eef847784a219a2f
-P 2d46c87dfa9f2f1599761b0e1d409e883428b5a0206c2e70cb61ff3c15f40505
-R 407ac42a10d31eb2e452e5bd52d59867
+P 5f5bcd49b5971e28ea59a3b6cfd070feefeb2506423676ee7003f5fd7c7512b1
+R c1e31de933673f4520b315739bd94c91
 U dan
-Z 8005b4aad82f5fb3eb8a68f6256b4133
+Z e867afb9908222df61f021692512e5c2
 # Remove this line to create a well-formed Fossil manifest.
