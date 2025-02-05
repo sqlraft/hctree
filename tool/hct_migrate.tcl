@@ -83,20 +83,30 @@ proc plan_migration {} {
 
   # This loop runs one iteration for each non-virtual, non-schema table 
   # or index in the database being migrated.
-  src eval {
-    SELECT 
-        name, 
-        (
-          CASE WHEN name=tbl_name THEN name ELSE tbl_name||'.'||name END
-        ) AS display,
-        rootpage,
-        row_number() OVER () AS iImp
-    FROM sqlite_schema WHERE type='index' OR (
-        type = 'table' AND
-        name NOT LIKE 'sqlite_%' AND 
-        sql NOT LIKE 'create virtual%'
-    );
-  } {
+  set rc [catch {
+    set srcdata [src eval {
+      SELECT 
+          name, 
+          (
+            CASE WHEN name=tbl_name THEN name ELSE tbl_name||'.'||name END
+          ) AS display,
+          rootpage,
+          row_number() OVER () AS iImp
+      FROM sqlite_schema WHERE type='index' OR (
+          type = 'table' AND
+          name NOT LIKE 'sqlite_%' AND 
+          sql NOT LIKE 'create virtual%'
+      );
+    }] 
+  } msg]
+
+  if {$rc} {
+    set exrc [sqlite3_extended_errcode src]
+    puts stderr "ERROR querying source db schema: $msg ($exrc)"
+    error $msg
+  }
+
+  foreach {name rootpage row_number} $srcdata {
     set bIntkey 0
     set bPrimaryKey 0
 

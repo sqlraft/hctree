@@ -1239,6 +1239,32 @@ static int test_dbdata_init(
 }
 
 /*
+** tclcmd: sqlite3_extended_errcode DB
+*/
+static int test_extended_errcode(
+  ClientData clientData,          /* Unused */
+  Tcl_Interp *interp,             /* The TCL interpreter */
+  int objc,                       /* Number of arguments */
+  Tcl_Obj *CONST objv[]           /* Command arguments */
+){
+  sqlite3 *db = 0;
+  int rc = 0;
+
+  if( objc!=2 ){
+    Tcl_WrongNumArgs(interp, 1, objv, "DB");
+    return TCL_ERROR;
+  }
+  if( getSqlite3Ptr(interp, objv[1], &db) ){
+    return TCL_ERROR;
+  }
+
+  rc = sqlite3_extended_errcode(db);
+  Tcl_SetObjResult(interp, Tcl_NewIntObj(rc));
+
+  return TCL_OK;
+}
+
+/*
 ** Register commands with the TCL interpreter.
 */
 int SqliteThreadTest_Init(Tcl_Interp *interp){
@@ -1251,7 +1277,8 @@ int SqliteThreadTest_Init(Tcl_Interp *interp){
     { sqlite_migrate, "sqlite_migrate" },
     { sqlite_imposter, "sqlite_imposter" },
     { test_fallocate, "fallocate" },
-    { test_dbdata_init, "sqlite3_dbdata_init" }
+    { test_dbdata_init, "sqlite3_dbdata_init" },
+    { test_extended_errcode, "sqlite3_extended_errcode" }
   };
   int ii;
   for(ii=0; ii<sizeof(aCmd)/sizeof(aCmd[0]); ii++){
