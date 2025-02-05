@@ -106,7 +106,7 @@ proc plan_migration {} {
     error $msg
   }
 
-  foreach {name rootpage row_number} $srcdata {
+  foreach {name display rootpage iImp} $srcdata {
     set bIntkey 0
     set bPrimaryKey 0
 
