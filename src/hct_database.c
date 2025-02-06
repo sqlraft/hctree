@@ -2222,8 +2222,10 @@ static int hctDbCompareKey2(
     }
     if( ret==0 ){
       /* default_rc==1 if the key has been passed to hctDbDecrementKey() */
+#if 0
       assert( pKey1->default_rc==0 || pKey1->default_rc==1 );
       assert( p2->pKey->default_rc==0 || p2->pKey->default_rc==1 );
+#endif
       ret = p2->pKey->default_rc - pKey1->default_rc;
     }
     if( ret==0 ){

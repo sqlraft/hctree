@@ -1,5 +1,5 @@
-C Fix\sa\sproblem\scorrupting\sthe\sdatabase\swhen\sa\srollback\soperation\srolled\sback\smultiple\srecords\swith\soverflow\spages\sfrom\sthe\ssame\stable.
-D 2025-02-06T18:16:30.197
+C Remove\san\sassert()\sthat\scould\sbe\sfalse.
+D 2025-02-06T19:19:14.881
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md e108e1e69ae8e8a59e93c455654b8ac9356a11720d3345df2a4743e9590fb20d
@@ -772,7 +772,7 @@ F src/hctInt.h b3227602ae00eb082c61166544d1cfbb6f4b27d236ae3789c03b53417ed104a8
 F src/hctJrnlInt.h 49add7e14722d06836743f92619d4ba28c9d40317765e055c1f20c4c45d9e936
 F src/hctPManInt.h 3936d01947aace587fd73c51246b7bd5cdbc79833248b839e7d9ffd737ded8b7
 F src/hctTMapInt.h bb7edd6282339ee6ac09be383a1f87267d9731f7bd384dd3b94cc7d2a3a99c10
-F src/hct_database.c 70c51ba0e8f586c81ec1eab2941d51eeb94eddb46d369a1686d12281f96cfd74
+F src/hct_database.c 1ace097e71c6fc057a6be8b97fcd566316b869569bd63570fbaf91655a2ced7b
 F src/hct_file.c 972ac3069b93641a501482a0a23c5d2e0f58eed76f9657d2005790ed7331ddde
 F src/hct_journal.c 1c96c0bdf39766fc1c7d3bb02da5515b1621d6144fd92bca4d497a2d2ed4c04d
 F src/hct_journalhash.c 5af4886fd8c126a96c78278f6e62a8e31de9b8e683b167c487b033a87fabb7a3
@@ -2344,8 +2344,8 @@ F tool/version-info.c 3b36468a90faf1bbd59c65fd0eb66522d9f941eedd364fabccd7227350
 F tool/warnings-clang.sh bbf6a1e685e534c92ec2bfba5b1745f34fb6f0bc2a362850723a9ee87c1b31a7
 F tool/warnings.sh 49a486c5069de041aedcbde4de178293e0463ae9918ecad7539eedf0ec77a139
 F tool/win/sqlite.vsix deb315d026cc8400325c5863eef847784a219a2f
-P cb668ccf4d41acc61f41708adfc0778a8de4d86dd25f6874bd68c1fc1304c24e
-R f667b4204f0e005c9c64c53ce49ad97f
+P 549e5f062b8210be67387e62f1265057aa1b9b4a14154177ec19ae78875467a6
+R f0b4fa87a920e827f9065613c5ded7f7
 U dan
-Z 8b9981f42ecc387605ccaa877ce45272
+Z 06530b0ebdd95454bd8c298a128eba8b
 # Remove this line to create a well-formed Fossil manifest.
