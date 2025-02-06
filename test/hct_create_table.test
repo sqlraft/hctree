@@ -241,6 +241,38 @@ do_execsql_test 5.3 {
   {CREATE TABLE x3(d, e, f)} 
 }
 
+#-------------------------------------------------------------------------
+hct_reset_db
+
+do_execsql_test 6.1 {
+  CREATE TABLE t1(x);
+  BEGIN CONCURRENT;
+    CREATE TABLE t2(x, y);
+    INSERT INTO t2 VALUES(1, 2), (3, 4);
+    DELETE FROM t2 WHERE rowid = 2;
+  COMMIT;
+  SELECT * FROM t2;
+} {1 2}
+
+do_execsql_test 6.2 {
+  BEGIN CONCURRENT;
+    CREATE TABLE t3(x PRIMARY KEY, y) WITHOUT ROWID;
+    INSERT INTO t3 VALUES(1, 2), (3, 4);
+    DELETE FROM t3 WHERE x = 3;
+  COMMIT;
+  SELECT * FROM t3;
+} {1 2}
+
+do_execsql_test 6.2 {
+  CREATE TABLE t4(a, b);
+  INSERT INTO t4 VALUES(1, 2), (3, 4);
+  BEGIN CONCURRENT;
+    CREATE INDEX i4 ON t4(a, b);
+    DELETE FROM t4 WHERE a=1;
+  COMMIT;
+  SELECT * FROM t4;
+} {3 4}
+
 finish_test
 
 

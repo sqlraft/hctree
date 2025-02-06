@@ -1282,7 +1282,10 @@ int SqliteThreadTest_Init(Tcl_Interp *interp){
   };
   int ii;
   for(ii=0; ii<sizeof(aCmd)/sizeof(aCmd[0]); ii++){
-    Tcl_CreateObjCommand(interp, aCmd[ii].zName, aCmd[ii].xProc, 0, 0);
+    Tcl_CmdInfo cmd;
+    if( Tcl_GetCommandInfo(interp, aCmd[ii].zName, &cmd)==0 ){
+      Tcl_CreateObjCommand(interp, aCmd[ii].zName, aCmd[ii].xProc, 0, 0);
+    }
   }
 
   return TCL_OK;

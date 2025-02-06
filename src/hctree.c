@@ -2844,7 +2844,7 @@ int sqlite3HctBtreeInsert(
     if( pCur->isLast && seekResult<0 ){
       rc = sqlite3HctTreeAppend(
           pTreeCsr, pCur->pKeyInfo, iKey, nData, aData, nZero
-          );
+      );
     }else{
       rc = sqlite3HctTreeInsert(pTreeCsr, pRec, iKey, nData, aData, nZero);
       pCur->isLast = 0;
@@ -2901,9 +2901,9 @@ int sqlite3HctBtreeDelete(BtCursor *pCursor, u8 flags){
   HBtCursor *const pCur = (HBtCursor*)pCursor;
   int rc = SQLITE_OK;
 
-  /* TODO: If this happens, switch the cursor out of direct write mode
-  ** before proceeding with the rest of this function. */
-  assert( pCur->isDirectWrite==0 );
+  /* Switch the cursor out of direct write mode before proceeding with 
+  ** the rest of this function. */
+  pCur->isDirectWrite = 0;
 
   hctBtreeClearIsLast(pCur->pBtree, 0);
   if( pCur->pHctDbCsr==0 ){
@@ -2931,9 +2931,9 @@ int sqlite3HctBtreeIdxDelete(BtCursor *pCursor, UnpackedRecord *pKey){
   HBtCursor *const pCur = (HBtCursor*)pCursor;
   int rc = SQLITE_OK;
 
-  /* TODO: If this happens, switch the cursor out of direct write mode
-  ** before proceeding with the rest of this function. */
-  assert( pCur->isDirectWrite==0 );
+  /* Switch the cursor out of direct write mode before proceeding with 
+  ** the rest of this function. */
+  pCur->isDirectWrite = 0;
 
   hctBtreeClearIsLast(pCur->pBtree, 0);
   if( pCur->pHctDbCsr ){
