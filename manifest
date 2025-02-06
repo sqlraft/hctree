@@ -1,5 +1,5 @@
-C Add\scode\sto\simprove\sthe\serror\smessage\sfrom\shct_migrate.tcl\sif\sthe\ssource\sdb\scannot\sbe\saccessed.
-D 2025-02-05T15:37:19.565
+C Fix\stypos\sin\shct_migrate.tcl.
+D 2025-02-06T15:04:32.577
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md e108e1e69ae8e8a59e93c455654b8ac9356a11720d3345df2a4743e9590fb20d
@@ -2228,7 +2228,7 @@ F tool/fuzzershell.c 41480c8a1e4749351f381431ecfdfceba645396c5d836f8d26b51a33c4a
 F tool/genfkey.README cf68fddd4643bbe3ff8e31b8b6d8b0a1b85e20f4
 F tool/genfkey.test b6afd7b825d797a1e1274f519ab5695373552ecad5cd373530c63533638a5a4f
 F tool/getlock.c f4c39b651370156cae979501a7b156bdba50e7ce
-F tool/hct_migrate.tcl 2ce120036cc6e6d909b3cb0b7b26d66025c6e18b2bdf9e4390b750a37e36bb71
+F tool/hct_migrate.tcl 92e788a8e9dacbf9ff398609716e218bd7e3bcfc1c867058c66fed807fec0c55
 F tool/hct_mkbtreewrapper.tcl fd20af6c921070ca7a6e25132c303fd3633f7cb37fee1988636a56428860bb8d
 F tool/hct_mkspeedtable.tcl 30ae66edc2497bb6effdfe533a378519ab5e8749b7c23de79e3a95ec8aabae88
 F tool/hct_thread_test.c 8345b642e27b877b14c90ec2b866a5cbfcc6a8100fadfb947a61c129f33f93f6
@@ -2307,9 +2307,9 @@ F tool/version-info.c 3b36468a90faf1bbd59c65fd0eb66522d9f941eedd364fabccd7227350
 F tool/warnings-clang.sh bbf6a1e685e534c92ec2bfba5b1745f34fb6f0bc2a362850723a9ee87c1b31a7
 F tool/warnings.sh 49a486c5069de041aedcbde4de178293e0463ae9918ecad7539eedf0ec77a139
 F tool/win/sqlite.vsix deb315d026cc8400325c5863eef847784a219a2f
-P 99210c4cfa5862c570311bc363dfc58b793aafe370c21acb79475f301b6b8900
-Q +292c17e2b9d1b53f4ae76b00191c407a026b1d7b30f2de7d2fdafac6cf3e3b88
-R 1fb415c40b7d35f8073733c660a98b10
+P 29049618f2b51f2d6cef098bbcb74b21f992bf2a8a00ed196f25fc85de2062ea
+Q +a967545868e54d6b021659562774e39ff6fe35f4f5b58a951694813624fcb0ee
+R 210762be519fecfa88390d8a62e7fa73
 U dan
-Z 6881bf5e24d8fcfe5633be0b0455e213
+Z 2c04e49b2fa2190581244a276f7f9e59
 # Remove this line to create a well-formed Fossil manifest.
