@@ -528,11 +528,12 @@ static int hctBufferSet(HctBuffer *pBuf, const u8 *aData, int nData){
 }
 
 
-#ifdef SQLITE_DEBUG
-static int hctSqliteBusy(int iLine){
+#if 1 || defined(SQLITE_DEBUG)
+static int hctSqliteBusy(const char *zFile, int iLine){
+  sqlite3_log(SQLITE_WARNING, "HCT_SQLITE_BUSY at %s:%d", zFile, iLine);
   return SQLITE_BUSY_SNAPSHOT;
 }
-# define HCT_SQLITE_BUSY hctSqliteBusy(__LINE__)
+# define HCT_SQLITE_BUSY hctSqliteBusy(__FILE__, __LINE__)
 #else
 # define HCT_SQLITE_BUSY SQLITE_BUSY_SNAPSHOT
 #endif /* SQLITE_DEBUG */
