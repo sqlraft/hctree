@@ -201,6 +201,9 @@ proc plan_migration {} {
   set lRet
 }
 
+sqlite_log_to_stdout
+sqlite_thread_test_config
+
 sqlite3 dest "file:$G(dest)?hctree=1" -uri 1
 sqlite3 src $G(src)
 

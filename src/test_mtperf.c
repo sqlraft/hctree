@@ -778,10 +778,12 @@ struct MigrationInsert {
 
 /*
 ** mutex:
-**   Mutex used to protect nInsertDone within the [run] sub-command.
+**   Mutex used to protect nInsertStarted/nInsertDone within the [run]
+**   sub-command.
 */
 struct Migration {
   sqlite3_mutex *mutex;
+  int nInsertStarted;
   int nInsertDone;
 
   int nInsert;
@@ -830,9 +832,9 @@ static void *migration_main(void *pArg){
   while( pJob->rc==SQLITE_OK ){
     MigrationInsert *pInsert = 0;
     sqlite3_mutex_enter(p->mutex);
-    if( p->nInsertDone<p->nInsert ){
-      pInsert = &p->aInsert[p->nInsertDone];
-      p->nInsertDone++;
+    if( p->nInsertStarted<p->nInsert ){
+      pInsert = &p->aInsert[p->nInsertStarted];
+      p->nInsertStarted++;
     }
     sqlite3_mutex_leave(p->mutex);
 
@@ -876,6 +878,12 @@ static void *migration_main(void *pArg){
     if( pJob->rc==SQLITE_OK ){
       pJob->rc = sqlite3_exec(pJob->db, "COMMIT", 0, 0, 0);
     }
+
+    sqlite3_mutex_enter(p->mutex);
+    p->nInsertDone++;
+    printf("(%d/%d)\r", p->nInsertDone, p->nInsert);
+    fflush(stdout);
+    sqlite3_mutex_leave(p->mutex);
   }
 
   return 0;
@@ -965,10 +973,12 @@ static int migration_cmd(
         MigrationJob *pJob = &p->aJob[ii];
         pthread_join(pJob->tid, &ret);
         if( rc==TCL_OK && pJob->rc!=SQLITE_OK ){
-          rc = TCL_ERROR;
-          Tcl_AppendResult(interp, 
-              "SQL error in job: ", sqlite3_errmsg(pJob->db), (char*)0
+          char zErrcode[24];
+          sprintf(zErrcode, "(%d) ", sqlite3_extended_errcode(pJob->db));
+          Tcl_AppendResult(interp, "SQL error in job: ", 
+              zErrcode, sqlite3_errmsg(pJob->db), (char*)0
           );
+          rc = TCL_ERROR;
         }
       }
 
@@ -1086,6 +1096,7 @@ static int sqlite_migrate(
       Tcl_AppendResult(interp, "error in sqlite3_open()", (char*)0);
       return TCL_ERROR;
     }
+    sqlite3_busy_timeout(pJob->db, 1000);
     rc = sqlite3_exec(pJob->db, zAttach, 0, 0, 0);
     if( rc!=SQLITE_OK ){
       Tcl_AppendResult(interp, 
@@ -1265,6 +1276,36 @@ static int test_extended_errcode(
 }
 
 /*
+** Callback registered by test_log_to_stdout().
+*/
+static void testLogCallback(void *unused, int err, const char *zMsg){
+  printf("log: (%d) %s\n", err, zMsg);
+}
+
+/*
+** tclcmd: sqlite_log_to_stdout
+*/
+static int test_log_to_stdout(
+  ClientData clientData,          /* Unused */
+  Tcl_Interp *interp,             /* The TCL interpreter */
+  int objc,                       /* Number of arguments */
+  Tcl_Obj *CONST objv[]           /* Command arguments */
+){
+  sqlite3 *db = 0;
+  int rc = 0;
+
+  if( objc!=1 ){
+    Tcl_WrongNumArgs(interp, 1, objv, "");
+    return TCL_ERROR;
+  }
+
+  rc = sqlite3_config(SQLITE_CONFIG_LOG, testLogCallback, (void*)0);
+  Tcl_SetObjResult(interp, Tcl_NewIntObj(rc));
+
+  return TCL_OK;
+}
+
+/*
 ** Register commands with the TCL interpreter.
 */
 int SqliteThreadTest_Init(Tcl_Interp *interp){
@@ -1278,7 +1319,8 @@ int SqliteThreadTest_Init(Tcl_Interp *interp){
     { sqlite_imposter, "sqlite_imposter" },
     { test_fallocate, "fallocate" },
     { test_dbdata_init, "sqlite3_dbdata_init" },
-    { test_extended_errcode, "sqlite3_extended_errcode" }
+    { test_extended_errcode, "sqlite3_extended_errcode" },
+    { test_log_to_stdout, "sqlite_log_to_stdout" }
   };
   int ii;
   for(ii=0; ii<sizeof(aCmd)/sizeof(aCmd[0]); ii++){
