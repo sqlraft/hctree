@@ -1,5 +1,5 @@
-C Fix\sa\sproblem\swith\sdelete\soperations\smade\swithin\sthe\ssame\stransaction\sas\sa\stable\sor\sindex\swas\sfirst\screated.
-D 2025-02-06T15:22:29.438
+C Fix\sa\sproblem\scorrupting\sthe\sdatabase\swhen\sa\srollback\soperation\srolled\sback\smultiple\srecords\swith\soverflow\spages\sfrom\sthe\ssame\stable.
+D 2025-02-07T11:14:28.521
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md e108e1e69ae8e8a59e93c455654b8ac9356a11720d3345df2a4743e9590fb20d
@@ -764,7 +764,7 @@ F src/hctInt.h b3227602ae00eb082c61166544d1cfbb6f4b27d236ae3789c03b53417ed104a8
 F src/hctJrnlInt.h 49add7e14722d06836743f92619d4ba28c9d40317765e055c1f20c4c45d9e936
 F src/hctPManInt.h 3936d01947aace587fd73c51246b7bd5cdbc79833248b839e7d9ffd737ded8b7
 F src/hctTMapInt.h bb7edd6282339ee6ac09be383a1f87267d9731f7bd384dd3b94cc7d2a3a99c10
-F src/hct_database.c 365eed364930358f5a5473456b5bc33ee9f21c54dbfdf050921ddd9d8cb3f9e9
+F src/hct_database.c 76486b8f8f01dd6eea59b6c344a4b06d16f3a42c16cda03a1c5689d7bb001696
 F src/hct_file.c 972ac3069b93641a501482a0a23c5d2e0f58eed76f9657d2005790ed7331ddde
 F src/hct_journal.c 1c96c0bdf39766fc1c7d3bb02da5515b1621d6144fd92bca4d497a2d2ed4c04d
 F src/hct_journalhash.c 5af4886fd8c126a96c78278f6e62a8e31de9b8e683b167c487b033a87fabb7a3
@@ -2307,8 +2307,9 @@ F tool/version-info.c 3b36468a90faf1bbd59c65fd0eb66522d9f941eedd364fabccd7227350
 F tool/warnings-clang.sh bbf6a1e685e534c92ec2bfba5b1745f34fb6f0bc2a362850723a9ee87c1b31a7
 F tool/warnings.sh 49a486c5069de041aedcbde4de178293e0463ae9918ecad7539eedf0ec77a139
 F tool/win/sqlite.vsix deb315d026cc8400325c5863eef847784a219a2f
-P 4a69b11730e513d27903e2fda94937f50bf54bb93a429d03fdfa05c2640cd19f
-R 3684cac0c9998cadf083a23c8c5a873e
+P f7b8f618af21ccf3af9b11b556d0c34bd46a151ccff8a70f24cc4d79e81808e8
+Q +549e5f062b8210be67387e62f1265057aa1b9b4a14154177ec19ae78875467a6
+R cd6fd65d97ffcb8d7241480ba78ead05
 U dan
-Z de95dca3645f600bc7c9b200e5ebb485
+Z 0b793c55af38ef9ccfa467b80951fd72
 # Remove this line to create a well-formed Fossil manifest.

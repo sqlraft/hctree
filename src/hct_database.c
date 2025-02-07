@@ -3010,7 +3010,6 @@ static void hctDbWriterCleanup(HctDatabase *pDb, HctDbWriter *p, int bRevert){
 
     /* Free/zero various buffers and caches */
     hctDbCsrCleanup(&p->writecsr);
-    hctDbCsrCleanup(&pDb->rbackcsr);
     p->bDoCleanup = 0;
   }
 }
@@ -5616,6 +5615,9 @@ int sqlite3HctDbInsert(
   }
 
  insert_done:
+  if( pDb->eMode==HCT_MODE_ROLLBACK ){
+    hctDbCsrCleanup(&pDb->rbackcsr);
+  }
   if( pRec ) pRec->nField = nRecField;
   return rc;
 }
