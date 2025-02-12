@@ -1,5 +1,5 @@
-C Improvements\sto\soutput\sof\shct_migrate.tcl.
-D 2025-02-07T17:05:39.488
+C Fix\sa\s32-bit\soverflow\sin\sshowdb.c.
+D 2025-02-12T18:55:24.656
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md e108e1e69ae8e8a59e93c455654b8ac9356a11720d3345df2a4743e9590fb20d
@@ -2305,7 +2305,7 @@ F tool/replace.tcl 511c61acfe563dfb58675efb4628bb158a13d48ff8322123ac447e9d25a82
 F tool/restore_jrnl.tcl 1079ecba47cc82fa82115b81c1f68097ab1f956f357ee8da5fc4b2589af6bd98
 F tool/rollback-test.c 9fc98427d1e23e84429d7e6d07d9094fbdec65a5
 F tool/run-speed-test.sh f95d19fd669b68c4c38b6b475242841d47c66076
-F tool/showdb.c 81b04bfaa9a63665f75945947323aa68b820570aa156b1574f440fc8276092c6
+F tool/showdb.c 3d4f608d39649cbe5e23cee4e81fdd147e42a4c6d9f6493ddcbf340b06e7bbe7
 F tool/showjournal.c 5bad7ae8784a43d2b270d953060423b8bd480818
 F tool/showlocks.c 9cc5e66d4ebbf2d194f39db2527ece92077e86ae627ddd233ee48e16e8142564
 F tool/showshm.c a0ab6ec32dd1f11218ca2a4018f8fb875b59414801ab8ceed8b2e69b7b45a809
@@ -2344,8 +2344,8 @@ F tool/version-info.c 3b36468a90faf1bbd59c65fd0eb66522d9f941eedd364fabccd7227350
 F tool/warnings-clang.sh bbf6a1e685e534c92ec2bfba5b1745f34fb6f0bc2a362850723a9ee87c1b31a7
 F tool/warnings.sh 49a486c5069de041aedcbde4de178293e0463ae9918ecad7539eedf0ec77a139
 F tool/win/sqlite.vsix deb315d026cc8400325c5863eef847784a219a2f
-P 7064b22a25a819f70ab54377d2e6ff3b09d24eb67618e477d5234e7a16b3bfe2 f87a2fd6a5d4d6b559075b6723742354ccc381d40bbecb18ffea9cc8fd1a975f
-R 692f64f70ade84bd952091308e218872
+P 017e5d2e6dc5ce5659bcf28cf26519cb40d2d9930de73bbb57d3c6e0d722f58c
+R f4ff56856c2c3670a127a4accd9ea1e9
 U dan
-Z 5512cef936c0f8d7843ee10a62081ead
+Z 1ed9c3c9eec8221b34984f5aebbd385c
 # Remove this line to create a well-formed Fossil manifest.
