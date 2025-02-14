@@ -658,6 +658,8 @@ int sqlite3HctDbPagesize(HctDatabase *pDb){
 
 void sqlite3HctDbClose(HctDatabase *p){
   if( p ){
+    assert( p->rbackcsr.pKeyInfo==0 );
+    assert( p->rbackcsr.pRec==0 );
     sqlite3_free(p->aTmp);
     sqlite3HctFileClose(p->pFile);
     p->pFile = 0;
@@ -1872,6 +1874,7 @@ static void hctDbFreeCsr(HctDbCsr *pCsr){
 
 static void hctDbCsrCleanup(HctDbCsr *pCsr){
   hctDbCsrReset(pCsr);
+  assert( pCsr->pKeyInfo || pCsr->pRec==0 );
   if( pCsr->pKeyInfo ){ 
     sqlite3DbFree(pCsr->pKeyInfo->db, pCsr->pRec);
     sqlite3KeyInfoUnref(pCsr->pKeyInfo);
@@ -3703,8 +3706,7 @@ static int hctDbFindLhsPeer(
   u8 *aLeft = pPg->aNew ? pPg->aNew : pPg->aOld;
   int rc = SQLITE_OK;
 
-  hctDbCsrInit(pDb, p->writecsr.iRoot, 0, &csr);
-  csr.pKeyInfo = p->writecsr.pKeyInfo;
+  hctDbCsrInit(pDb, p->writecsr.iRoot, p->writecsr.pKeyInfo, &csr);
   if( hctPagetype(aLeft)==HCT_PAGETYPE_INTKEY ){
     i64 iKey = hctDbIntkeyFPKey(aLeft);
     assert( iKey!=SMALLEST_INT64 );
@@ -3740,6 +3742,7 @@ static int hctDbFindLhsPeer(
     memset(pOut, 0, sizeof(HctFilePage));
     rc = SQLITE_LOCKED_ERR(pPg->iPg, "peer");
   }
+  hctDbCsrCleanup(&csr);
 
   return rc;
 }
@@ -5572,6 +5575,7 @@ int sqlite3HctDbInsert(
 
     pDb->pa.bDoCleanup = 1;
     if( pDb->rbackcsr.iRoot!=iRoot ){
+      hctDbCsrCleanup(&pDb->rbackcsr);
       hctDbCsrInit(pDb, iRoot, 0, &pDb->rbackcsr);
       if( pRec ){
         pDb->rbackcsr.pKeyInfo = sqlite3KeyInfoRef(pRec->pKeyInfo);
@@ -5622,6 +5626,7 @@ int sqlite3HctDbInsert(
     hctDbCsrCleanup(&pDb->rbackcsr);
   }
   if( pRec ) pRec->nField = nRecField;
+  assert( pDb->rbackcsr.pRec==0 );
   return rc;
 }
 
