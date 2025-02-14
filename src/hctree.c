@@ -1066,6 +1066,7 @@ static int hctScanOne(void *pCtx, const char *zFile){
       if( rdr.iRoot!=iPrevRoot ){
         hctRecoverCursorClose(p->p, &csr);
         rc = hctRecoverCursorOpen(p->p, rdr.iRoot, &csr);
+        iPrevRoot = rdr.iRoot;
       }
 
       if( rc==SQLITE_OK ){

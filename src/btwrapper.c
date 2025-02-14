@@ -661,6 +661,10 @@ int sqlite3IsHct(Btree *pBt){
   return (pBt && pBt->pMethods==&hct_btree_methods);
 }
 
+int sqlite3IsHctCsr(BtCursor *pCsr){
+  return (pCsr && pCsr->pMethods==&hct_btcursor_methods);
+}
+
 int sqlite3BtreeSchemaLoaded(Btree *pBt){
   int rc = SQLITE_OK;
   if( sqlite3IsHct(pBt) ){
