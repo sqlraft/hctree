@@ -343,6 +343,7 @@ int sqlite3BtreeUpdateMeta(Btree *p, int a, u32 b){
   return p->pMethods->xBtreeUpdateMeta(p, a, b);
 }
 int sqlite3BtreePragma(Btree *p, char* *a){
+  if( p==0 ) return 0;
   return p->pMethods->xBtreePragma(p, a);
 }
 Pager * sqlite3BtreePager(Btree *p){
