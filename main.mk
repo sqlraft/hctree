@@ -867,9 +867,9 @@ TESTSRC2 = \
   $(TOP)/ext/fts3/fts3_expr.c \
   $(TOP)/ext/fts3/fts3_tokenizer.c \
   $(TOP)/ext/fts3/fts3_write.c \
-  $(TOP)/ext/session/sqlite3session.c \
   $(TOP)/ext/session/sqlite3changebatch.c \
   $(TOP)/ext/session/test_session.c \
+  $(TOP)/ext/session/sqlite3session.c \
   fts5.c
 
 # Header files used by all library source files.
@@ -1102,7 +1102,7 @@ mksourceid$(B.exe): $(MAKE_SANITY_CHECK) $(TOP)/tool/mksourceid.c
 sqlite3.h: $(MAKE_SANITY_CHECK) $(TOP)/src/sqlite.h.in \
     $(TOP)/manifest mksourceid$(B.exe) \
 		$(TOP)/VERSION $(B.tclsh)
-	$(B.tclsh) $(TOP)/tool/mksqlite3h.tcl $(TOP) >sqlite3.h
+	$(B.tclsh) $(TOP)/tool/mksqlite3h.tcl $(TOP) -o sqlite3.h
 
 sqlite3.c:	.target_source sqlite3.h $(TOP)/tool/mksqlite3c.tcl src-verify$(B.exe) \
 		$(B.tclsh)
@@ -1111,7 +1111,7 @@ sqlite3.c:	.target_source sqlite3.h $(TOP)/tool/mksqlite3c.tcl src-verify$(B.exe
 	cp $(TOP)/ext/session/sqlite3session.h .
 
 sqlite3r.h: sqlite3.h $(B.tclsh)
-	$(B.tclsh) $(TOP)/tool/mksqlite3h.tcl $(TOP) --enable-recover >sqlite3r.h
+	$(B.tclsh) $(TOP)/tool/mksqlite3h.tcl $(TOP) --enable-recover -o sqlite3r.h
 
 sqlite3r.c: sqlite3.c sqlite3r.h $(B.tclsh)
 	cp $(TOP)/ext/recover/sqlite3recover.c tsrc/
@@ -1576,7 +1576,7 @@ install: install-headers
 # libtclsqlite3...
 #
 pkgIndex.tcl:
-	echo 'package ifneeded sqlite3 $(PACKAGE_VERSION) [list load [file join $$dir libtclsqlite3[info sharedlibextension]] sqlite3]' > $@
+	echo 'package ifneeded sqlite3 $(PACKAGE_VERSION) [list load [file join $$dir libtclsqlite3[info sharedlibextension]] Sqlite3]' > $@
 pkgIndex.tcl-1: pkgIndex.tcl
 pkgIndex.tcl-0 pkgIndex.tcl-:
 tcl: pkgIndex.tcl-$(HAVE_TCL)
@@ -2090,7 +2090,7 @@ sqlite3d$(T.exe):	shell.c $(LIBOBJS0)
 		$(LDFLAGS.libsqlite3) $(LDFLAGS.readline)
 
 install-shell-0: sqlite3$(T.exe) $(install-dir.bin)
-	$(INSTALL) -s sqlite3$(T.exe) "$(install-dir.bin)"
+	$(INSTALL) sqlite3$(T.exe) "$(install-dir.bin)"
 install-shell-1:
 install: install-shell-$(HAVE_WASI_SDK)
 
@@ -2104,7 +2104,7 @@ sqldiff$(T.exe): $(sqldiff.$(LINK_TOOLS_DYNAMICALLY).deps)
 	$(sqldiff.$(LINK_TOOLS_DYNAMICALLY).rules)
 
 install-diff: sqldiff$(T.exe) $(install-dir.bin)
-	$(INSTALL) -s sqldiff$(T.exe) "$(install-dir.bin)"
+	$(INSTALL) sqldiff$(T.exe) "$(install-dir.bin)"
 #install: install-diff
 
 dbhash$(T.exe):	$(TOP)/tool/dbhash.c sqlite3.o sqlite3.h
@@ -2288,7 +2288,7 @@ SHELL_DEP = \
     $(TOP)/src/test_windirent.h
 
 shell.c:	$(SHELL_DEP) $(TOP)/tool/mkshellc.tcl $(B.tclsh)
-	$(B.tclsh) $(TOP)/tool/mkshellc.tcl >shell.c
+	$(B.tclsh) $(TOP)/tool/mkshellc.tcl shell.c
 
 #
 # Rules to build the extension objects.
