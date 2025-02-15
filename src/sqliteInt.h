@@ -388,7 +388,7 @@
 ** which case memory allocation statistics are disabled by default.
 */
 #if !defined(SQLITE_DEFAULT_MEMSTATUS)
-# define SQLITE_DEFAULT_MEMSTATUS 0
+# define SQLITE_DEFAULT_MEMSTATUS 1
 #endif
 
 /*
