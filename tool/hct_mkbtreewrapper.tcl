@@ -93,6 +93,7 @@ set tree_apis {
 }
 
 set check_for_null_object {
+  sqlite3BtreePragma
   sqlite3BtreeTxnState
   sqlite3BtreeTripAllCursors
   sqlite3BtreeSavepoint

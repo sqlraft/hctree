@@ -1,5 +1,5 @@
-C Fix\sbuilds\sof\sfuzzcheck\son\sthis\sbranch.
-D 2025-02-15T17:47:49.666
+C Allow\sfor\sthe\sfact\sthat\ssqlite3BtreePragma()\smay\sbe\scalled\sbefore\sthe\sb-tree\sis\sopened.
+D 2025-02-15T17:48:12.281
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md e108e1e69ae8e8a59e93c455654b8ac9356a11720d3345df2a4743e9590fb20d
@@ -745,7 +745,7 @@ F src/btreeDefine.h 448586eb894629835df479a861f29c3d68628568f0965abb80f0dd07ea1c
 F src/btreeInt.h 489398cd182aa548ff9dca78a33d40aa10ddec5466ca1d6a6fb8a598467998bc
 F src/btreeModules.h eb3cf07f5cc21695366252f73e2456075ca9a4c178feb48e5bf3469053548e1e
 F src/btreeUndef.h e2c12a24fc2c0e39173ebd3179f7c758ec10fc7f5c38c34a528ff88399d81c4c
-F src/btwrapper.c 36e51a4bed11184907e1c63cc49fbaf4a594a8a53c058fd7bb68fa9a93276df4
+F src/btwrapper.c 44bd4f386f3c003b5598d92190a609d847b449aafe0f8192a91e412a57b5f19e
 F src/build.c 6f148756aa591ad44a9737d2258a4352061044480ca4e45bc730ecb50102f508
 F src/callback.c acae8c8dddda41ee85cfdf19b926eefe830f371069f8aadca3aa39adf5b1c859
 F src/complete.c a3634ab1e687055cd002e11b8f43eb75c17da23e
@@ -2233,7 +2233,7 @@ F tool/genfkey.README cf68fddd4643bbe3ff8e31b8b6d8b0a1b85e20f4
 F tool/genfkey.test b6afd7b825d797a1e1274f519ab5695373552ecad5cd373530c63533638a5a4f
 F tool/getlock.c f4c39b651370156cae979501a7b156bdba50e7ce
 F tool/hct_migrate.tcl cda2afda0cb6003870dd754a67b80db3e97a1f1f9a3156bad02c0eb9035a6880
-F tool/hct_mkbtreewrapper.tcl fd20af6c921070ca7a6e25132c303fd3633f7cb37fee1988636a56428860bb8d
+F tool/hct_mkbtreewrapper.tcl d11325cf00d66fd2614d938a0f8e3dbcda7e2377d3c5d1aa59c80c07a30f8107
 F tool/hct_mkspeedtable.tcl 30ae66edc2497bb6effdfe533a378519ab5e8749b7c23de79e3a95ec8aabae88
 F tool/hct_thread_test.c 8345b642e27b877b14c90ec2b866a5cbfcc6a8100fadfb947a61c129f33f93f6
 F tool/index_usage.c f62a0c701b2c7ff2f3e21d206f093c123f222dbf07136a10ffd1ca15a5c706c5
@@ -2311,9 +2311,9 @@ F tool/version-info.c 3b36468a90faf1bbd59c65fd0eb66522d9f941eedd364fabccd7227350
 F tool/warnings-clang.sh bbf6a1e685e534c92ec2bfba5b1745f34fb6f0bc2a362850723a9ee87c1b31a7
 F tool/warnings.sh 49a486c5069de041aedcbde4de178293e0463ae9918ecad7539eedf0ec77a139
 F tool/win/sqlite.vsix deb315d026cc8400325c5863eef847784a219a2f
-P 23ca4d581732bf83c124ba3aeabe4924101f3f0b2ff6659a3bd4e19eeed73f66
-Q +9d7b6840ac88b703677095e6fb417666338c29bd0574d4d8a4690168fd9709df
-R 540ea82a9c481d51319287543797ab45
+P 21bc088d08897ca730e89c9ea1c34b91534fb78d95b267cb22c654a01035cf5e
+Q +51d8f7569b1b870d139461811708c6cb6f70dbee0ff8122b27b4a8529a6af0e4
+R b2a43fe6d2968e448e3e94731787cbec
 U dan
-Z a1a5bf00b4ec016c24600ce9069618c7
+Z 932aab2dc9f936aa9ab47b9d8b74214c
 # Remove this line to create a well-formed Fossil manifest.
