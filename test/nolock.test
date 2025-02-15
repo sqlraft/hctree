@@ -33,6 +33,12 @@ testvfs tvfs
 tvfs script tvfs_callback
 tvfs filter {xLock xUnlock xCheckReservedLock xAccess}
 
+# SQLITE_ENABLE_HCT builds make 2 extra xAccess() calls when opening
+# existing databases. One on the database file itself, and then a second
+# to check for a *-pagemap file.
+#
+set nExtraAccess 2
+
 ############################################################################
 # Verify that the nolock=1 query parameter for URI filenames disables all
 # calls to xLock and xUnlock for rollback databases.
@@ -111,7 +117,7 @@ do_test nolock-2.2 {
   list xLock $::tvfs_calls(xLock) xUnlock $::tvfs_calls(xUnlock) \
        xCheckReservedLock $::tvfs_calls(xCheckReservedLock) \
        xAccess $::tvfs_calls(xAccess)
-} {xLock 2 xUnlock 2 xCheckReservedLock 0 xAccess 4}
+} [list xLock 2 xUnlock 2 xCheckReservedLock 0 xAccess [expr 4+$nExtraAccess]]
 
 
 do_test nolock-2.11 {
@@ -124,7 +130,7 @@ do_test nolock-2.12 {
   list xLock $::tvfs_calls(xLock) xUnlock $::tvfs_calls(xUnlock) \
        xCheckReservedLock $::tvfs_calls(xCheckReservedLock) \
        xAccess $::tvfs_calls(xAccess)
-} {xLock 2 xUnlock 2 xCheckReservedLock 0 xAccess 4}
+} [list xLock 2 xUnlock 2 xCheckReservedLock 0 xAccess [expr 4+$nExtraAccess]]
 
 
 do_test nolock-2.21 {
@@ -137,7 +143,7 @@ do_test nolock-2.22 {
   list xLock $::tvfs_calls(xLock) xUnlock $::tvfs_calls(xUnlock) \
        xCheckReservedLock $::tvfs_calls(xCheckReservedLock) \
        xAccess $::tvfs_calls(xAccess)
-} {xLock 0 xUnlock 0 xCheckReservedLock 0 xAccess 0}
+} [list xLock 0 xUnlock 0 xCheckReservedLock 0 xAccess $nExtraAccess]
 
 do_test nolock-2.31 {
   db2 close
@@ -149,7 +155,7 @@ do_test nolock-2.32 {
   list xLock $::tvfs_calls(xLock) xUnlock $::tvfs_calls(xUnlock) \
        xCheckReservedLock $::tvfs_calls(xCheckReservedLock) \
        xAccess $::tvfs_calls(xAccess)
-} {xLock 0 xUnlock 0 xCheckReservedLock 0 xAccess 0}
+} [list xLock 0 xUnlock 0 xCheckReservedLock 0 xAccess $nExtraAccess]
 
 ############################################################################
 # Verify that the SQLITE_IOCAP_IMMUTABLE flag works
@@ -165,7 +171,7 @@ do_test nolock-3.2 {
   list xLock $::tvfs_calls(xLock) xUnlock $::tvfs_calls(xUnlock) \
        xCheckReservedLock $::tvfs_calls(xCheckReservedLock) \
        xAccess $::tvfs_calls(xAccess)
-} {xLock 0 xUnlock 0 xCheckReservedLock 0 xAccess 0}
+} [list xLock 0 xUnlock 0 xCheckReservedLock 0 xAccess $nExtraAccess]
 
 do_test nolock-3.11 {
   db2 close
@@ -177,7 +183,7 @@ do_test nolock-3.12 {
   list xLock $::tvfs_calls(xLock) xUnlock $::tvfs_calls(xUnlock) \
        xCheckReservedLock $::tvfs_calls(xCheckReservedLock) \
        xAccess $::tvfs_calls(xAccess)
-} {xLock 0 xUnlock 0 xCheckReservedLock 0 xAccess 0}
+} [list xLock 0 xUnlock 0 xCheckReservedLock 0 xAccess $nExtraAccess]
 
 db2 close
 db close

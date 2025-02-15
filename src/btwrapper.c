@@ -618,7 +618,8 @@ static int btWrapperUseHct(
       rc = SQLITE_NOMEM_BKPT;
     }else{
       memset(zFull, 0, nAlloc);
-      rc = pVfs->xFullPathname(pVfs, zFilename, pVfs->mxPathname, zFull);
+      rc = sqlite3OsFullPathname(pVfs, zFilename, pVfs->mxPathname, zFull);
+      if( rc==SQLITE_OK_SYMLINK ) rc = SQLITE_OK;
     }
 
     if( rc==SQLITE_OK ){
@@ -655,7 +656,9 @@ int sqlite3BtreeOpen(
   int rc = SQLITE_OK;
   int bUseHct = 0;
 
-  rc = btWrapperUseHct(pVfs, zFilename, &bUseHct);
+  if( (vfsFlags & SQLITE_OPEN_MEMORY)==0 ){
+    rc = btWrapperUseHct(pVfs, zFilename, &bUseHct);
+  }
   if( rc==SQLITE_OK ){
     if( bUseHct ){
       rc = sqlite3HctBtreeOpen(pVfs, zFilename, db, &pBtree, flags, vfsFlags);

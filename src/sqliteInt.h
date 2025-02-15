@@ -56,11 +56,6 @@
 # define SQLITE_ENABLE_PREUPDATE_HOOK 1
 #endif
 
-#ifndef SQLITE_DISABLE_PAGECACHE_OVERFLOW_STATS
-# define SQLITE_DISABLE_PAGECACHE_OVERFLOW_STATS 1
-#endif
-#define SQLITE_SHARED_MAPPING 1
-
 /*
 ** Include the header file used to customize the compiler options for MSVC.
 ** This should be done first so that it can successfully prevent spurious
@@ -393,7 +388,7 @@
 ** which case memory allocation statistics are disabled by default.
 */
 #if !defined(SQLITE_DEFAULT_MEMSTATUS)
-# define SQLITE_DEFAULT_MEMSTATUS 0
+# define SQLITE_DEFAULT_MEMSTATUS 1
 #endif
 
 /*

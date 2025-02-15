@@ -560,7 +560,6 @@ sqlite3_hard_heap_limit64 $cmdlinearg(hard-heap-limit)
 #
 proc reset_db {} {
   catch {db close}
-  catch {db2 close}
   forcedelete test.db
   forcedelete test.db-journal
   forcedelete test.db-wal
