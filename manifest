@@ -1,5 +1,5 @@
-C Make\sthis\sbranch\sa\slittle\smore\sconsistent\swith\sthe\s"bedrock"\sbranch.
-D 2025-02-15T17:46:42.102
+C Fix\sa\smemory\sleak\sthat\scould\soccur\swhen\srecovering\sfrom\sa\sprocess\scrash.
+D 2025-02-15T17:47:30.343
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md e108e1e69ae8e8a59e93c455654b8ac9356a11720d3345df2a4743e9590fb20d
@@ -766,7 +766,7 @@ F src/hctInt.h b3227602ae00eb082c61166544d1cfbb6f4b27d236ae3789c03b53417ed104a8
 F src/hctJrnlInt.h 49add7e14722d06836743f92619d4ba28c9d40317765e055c1f20c4c45d9e936
 F src/hctPManInt.h 3936d01947aace587fd73c51246b7bd5cdbc79833248b839e7d9ffd737ded8b7
 F src/hctTMapInt.h bb7edd6282339ee6ac09be383a1f87267d9731f7bd384dd3b94cc7d2a3a99c10
-F src/hct_database.c 875d2171b3d83229636e33fa7e05b4c7a259bfad8a5f9aa36eddb4a25ea8484c
+F src/hct_database.c a3ceed53ab0889e9c51c59a3c1085da1731a188af189ea427632fe7cd8f2322f
 F src/hct_file.c 972ac3069b93641a501482a0a23c5d2e0f58eed76f9657d2005790ed7331ddde
 F src/hct_journal.c 1c96c0bdf39766fc1c7d3bb02da5515b1621d6144fd92bca4d497a2d2ed4c04d
 F src/hct_journalhash.c 5af4886fd8c126a96c78278f6e62a8e31de9b8e683b167c487b033a87fabb7a3
@@ -2311,9 +2311,9 @@ F tool/version-info.c 3b36468a90faf1bbd59c65fd0eb66522d9f941eedd364fabccd7227350
 F tool/warnings-clang.sh bbf6a1e685e534c92ec2bfba5b1745f34fb6f0bc2a362850723a9ee87c1b31a7
 F tool/warnings.sh 49a486c5069de041aedcbde4de178293e0463ae9918ecad7539eedf0ec77a139
 F tool/win/sqlite.vsix deb315d026cc8400325c5863eef847784a219a2f
-P a8ed527ef929e39ca4f2cd19d3145c0970f65f23b5f09b095ffc702beadf776a
-Q +0385506beb374db3895adfbb86743d42052f339ed0e5b759ef0f1d7178cebcb2
-R e954678158999d1aa8e1d91f84c71416
+P a21354f09a12a9cba60f97307ee734229be9b30fba1d4772a2a27972f6087b75
+Q +1d0dd02a3f8fefc7d0a3c1c8f29777be0e06f86b991aea70545cebe9007993b5
+R 76e45432ac0326be279f14756c0d5a42
 U dan
-Z a07c8a853baaf826a1ce4aae4c550053
+Z 3a07f667549de00457fa2653826c1ee1
 # Remove this line to create a well-formed Fossil manifest.
