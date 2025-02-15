@@ -1,5 +1,5 @@
-C Fix\sa\smemory\sleak\sthat\scould\soccur\swhen\srecovering\sfrom\sa\sprocess\scrash.
-D 2025-02-15T17:47:30.343
+C Fix\sbuilds\sof\sfuzzcheck\son\sthis\sbranch.
+D 2025-02-15T17:47:49.666
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md e108e1e69ae8e8a59e93c455654b8ac9356a11720d3345df2a4743e9590fb20d
@@ -722,7 +722,7 @@ F ext/wasm/tests/opfs/concurrency/test.js d08889a5bb6e61937d0b8cbb78c9efbefbf65a
 F ext/wasm/tests/opfs/concurrency/worker.js 0a8c1a3e6ebb38aabbee24f122693f1fb29d599948915c76906681bb7da1d3d2
 F ext/wasm/wasmfs.make 68999f5bd8c489239592d59a420f8c627c99169bbd6fa16a404751f757b9f702
 F magic.txt 5ade0bc977aa135e79e3faaea894d5671b26107cc91e70783aa7dc83f22f3ba0
-F main.mk d11e8a2896a8464a662d70128d1da5c4bc34ba404838cf8043b8b3b8c6666c18
+F main.mk 219df577828861e470b8d2d5e3330103e0e3beac6d378b7436e9db0cdf660f6e
 F mptest/config01.test 3c6adcbc50b991866855f1977ff172eb6d901271
 F mptest/config02.test 4415dfe36c48785f751e16e32c20b077c28ae504
 F mptest/crash01.test 61e61469e257df0850df4293d7d4d6c2af301421
@@ -745,7 +745,7 @@ F src/btreeDefine.h 448586eb894629835df479a861f29c3d68628568f0965abb80f0dd07ea1c
 F src/btreeInt.h 489398cd182aa548ff9dca78a33d40aa10ddec5466ca1d6a6fb8a598467998bc
 F src/btreeModules.h eb3cf07f5cc21695366252f73e2456075ca9a4c178feb48e5bf3469053548e1e
 F src/btreeUndef.h e2c12a24fc2c0e39173ebd3179f7c758ec10fc7f5c38c34a528ff88399d81c4c
-F src/btwrapper.c 6332bd6ab4b7a494de153a7a5e1ac3a5ac8483579068e3d9ccfeaaf57dda7377
+F src/btwrapper.c 36e51a4bed11184907e1c63cc49fbaf4a594a8a53c058fd7bb68fa9a93276df4
 F src/build.c 6f148756aa591ad44a9737d2258a4352061044480ca4e45bc730ecb50102f508
 F src/callback.c acae8c8dddda41ee85cfdf19b926eefe830f371069f8aadca3aa39adf5b1c859
 F src/complete.c a3634ab1e687055cd002e11b8f43eb75c17da23e
@@ -2311,9 +2311,9 @@ F tool/version-info.c 3b36468a90faf1bbd59c65fd0eb66522d9f941eedd364fabccd7227350
 F tool/warnings-clang.sh bbf6a1e685e534c92ec2bfba5b1745f34fb6f0bc2a362850723a9ee87c1b31a7
 F tool/warnings.sh 49a486c5069de041aedcbde4de178293e0463ae9918ecad7539eedf0ec77a139
 F tool/win/sqlite.vsix deb315d026cc8400325c5863eef847784a219a2f
-P a21354f09a12a9cba60f97307ee734229be9b30fba1d4772a2a27972f6087b75
-Q +1d0dd02a3f8fefc7d0a3c1c8f29777be0e06f86b991aea70545cebe9007993b5
-R 76e45432ac0326be279f14756c0d5a42
+P 23ca4d581732bf83c124ba3aeabe4924101f3f0b2ff6659a3bd4e19eeed73f66
+Q +9d7b6840ac88b703677095e6fb417666338c29bd0574d4d8a4690168fd9709df
+R 540ea82a9c481d51319287543797ab45
 U dan
-Z 3a07f667549de00457fa2653826c1ee1
+Z a1a5bf00b4ec016c24600ce9069618c7
 # Remove this line to create a well-formed Fossil manifest.

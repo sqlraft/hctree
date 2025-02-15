@@ -60,6 +60,17 @@ sqlite3_uint64 sqlite3StockBtreeSeekCount(Btree *p){
 }
 #endif
 
+#if SQLITE_MAX_MMAP_SIZE<=0
+int sqlite3HctBtreeSetMmapLimit(Btree *p, sqlite3_int64 szMmap){
+  assert( 0 );
+  return SQLITE_OK;
+}
+int sqlite3StockBtreeSetMmapLimit(Btree *p, sqlite3_int64 szMmap){
+  assert( 0 );
+  return SQLITE_OK;
+}
+#endif
+
 /* BEGIN_HCT_MKBTREEWRAPPER_TCL_CODE */
 /******************************************************************
 ** GENERATED CODE - DO NOT EDIT!
