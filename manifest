@@ -1,5 +1,5 @@
-C Fix\sproblems\swith\ssdevtest/mdevtest\son\sthis\sbranch.
-D 2025-02-15T18:04:57.900
+C Add\sdescription\sof\ssimpler\sreplication\sjournal\ssupport.
+D 2025-02-19T20:13:05.927
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md e108e1e69ae8e8a59e93c455654b8ac9356a11720d3345df2a4743e9590fb20d
@@ -66,6 +66,7 @@ F doc/hctree/mkthreadtest.tcl 58b1c401b35dcabd978f5a9663376a5beee441bdd9d1e49536
 F doc/hctree/pagetest.c 4d5f3aee508e32ff08dfd81b0c79f9ebfad04590f4d9283bd5df7e08674f9112
 F doc/hctree/perftest1.tcl f886f47adfd660a6e0648c8272227a037a209a4abdc5b6451a87224249beff1b
 F doc/hctree/replication.md 45c7df44a05c9843d70e4cf8bccf001548c1b7e13080491666fee5800caeb5a9
+F doc/hctree/replication2.md ad1c769db12e293848465b2c690dd6db952c9488319fd00f16348658827f300f
 F doc/hctree/slides.html 763e1e5b40201595f0924a589c8e6e9a7ca3ca593ed0045d372e66e12ece7aef
 F doc/hctree/slides.wiki 4151889c5485fecd8a71d5d0089645998a2db5ebc3360b570f763e59effed60c
 F doc/hctree/testing.wiki 398878d3636512df24cdd4650e87423163ecc9bc371d40e5876237a42f8b59e1
@@ -2311,9 +2312,8 @@ F tool/version-info.c 3b36468a90faf1bbd59c65fd0eb66522d9f941eedd364fabccd7227350
 F tool/warnings-clang.sh bbf6a1e685e534c92ec2bfba5b1745f34fb6f0bc2a362850723a9ee87c1b31a7
 F tool/warnings.sh 49a486c5069de041aedcbde4de178293e0463ae9918ecad7539eedf0ec77a139
 F tool/win/sqlite.vsix deb315d026cc8400325c5863eef847784a219a2f
-P a0fe42f8af1b013202e520819f0a24dc26c7ba64950557d43290cf8f3f9b56ce
-Q +095b1035eb1f88f627d181e54c12052e2be529ce599b2c4ff8c514af70744d29
-R e221f24a5c165a9986eb981793fa2c1f
+P ffc6891a1d847689ca1aa1105f99ab18c6dfeffda5413e49c63c6faa4c67c8bc
+R 6fc6ec232bc3b93b23fb4b2989dccc1c
 U dan
-Z 08252ce32460504ca1e865761e6245ce
+Z cbdc78fe5e70c1f5d284864bbb33153d
 # Remove this line to create a well-formed Fossil manifest.
