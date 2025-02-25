@@ -1,5 +1,5 @@
-C Remove\sunused\scode.\sFix\sother\scompiler\swarnings.
-D 2025-02-25T19:32:06.281
+C Avoid\sdropping\serror\scode\sin\sinternal\scalls\sto\ssqlite3HctBtreeGetMeta().
+D 2025-02-25T19:59:31.758
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md e108e1e69ae8e8a59e93c455654b8ac9356a11720d3345df2a4743e9590fb20d
@@ -776,7 +776,7 @@ F src/hct_record.c 89e030773cdd9d00c1d3a10ce35478a87f6a143ae3c9ce2ec5842c83822a5
 F src/hct_stats.c f3bf6890dd72a942724133a2f76224a22a0adcf1d5ffce422ec056bc28d58b5a
 F src/hct_tmap.c 6bee8c77e9ed5018803b1c1b8628fae2858874e08d657200a814caef35be4160
 F src/hct_tree.c bc4ce8b9e86e6d5bf3c162b379eade9360eba3ddda7b91f643158485dd6ea10e
-F src/hctree.c bab267848630a8acb9375a6a2d808ec54ffd963ee5d4c5dcd77b62c19325685c
+F src/hctree.c ad57bbe3fa646f676e9177bdcaa38d20d0b57bfb0816a9aa40fa09695aa3dc23
 F src/hwtime.h f9c2dfb84dce7acf95ce6d289e46f5f9d3d1afd328e53da8f8e9008e3b3caae6
 F src/in-operator.md 10cd8f4bcd225a32518407c2fb2484089112fd71
 F src/insert.c d1365fe92a984a62416b5e0f725f9d886d62f3efca20397049502b9d16657eb2
@@ -2312,8 +2312,8 @@ F tool/version-info.c 3b36468a90faf1bbd59c65fd0eb66522d9f941eedd364fabccd7227350
 F tool/warnings-clang.sh bbf6a1e685e534c92ec2bfba5b1745f34fb6f0bc2a362850723a9ee87c1b31a7
 F tool/warnings.sh 49a486c5069de041aedcbde4de178293e0463ae9918ecad7539eedf0ec77a139
 F tool/win/sqlite.vsix deb315d026cc8400325c5863eef847784a219a2f
-P 0ec94d35a91e93488eeb7652c419b86645a5038dc346f8d1998375cf76423729
-R a760d2f2bdf38cf0eb8345120ea6188b
+P a6d6f12011f568b260482924929df173768b1f67d7d1ecbe938c1eecb345489f
+R 5d9b1a1b9d7bbebc9f7f63dfea040846
 U dan
-Z a2567995c1299eb52a07f48a1eeec0ab
+Z 369ed7d775c4d5c31035764f9fb74feb
 # Remove this line to create a well-formed Fossil manifest.

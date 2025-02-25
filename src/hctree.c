@@ -1217,6 +1217,57 @@ static int hctAttemptRecovery(HBtree *p){
 }
 
 /*
+** Like sqlite3BtreeGetMeta(), but may return an error.
+*/
+static int hctBtreeGetMeta(HBtree *p, int idx, u32 *pMeta){
+  int rc = SQLITE_OK;
+
+  assert( idx>=0 && idx<SQLITE_N_BTREE_META );
+  assert( p->pHctDb );
+
+  if( idx==BTREE_DATA_VERSION ){
+    /* TODO: Fix this so that the data_version does not change when the
+    ** database is written by the current connection. */
+    i64 iSnapshot = sqlite3HctDbSnapshotId(p->pHctDb);
+    *pMeta = (u32)iSnapshot;
+  }else{
+    if( p->eMetaState==HCT_METASTATE_NONE && p->eTrans!=SQLITE_TXN_ERROR ){
+      if( p->eTrans==SQLITE_TXN_NONE ){
+        rc = sqlite3HctDbGetMeta(
+            p->pHctDb, (u8*)p->aMeta, SQLITE_N_BTREE_META*4
+        );
+      }else{
+        int res = 0;
+        HBtCursor csr;
+        BtCursor *pCsr = (BtCursor*)&csr;
+        memset(&csr, 0, sizeof(csr));
+
+        rc = sqlite3HctBtreeCursor((Btree*)p, 2, 0, 0, pCsr);
+        if( rc==SQLITE_OK ){
+          rc = sqlite3HctBtreeTableMoveto(pCsr, 0, 0, &res);
+        }
+        /* assert( rc==SQLITE_OK ); */
+        if( rc==SQLITE_OK && res==0 ){
+          const void *aMeta = 0;
+          u32 nMeta = 0;
+          aMeta = sqlite3HctBtreePayloadFetch(pCsr, &nMeta);
+          memcpy(p->aMeta, aMeta, MAX(nMeta, SQLITE_N_BTREE_META*4));
+          p->eMetaState = HCT_METASTATE_READ;
+        }
+        sqlite3HctBtreeCloseCursor(pCsr);
+      }
+      sqlite3HctJournalSchemaVersion(
+          p->pHctJrnl, &p->aMeta[BTREE_SCHEMA_VERSION]
+      );
+    }
+    *pMeta = p->aMeta[idx];
+  }
+
+  return rc;
+}
+
+
+/*
 ** Attempt to start a new transaction. A write-transaction
 ** is started if the second argument is nonzero, otherwise a read-
 ** transaction.  If the second argument is 2 or more and exclusive
@@ -1252,7 +1303,7 @@ int sqlite3HctBtreeBeginTrans(Btree *pBt, int wrflag, int *pSchemaVersion){
   }
 
   if( rc==SQLITE_OK && pSchemaVersion ){
-    sqlite3HctBtreeGetMeta((Btree*)p, 1, (u32*)pSchemaVersion);
+    rc = hctBtreeGetMeta(p, 1, (u32*)pSchemaVersion);
     sqlite3HctDbTransIsConcurrent(p->pHctDb, p->config.db->bConcurrent);
   }
 
@@ -3016,7 +3067,6 @@ int sqlite3HctBtreeDropTable(Btree *pBt, int iTable, int *piMoved){
   return hctreeAddNewSchemaOp(p, iTable, HCT_SCHEMAOP_DROP);
 }
 
-
 /*
 ** This function may only be called if the b-tree connection already
 ** has a read or write transaction open on the database.
@@ -3039,47 +3089,7 @@ int sqlite3HctBtreeDropTable(Btree *pBt, int iTable, int *piMoved){
 */
 void sqlite3HctBtreeGetMeta(Btree *pBt, int idx, u32 *pMeta){
   HBtree *const p = (HBtree*)pBt;
-
-  assert( idx>=0 && idx<SQLITE_N_BTREE_META );
-  assert( p->pHctDb );
-
-  if( idx==BTREE_DATA_VERSION ){
-    /* TODO: Fix this so that the data_version does not change when the
-    ** database is written by the current connection. */
-    i64 iSnapshot = sqlite3HctDbSnapshotId(p->pHctDb);
-    *pMeta = (u32)iSnapshot;
-  }else{
-    if( p->eMetaState==HCT_METASTATE_NONE && p->eTrans!=SQLITE_TXN_ERROR ){
-      int rc = SQLITE_OK;
-      if( p->eTrans==SQLITE_TXN_NONE ){
-        rc = sqlite3HctDbGetMeta(
-            p->pHctDb, (u8*)p->aMeta, SQLITE_N_BTREE_META*4
-        );
-      }else{
-        int res = 0;
-        HBtCursor csr;
-        BtCursor *pCsr = (BtCursor*)&csr;
-        memset(&csr, 0, sizeof(csr));
-
-        rc = sqlite3HctBtreeCursor(pBt, 2, 0, 0, pCsr);
-        if( rc==SQLITE_OK ){
-          rc = sqlite3HctBtreeTableMoveto(pCsr, 0, 0, &res);
-        }
-        /* assert( rc==SQLITE_OK ); */
-        if( rc==SQLITE_OK && res==0 ){
-          const void *aMeta = 0;
-          u32 nMeta = 0;
-          aMeta = sqlite3HctBtreePayloadFetch(pCsr, &nMeta);
-          memcpy(p->aMeta, aMeta, MAX(nMeta, SQLITE_N_BTREE_META*4));
-        }
-        sqlite3HctBtreeCloseCursor(pCsr);
-      }
-      sqlite3HctJournalSchemaVersion(
-          p->pHctJrnl, &p->aMeta[BTREE_SCHEMA_VERSION]
-      );
-    }
-    *pMeta = p->aMeta[idx];
-  }
+  (void)hctBtreeGetMeta(p, idx, pMeta);
 }
 
 /*
