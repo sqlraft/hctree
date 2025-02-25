@@ -1675,7 +1675,6 @@ static int hctBtreeDirectInsert(
   const u8 *aData                 /* Pointer to record to insert */
 ){
   int rc = SQLITE_OK;
-  HBtree *p = pCur->pBtree;
   int bFail = 0;
 
   assert( pCur->isDirectWrite );
@@ -1690,65 +1689,6 @@ static int hctBtreeDirectInsert(
 
   return rc;
 }
-
-
-static int hctBtreeMigrateInsert(
-  HBtCursor *pCur,
-  UnpackedRecord *pRec,
-  i64 iKey,
-  int nData,
-  const u8 *aData
-){
-  int rc = SQLITE_OK;
-  HBtree *p = pCur->pBtree;
-  int nRetry = 0;
-
-  if( 0==sqlite3HctDbTid(p->pHctDb) ){
-    i64 iDummy = 0;
-    rc = sqlite3HctDbStartWrite(p->pHctDb, &iDummy);
-    if( rc!=SQLITE_OK ) return rc;
-  }
-
-  rc = sqlite3HctDbInsert(
-      p->pHctDb, 
-      sqlite3HctTreeCsrRoot(pCur->pHctTreeCsr),
-      pRec, iKey, 0, nData, aData, &nRetry
-  );
-  if( nRetry>0 ){
-    rc = SQLITE_ABORT;
-  }
-
-  return rc;
-}
-
-static int hctBtreeMigrateCommit(HBtree *p){
-  int rc = SQLITE_OK;
-  i64 iCid = 0;
-  int bTmapScan = 0;
-  int nRetry = 0;
-
-  rc = sqlite3HctDbInsertFlush(p->pHctDb, &nRetry);
-  if( nRetry>0 ){
-    rc = SQLITE_ABORT;
-  }
-
-  if( rc==SQLITE_OK ){
-    rc = sqlite3HctDbValidate(p->config.db, p->pHctDb, &iCid, &bTmapScan);
-  }
-
-  if( rc==SQLITE_OK ){
-    rc = sqlite3HctDbEndWrite(p->pHctDb, iCid, 0);
-  }
-
-  if( bTmapScan ){
-    sqlite3HctDbTMapScan(p->pHctDb);
-  }
-
-  return rc;
-}
-
-#define BT_IS_MIGRATE(pBt) (pBt->config.db->bHctMigrate)
-#define CSR_IS_MIGRATE(pCsr) (pCsr->pBtree->config.db->bHctMigrate)
 
 /*
 ** Roll back any schema operations performed during the current transaction.
@@ -3121,9 +3061,11 @@ void sqlite3HctBtreeGetMeta(Btree *pBt, int idx, u32 *pMeta){
         BtCursor *pCsr = (BtCursor*)&csr;
         memset(&csr, 0, sizeof(csr));
 
-        sqlite3HctBtreeCursor(pBt, 2, 0, 0, pCsr);
-        rc = sqlite3HctBtreeTableMoveto(pCsr, 0, 0, &res);
-        assert( rc==SQLITE_OK );
+        rc = sqlite3HctBtreeCursor(pBt, 2, 0, 0, pCsr);
+        if( rc==SQLITE_OK ){
+          rc = sqlite3HctBtreeTableMoveto(pCsr, 0, 0, &res);
+        }
+        /* assert( rc==SQLITE_OK ); */
         if( rc==SQLITE_OK && res==0 ){
           const void *aMeta = 0;
           u32 nMeta = 0;

@@ -568,6 +568,7 @@ static u64 hctDbTMapLookup(HctDatabase *pDb, u64 iTid, u64 *peState){
 }
 
 
+#if 0
 static void print_out_tmap(HctDatabase *pDb, int nLimit){
   int ii;
 
@@ -584,8 +585,8 @@ static void print_out_tmap(HctDatabase *pDb, int nLimit){
       (int)iCid
     );
   }
-
 }
+#endif
 
 static void hctDbPageArrayReset(HctDbPageArray *pArray){
   sqlite3_free(pArray->aDyn);
@@ -772,9 +773,11 @@ static u32 hctGetU32(const u8 *a){
   return ret;
 }
 
+#if 0
 static void hctPutU32(u8 *a, u32 val){
   hctMemcpy(a, &val, sizeof(u32));
 }
+#endif
 
 /*
 ** Return true if TID iTid maps to a commit-id visible to the current
@@ -4612,41 +4615,6 @@ static void hctDbRemoveCell(
 
 }
 
-
-/*
-** This is called as part of a bulk insert of contiguous keys. At present
-** this only occurs as part of a migrate, but in the future it could be
-** auto-detected.
-*/
-static int hctDbBalanceMigrate(
-  HctDatabase *pDb, 
-  HctDbWriter *p, 
-  HctDbInsertOp *pOp
-){
-  HctDbLeaf *pLeaf = (HctDbLeaf*)p->writepg.aPg[0].aNew;
-  int ii = 0;
-
-  assert( p->writepg.nPg==1 );
-  assert( p->bAppend==0 );
-  assert( p->iHeight==0 );
-  assert( pOp->iInsert<=pLeaf->pg.nEntry );
-  assert( pOp->eBalance==BALANCE_REQUIRED || pOp->eBalance==BALANCE_OPTIONAL );
-
-  /* Set nMigrateKey to the number of keys to copy from p->writepg.aPg[0].aOld
-  ** before flushing the current array of pages to disk.  */
-  p->nMigrateKey = pLeaf->pg.nEntry - pOp->iInsert;
-
-  /* Remove the last nMigrateKey cells from the page. */
-  for(ii=0; ii<p->nMigrateKey; ii++){
-    hctDbRemoveCell(pDb, 0, (u8*)pLeaf, pLeaf->pg.nEntry-1);
-  }
-  p->bAppend = 1;
-
-  /* Use a regular balance to make space for the new key */
-  pOp->eBalance = BALANCE_REQUIRED;
-  return hctDbBalance(pDb, p, pOp, 0);
-}
-
 /*
 ** Buffer aTarget must contain the image of a page that uses variable 
 ** length records - an intkey leaf, or an index leaf or node. This
@@ -5689,7 +5657,6 @@ static int hctDbDirectSplitRoot(HctDatabase *pDb, HctFilePage *pPg){
   rc = sqlite3HctFilePageNew(pDb->pFile, &peer);
   if( rc==SQLITE_OK ){
     u8 pgtype = hctPagetype(pPg->aOld);
-    HctDbIndexNode *pNode = (HctDbIndexNode*)pPg->aOld;
 
     memcpy(peer.aNew, pPg->aOld, pDb->pgsz);
     hctDbRootPageInit(pgtype==HCT_PAGETYPE_INDEX, 
@@ -6890,6 +6857,7 @@ static int hctDbIntegrityCheckCb(
   return (p->nErr>=p->nMaxErr) ? -1 : 0;
 }
 
+#if 0
 /*
 ** Parameter aVal[] is an array nVal values in size. If this array contains
 ** the value passed as the 3rd parameter (val), return true. Otherwise return
@@ -6902,6 +6870,7 @@ static int arrayContainsValue(u32 *aVal, int nVal, u32 val){
   }
   return 0;
 }
+#endif
 
 char *sqlite3HctDbIntegrityCheck(
   HctDatabase *pDb, 

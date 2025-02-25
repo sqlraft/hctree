@@ -918,13 +918,12 @@ static int migration_cmd(
 
   switch( iSub ){
     case 0: assert( 0==strcmp(azSub[iSub], "copy") ); {
-      int nByte = 0;
       const char *zCreate1 = 0;
       const char *zCreate2 = 0;
       const char *zInsert = 0;
       const char *zName = 0;
       sqlite3_int64 pgno = 0;
-      char *zCopy = 0;
+
       /* $cmd copy SOURCE-ROOT NAME INSERT CREATE-TABLE-1 CREATE-TABLE-2 */
       if( objc!=7 ){
         Tcl_WrongNumArgs(interp, 2, objv, "ROOT NAME INSERT CT1 CT2");
@@ -1285,7 +1284,6 @@ static int test_log_to_stdout(
   int objc,                       /* Number of arguments */
   Tcl_Obj *CONST objv[]           /* Command arguments */
 ){
-  sqlite3 *db = 0;
   int rc = 0;
 
   if( objc!=1 ){
