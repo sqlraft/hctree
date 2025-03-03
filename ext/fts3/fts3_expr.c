@@ -283,7 +283,7 @@ static int getNextString(
   Fts3Expr *p = 0;
   sqlite3_tokenizer_cursor *pCursor = 0;
   char *zTemp = 0;
-  int nTemp = 0;
+  i64 nTemp = 0;
 
   const int nSpace = sizeof(Fts3Expr) + sizeof(Fts3Phrase);
   int nToken = 0;
@@ -657,7 +657,7 @@ static int fts3ExprParse(
 
           /* The isRequirePhrase variable is set to true if a phrase or
           ** an expression contained in parenthesis is required. If a
-          ** binary operator (AND, OR, NOT or NEAR) is encounted when
+          ** binary operator (AND, OR, NOT or NEAR) is encountered when
           ** isRequirePhrase is set, this is a syntax error.
           */
           if( !isPhrase && isRequirePhrase ){

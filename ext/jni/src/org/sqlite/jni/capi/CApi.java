@@ -199,16 +199,16 @@ public final class CApi {
   }
 
   private static native sqlite3_backup sqlite3_backup_init(
-    @NotNull long ptrToDbDest, @NotNull String destTableName,
-    @NotNull long ptrToDbSrc, @NotNull String srcTableName
+    @NotNull long ptrToDbDest, @NotNull String destSchemaName,
+    @NotNull long ptrToDbSrc, @NotNull String srcSchemaName
   );
 
   public static sqlite3_backup sqlite3_backup_init(
-    @NotNull sqlite3 dbDest, @NotNull String destTableName,
-    @NotNull sqlite3 dbSrc, @NotNull String srcTableName
+    @NotNull sqlite3 dbDest, @NotNull String destSchemaName,
+    @NotNull sqlite3 dbSrc, @NotNull String srcSchemaName
   ){
-    return sqlite3_backup_init( dbDest.getNativePointer(), destTableName,
-                                dbSrc.getNativePointer(), srcTableName );
+    return sqlite3_backup_init( dbDest.getNativePointer(), destSchemaName,
+                                dbSrc.getNativePointer(), srcSchemaName );
   }
 
   private static native int sqlite3_backup_pagecount(@NotNull long ptrToBackup);
@@ -264,7 +264,7 @@ public final class CApi {
   }
 
   /**
-     Convenience overload which is equivalant to passing its arguments
+     Convenience overload which is equivalent to passing its arguments
      to sqlite3_bind_nio_buffer() with the values 0 and -1 for the
      final two arguments.
   */
@@ -312,7 +312,7 @@ public final class CApi {
 
      The byte range of the buffer may be restricted by providing a
      start index and a number of bytes. beginPos may not be negative.
-     Negative howMany is interpretated as the remainder of the buffer
+     Negative howMany is interpreted as the remainder of the buffer
      past the given start position, up to the buffer's limit() (as
      opposed its capacity()).
 
@@ -1076,7 +1076,7 @@ public final class CApi {
 
   /**
      <p>Works like in the C API with the exception that it only supports
-     the following subset of configution flags:
+     the following subset of configuration flags:
 
      <p>SQLITE_CONFIG_SINGLETHREAD
      SQLITE_CONFIG_MULTITHREAD

@@ -1218,7 +1218,8 @@ int main(int argc, char **argv){
         iEnd = strtol(&zLeft[2], 0, 0);
         checkPageValidity(iEnd);
       }else if( zLeft && zLeft[0]=='b' ){
-        int ofst, nByte, hdrSize;
+        i64 ofst;
+        int nByte, hdrSize;
         unsigned char *a;
         if( iStart==1 ){
           ofst = hdrSize = 100;
