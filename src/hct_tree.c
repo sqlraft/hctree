@@ -1125,8 +1125,10 @@ int sqlite3HctTreeCsrOpen(HctTree *pTree, u32 iRoot, HctTreeCsr **ppCsr){
         pNew->iNode = -1;
       }
     }
-    pNew->pCsrNext = pRoot->pCsrList;
-    pRoot->pCsrList = pNew;
+    if( pNew ){
+      pNew->pCsrNext = pRoot->pCsrList;
+      pRoot->pCsrList = pNew;
+    }
   }
   *ppCsr = pNew;
   return rc;

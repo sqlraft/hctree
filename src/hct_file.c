@@ -1190,12 +1190,14 @@ int sqlite3HctFileIsNewDb(HctFile *pFile){
   return bRet;
 }
 
+#if 0
 #include <sys/time.h>
 static sqlite3_int64 current_time(){
   struct timeval sNow;
   gettimeofday(&sNow, 0);
   return (sqlite3_int64)sNow.tv_sec*1000 + sNow.tv_usec/1000;
 }
+#endif
 
 static void hctFileEnterServerMutex(HctFile *pFile){
   sqlite3_mutex *pMutex = pFile->pServer->pMutex;
@@ -1522,7 +1524,7 @@ int sqlite3HctFileTreeFree(HctFile *pFile, u32 iRoot, int bImmediate){
 }
 
 int sqlite3HctFileTreeClear(HctFile *pFile, u32 iRoot){
-  sqlite3HctPManFreeTree(pFile->pPManClient, pFile, iRoot, 0, 1);
+  return sqlite3HctPManFreeTree(pFile->pPManClient, pFile, iRoot, 0, 1);
 }
 
 static int hctFilePagemapGetGrow(HctFile *pFile, u32 iPg, u64 *piVal){

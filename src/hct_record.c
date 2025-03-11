@@ -205,7 +205,7 @@ int sqlite3HctNameFromSchemaRecord(
 
     if( aType[0]==27 || aType[0]==40 ){
       /* A trigger */
-      *ppName = "";
+      *ppName = (const u8*)"";
       nRet = 0;
     }else{
       *ppName = &aData[iOff + sqlite3VdbeSerialTypeLen(aType[0])];

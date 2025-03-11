@@ -8755,7 +8755,6 @@ static int SQLITE_TCLAPI test_hct_proc_failure(
   Tcl_Obj *CONST objv[]
 ){
   int nFail;
-  int nReset;
 
   if( objc!=2 ){
     Tcl_WrongNumArgs(interp, 1, objv, "NFAIL");
