@@ -267,6 +267,8 @@ void sqlite3HctDbRecordTrim(UnpackedRecord *pRec);
 */
 i64 sqlite3HctDbSnapshotId(HctDatabase *pDb);
 
+u64 sqlite3HctDbReqSnapshot(HctDatabase *pDb);
+
 int sqlite3HctDbCsrFindLastWrite(
   HctDbCsr *pCsr,                 /* Cursor to seek */
   UnpackedRecord *pRec,           /* Key for index/without rowid tables */

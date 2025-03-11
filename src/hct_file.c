@@ -1027,6 +1027,8 @@ static int hctFileServerInit(
       }
     }
     sqlite3_free(unc.aTid);
+
+    rc = sqlite3HctJournalServerNew(&p->pJrnlPtr);
   }
   return rc;
 }
@@ -1455,9 +1457,8 @@ void sqlite3HctFileClose(HctFile *pFile){
       }
       if( pDel->fdMap ) close(pDel->fdMap);
 
-      if( pDel->xJrnlDel ){
-        pDel->xJrnlDel(pDel->pJrnlPtr);
-      }
+      sqlite3HctJournalServerFree(pDel->pJrnlPtr);
+
       sqlite3_free(pDel->zDir);
       sqlite3_free(pDel->zPath);
       sqlite3_mutex_free(pDel->pMutex);
@@ -1910,6 +1911,9 @@ int sqlite3HctFilePageDirectWrite(HctFilePage *pPg){
   return SQLITE_OK;
 }
 
+u64 sqlite3HctFilePeekTransid(HctFile *pFile){
+  return hctFilePagemapGet(pFile->pMapping, HCT_PAGEMAP_TRANSID_EOF);
+}
 
 u64 sqlite3HctFileAllocateTransid(HctFile *pFile){
   u64 iVal = hctFilePagemapIncr(pFile, HCT_PAGEMAP_TRANSID_EOF, 1);

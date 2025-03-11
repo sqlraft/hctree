@@ -150,8 +150,9 @@ Restrictions:
      hct_journal table. 
 
   *  Attempting to change a database from NORMAL to either LEADER or FOLLOWER
-     mode requires exclusive access. The results of attempting to do so while
-     any other client is reading or writing to the same database are undefined.
+     mode, or from LEADER or FOLLOWER back to NORMAL, requires exclusive
+     access. The results of attempting to do so while any other client is
+     reading or writing to the same database are undefined.
 
   *  Attempting to change a database from FOLLOWER to LEADER, or from LEADER
      to FOLLOWER, requires that no other client be simultaneously writing to

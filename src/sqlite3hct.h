@@ -46,11 +46,16 @@ int sqlite3_hct_journal_truncate(sqlite3 *db, sqlite3_int64 iMinCid);
 /* 
 ** Candidate values for second arg to sqlite3_hct_journal_setmode() 
 */
+#define SQLITE_HCT_NORMAL   0
+#define SQLITE_HCT_FOLLOWER 1
+#define SQLITE_HCT_LEADER   2
+
 #define SQLITE_HCT_JOURNAL_MODE_FOLLOWER 0
-#define SQLITE_HCT_JOURNAL_MODE_LEADER   1
+#define SQLITE_HCT_JOURNAL_MODE_LEADER 1
 
 /*
-** Query the LEADER/FOLLOWER setting of the db passed as the only argument.
+** Query the NORMAL/FOLLOWER/LEADER setting of the db passed as the 
+** only argument.
 */
 int sqlite3_hct_journal_mode(sqlite3 *db);
 
@@ -61,6 +66,35 @@ int sqlite3_hct_journal_mode(sqlite3 *db);
 ** sqlite3_errmsg()) in the database handle.
 */
 int sqlite3_hct_journal_setmode(sqlite3 *db, int eMode);
+
+/*
+** Commit a leader transaction.
+*/
+int sqlite3_hct_journal_leader_commit(
+  sqlite3 *db,                    /* Commit transaction for this db handle */
+  const unsigned char *aData,     /* Data to write to "query" column */
+  int nData,                      /* Size of aData[] in bytes */
+  sqlite3_int64 *piCid,           /* OUT: CID of committed transaction */
+  sqlite3_int64 *piSnapshot       /* OUT: Min. snapshot to recreate */
+);
+
+/*
+** Commit a follower transaction.
+*/
+int sqlite3_hct_journal_follower_commit(
+  sqlite3 *db,                    /* Commit transaction for this db handle */
+  const unsigned char *aData,     /* Data to write to "query" column */
+  int nData,                      /* Size of aData[] in bytes */
+  sqlite3_int64 iCid,             /* CID of committed transaction */
+  sqlite3_int64 iSnapshot         /* Value for hct_journal.snapshot field */
+);
+
+/*
+** Set output variable (*piCid) to the CID of the newest available 
+** database snapshot. Return SQLITE_OK if successful, or an SQLite
+** error code if something goes wrong.
+*/
+int sqlite3_hct_journal_snapshot(sqlite3 *db, sqlite3_int64 *piCid);
 
 /*
 ** Rollback transactions that follow the first hole in the journal.
@@ -74,12 +108,6 @@ int sqlite3_hct_journal_rollback(sqlite3 *db, sqlite3_int64 iCid);
 #define SQLITE_HCT_ROLLBACK_MAXIMUM   0
 #define SQLITE_HCT_ROLLBACK_PRESERVE -1
 
-/*
-** Set output variable (*piCid) to the CID of the newest available 
-** database snapshot. Return SQLITE_OK if successful, or an SQLite
-** error code if something goes wrong.
-*/
-int sqlite3_hct_journal_snapshot(sqlite3 *db, sqlite3_int64 *piCid);
 
 /*
 ** Register a custom validation callback with the database handle.

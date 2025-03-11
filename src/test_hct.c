@@ -159,10 +159,13 @@ static int test_hct_journal_mode(
 
   eRet = sqlite3_hct_journal_mode(db);
   switch( eRet ){
-    case SQLITE_HCT_JOURNAL_MODE_FOLLOWER:
+    case SQLITE_HCT_NORMAL:
+      Tcl_SetObjResult(interp, Tcl_NewStringObj("NORMAL", -1));
+      break;
+    case SQLITE_HCT_FOLLOWER:
       Tcl_SetObjResult(interp, Tcl_NewStringObj("FOLLOWER", -1));
       break;
-    case SQLITE_HCT_JOURNAL_MODE_LEADER:
+    case SQLITE_HCT_LEADER:
       Tcl_SetObjResult(interp, Tcl_NewStringObj("LEADER", -1));
       break;
     default:
@@ -182,13 +185,14 @@ static int test_hct_journal_setmode(
   int objc,                       /* Number of arguments */
   Tcl_Obj *CONST objv[]           /* Command arguments */
 ){
-  const char *azArg[] = { "FOLLOWER", "LEADER", 0 };
+  const char *azArg[] = { "NORMAL", "FOLLOWER", "LEADER", 0 };
   sqlite3 *db = 0;
   int rc = TCL_OK;
   int eVal;
 
-  assert( SQLITE_HCT_JOURNAL_MODE_FOLLOWER==0 );
-  assert( SQLITE_HCT_JOURNAL_MODE_LEADER==1 );
+  assert( SQLITE_HCT_NORMAL==0 );
+  assert( SQLITE_HCT_FOLLOWER==1 );
+  assert( SQLITE_HCT_LEADER==2 );
 
   if( objc!=3 ){
     Tcl_WrongNumArgs(interp, 1, objv, "DB");
@@ -325,6 +329,42 @@ static int test_hct_journal_rollback(
 }
 
 /*
+** tclcmd: sqlite3_hct_journal_leader_commit DB DATA
+*/
+static int test_hct_journal_leader_commit(
+  ClientData clientData,          /* Unused */
+  Tcl_Interp *interp,             /* The TCL interpreter */
+  int objc,                       /* Number of arguments */
+  Tcl_Obj *CONST objv[]           /* Command arguments */
+){
+  sqlite3 *db = 0;
+  int rc = TCL_OK;
+  const char *zSql = 0;
+  int nSql = 0;
+  sqlite3_int64 iCid = 0;
+  sqlite3_int64 iSnapshot = 0;
+  Tcl_Obj *pRet = 0;
+
+  if( objc!=3 ){
+    Tcl_WrongNumArgs(interp, 1, objv, "DB SQL");
+    return TCL_ERROR;
+  }
+  rc = getDbPointer(interp, Tcl_GetString(objv[1]), &db);
+  if( rc!=TCL_OK ) return rc;
+  zSql = Tcl_GetStringFromObj(objv[2], &nSql);
+
+  rc = sqlite3_hct_journal_leader_commit(db, zSql, nSql, &iCid, &iSnapshot);
+
+  pRet = Tcl_NewObj();
+  Tcl_ListObjAppendElement(interp,pRet,Tcl_NewStringObj(sqlite3ErrName(rc),-1));
+  Tcl_ListObjAppendElement(interp, pRet, Tcl_NewWideIntObj(iCid));
+  Tcl_ListObjAppendElement(interp, pRet, Tcl_NewWideIntObj(iSnapshot));
+  Tcl_SetObjResult(interp, pRet);
+
+  return TCL_OK;
+}
+
+/*
 ** Register commands with the TCL interpreter.
 */
 int SqliteHctTest_Init(Tcl_Interp *interp){
@@ -340,6 +380,7 @@ int SqliteHctTest_Init(Tcl_Interp *interp){
     { "sqlite3_hct_journal_snapshot",        test_hct_journal_snapshot },
     { "sqlite3_hct_journal_truncate",        test_hct_journal_truncate },
     { "sqlite3_hct_journal_rollback",        test_hct_journal_rollback },
+    { "sqlite3_hct_journal_leader_commit",   test_hct_journal_leader_commit },
   };
   int ii = 0;
 

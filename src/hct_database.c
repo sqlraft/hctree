@@ -300,6 +300,12 @@ struct HctDatabaseStats {
 ** iJrnlWriteCid:
 **   This value is set within calls to sqlite3_hct_journal_write(). The CID
 **   of the journal entry being written to the db.
+**
+** iLocalMinTid:
+**   This is set whenever a read-transaction is ongoing. The client may
+**   assume that the transactions associated with this and all smaller TID
+**   values have been fully committed or rolled back. No pointers associated
+**   with such values need be followed.
 */
 struct HctDatabase {
   HctFile *pFile;
@@ -316,6 +322,7 @@ struct HctDatabase {
 
   HctTMap *pTmap;                 /* Transaction map (non-NULL if trans open) */
   u64 iSnapshotId;                /* Snapshot id for reading */
+  u64 iReqSnapshotId;             /* Required snapshot to replicate trans. */
   u64 iLocalMinTid;
   HctDbWriter pa;
   HctDbCsr rbackcsr;              /* Used to find old values during rollback */
@@ -756,6 +763,12 @@ int sqlite3HctDbStartRead(HctDatabase *pDb, HctJournal *pJrnl){
       pDb->iSnapshotId = iSnapshot;
       pDb->iLocalMinTid = sqlite3HctTMapCommitedTID(pTMapClient);
       assert( pDb->iSnapshotId>0 );
+
+      assert( pDb->iReqSnapshotId==0 );
+      pDb->iReqSnapshotId = 1;
+      if( pDb->iSnapshotId>(HCT_MAX_LEADING_WRITE/2) ){
+        pDb->iReqSnapshotId = pDb->iSnapshotId - (HCT_MAX_LEADING_WRITE/2);
+      }
     }
   }
 
@@ -785,7 +798,8 @@ static void hctPutU32(u8 *a, u32 val){
 */
 static int hctDbTidIsVisible(HctDatabase *pDb, u64 iTid, int bNosnap){
 
-  if( (iTid & HCT_TID_MASK)<=pDb->iLocalMinTid ) return 1;
+  // if( (iTid & HCT_TID_MASK)<=pDb->iLocalMinTid ) return 1;
+
   while( 1 ){
     u64 eState = 0;
     u64 iCid = hctDbTMapLookup(pDb, (iTid & HCT_TID_MASK), &eState);
@@ -799,6 +813,7 @@ static int hctDbTidIsVisible(HctDatabase *pDb, u64 iTid, int bNosnap){
       if( bNosnap==0 && iCid>pDb->iSnapshotId ){
         return 0;
       }
+      pDb->iReqSnapshotId = MAX(pDb->iReqSnapshotId, iCid);
       return 1;
     }
     assert( eState==HCT_TMAP_VALIDATING );
@@ -819,7 +834,7 @@ static int hctDbTidIsVisible(HctDatabase *pDb, u64 iTid, int bNosnap){
 ** false if the write should proceed.
 */
 static int hctDbTidIsConflict(HctDatabase *pDb, u64 iTid){
-  if( iTid==pDb->iTid || iTid<=pDb->iLocalMinTid || iTid==LARGEST_TID ){
+  if( iTid==pDb->iTid /* || iTid<=pDb->iLocalMinTid */ || iTid==LARGEST_TID ){
     return 0;
   }else{
     u64 eState = 0;
@@ -831,6 +846,7 @@ static int hctDbTidIsConflict(HctDatabase *pDb, u64 iTid){
       eState = HCT_TMAP_COMMITTED;
     }
 
+    pDb->iReqSnapshotId = MAX(pDb->iReqSnapshotId, iCid);
     if( eState==HCT_TMAP_COMMITTED && iCid<=pDb->iSnapshotId ) return 0;
     if( iCid==pDb->iJrnlWriteCid ) return 0;
     return 1;
@@ -1401,6 +1417,10 @@ void sqlite3HctDbRecordTrim(UnpackedRecord *pRec){
 i64 sqlite3HctDbSnapshotId(HctDatabase *pDb){
   assert( pDb->iSnapshotId>0 );
   return pDb->iSnapshotId;
+}
+
+u64 sqlite3HctDbReqSnapshot(HctDatabase *pDb){
+  return pDb->iReqSnapshotId;
 }
 
 /*
@@ -2151,9 +2171,9 @@ struct HctRangePtr {
 ** This happens if the transaction with TID iRangeTid is not visible to
 ** the reader. Or, if the only reason to follow the pointer is in order
 ** to follow other pointers on the indicated page, (*pbMerge) is set to
-** true. This happens when iRangeTid is included in the transaction, but
-** there exists one or more transactions with TID values smaller than iRangeTid
-** that are not.
+** false. This happens when iRangeTid is included in the transaction, but
+** there exists one or more transactions with TID values smaller than 
+** iRangeTid that are not.
 */
 static int hctDbFollowRangeOld(
   HctDatabase *pDb, 
@@ -5976,6 +5996,7 @@ int sqlite3HctDbEndRead(HctDatabase *pDb){
     sqlite3HctTMapEnd(pTMapClient, pDb->iSnapshotId);
     pDb->pTmap = 0;
     pDb->iSnapshotId = 0;
+    pDb->iReqSnapshotId = 0;
     pDb->bConcurrent = 0;
   }
   return SQLITE_OK;
@@ -6012,11 +6033,12 @@ void sqlite3HctDbRecoverTid(HctDatabase *pDb, u64 iTid){
 int sqlite3HctDbFinishRecovery(HctDatabase *pDb, int iStage, int rc){
   /* assert( pDb->eMode==HCT_MODE_ROLLBACK ); */
   assert( iStage==0 || iStage==1 );
-  assert( pDb->iSnapshotId>0 );
+  assert( pDb->iSnapshotId>0 || rc!=SQLITE_OK );
 
   pDb->iTid = 0;
   pDb->eMode = HCT_MODE_NORMAL;
   pDb->iSnapshotId = 0;
+  pDb->iReqSnapshotId = 0;
   pDb->iLocalMinTid = 0;
   return sqlite3HctFileFinishRecovery(pDb->pFile, iStage, rc);
 }

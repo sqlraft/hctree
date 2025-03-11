@@ -513,7 +513,7 @@ static int hctRecoverOne(void *pCtx, const char *zFile){
       rc = btreeFlushData(p, 0);
     }
     sqlite3HctDbRollbackMode(p->pHctDb, 0);
-    if( rc==SQLITE_OK && p->pHctJrnl ){
+    if( rc==SQLITE_OK && p->pHctJrnl && 0 ){
       rc = sqlite3HctJrnlRollbackEntry(p->pHctJrnl, rdr.iTid);
     }
     sqlite3HctDbRecoverTid(p->pHctDb, 0);
@@ -700,6 +700,10 @@ int sqlite3HctBtreeOpen(
 
   if( rc==SQLITE_OK && zFilename && zFilename[0] ){
     pNew->pHctDb = sqlite3HctDbOpen(&rc, zFilename, &pNew->config);
+  }
+
+  if( rc==SQLITE_OK && pNew->pHctDb ){
+    rc = sqlite3HctJournalNew(pNew->pHctTree, pNew->pHctDb, &pNew->pHctJrnl);
   }
 
   if( rc!=SQLITE_OK ){
@@ -933,7 +937,7 @@ int sqlite3HctBtreeNewDb(Btree *p){
 
 static int hctDetectJournals(HBtree *p){
   int rc = SQLITE_OK;
-  if( p->pHctJrnl==0 ){
+  if( p->pHctJrnl==0 && 0 ){
     rc = sqlite3HctJournalNewIf(
         (Schema*)p->pSchema, p->pHctTree, p->pHctDb, &p->pHctJrnl
     );
@@ -1157,7 +1161,7 @@ static int hctRecoverFreeList(HBtree *p){
   ** be rolled back using a call to sqlite3_hct_journal_rollback(). Record
   ** the set of physical pages that may be required by this call in the 
   ** ctx.aPg[] array.  */
-  if( p->pHctJrnl ){
+  if( p->pHctJrnl && 0 ){
     void *pCtx = (void*)&ctx;
     rc = sqlite3HctJrnlSavePhysical(
         p->config.db, p->pHctJrnl, hctSavePhysical, pCtx
@@ -1203,7 +1207,7 @@ static int hctAttemptRecovery(HBtree *p){
         rc = hctRecoverLogs(p);
       }
 
-      if( rc==SQLITE_OK && p->pHctJrnl ){
+      if( rc==SQLITE_OK && p->pHctJrnl && 0 ){
         sqlite3HctDbRollbackMode(p->pHctDb, 0);
         rc = sqlite3HctJrnlRecovery(p->pHctJrnl, p->pHctDb);
       }
@@ -1299,7 +1303,8 @@ int sqlite3HctBtreeBeginTrans(Btree *pBt, int wrflag, int *pSchemaVersion){
   if( p->eTrans==SQLITE_TXN_ERROR ) return SQLITE_BUSY_SNAPSHOT;
 
   if( rc==SQLITE_OK ){
-    rc = sqlite3HctDbStartRead(p->pHctDb, p->pHctJrnl);
+    // rc = sqlite3HctDbStartRead(p->pHctDb, p->pHctJrnl);
+    rc = sqlite3HctDbStartRead(p->pHctDb, 0);
   }
 
   if( rc==SQLITE_OK && pSchemaVersion ){
@@ -1605,8 +1610,9 @@ static int btreeFlushToDisk(HBtree *p){
   rc = btreeWriteLog(p);
 
   if( rc==SQLITE_OK ){
+    // iTid = sqlite3HctJrnlWriteTid(p->pHctJrnl, &iCid);
+
     /* Obtain the TID for this transaction.  */
-    iTid = sqlite3HctJrnlWriteTid(p->pHctJrnl, &iCid);
     if( iTid==0 ){
       sqlite3HctDbStartWrite(p->pHctDb, &iTid);
     }
@@ -1630,6 +1636,8 @@ static int btreeFlushToDisk(HBtree *p){
   /* Assuming the data has been flushed to disk without error or a
   ** write/write conflict, allocate a CID and validate the transaction. */
   if( rc==SQLITE_OK ){
+    u64 iReqSnapshot = sqlite3HctDbReqSnapshot(p->pHctDb);
+
     /* Invoke the SQLITE_TESTCTRL_HCT_MTCOMMIT hook, if applicable */
     if( p->config.db->xMtCommit ){
       p->config.db->xMtCommit(p->config.db->pMtCommitCtx, 1);
@@ -1646,14 +1654,9 @@ static int btreeFlushToDisk(HBtree *p){
     }
 
     /* If validation passed and this database is configured for replication,
-    ** write the journal entry and invoke the custom validation hook */
-    if( rc==SQLITE_OK && p->pHctJrnl ){
-      rc = sqlite3HctJrnlLog(
-        p->pHctJrnl,
-        p->config.db,
-        (Schema*)p->pSchema,
-        iCid, iTid, &bCustomValid
-      );
+    ** write the journal entry.  */
+    if( rc==SQLITE_OK ){
+      rc = sqlite3HctJrnlLog(p->pHctJrnl, iCid, iReqSnapshot, iTid);
     }
   }
 
@@ -1663,7 +1666,7 @@ static int btreeFlushToDisk(HBtree *p){
     rcok = SQLITE_BUSY_SNAPSHOT;
     rc = btreeFlushData(p, 1);
     if( rc==SQLITE_DONE ) rc = SQLITE_OK;
-    if( iCid>0 && p->pHctJrnl ){
+    if( iCid>0 && p->pHctJrnl && 0 ){
       rc = sqlite3HctJrnlWriteEmpty(p->pHctJrnl, iCid, iTid, 
           (bCustomValid ? 0 : p->config.db)
       );
@@ -2852,7 +2855,7 @@ int sqlite3HctBtreeInsert(
 int sqlite3HctSchemaOp(Btree *pBt, const char *zSql){
   int rc = SQLITE_OK;
   HBtree *const p = (HBtree*)pBt;
-  if( p->pHctJrnl ){
+  if( p->pHctJrnl && 0 ){
     HctTreeCsr *pCsr = 0;
 
     rc = sqlite3HctTreeCsrOpen(p->pHctTree, HCT_TREE_SCHEMAOP_ROOT, &pCsr);

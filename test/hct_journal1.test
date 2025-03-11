@@ -15,6 +15,170 @@ source $testdir/tester.tcl
 set testprefix hct_journal1
 
 hct_reset_db
+
+do_test 1.1 {
+  catch_hct_journal_init db
+} {0 {}}
+
+do_execsql_test 1.2 {
+  SELECT name, type FROM sqlite_schema
+} {hct_journal table}
+
+do_execsql_test 1.3 {
+  SELECT * FROM hct_journal
+} {
+  1 {} 0 0
+}
+
+do_execsql_test 1.4 {
+  PRAGMA table_info = hct_journal
+} {
+  0 cid INTEGER 0 {} 1 
+  1 query TEXT 0 {} 0 
+  2 snapshot INTEGER 0 {} 0
+  3 tid INTEGER 0 {} 0
+}
+
+reset_db
+do_test 1.5 {
+  catch_hct_journal_init db
+} {1 {not an hct database}}
+
+hct_reset_db
+do_test 1.6 {
+  execsql { BEGIN }
+  catch_hct_journal_init db
+} {1 {open transaction on database}}
+
+execsql ROLLBACK
+hct_reset_db
+
+do_test 1.7 {
+  catch_hct_journal_init db
+} {0 {}}
+
+do_test 1.8 {
+  sqlite3_hct_journal_mode db
+} {NORMAL}
+
+
+#--------------------------------------------------------------------
+hct_reset_db
+
+do_execsql_test 2.0 {
+  CREATE TABLE t1(x, y);
+  INSERT INTO t1 VALUES(1, 2);
+}
+
+do_test 2.1 {
+  catch_hct_journal_init db
+} {0 {}}
+
+do_test 2.2 {
+  sqlite3_hct_journal_setmode db NORMAL
+} {SQLITE_OK}
+
+do_test 2.3 {
+  sqlite3_hct_journal_mode db
+} {NORMAL}
+
+do_test 2.4.1 {
+  sqlite3_hct_journal_setmode db FOLLOWER
+} {SQLITE_OK}
+
+do_test 2.4.2 {
+  sqlite3_hct_journal_mode db
+} {FOLLOWER}
+do_test 2.4.3 {
+  sqlite3_hct_journal_setmode db NORMAL
+} {SQLITE_OK}
+do_test 2.4.4 {
+  sqlite3_hct_journal_mode db
+} {NORMAL}
+
+do_test 2.5.1 {
+  sqlite3_hct_journal_setmode db LEADER
+} {SQLITE_OK}
+do_test 2.5.2 {
+  sqlite3_hct_journal_mode db
+} {LEADER}
+do_test 2.5.3 {
+  sqlite3_hct_journal_setmode db NORMAL
+} {SQLITE_OK}
+do_test 2.5.4 {
+  sqlite3_hct_journal_mode db
+} {NORMAL}
+
+do_test 2.6.1 {
+  sqlite3_hct_journal_setmode db FOLLOWER
+} {SQLITE_OK}
+do_test 2.6.2 {
+  sqlite3_hct_journal_mode db
+} {FOLLOWER}
+
+do_test 2.6.3 {
+  sqlite3_hct_journal_setmode db LEADER
+} {SQLITE_OK}
+do_test 2.6.4 {
+  sqlite3_hct_journal_mode db
+} {LEADER}
+
+do_test 2.6.5 {
+  sqlite3_hct_journal_setmode db FOLLOWER
+} {SQLITE_OK}
+do_test 2.6.6 {
+  sqlite3_hct_journal_mode db
+} {FOLLOWER}
+
+do_test 2.6.7 {
+  sqlite3_hct_journal_setmode db NORMAL
+} {SQLITE_OK}
+do_test 2.6.8 {
+  sqlite3_hct_journal_mode db
+} {NORMAL}
+
+#--------------------------------------------------------------------
+hct_reset_db
+
+do_test 3.0 {
+  catch_hct_journal_init db
+  sqlite3_hct_journal_setmode db LEADER
+} {SQLITE_OK}
+
+set trans {
+  CREATE TABLE t1(x INTEGER PRIMARY KEY, y);
+  INSERT INTO t1 VALUES(1, 2);
+}
+
+do_execsql_test 3.1 "
+  BEGIN CONCURRENT;
+    $trans
+"
+
+do_test 3.2 {
+  sqlite3_hct_journal_leader_commit db $trans
+} {SQLITE_OK 2 1}
+
+do_execsql_test 3.3 {
+  SELECT cid, query FROM hct_journal
+} [list \
+  1 {} \
+  2 $trans 
+]
+
+do_execsql_test 3.4 "
+  BEGIN CONCURRENT;
+    INSERT INTO t1 VALUES(3, 4);
+"
+
+breakpoint
+do_test 3.5 {
+  sqlite3_hct_journal_leader_commit db $trans
+} {SQLITE_OK 3 2}
+
+finish_test
+
+
 do_execsql_test 1.0 {
   CREATE TABLE t1(a);
 }

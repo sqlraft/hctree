@@ -29,9 +29,11 @@
 #define HCT_TMAP_PGSZBITS 10
 #define HCT_TMAP_PAGESIZE (1 << HCT_TMAP_PGSZBITS)
 
-#define HCT_TMAP_ENTRYSLOT(iEntry) \
+// #define HCT_TMAP_ENTRYSLOT(iEntry) \
     (((iEntry) >> 3) + (((iEntry) & 0x07) << (HCT_TMAP_PGSZBITS-3)))
 // #define HCT_TMAP_ENTRYSLOT(iEntry) (((iEntry) >> 3) + (((iEntry) & 0x07) << 10))
+
+#define HCT_TMAP_ENTRYSLOT(iEntry) (iEntry)
 
 /*
 ** Transaction state - stored in the MSB of the 8-byte transaction map entry.
@@ -67,22 +69,8 @@ typedef struct HctTMap HctTMap;
 
 /*
 ** A transaction-map object.
-**
-** iMinTid:
-**   This, and all smaller TID values have been finalized (fully committed
-**   or rolled back). The client may not query the map for any TID values
-**   less than or equal to this one.
-**
-** iMinCid:
-**   This an all smaller CID values were committed
 */
 struct HctTMap {
-  /* Snapshot locking values */
-#if 0
-  u64 iMinCid;                    /* This + all smaller CIDs fully committed */
-  u64 iMinTid;                    /* This + all smaller TIDs fully committed */
-#endif
-
   /* Transaction map */
   u64 iFirstTid;                  /* TID corresponding to aaMap[0][0] */
   int nMap;                       /* Number of mapping pages in aaMap[] */
@@ -124,6 +112,10 @@ int sqlite3HctTMapEnd(HctTMapClient *p, u64 iCID);
 */
 u64 sqlite3HctTMapSafeTID(HctTMapClient*);
 
+/*
+** Called when a writer obtains the TID value for its transaction. To
+** check that the transaction-map is large enough to accomodate it.
+*/
 int sqlite3HctTMapNewTID(HctTMapClient *p, u64 iTid, HctTMap **ppMap);
 
 /*
@@ -139,14 +131,13 @@ void sqlite3HctTMapScan(HctTMapClient*);
 
 
 /* 
-** The following API is used when recovering a replication-enabled database.
-** In that case, a new HctTMap object must be created during recovery to
-** reflect the contents of the sqlite_hct_journal table.
+** The following API is used when switching a replication-enabled database
+** to FOLLOWER or LEADER mode. In that case, a new HctTMap object must be
+** created during recovery to reflect the contents of the hct_journal table.
 */
 int sqlite3HctTMapRecoverySet(HctTMapClient*, u64 iTid, u64 iCid);
 void sqlite3HctTMapRecoveryFinish(HctTMapClient*, int rc);
 
 int sqlite3HctTMapServerSet(HctTMapServer *pServer, u64 iTid, u64 iCid);
-
 
 

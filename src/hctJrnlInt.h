@@ -12,7 +12,23 @@
 **
 */
 
+/*
+** In follower mode, it is not possible to call sqlite3_hct_journal_write()
+** for the transaction with CID (N + HCT_MAX_LEADING_WRITE) until all 
+** transactions with CID values of N or less have been committed.
+*/
+#define HCT_MAX_LEADING_WRITE (8*1024)
+
 typedef struct HctJournal HctJournal;
+
+int sqlite3HctJournalServerNew(void **pJrnlPtr);
+void sqlite3HctJournalServerFree(void *pJrnlPtr);
+
+int sqlite3HctJournalNew(
+  HctTree *pTree, 
+  HctDatabase *pDb, 
+  HctJournal **pp
+);
 
 /*
 ** If schema pSchema contains the special tables sqlite_hct_journal and
@@ -29,14 +45,7 @@ int sqlite3HctJournalNewIf(Schema*, HctTree*, HctDatabase*, HctJournal **pp);
 void sqlite3HctJournalClose(HctJournal*);
 
 
-int sqlite3HctJrnlLog(
-  HctJournal *pJrnl,
-  sqlite3 *db,
-  Schema *pSchema,
-  u64 iCid,
-  u64 iTid,
-  int *pbCustomValid
-);
+int sqlite3HctJrnlLog(HctJournal *pJrnl, u64 iCid, u64 iSnap, u64 iTid);
 
 /*
 ** This is called as part of stage 1 recovery (the bit after the upper layer
