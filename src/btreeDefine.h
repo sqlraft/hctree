@@ -32,7 +32,9 @@
 #define sqlite3BtreeClearTableOfCursor sqlite3StockBtreeClearTableOfCursor
 #define sqlite3BtreeCount sqlite3StockBtreeCount
 #define sqlite3BtreeCursor sqlite3StockBtreeCursor
+#ifdef SQLITE_DEBUG
 #define sqlite3BtreeSeekCount sqlite3StockBtreeSeekCount
+#endif /* SQLITE_DEBUG */
 #define sqlite3BtreeLastPage sqlite3StockBtreeLastPage
 #define sqlite3BtreeClose sqlite3StockBtreeClose
 #define sqlite3BtreeSetCacheSize sqlite3StockBtreeSetCacheSize

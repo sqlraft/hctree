@@ -32,7 +32,9 @@
 #undef sqlite3BtreeClearTableOfCursor
 #undef sqlite3BtreeCount
 #undef sqlite3BtreeCursor
+#ifdef SQLITE_DEBUG
 #undef sqlite3BtreeSeekCount
+#endif /* SQLITE_DEBUG */
 #undef sqlite3BtreeLastPage
 #undef sqlite3BtreeClose
 #undef sqlite3BtreeSetCacheSize
