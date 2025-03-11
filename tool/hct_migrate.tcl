@@ -94,7 +94,6 @@ proc plan_migration {} {
           row_number() OVER () AS iImp
       FROM sqlite_schema WHERE type='index' OR (
           type = 'table' AND
-          name NOT LIKE 'sqlite_%' AND 
           sql NOT LIKE 'create virtual%'
       );
     }] 
