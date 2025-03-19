@@ -513,7 +513,7 @@ static int hctRecoverOne(void *pCtx, const char *zFile){
       rc = btreeFlushData(p, 0);
     }
     sqlite3HctDbRollbackMode(p->pHctDb, 0);
-    if( rc==SQLITE_OK && p->pHctJrnl && 0 ){
+    if( rc==SQLITE_OK && p->pHctJrnl ){
       rc = sqlite3HctJrnlRollbackEntry(p->pHctJrnl, rdr.iTid);
     }
     sqlite3HctDbRecoverTid(p->pHctDb, 0);
@@ -703,7 +703,7 @@ int sqlite3HctBtreeOpen(
   }
 
   if( rc==SQLITE_OK && pNew->pHctDb ){
-    rc = sqlite3HctJournalNew(pNew->pHctTree, pNew->pHctDb, &pNew->pHctJrnl);
+    rc = sqlite3HctJournalNew(pNew->pHctDb, &pNew->pHctJrnl);
   }
 
   if( rc!=SQLITE_OK ){
@@ -932,37 +932,6 @@ int sqlite3HctBtreeGetAutoVacuum(Btree *p){
 int sqlite3HctBtreeNewDb(Btree *p){
   int rc = SQLITE_OK;
   assert( 0 );
-  return rc;
-}
-
-static int hctDetectJournals(HBtree *p){
-  int rc = SQLITE_OK;
-  if( p->pHctJrnl==0 && 0 ){
-    rc = sqlite3HctJournalNewIf(
-        (Schema*)p->pSchema, p->pHctTree, p->pHctDb, &p->pHctJrnl
-    );
-  }
-  return rc;
-}
-
-/*
-** This is called by sqlite3_hct_journal_init() after the journal and
-** baseline tables have been created in the database to initialize the
-** journal sub-system.
-**
-** Return SQLITE_OK if successful, or an SQLite error code if an error
-** occurs.
-*/
-int sqlite3HctDetectJournals(sqlite3 *db){
-  HBtree *p = (HBtree*)db->aDb[0].pBt;
-  int rc = hctDetectJournals(p);
-  if( rc==SQLITE_OK ){
-    rc = sqlite3HctDbStartRead(p->pHctDb, 0);
-  }
-  if( rc==SQLITE_OK ){
-    rc = sqlite3HctJrnlRecovery(p->pHctJrnl, p->pHctDb);
-  }
-  sqlite3HctDbEndRead(p->pHctDb);
   return rc;
 }
 
@@ -1303,8 +1272,7 @@ int sqlite3HctBtreeBeginTrans(Btree *pBt, int wrflag, int *pSchemaVersion){
   if( p->eTrans==SQLITE_TXN_ERROR ) return SQLITE_BUSY_SNAPSHOT;
 
   if( rc==SQLITE_OK ){
-    // rc = sqlite3HctDbStartRead(p->pHctDb, p->pHctJrnl);
-    rc = sqlite3HctDbStartRead(p->pHctDb, 0);
+    rc = sqlite3HctDbStartRead(p->pHctDb, p->pHctJrnl);
   }
 
   if( rc==SQLITE_OK && pSchemaVersion ){
@@ -1327,17 +1295,12 @@ int sqlite3HctBtreeBeginTrans(Btree *pBt, int wrflag, int *pSchemaVersion){
 int sqlite3HctBtreeSchemaLoaded(Btree *pBt){
   int rc = SQLITE_OK;
   HBtree *const p = (HBtree*)pBt;
+  sqlite3HctJrnlSetRoot(p->pHctJrnl, (Schema*)p->pSchema);
   if( p->bRecoveryDone==0 ){
-    rc = hctDetectJournals(p);
-    if( rc==SQLITE_OK ){
-      rc = hctAttemptRecovery(p);
-    }
+    rc = hctAttemptRecovery(p);
     if( rc==SQLITE_OK ){
       sqlite3HctDbEndRead(p->pHctDb);
     }
-  }
-  if( rc==SQLITE_OK && p->pHctJrnl ){
-    sqlite3HctJournalFixSchema(p->pHctJrnl, p->config.db, p->pSchema);
   }
   return rc;
 }
@@ -1602,20 +1565,15 @@ static int btreeFlushToDisk(HBtree *p){
   int rcok = SQLITE_OK;
   u64 iTid = 0;
   u64 iCid = 0;
-  int bTmapScan = 0;
-  int bCustomValid = 0;           /* True if xValidate() was invoked */
 
   /* Write a log file for this transaction. The TID field is still set
   ** to zero at this point.  */
   rc = btreeWriteLog(p);
 
   if( rc==SQLITE_OK ){
-    // iTid = sqlite3HctJrnlWriteTid(p->pHctJrnl, &iCid);
 
     /* Obtain the TID for this transaction.  */
-    if( iTid==0 ){
-      sqlite3HctDbStartWrite(p->pHctDb, &iTid);
-    }
+    sqlite3HctDbStartWrite(p->pHctDb, &iTid);
 
     /* Invoke the SQLITE_TESTCTRL_HCT_MTCOMMIT hook, if applicable */
     if( p->config.db->xMtCommit ){
@@ -1643,20 +1601,28 @@ static int btreeFlushToDisk(HBtree *p){
       p->config.db->xMtCommit(p->config.db->pMtCommitCtx, 1);
     }
 
-    /* Validate the transaction. */
-    rc = sqlite3HctDbValidate(p->config.db, p->pHctDb, &iCid, &bTmapScan);
+    /* If the db is in FOLLOWER mode, then the CID value has already been
+    ** supplied by the caller - we just have to grab it from the HctJrnl
+    ** object. Also if in FOLLOWER mode, there is no validation step. 
+    **
+    ** Otherwise, if not in FOLLOWER mode - validate the transaction.  */
+    iCid = sqlite3HctJrnlFollowerModeCid(p->pHctJrnl);
+    if( iCid==0 ){
+      rc = sqlite3HctDbValidate(p->config.db, p->pHctDb, &iCid);
+    }
+
+    /* If there have been any schema operations, there may have been
+    ** CREATE TABLE statements. In this case, for each CREATE TABLE
+    ** statement check that the write to the sqlite_schema table did not
+    ** create a duplicate table name.  */
     if( rc==SQLITE_OK && p->nSchemaOp ){
-      /* If there have been any schema operations, there may have been
-      ** CREATE TABLE statements. For each CREATE TABLE statement, check
-      ** that the write to the sqlite_schema table did not create a duplicate
-      ** table name.  */
       rc = hctValidateSchema(p, iTid);
     }
 
     /* If validation passed and this database is configured for replication,
     ** write the journal entry.  */
-    if( rc==SQLITE_OK ){
-      rc = sqlite3HctJrnlLog(p->pHctJrnl, iCid, iReqSnapshot, iTid);
+    if( iCid!=0 ){
+      rc = sqlite3HctJrnlLog(p->pHctJrnl, iCid, iReqSnapshot, iTid, rc);
     }
   }
 
@@ -1666,11 +1632,6 @@ static int btreeFlushToDisk(HBtree *p){
     rcok = SQLITE_BUSY_SNAPSHOT;
     rc = btreeFlushData(p, 1);
     if( rc==SQLITE_DONE ) rc = SQLITE_OK;
-    if( iCid>0 && p->pHctJrnl && 0 ){
-      rc = sqlite3HctJrnlWriteEmpty(p->pHctJrnl, iCid, iTid, 
-          (bCustomValid ? 0 : p->config.db)
-      );
-    }
   }
 
   /* Do any DROP TABLE commands */
@@ -1692,11 +1653,8 @@ static int btreeFlushToDisk(HBtree *p){
     rc = sqlite3HctDbEndWrite(p->pHctDb, iCid, rcok!=SQLITE_OK);
   }
   assert( rc==SQLITE_OK );
-  if( bTmapScan ){
-    sqlite3HctDbTMapScan(p->pHctDb);
-  }
+  sqlite3HctDbTMapScan(p->pHctDb);
 
-  sqlite3HctJrnlInvokeHook(p->pHctJrnl, p->config.db);
   return (rc==SQLITE_OK ? rcok : rc);
 }
 
@@ -1806,6 +1764,13 @@ int sqlite3HctBtreeCommitPhaseTwo(Btree *pBt, int bCleanup){
   if( p->eTrans==SQLITE_TXN_ERROR ) return SQLITE_BUSY_SNAPSHOT;
 
   if( p->eTrans==SQLITE_TXN_WRITE ){
+
+    if( sqlite3HctJrnlCommitOk(p->pHctJrnl)==0 ){
+      /* This case is when a straight COMMIT is run in FOLLOWER or 
+      ** LEADER mode. */
+      return SQLITE_ERROR;
+    }
+
     if( p->pCsrList ){
       /* Cannot commit with open cursors in hctree */
       return SQLITE_LOCKED;
@@ -2028,20 +1993,21 @@ int sqlite3HctBtreeCursor(
   HBtCursor *const pCur = (HBtCursor*)pCursor;
   HBtree *const p = (HBtree*)pBt;
   int rc = SQLITE_OK;
-  int bNosnap = 0;
   int bNoscan = (iTable==1);
-  int bReadonly = sqlite3HctJournalIsReadonly(p->pHctJrnl, iTable, &bNosnap);
+  int bNosnap = sqlite3HctJournalIsNosnap(p->pHctJrnl, iTable);
 
   assert( p->eTrans!=SQLITE_TXN_NONE );
   assert( p->eTrans!=SQLITE_TXN_ERROR );
   assert( pCur->pHctTreeCsr==0 );
 
+#if 0
   /* If this is an attempt to open a read/write cursor on either the
   ** sqlite_hct_journal or sqlite_hct_baseline tables, return an error
   ** immediately.  */
   if( wrFlag && bReadonly ){
     return SQLITE_READONLY;
   }
+#endif
 
   pCur->pKeyInfo = pKeyInfo;
   rc = sqlite3HctTreeCsrOpen(p->pHctTree, iTable, &pCur->pHctTreeCsr);

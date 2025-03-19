@@ -752,11 +752,10 @@ int sqlite3HctDbStartRead(HctDatabase *pDb, HctJournal *pJrnl){
       u64 iSnapshot = 0;
       HctTMapClient *pTMapClient = sqlite3HctFileTMapClient(pDb->pFile);
 
-      iSnapshot = sqlite3HctJournalSnapshot(pJrnl);
+      iSnapshot = sqlite3HctJrnlSnapshot(pJrnl);
       rc = sqlite3HctTMapBegin(pTMapClient, iSnapshot, &pDb->pTmap);
       assert( rc==SQLITE_OK );  /* todo */
 
-      iSnapshot = sqlite3HctJournalSnapshot(pJrnl);
       if( iSnapshot==0 ){
         iSnapshot = sqlite3HctFileGetSnapshotid(pDb->pFile);
       }
@@ -5525,6 +5524,51 @@ static int hctDbInsert(
   return rc;
 }
 
+static int hctDbInsertWithRetry(
+  HctDatabase *pDb,
+  u32 iRoot,
+  UnpackedRecord *pRec,           /* The key value for index tables */
+  i64 iKey,                       /* For intkey tables, the key value */
+  int bDel,                       /* True for a delete, false for insert */
+  int nData, const u8 *aData,     /* Record/key to insert */
+  int *pnRetry                    /* OUT: number of operations to retry */
+){
+  int rc = SQLITE_OK;
+
+  rc = hctDbInsert(pDb, &pDb->pa, iRoot, pRec, iKey, 0, bDel, nData, aData);
+  if( rc!=SQLITE_OK ){
+    hctDbWriterCleanup(pDb, &pDb->pa, 1);
+  }
+  if( rc==SQLITE_LOCKED || (rc&0xFF)==SQLITE_BUSY ){
+    if( rc==SQLITE_LOCKED ){
+      rc = SQLITE_OK;
+      pDb->nCasFail++;
+    }
+    *pnRetry = pDb->pa.nWriteKey;
+    pDb->pa.nWriteKey = 0;
+  }else{
+    *pnRetry = 0;
+  }
+
+  return rc;
+}
+
+int sqlite3HctDbJrnlWrite(
+  HctDatabase *pDb,               /* Database to insert into or delete from */
+  u32 iRoot,                      /* Root page of hct_journal table */
+  i64 iKey,                       /* intkey value */
+  int nData, const u8 *aData,     /* Record to insert */
+  int *pnRetry                    /* OUT: number of operations to retry */
+){
+  int rc = SQLITE_OK;
+
+  assert( pDb->eMode==HCT_MODE_NORMAL );
+  pDb->eMode = HCT_MODE_ROLLBACK;
+  rc = hctDbInsertWithRetry(pDb, iRoot, 0, iKey, 0, nData, aData, pnRetry);
+  pDb->eMode = HCT_MODE_NORMAL;
+  return rc;
+}
+
 int sqlite3HctDbInsert(
   HctDatabase *pDb,               /* Database to insert into or delete from */
   u32 iRoot,                      /* Root page of table to modify */
@@ -5593,20 +5637,7 @@ int sqlite3HctDbInsert(
   }
 
   if( rc==SQLITE_OK ){
-    rc = hctDbInsert(pDb, &pDb->pa, iRoot, pRec, iKey, 0, bDel, nData, aData);
-    if( rc!=SQLITE_OK ){
-      hctDbWriterCleanup(pDb, &pDb->pa, 1);
-    }
-  }
-  if( rc==SQLITE_LOCKED || (rc&0xFF)==SQLITE_BUSY ){
-    if( rc==SQLITE_LOCKED ){
-      rc = SQLITE_OK;
-      pDb->nCasFail++;
-    }
-    *pnRetry = pDb->pa.nWriteKey;
-    pDb->pa.nWriteKey = 0;
-  }else{
-    *pnRetry = 0;
+    rc = hctDbInsertWithRetry(pDb,iRoot,pRec,iKey, bDel, nData, aData, pnRetry);
   }
 
  insert_done:
@@ -6587,8 +6618,25 @@ static int hctDbValidateIndex(HctDatabase *pDb, HctDbCsr *pCsr){
   return rc;
 }
 
+/*
+** A transaction has recently been committed, or rolled back after data
+** was written to the db (i.e. as a result of failed validation). Do a
+** tmap scan if required.
+*/
 void sqlite3HctDbTMapScan(HctDatabase *pDb){
-  sqlite3HctTMapScan(sqlite3HctFileTMapClient(pDb->pFile));
+  u64 nFinalWrite = 0;
+  int nPageScan = pDb->pConfig->nPageScan;
+
+  /* Set nWrite to the number of pages written by this transaction. It 
+  ** doesn't matter if it is slightly inaccurate in some cases.  */
+  int nWrite = sqlite3HctFileWriteCount(pDb->pFile) - pDb->nWriteCount;
+
+  assert( nWrite>=0 );
+  if( nWrite==0 ) nWrite = 1;
+  nFinalWrite = sqlite3HctFileIncrWriteCount(pDb->pFile, nWrite);
+  if( (nFinalWrite / nPageScan)!=((nFinalWrite-nWrite) / nPageScan) ){
+    sqlite3HctTMapScan(sqlite3HctFileTMapClient(pDb->pFile));
+  }
 }
 
 int 
@@ -6596,22 +6644,12 @@ __attribute__ ((noinline))
 sqlite3HctDbValidate(
   sqlite3 *db, 
   HctDatabase *pDb, 
-  u64 *piCid, 
-  int *pbTmapscan
+  u64 *piCid
 ){
   HctDbCsr *pCsr = 0;
   u64 *pEntry = hctDbFindTMapEntry(pDb->pTmap, pDb->iTid);
   u64 iCid = *piCid;
-  u64 nFinalWrite = 0;
   int rc = SQLITE_OK;
-  int nPageScan = pDb->pConfig->nPageScan;
-
-  /* Set nWrite to the number of pages written by this transaction. This
-  ** is used for scheduling tmap scans only, so it doesn't matter if it
-  ** is slightly inaccurate in some cases.  */
-  int nWrite = sqlite3HctFileWriteCount(pDb->pFile) - pDb->nWriteCount;
-  assert( nWrite>=0 );
-  if( nWrite==0 ) nWrite = 1;
 
   assert( *pEntry==0 );
   if( iCid==0 ){
@@ -6619,11 +6657,6 @@ sqlite3HctDbValidate(
     iCid = sqlite3HctFileAllocateCID(pDb->pFile, 1);
   }
   HctAtomicStore(pEntry, HCT_TMAP_VALIDATING | iCid);
-
-  nFinalWrite = sqlite3HctFileIncrWriteCount(pDb->pFile, nWrite);
-  if( (nFinalWrite / nPageScan)!=((nFinalWrite-nWrite) / nPageScan) ){
-    *pbTmapscan = 1;
-  }
 
   assert( pDb->eMode==HCT_MODE_NORMAL );
 

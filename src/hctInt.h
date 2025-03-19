@@ -172,7 +172,6 @@ typedef struct HctDbCsr HctDbCsr;
 typedef struct HctJournal HctJournal;
 
 HctDatabase *sqlite3HctDbFind(sqlite3*, int);
-int sqlite3HctDetectJournals(sqlite3 *db);
 
 HctDatabase *sqlite3HctDbOpen(int*, const char *zFile, HctConfig*);
 void sqlite3HctDbClose(HctDatabase *pDb);
@@ -195,7 +194,7 @@ int sqlite3HctDbStartRead(HctDatabase*,HctJournal*);
 int sqlite3HctDbStartWrite(HctDatabase*, u64*);
 int sqlite3HctDbEndWrite(HctDatabase*, u64, int);
 int sqlite3HctDbEndRead(HctDatabase*);
-int sqlite3HctDbValidate(sqlite3*, HctDatabase*, u64 *piCid, int*);
+int sqlite3HctDbValidate(sqlite3*, HctDatabase*, u64 *piCid);
 
 i64 sqlite3HctDbTid(HctDatabase *);
 
@@ -244,8 +243,6 @@ void sqlite3HctDbSetSavePhysical(
 
 char *sqlite3HctDbRecordToText(sqlite3 *db, const u8 *aRec, int nRec);
 
-void sqlite3HctDbTMapScan(HctDatabase *pDb);
-
 void sqlite3HctDbTransIsConcurrent(HctDatabase *pDb, int bConcurrent);
 
 HctFile *sqlite3HctDbFile(HctDatabase *pDb);
@@ -290,6 +287,16 @@ int sqlite3HctDbDirectClear(HctDatabase *pDb, u32 iRoot);
 int sqlite3HctDbCsrIsLast(HctDbCsr *pCsr);
 
 int sqlite3HctDbValidateTablename(HctDatabase*, const u8*, int, u64);
+
+int sqlite3HctDbJrnlWrite(
+  HctDatabase *pDb,               /* Database to insert into or delete from */
+  u32 iRoot,                      /* Root page of hct_journal table */
+  i64 iKey,                       /* intkey value */
+  int nData, const u8 *aData,     /* Record to insert */
+  int *pnRetry                    /* OUT: number of operations to retry */
+);
+
+void sqlite3HctDbTMapScan(HctDatabase *pDb);
 
 /*************************************************************************
 ** Interface to code in hct_file.c

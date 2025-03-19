@@ -29,11 +29,10 @@
 #define HCT_TMAP_PGSZBITS 10
 #define HCT_TMAP_PAGESIZE (1 << HCT_TMAP_PGSZBITS)
 
-// #define HCT_TMAP_ENTRYSLOT(iEntry) \
+#define HCT_TMAP_ENTRYSLOT(iEntry) \
     (((iEntry) >> 3) + (((iEntry) & 0x07) << (HCT_TMAP_PGSZBITS-3)))
-// #define HCT_TMAP_ENTRYSLOT(iEntry) (((iEntry) >> 3) + (((iEntry) & 0x07) << 10))
 
-#define HCT_TMAP_ENTRYSLOT(iEntry) (iEntry)
+// #define HCT_TMAP_ENTRYSLOT(iEntry) (iEntry)
 
 /*
 ** Transaction state - stored in the MSB of the 8-byte transaction map entry.
@@ -140,4 +139,5 @@ void sqlite3HctTMapRecoveryFinish(HctTMapClient*, int rc);
 
 int sqlite3HctTMapServerSet(HctTMapServer *pServer, u64 iTid, u64 iCid);
 
-
+int sqlite3HctTMapBuildStart(HctTMapClient *p, u64 iStart, u64 iLast);
+void sqlite3HctTMapBuildSet(HctTMapClient *p, u64 iTid, u64 iCid);
