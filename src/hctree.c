@@ -81,7 +81,10 @@ struct HBtree {
   int nRollbackOp;
 
   int openFlags;
+  HctLog *pHctLog;                /* Log file or files */
+#if 0
   HctLogFile *pLog;               /* Object for writing to log file */
+#endif
   u32 iNextRoot;                  /* Next root page to allocate if pHctDb==0 */
   u32 aMeta[SQLITE_N_BTREE_META]; /* 16 database meta values */
   int eMetaState;                 /* HCT_METASTATE_XXX value */
@@ -388,29 +391,24 @@ static void hctLogReaderNext(HctLogReader *pReader){
   if( (pReader->iFile + sizeof(aInt))>pReader->nFile ){
     pReader->bEof = 1;
   }else{
-    memcpy(aInt, &pReader->aFile[pReader->iFile], sizeof(aInt));
-    pReader->iRoot = (i64)aInt[0];
+    i64 iRoot;
+    u32 nByte;
+
+    memcpy(&iRoot, &pReader->aFile[pReader->iFile], sizeof(iRoot));
+    pReader->iFile += sizeof(iRoot);
+    memcpy(&nByte, &pReader->aFile[pReader->iFile], sizeof(nByte));
+    pReader->iFile += sizeof(nByte);
+
     if( pReader->iRoot==0 ){
       pReader->bEof = 1;
     }else{
-      pReader->nKey = (int)aInt[1];
-      pReader->iFile += sizeof(aInt);
-      if( pReader->nKey==0 ){
-        pReader->aKey = 0;
-        if( pReader->iFile+sizeof(i64)>pReader->nFile ){
-          pReader->bEof = 1;
-        }else{
-          memcpy(&pReader->iKey, &pReader->aFile[pReader->iFile], sizeof(i64));
-          pReader->iFile += sizeof(i64);
-        }
+      if( nByte==0xFFFFFFFF ){
+        memcpy(&pReader->iKey, &pReader->aFile[pReader->iFile], sizeof(i64));
+        pReader->iFile += sizeof(i64);
       }else{
-        pReader->iKey = 0;
-        if( pReader->iFile+pReader->nKey>pReader->nFile ){
-          pReader->bEof = 1;
-        }else{
-          pReader->aKey = &pReader->aFile[pReader->iFile];
-          pReader->iFile += pReader->nKey;
-        }
+        pReader->nKey = nByte;
+        pReader->aKey = &pReader->aFile[pReader->iFile];
+        pReader->iFile += pReader->nKey;
       }
     }
   }
@@ -442,7 +440,7 @@ static int hctLogReaderOpen(const char *zFile, HctLogReader *pReader){
         rc = sqlite3HctIoerr(SQLITE_IOERR);
       }else{
         memcpy(&pReader->iTid, pReader->aFile, sizeof(i64));
-        pReader->iFile = sizeof(i64);
+        memcpy(&pReader->iFile, &pReader->aFile[8], sizeof(int));
         if( pReader->iTid==0 ){
           pReader->bEof = 1;
         }else{
@@ -534,119 +532,6 @@ static int hctRecoverLogs(HBtree *p){
 
 
 /*
-** Free a pLog object and close the associated log file handle. If parameter
-** bUnlink is true, also unlink() the log file.
-*/
-static void hctLogFileClose(HctLogFile *pLog, int bUnlink){
-  if( pLog ){
-    close(pLog->fd);
-    if( bUnlink ) unlink(pLog->zLogFile);
-    sqlite3_free(pLog->zLogFile);
-    sqlite3_free(pLog->aBuf);
-    sqlite3_free(pLog);
-  }
-}
-
-/*
-** Open a log file object.
-*/
-static int hctLogFileOpen(char *zLogFile, int nBuf, HctLogFile **ppLog){
-  int rc = SQLITE_OK;
-  HctLogFile *pLog;
-
-  pLog = (HctLogFile*)sqlite3HctMalloc(&rc, sizeof(HctLogFile));
-  if( pLog ){
-    pLog->zLogFile = zLogFile;
-    pLog->fd = open(zLogFile, O_CREAT|O_RDWR, 0644);
-    if( pLog->fd<0 ){
-      rc = SQLITE_CANTOPEN_BKPT;
-    }else{
-      pLog->nBuf = nBuf;
-      pLog->aBuf = sqlite3HctMalloc(&rc, nBuf);
-    }
-  }
-
-  if( rc!=SQLITE_OK ){
-    hctLogFileClose(pLog, 0);
-    pLog = 0;
-  }
-
-  *ppLog = pLog;
-  return rc;
-}
-
-static int hctLogFileWrite(HctLogFile *pLog, const void *aData, int nData){
-  int nRem = nData;
-  const u8 *aRem = (u8*)aData;
-  
-  assert( pLog->iBufferOff<=pLog->nBuf );
-  while( 1 ){
-
-    int nCopy = MIN(pLog->nBuf - pLog->iBufferOff, nRem);
-    if( nCopy>0 ){
-      memcpy(&pLog->aBuf[pLog->iBufferOff], aRem, nCopy);
-      pLog->iBufferOff += nCopy;
-      nRem -= nCopy;
-      if( nRem==0 ) break;
-      aRem += nCopy;
-    }
-
-    if( write(pLog->fd, pLog->aBuf, pLog->nBuf)!=pLog->nBuf ){
-      return sqlite3HctIoerr(SQLITE_IOERR_WRITE);
-    }
-    pLog->iFileOff += pLog->nBuf;
-    pLog->iBufferOff = 0;
-  }
-
-  return SQLITE_OK;
-}
-
-
-static void hctLogFileRestart(HctLogFile *pLog){
-  memset(pLog->aBuf, 0, 8);
-  lseek(pLog->fd, 0, SEEK_SET);
-  pLog->iFileOff = 0;
-  pLog->iBufferOff = 8;
-}
-
-
-static int hctLogFileWriteTid(HctLogFile *pLog, u64 iTid){
-  lseek(pLog->fd, 0, SEEK_SET);
-  if( write(pLog->fd, &iTid, sizeof(iTid))!=sizeof(iTid) ){
-    return sqlite3HctIoerr(SQLITE_IOERR_WRITE);
-  }
-  return SQLITE_OK;
-}
-
-static int hctLogFileFinish(HctLogFile *pLog, u64 iTid){
-  int rc = SQLITE_OK;
-  int bDone = 0;
-  if( pLog->iFileOff==0 ){
-    bDone = 1;
-    memcpy(pLog->aBuf, &iTid, sizeof(iTid));
-  }
-  if( rc==SQLITE_OK ){
-    static const u8 aZero[8] = {0,0,0,0, 0,0,0,0};
-    rc = hctLogFileWrite(pLog, aZero, sizeof(aZero));
-    if( rc==SQLITE_OK ){
-      assert( pLog->iBufferOff>0 );
-      if( write(pLog->fd, pLog->aBuf, pLog->iBufferOff)!=pLog->iBufferOff ){
-        rc = sqlite3HctIoerr(SQLITE_IOERR_WRITE);
-      }
-    }
-  }
-  if( bDone==0 && rc==SQLITE_OK ){
-    rc = hctLogFileWriteTid(pLog, iTid);
-  }
-  return rc;
-}
-
-static int btreeLogFileZero(HctLogFile *pLog){
-  return hctLogFileWriteTid(pLog, 0);
-}
-
-
-/*
 ** Open a database file.
 ** 
 ** zFilename is the name of the database file.  If zFilename is NULL
@@ -723,7 +608,7 @@ int sqlite3HctBtreeClose(Btree *pBt){
     while(p->pCsrList){
       sqlite3HctBtreeCloseCursor((BtCursor*)p->pCsrList);
     }
-    hctLogFileClose(p->pLog, 1);
+    sqlite3HctLogClose(p->pHctLog);
     sqlite3HctBtreeRollback((Btree*)p, SQLITE_OK, 0);
     sqlite3HctBtreeCommit((Btree*)p);
     if( p->xSchemaFree ){
@@ -1434,28 +1319,6 @@ static int btreeFlushOneToDisk(void *pCtx, u32 iRoot, KeyInfo *pKeyInfo){
   return rc;
 }
 
-static int btreeLogIntkey(HctLogFile *pLog, u32 iRoot, i64 iRowid){
-  u8 aBuf[16];
-  memcpy(&aBuf[0], &iRoot, sizeof(u32));
-  memset(&aBuf[4], 0, sizeof(u32));
-  memcpy(&aBuf[8], &iRowid, sizeof(i64));
-  return hctLogFileWrite(pLog, aBuf, sizeof(aBuf));
-}
-
-static int btreeLogIndex(
-  HctLogFile *pLog, 
-  u32 iRoot, 
-  const u8 *aData, int nData
-){
-  if( hctLogFileWrite(pLog, &iRoot, sizeof(iRoot))
-   || hctLogFileWrite(pLog, &nData, sizeof(nData))
-   || hctLogFileWrite(pLog, aData, nData)
-  ){
-    return sqlite3HctIoerr(SQLITE_IOERR_WRITE);
-  }
-  return SQLITE_OK;
-}
-
 static int btreeLogOneToDisk(void *pCtx, u32 iRoot, KeyInfo *pKeyInfo){
   HBtree *p = (HBtree*)pCtx;
   HctTreeCsr *pCsr = 0;
@@ -1471,11 +1334,11 @@ static int btreeLogOneToDisk(void *pCtx, u32 iRoot, KeyInfo *pKeyInfo){
         int nData = 0;
         const u8 *aData = 0;
         sqlite3HctTreeCsrData(pCsr, &nData, &aData);
-        rc = btreeLogIndex(p->pLog, iRoot, aData, nData);
+        rc = sqlite3HctLogRecord(p->pHctLog, iRoot, nData, aData);
       }else{
         i64 iRowid = 0;
         sqlite3HctTreeCsrKey(pCsr, &iRowid);
-        rc = btreeLogIntkey(p->pLog, iRoot, iRowid);
+        rc = sqlite3HctLogRecord(p->pHctLog, iRoot, iRowid, 0);
       }
 
       if( rc!=SQLITE_OK ) break;
@@ -1507,18 +1370,16 @@ static int btreeFlushData(HBtree *p, int bRollback){
 static int btreeWriteLog(HBtree *p){
   int rc = SQLITE_OK;
 
-  if( p->pLog==0 ){
-    char *zLog = sqlite3HctDbLogFile(p->pHctDb);
-    if( zLog==0 ){
-      rc = SQLITE_NOMEM_BKPT;
-    }else{
-      rc = hctLogFileOpen(zLog, p->config.szLogChunk, &p->pLog);
-    }
+  if( p->pHctLog==0 ){
+    HctFile *pFile = sqlite3HctDbFile(p->pHctDb);
+    rc = sqlite3HctLogNew(pFile, p->pHctJrnl, &p->pHctLog);
   }
 
   if( rc==SQLITE_OK ){
-    hctLogFileRestart(p->pLog);
-    rc = sqlite3HctTreeForeach(p->pHctTree, 0, (void*)p, btreeLogOneToDisk);
+    rc = sqlite3HctLogBegin(p->pHctLog);
+    if( rc==SQLITE_OK ){
+      rc = sqlite3HctTreeForeach(p->pHctTree, 0, (void*)p, btreeLogOneToDisk);
+    }
   }
 
   return rc;
@@ -1581,7 +1442,9 @@ static int btreeFlushToDisk(HBtree *p){
     }
 
     assert( iTid>0 );
-    if( p->pLog ) rc = hctLogFileFinish(p->pLog, iTid);
+    if( p->pHctLog ){
+      rc = sqlite3HctLogFinish(p->pHctLog, iTid);
+    }
   }
 
   /* Write all the new database entries to the database. Any write/write
@@ -1646,8 +1509,8 @@ static int btreeFlushToDisk(HBtree *p){
 
   /* Zero the log file and set the entry in the transaction-map to 
   ** finish the transaction. */
-  if( rc==SQLITE_OK && p->pLog ){
-    rc = btreeLogFileZero(p->pLog);
+  if( rc==SQLITE_OK && p->pHctLog ){
+    rc = sqlite3HctLogZero(p->pHctLog);
   }
   if( rc==SQLITE_OK ){
     rc = sqlite3HctDbEndWrite(p->pHctDb, iCid, rcok!=SQLITE_OK);

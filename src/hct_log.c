@@ -13,6 +13,9 @@
 
 #include "hctInt.h"
 
+#include <fcntl.h>
+#include <unistd.h>
+
 typedef struct HctLogFile HctLogFile;
 
 struct HctLogFile {
@@ -73,15 +76,15 @@ int sqlite3HctLogNew(
 }
 
 int sqlite3HctLogBegin(HctLog *pLog){
+  const u64 iSafeTid = sqlite3HctFileSafeTID(pLog->pFile);
+  int rc = SQLITE_OK;
   int iFile = pLog->iFile;
   int iFileOff = pLog->iFileOff;
 
   /* Determine where and in which log file to write this transaction */
-  if( pLog->iFileOff==0 
-   || sqlite3HctJrnlIsSafe(pLog->pJrnl, pLog->aFile[iFile].iLastTid)
-  ){
+  if( pLog->iFileOff==0 || pLog->aFile[iFile].iLastTid<=iSafeTid ){
     iFileOff = JRNL_HDR_SIZE;
-  }else if( sqlite3HctJrnlIsSafe(pLog->pJrnl, pLog->aFile[!iFile].iLastTid) ){
+  }else if( pLog->aFile[!iFile].iLastTid<=iSafeTid ){
     iFile = !iFile;
     iFileOff = JRNL_HDR_SIZE;
   }
@@ -137,6 +140,7 @@ static int hctLogPutU32(u8 *aBuf, u32 val){
 
 static int hctLogWriteBuffer(HctLog *pLog, int nData, const u8 *aData){
   int nRem = nData;
+  int rc = SQLITE_OK;
   do {
     int nCopy = MIN(nRem, (pLog->nBuf - pLog->iBufOff));
     if( nCopy>0 ){
@@ -151,6 +155,8 @@ static int hctLogWriteBuffer(HctLog *pLog, int nData, const u8 *aData){
 }
 
 int sqlite3HctLogRecord(HctLog *pLog, i64 iRoot, i64 nData, const u8 *aData){
+  int rc = SQLITE_OK;
+
   if( (pLog->nBuf-pLog->iBufOff)<(8 + 4 + 8) ){
     rc = hctLogFlushBuffer(pLog);
     if( rc!=SQLITE_OK ) return rc;
@@ -198,6 +204,7 @@ int sqlite3HctLogFinish(HctLog *pLog, u64 iTid){
 
 int sqlite3HctLogZero(HctLog *pLog){
   const u8 aZero[9] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+  int rc = SQLITE_OK;
   HctLogFile *p = &pLog->aFile[pLog->iFile];
 
   lseek(p->fd, 0, SEEK_SET);
@@ -209,16 +216,19 @@ int sqlite3HctLogZero(HctLog *pLog){
 }
 
 void sqlite3HctLogClose(HctLog *pLog){
-  int ii;
-  for(ii=0; ii<2; ii++){
-    HctLogFile *p = &pLog->aFile[ii];
-    if( p->fd>=0 ) close(p->fd);
-    if( p->zPath ){
-      unlink(p->zPath);
+  if( pLog ){
+    int ii;
+    for(ii=0; ii<2; ii++){
+      HctLogFile *p = &pLog->aFile[ii];
+      if( p->fd>=0 ) close(p->fd);
+      if( p->zPath ){
+        unlink(p->zPath);
+      }
+      sqlite3_free(p->zPath);
     }
+    sqlite3_free(pLog->aBuf);
+    sqlite3_free(pLog);
   }
-  sqlite3_free(pLog->aBuf);
-  sqlite3_free(pLog);
 }
 
 

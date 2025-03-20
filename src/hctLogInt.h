@@ -15,11 +15,11 @@
 typedef struct HctLog HctLog;
 
 
-
 /*
 ** Open a new log for writing transactions to file pFile.
 */
-int sqlite3HctLogNew(HctFile *pFile, HctLog **ppLog);
+typedef struct HctJournal HctJournal;
+int sqlite3HctLogNew(HctFile *pFile, HctJournal *pJrnl, HctLog **ppLog);
 
 /*
 ** Close existing log.

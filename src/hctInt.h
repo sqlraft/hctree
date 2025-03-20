@@ -46,6 +46,7 @@ struct HctConfig {
 
 #include <hctTMapInt.h>
 #include <hctFileInt.h>
+#include <hctLogInt.h>
 
 #ifdef SQLITE_DEBUG
 # define SQLITE_LOCKED_ERR(x,y) sqlite3HctLockedErr(x,y)

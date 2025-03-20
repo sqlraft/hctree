@@ -40,7 +40,6 @@ do_execsql_test 1.1 {
   PRAGMA integrity_check
 } {ok}
 
-
 proc do_recover_test {tn sql} {
   for {set ii 1} {$ii<500} {incr ii} {
     write_script [subst {

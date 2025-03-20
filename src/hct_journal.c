@@ -586,6 +586,7 @@ int sqlite3HctJournalIsNosnap(HctJournal *pJrnl, i64 iTable){
 ** in the hct_journal table. Extract the value of the "tid" column.
 */
 static int hctJrnlExtractTid(HctDbCsr *pCsr, i64 *piTid){
+  return SQLITE_OK;
 }
 
 /*
@@ -600,7 +601,6 @@ int sqlite3HctJrnlRollbackEntry(HctJournal *pJrnl, i64 iTid){
 
   rc = sqlite3HctDbCsrOpen(pJrnl->pDb, 0, (u32)iJrnlRoot, &pCsr);
   if( rc==SQLITE_OK ){
-    HctJournalRecord rec;
     sqlite3HctDbCsrNosnap(pCsr, 1);
     for(rc=sqlite3HctDbCsrLast(pCsr);
         iDel==0 && rc==SQLITE_OK && sqlite3HctDbCsrEof(pCsr)==0;

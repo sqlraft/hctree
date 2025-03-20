@@ -66,3 +66,9 @@ u64 sqlite3HctJrnlFollowerModeCid(HctJournal *pJrnl);
 
 void sqlite3HctJrnlSetRoot(HctJournal *pJrnl, Schema *pSchema);
 
+/*
+** Return true if it is guaranteed that the transaction with TID value iTid
+** will never need to be rolled back as part of journal recovery.
+*/
+int sqlite3HctJrnlIsSafe(HctJournal *pJrnl, i64 iTid);
+
