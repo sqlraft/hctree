@@ -2844,7 +2844,7 @@ int sqlite3HctDbIsIndex(HctDatabase *pDb, u32 iRoot, int *pbIndex){
 }
 
 char *sqlite3HctDbLogFile(HctDatabase *pDb){
-  return sqlite3HctFileLogFile(pDb->pFile);
+  return sqlite3HctFileLogFile(pDb->pFile, 0);
 }
 
 static void hctDbCsrInit(

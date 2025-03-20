@@ -146,7 +146,7 @@ int sqlite3HctFileClearPhysInUse(HctFile *pFile, u32 pgno, int bReuseNow);
 
 void sqlite3HctFileDebugPrint(HctFile *pFile, const char *zFmt, ...);
 
-char *sqlite3HctFileLogFile(HctFile *pFile);
+char *sqlite3HctFileLogFile(HctFile *pFile, int);
 int sqlite3HctFileStartRecovery(HctFile *pFile, int iStage);
 int sqlite3HctFileFinishRecovery(HctFile *pFile, int iStage, int rc);
 int sqlite3HctFileRecoverFreelists(
@@ -191,4 +191,9 @@ void sqlite3HctFileSetJrnlPtr(HctFile *pFile, void *pPtr, void(*xDel)(void*));
 void *sqlite3HctFileGetJrnlPtr(HctFile *pFile);
 
 int sqlite3HctIoerr(int rc);
+
+int sqlite3HctFileLogFileId(HctFile *pFile, int iFile);
+char *sqlite3HctFileLogFileName(HctFile *pFile, int iId);
+
+
 

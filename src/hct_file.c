@@ -2027,12 +2027,20 @@ int sqlite3HctFileClearPhysInUse(HctFile *pFile, u32 pgno, int bReuseNow){
   return rc;
 }
 
-char *sqlite3HctFileLogFile(HctFile *pFile){
+int sqlite3HctFileLogFileId(HctFile *pFile, int iFile){
+  assert( iFile==0 || iFile==1 );
+  return pFile->iFileId*2 + iFile;
+}
+char *sqlite3HctFileLogFileName(HctFile *pFile, int iId){
+  HctFileServer *pServer = pFile->pServer;
+  return sqlite3_mprintf("%s-log-%d", pServer->zPath, iId);
+}
+
+char *sqlite3HctFileLogFile(HctFile *pFile, int iFile){
   char *zRet = 0;
   HctFileServer *pServer = pFile->pServer;
-  sqlite3_mutex_enter(pServer->pMutex);
-  zRet = sqlite3_mprintf("%s-log-%d", pServer->zPath, pFile->iFileId);
-  sqlite3_mutex_leave(pServer->pMutex);
+  assert( iFile==0 || iFile==1 );
+  zRet = sqlite3_mprintf("%s-log-%d", pServer->zPath, pFile->iFileId*2+iFile);
   return zRet;
 }
 

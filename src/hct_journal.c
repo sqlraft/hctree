@@ -372,7 +372,7 @@ int sqlite3HctJrnlLog(
   u64 iTid,
   int rcin
 ){
-  int rc = SQLITE_OK;
+  int rc = rcin;
   if( pJrnl->pJrnlData ){
     if( rcin==SQLITE_OK ){
       HctJrnlServer *pServer = pJrnl->pServer;
@@ -395,7 +395,6 @@ int sqlite3HctJrnlLog(
       }
     }else{
       hctJrnlWriteRecord(pJrnl, iCid, 0, 0, 0, 0);
-      rc = rcin;
       pJrnl->iJrnlSnapshot = 0;
     }
     pJrnl->iJrnlCid = iCid;
