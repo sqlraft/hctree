@@ -33,6 +33,8 @@ int sqlite3HctLogBegin(HctLog *pLog);
 int sqlite3HctLogRecord(HctLog *pLog, i64 iRoot, i64 nData, const u8 *aData);
 int sqlite3HctLogFinish(HctLog *pLog, u64 iTid);
 
+void sqlite3HctLogSetCid(HctLog *pLog, u64 iCid);
+
 /*
 ** This function is used to obtain a 16-byte blob value that describes
 ** the current live transaction. This is stored in the hct_journal table
@@ -48,7 +50,7 @@ int sqlite3HctLogFinish(HctLog *pLog, u64 iTid);
 ** call to sqlite3HctLogPointer() or sqlite3HctLogClose() on the same
 ** HctLog object.
 */
-int sqlite3HctLogPointer(HctLog *pLog, int *pnRef, const u8 **paRef);
+int sqlite3HctLogPointer(HctLog *pLog, u64, int *pnRef, const u8 **paRef);
 
 
 /*
@@ -57,4 +59,12 @@ int sqlite3HctLogPointer(HctLog *pLog, int *pnRef, const u8 **paRef);
 */
 int sqlite3HctLogZero(HctLog *pLog);
 
+int sqlite3HctLogLoadData(
+  HctLog *pLog,                   /* Log object */
+  int nPtr, const u8 *aPtr,       /* Pointer from sqlite3HctLogPointer() */
+  i64 *piTid,                     /* OUT: TID value extracted from pointer */
+  int *pnData, u8 **paData        /* OUT: Contents of requested log */
+);
 
+void *sqlite3HctLogFindLogToFree(void **pLogPtrPtr, u64 iSafe);
+void sqlite3HctLogFree(void *pLogList, int bUnlink);

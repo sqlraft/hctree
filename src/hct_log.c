@@ -15,6 +15,7 @@
 
 #include <fcntl.h>
 #include <unistd.h>
+#include <sys/stat.h>
 
 typedef struct HctLogFile HctLogFile;
 
@@ -22,9 +23,18 @@ struct HctLogFile {
   int iId;
   char *zPath;
   int fd;
-  u64 iLastTid;
+  u64 iLastCid;
 };
 
+/*
+** pCloseNext:
+**   This is used in FOLLOWER mode only. In FOLLOWER mode, a connection may
+**   be closed immediately after writing a non-contiguous transaction to
+**   the database and journal. In this case it is not safe to unlink() the 
+**   log file until all all prior transactions (those with smaller CID values)
+**   have been written to the journal. This variable - pCloseNext - is part
+**   of the mechanism that allows the tmap module to do that.
+*/
 struct HctLog {
   HctFile *pFile;
   HctJournal *pJrnl;
@@ -38,6 +48,9 @@ struct HctLog {
   u8 *aBuf;                       /* malloc'd buffer for writing log file */
   int nBuf;                       /* Size of aBuf[] in bytes */
   int iBufOff;
+
+  u8 aLogptr[16];
+  HctLog *pCloseNext;
 };
 
 #define JRNL_HDR_SIZE 12
@@ -76,15 +89,21 @@ int sqlite3HctLogNew(
 }
 
 int sqlite3HctLogBegin(HctLog *pLog){
-  const u64 iSafeTid = sqlite3HctFileSafeTID(pLog->pFile);
+  u64 iSafeCid;
   int rc = SQLITE_OK;
   int iFile = pLog->iFile;
   int iFileOff = pLog->iFileOff;
 
+  if( sqlite3HctJrnlMode(pLog->pJrnl)==SQLITE_HCT_FOLLOWER ){
+    iSafeCid = sqlite3HctJrnlSnapshot(pLog->pJrnl);
+  }else{
+    iSafeCid = LARGEST_UINT64;
+  }
+
   /* Determine where and in which log file to write this transaction */
-  if( pLog->iFileOff==0 || pLog->aFile[iFile].iLastTid<=iSafeTid ){
+  if( pLog->iFileOff==0 || pLog->aFile[iFile].iLastCid<=iSafeCid ){
     iFileOff = JRNL_HDR_SIZE;
-  }else if( pLog->aFile[!iFile].iLastTid<=iSafeTid ){
+  }else if( pLog->aFile[!iFile].iLastCid<=iSafeCid ){
     iFile = !iFile;
     iFileOff = JRNL_HDR_SIZE;
   }
@@ -194,12 +213,15 @@ int sqlite3HctLogFinish(HctLog *pLog, u64 iTid){
     lseek(p->fd, 0, SEEK_SET);
     if( write(p->fd, aBuf, sizeof(aBuf))!=sizeof(aBuf) ){
       rc = sqlite3HctIoerr(SQLITE_IOERR_WRITE);
-    }else{
-      p->iLastTid = iTid;
     }
   }
 
   return rc;
+}
+
+void sqlite3HctLogSetCid(HctLog *pLog, u64 iCid){
+  HctLogFile *p = &pLog->aFile[pLog->iFile];
+  p->iLastCid = MAX(p->iLastCid, iCid);
 }
 
 int sqlite3HctLogZero(HctLog *pLog){
@@ -211,24 +233,210 @@ int sqlite3HctLogZero(HctLog *pLog){
   if( write(p->fd, aZero, sizeof(aZero))!=sizeof(aZero) ){
     rc = sqlite3HctIoerr(SQLITE_IOERR_WRITE);
   }
-  p->iLastTid = 0;
   return rc;
 }
 
+/*
+** Close the HctLog object pLog. In LEADER or NORMAL mode, the log file may
+** be deleted immediately. But in FOLLOWER mode, it may contain entries
+** that may yet be rolled back. So in this case, pass the HctLog object to
+** the journal module to be closed when it is safe to do so.
+*/
 void sqlite3HctLogClose(HctLog *pLog){
   if( pLog ){
     int ii;
+    int eMode = sqlite3HctJrnlMode(pLog->pJrnl);
+    int bDefer = 0;
+
+    /* Check if these log files can be unlinked immediately. They can be
+    ** unlinked immediately unless (a) the journal is in FOLLOWER mode, 
+    ** and (b) the log files contain one or more transactions from the
+    ** non-contiguous region of the journal. */
+    if( eMode==SQLITE_HCT_FOLLOWER ){
+      u64 iSafeCid = sqlite3HctJrnlSnapshot(pLog->pJrnl);
+      if( iSafeCid<pLog->aFile[0].iLastCid
+       || iSafeCid<pLog->aFile[1].iLastCid
+      ){
+        bDefer = 1;
+      }
+    }
+
     for(ii=0; ii<2; ii++){
       HctLogFile *p = &pLog->aFile[ii];
       if( p->fd>=0 ) close(p->fd);
-      if( p->zPath ){
-        unlink(p->zPath);
+      if( p->zPath && bDefer==0 ){
+        // unlink(p->zPath);
+        sqlite3_free(p->zPath);
       }
-      sqlite3_free(p->zPath);
     }
     sqlite3_free(pLog->aBuf);
-    sqlite3_free(pLog);
+    pLog->aBuf = 0;
+
+    if( bDefer ){
+      void **pLogPtrPtr = sqlite3HctJrnlLogPtrPtr(pLog->pJrnl);
+      HctLog **ppList = (HctLog**)pLogPtrPtr;
+      pLog->pCloseNext = *ppList;
+      *ppList = pLog;
+      sqlite3HctJrnlLogPtrPtrRelease(pLog->pJrnl);
+    }else{
+      sqlite3_free(pLog);
+    }
   }
 }
 
+int sqlite3HctLogPointer(HctLog *pLog, u64 iTid, int *pnRef, const u8 **paRef){
+  if( sqlite3HctJrnlMode(pLog->pJrnl)==SQLITE_HCT_FOLLOWER ){
+    HctLogFile *p = &pLog->aFile[pLog->iFile];
+    memcpy(pLog->aLogptr, &iTid, sizeof(u64));
+    memcpy(&pLog->aLogptr[8], &p->iId, sizeof(u32));
+    memcpy(&pLog->aLogptr[12], &pLog->iFileBeginOff, sizeof(u32));
+    *pnRef = 16;
+    *paRef = pLog->aLogptr;
+  }else{
+    *pnRef = 0;
+    *paRef = 0;
+  }
+  return SQLITE_OK;
+}
+
+/*
+** Argument fd is an open file-descriptor. This function attempts to 
+** determine the current size of the open file in bytes. 
+*/
+static int hctLogFileSize(int *pRc, int fd){
+  int ret = 0;
+  if( *pRc==SQLITE_OK ){
+    struct stat sStat;
+    memset(&sStat, 0, sizeof(sStat));
+    fstat(fd, &sStat);
+    ret = (int)sStat.st_size;
+  }
+  return ret;
+}
+
+/*
+**
+*/
+static int hctLogIsComplete(const u8 *aData, int *pnData){
+  int iOff = 0;
+  i64 iRoot = 0;
+  int sz = 0;
+  int nRead = *pnData;
+
+  while( 1 ){
+    if( (nRead-iOff)<8 ) return 0;
+
+    memcpy(&iRoot, (const void*)&aData[iOff], sizeof(iRoot));
+    iOff += sizeof(iRoot);
+    if( iRoot==0 ){
+      *pnData = iOff;
+      return 1;
+    }
+    if( (nRead-iOff)<4 ) return 0;
+
+    memcpy(&sz, (const void*)&aData[iOff], sizeof(sz));
+    iOff += sizeof(sz);
+    if( sz==0xFFFFFFFF ){
+      sz = 8;
+    }
+    iOff += sz;
+  }
+}
+
+/*
+** 
+*/
+int sqlite3HctLogLoadData(
+  HctLog *pLog,                   /* Log object */
+  int nPtr, const u8 *aPtr,       /* Pointer from sqlite3HctLogPointer() */
+  i64 *piTid,                     /* OUT: TID value extracted from pointer */
+  int *pnData, u8 **paData        /* OUT: Contents of requested log */
+){
+  int rc = SQLITE_OK;
+  i64 iTid = 0;
+  int iId = 0;
+  int iOff = 0;
+  char *zFile = 0;
+  int fd = -1;
+
+  assert( nPtr==(sizeof(iTid) + sizeof(iId) + sizeof(iOff)) );
+  memcpy(&iTid, aPtr, sizeof(iTid));
+  memcpy(&iId, &aPtr[8], sizeof(iId));
+  memcpy(&iOff, &aPtr[12], sizeof(iOff));
+
+  zFile = sqlite3HctFileLogFileName(pLog->pFile, iId);
+  if( !zFile ) return SQLITE_NOMEM_BKPT;
+
+  fd = open(zFile, O_RDONLY);
+  if( fd<0 ){
+    rc = SQLITE_CANTOPEN_BKPT;
+  }else{
+    int sz = hctLogFileSize(&rc, fd);
+
+    if( rc==SQLITE_OK ){
+      int nRead = 0;
+      u8 *aData = 0;
+      lseek(fd, iOff, SEEK_SET);
+      do {
+        int nExtra = MIN((nRead ? nRead : 1024), sz-nRead);
+        int n;
+        aData = sqlite3Realloc(aData, nRead+nExtra);
+        n = read(fd, &aData[nRead], nExtra);
+        if( n<=0 ){
+          rc = SQLITE_IOERR_READ;
+          break;
+        }
+        nRead += n;
+      }while( hctLogIsComplete(aData, &nRead)==0 );
+
+      if( rc==SQLITE_OK ){
+        *paData = aData;
+        *pnData = nRead;
+        *piTid = iTid;
+      }else{
+        sqlite3_free(aData);
+      }
+    }
+
+    close(fd);
+  }
+  return rc;
+}
+
+void *sqlite3HctLogFindLogToFree(void **pLogPtrPtr, u64 iSafeCid){
+  HctLog **ppLog = (HctLog**)pLogPtrPtr;
+  HctLog *pRet = 0;
+
+  while( *ppLog ){
+    HctLog *pLog = *ppLog;
+    if( pLog->aFile[0].iLastCid<=iSafeCid
+     && pLog->aFile[1].iLastCid<=iSafeCid
+    ){
+      *ppLog = pLog->pCloseNext;
+      pLog->pCloseNext = pRet;
+      pRet = pLog;
+    }else{
+      ppLog = &pLog->pCloseNext;
+    }
+  }
+
+  return (void*)pRet;
+}
+
+void sqlite3HctLogFree(void *pLogList, int bUnlink){
+  HctLog *p = pLogList;
+  while( p ){
+    int ii;
+    HctLog *pFree = p;
+    p = p->pCloseNext;
+    for(ii=0; ii<2; ii++){
+      HctLogFile *pFile = &pFree->aFile[ii];
+      if( pFile->zPath ){
+        if( bUnlink && 0 ) unlink(pFile->zPath);
+        sqlite3_free(pFile->zPath);
+      }
+    }
+    sqlite3_free(pFree);
+  }
+}
 

@@ -30,7 +30,7 @@
 #define HCT_TMAP_PAGESIZE (1 << HCT_TMAP_PGSZBITS)
 
 #define HCT_TMAP_ENTRYSLOT(iEntry) \
-    (((iEntry) >> 3) + (((iEntry) & 0x07) << (HCT_TMAP_PGSZBITS-3)))
+  (((iEntry) >> 3) + (((iEntry) & 0x07) << (HCT_TMAP_PGSZBITS-3)))
 
 // #define HCT_TMAP_ENTRYSLOT(iEntry) (iEntry)
 
@@ -141,3 +141,5 @@ int sqlite3HctTMapServerSet(HctTMapServer *pServer, u64 iTid, u64 iCid);
 
 int sqlite3HctTMapBuildStart(HctTMapClient *p, u64 iStart, u64 iLast);
 void sqlite3HctTMapBuildSet(HctTMapClient *p, u64 iTid, u64 iCid);
+
+void **sqlite3HctTMapLogPtrPtr(HctTMapClient *p);

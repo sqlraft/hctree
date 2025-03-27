@@ -196,4 +196,3 @@ int sqlite3HctFileLogFileId(HctFile *pFile, int iFile);
 char *sqlite3HctFileLogFileName(HctFile *pFile, int iId);
 
 
-

@@ -29,7 +29,9 @@ int sqlite3HctJournalNew(HctDatabase *pDb, HctJournal **pp);
 void sqlite3HctJournalClose(HctJournal*);
 
 
-int sqlite3HctJrnlLog(HctJournal *pJrnl, u64 iCid, u64 iSnap, u64 iTid, int rc);
+int sqlite3HctJrnlLog(
+    HctJournal *, u64 iCid, u64 iSnap, int nPtr, const u8 *aPtr, int rc
+);
 
 /*
 ** This is called as part of stage 1 recovery (the bit after the upper layer
@@ -54,7 +56,7 @@ int sqlite3HctJrnlInit(sqlite3 *db);
 */
 int sqlite3HctJournalIsNosnap(HctJournal *pJrnl, i64 iTable);
 
-int sqlite3HctJrnlRollbackEntry(HctJournal *pJrnl, i64 iTid);
+int sqlite3HctJrnlRollbackEntry(HctJournal *pJrnl, i64 iCid);
 
 u64 sqlite3HctJrnlSnapshot(HctJournal *pJrnl);
 
@@ -71,4 +73,21 @@ void sqlite3HctJrnlSetRoot(HctJournal *pJrnl, Schema *pSchema);
 ** will never need to be rolled back as part of journal recovery.
 */
 int sqlite3HctJrnlIsSafe(HctJournal *pJrnl, i64 iTid);
+
+/*
+** Return one of SQLITE_HCT_NORMAL, SQLITE_HCT_FOLLOWER or SQLITE_HCT_LEADER
+** to indicate the mode that the journal is in.
+*/
+int sqlite3HctJrnlMode(HctJournal *pJrnl);
+
+int sqlite3HctJrnlFindLogs(
+    sqlite3 *db, 
+    HctJournal*, 
+    void*, 
+    int(*)(void*,i64,int,const u8*),
+    int (*xMap)(void*, i64, i64)
+);
+
+void **sqlite3HctJrnlLogPtrPtr(HctJournal *pJrnl);
+void sqlite3HctJrnlLogPtrPtrRelease(HctJournal *pJrnl);
 

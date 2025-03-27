@@ -707,6 +707,7 @@ int sqlite3HctTMapRecoverySet(HctTMapClient *p, u64 iTid, u64 iCid){
   }
   p->iBuildMin = MIN(p->iBuildMin, iTid);
 
+  assert( pNew->m.iFirstTid<=iTid );
   while( rc==SQLITE_OK && pNew->m.iFirstTid>iTid ){
     int ii;
     HctTMapFull *pAlloc = 0;
@@ -735,6 +736,7 @@ int sqlite3HctTMapRecoverySet(HctTMapClient *p, u64 iTid, u64 iCid){
   if( rc==SQLITE_OK ){
     int iMap = (iTid - pNew->m.iFirstTid) / HCT_TMAP_PAGESIZE;
     int iOff = (iTid - pNew->m.iFirstTid) % HCT_TMAP_PAGESIZE;
+    iOff = HCT_TMAP_ENTRYSLOT(iOff);
     pNew->m.aaMap[iMap][iOff] = (iCid | HCT_TMAP_COMMITTED);
   }
 
