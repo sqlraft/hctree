@@ -33,13 +33,6 @@ int sqlite3HctJrnlLog(
     HctJournal *, u64 iCid, u64 iSnap, int nPtr, const u8 *aPtr, int rc
 );
 
-/*
-** This is called as part of stage 1 recovery (the bit after the upper layer
-** has loaded the database schema). The recovery mutex is held, so the client
-** has exclusive access to the database on disk.
-*/
-int sqlite3HctJrnlRecovery(HctJournal *pJrnl, HctDatabase *pDb);
-
 int sqlite3HctJrnlSavePhysical(sqlite3 *db, HctJournal *pJrnl, 
   int (*xSave)(void*, i64 iPhys), void *pSave
 );
@@ -83,6 +76,7 @@ int sqlite3HctJrnlMode(HctJournal *pJrnl);
 int sqlite3HctJrnlFindLogs(
     sqlite3 *db, 
     HctJournal*, 
+    int nDel, i64 *aDel,
     void*, 
     int(*)(void*,i64,int,const u8*),
     int (*xMap)(void*, i64, i64)
@@ -90,4 +84,8 @@ int sqlite3HctJrnlFindLogs(
 
 void **sqlite3HctJrnlLogPtrPtr(HctJournal *pJrnl);
 void sqlite3HctJrnlLogPtrPtrRelease(HctJournal *pJrnl);
+
+int sqlite3HctJrnlZeroEntries(HctJournal *pJrnl, int nEntry, i64 *aEntry);
+
+int sqlite3HctJrnlRecoveryMode(sqlite3 *db, HctJournal *pJrnl, int *peMode);
 

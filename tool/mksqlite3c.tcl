@@ -205,6 +205,7 @@ foreach hdr {
    hctPManInt.h
    hctTMapInt.h
    hctJrnlInt.h
+   hctLogInt.h
    btreeModules.h
    btreeDefine.h
    btreeUndef.h
@@ -515,7 +516,7 @@ set flist {
    hct_record.c
    hct_stats.c
    hct_journal.c
-   hct_journalhash.c
+   hct_log.c
 } 
 if {$enable_recover} {
   lappend flist sqlite3recover.c dbdata.c

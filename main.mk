@@ -660,6 +660,7 @@ SRC += \
   $(TOP)/src/hctJrnlInt.h      \
   $(TOP)/src/hctPManInt.h  \
   $(TOP)/src/hctTMapInt.h \
+  $(TOP)/src/hctLogInt.h \
   $(TOP)/src/btreeModules.h \
   $(TOP)/src/btreeDefine.h \
   $(TOP)/src/btreeUndef.h \

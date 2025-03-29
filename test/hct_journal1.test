@@ -306,8 +306,6 @@ execsql_pp {
   SELECT cid, query, snapshot, quote(logptr) FROM hct_journal;
 }
 
-breakpoint
-
 db close
 sqlite3 db test.db
 
@@ -320,6 +318,59 @@ do_execsql_test 5.5.2 {
 } {
   1 {} 
   2 {INSERT INTO t1 VALUES(1, 2)} 
+}
+
+#-------------------------------------------------------------------------
+# Test that filling in the non-contiguous part of a leaders journal on
+# recovery works.
+#
+
+hct_reset_db
+
+do_test 6.1 {
+  sqlite3_hct_journal_init db
+  sqlite3_hct_journal_setmode db LEADER
+} SQLITE_OK
+
+do_execsql_test 6.2 {
+  SELECT cid, query FROM hct_journal
+} {1 {}}
+
+proc write_leader {sql} {
+  execsql "BEGIN CONCURRENT"
+  execsql $sql
+  sqlite3_hct_journal_leader_commit db $sql
+}
+
+do_test 6.3 {
+  write_leader "CREATE TABLE t1(a INTEGER PRIMARY KEY, b)"
+  write_leader "INSERT INTO t1 VALUES(1, 2)"
+} {SQLITE_OK 3 2}
+
+do_execsql_test 6.2 {
+  SELECT cid, query FROM hct_journal
+} {
+  1 {}
+  2 {CREATE TABLE t1(a INTEGER PRIMARY KEY, b)}
+  3 {INSERT INTO t1 VALUES(1, 2)}
+}
+
+do_test 6.3 {
+  sqlite3_hct_journal_setmode db NORMAL
+  execsql {
+    UPDATE hct_journal SET cid=4 WHERE cid=3;
+  }
+  db close
+} {}
+
+sqlite3 db test.db
+do_execsql_test 6.4 {
+  SELECT cid, query FROM hct_journal
+} {
+  1 {}
+  2 {CREATE TABLE t1(a INTEGER PRIMARY KEY, b)}
+  3 {}
+  4 {INSERT INTO t1 VALUES(1, 2)}
 }
 
 finish_test

@@ -285,17 +285,24 @@ void sqlite3HctLogClose(HctLog *pLog){
 }
 
 int sqlite3HctLogPointer(HctLog *pLog, u64 iTid, int *pnRef, const u8 **paRef){
-  if( sqlite3HctJrnlMode(pLog->pJrnl)==SQLITE_HCT_FOLLOWER ){
-    HctLogFile *p = &pLog->aFile[pLog->iFile];
-    memcpy(pLog->aLogptr, &iTid, sizeof(u64));
-    memcpy(&pLog->aLogptr[8], &p->iId, sizeof(u32));
-    memcpy(&pLog->aLogptr[12], &pLog->iFileBeginOff, sizeof(u32));
-    *pnRef = 16;
-    *paRef = pLog->aLogptr;
-  }else{
+  int eMode = sqlite3HctJrnlMode(pLog->pJrnl);
+
+  if( eMode==SQLITE_HCT_NORMAL ){
     *pnRef = 0;
     *paRef = 0;
+  }else{
+    memcpy(pLog->aLogptr, &iTid, sizeof(u64));
+    *paRef = pLog->aLogptr;
+    if( eMode==SQLITE_HCT_FOLLOWER ){
+      HctLogFile *p = &pLog->aFile[pLog->iFile];
+      memcpy(&pLog->aLogptr[8], &p->iId, sizeof(u32));
+      memcpy(&pLog->aLogptr[12], &pLog->iFileBeginOff, sizeof(u32));
+      *pnRef = 16;
+    }else{
+      *pnRef = 8;
+    }
   }
+
   return SQLITE_OK;
 }
 
@@ -360,6 +367,7 @@ int sqlite3HctLogLoadData(
   int fd = -1;
 
   assert( nPtr==(sizeof(iTid) + sizeof(iId) + sizeof(iOff)) );
+
   memcpy(&iTid, aPtr, sizeof(iTid));
   memcpy(&iId, &aPtr[8], sizeof(iId));
   memcpy(&iOff, &aPtr[12], sizeof(iOff));
@@ -368,6 +376,7 @@ int sqlite3HctLogLoadData(
   if( !zFile ) return SQLITE_NOMEM_BKPT;
 
   fd = open(zFile, O_RDONLY);
+  sqlite3_free(zFile);
   if( fd<0 ){
     rc = SQLITE_CANTOPEN_BKPT;
   }else{

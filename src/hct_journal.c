@@ -22,6 +22,9 @@
     "logptr BLOB                 /* Used by hctree internally */"         \
 ");"
 
+#define SIZEOF_FOLLOWER_LOGPTR 16
+#define SIZEOF_LEADER_LOGPTR    8
+
 
 typedef struct HctJrnlServer HctJrnlServer;
 
@@ -436,123 +439,6 @@ int sqlite3HctJrnlSavePhysical(
   void *pSave
 ){
   return SQLITE_OK;
-}
-
-/*
-** Do special recovery (startup) processing for replication-enabled databases.
-** This function is called during stage 1 recovery - after any log files have
-** been processed (and the database schema + contents restored), but before the
-** free-page-lists are recovered.
-*/
-int sqlite3HctJrnlRecovery(HctJournal *pJrnl, HctDatabase *pDb){
-  assert( 0 );
-  return SQLITE_OK;
-#if 0
-  HctBaselineRecord base;         /* sqlite_hct_baseline data */
-  HctJrnlServer *pServer = 0;
-  HctFile *pFile = sqlite3HctDbFile(pDb);
-  int rc = SQLITE_OK;
-  HctDbCsr *pCsr = 0;
-
-  i64 iMaxCid = 0;                
-  i64 iSchemaCid = 0;
-
-  /* Read the contents of the sqlite_hct_baseline table. */
-  rc = hctJrnlReadBaseline(pJrnl, &base);
-
-  /* Allocate the new HctJrnlServer structure */
-  pServer = (HctJrnlServer*)sqlite3HctMalloc(&rc, sizeof(HctJrnlServer));
-
-  /* Read the last record of the sqlite_hct_journal table. Specifically,
-  ** the value of fields "cid" and "schema_version". Store these values
-  ** in stack variables iMaxCid and aSchema, respectively.  Or, if the
-  ** sqlite_hct_journal table is empty, populate iMaxCid and aSchema[] with
-  ** values from the baseline table.  */
-  if( rc==SQLITE_OK ){
-    rc = sqlite3HctDbCsrOpen(pDb, 0, (u32)pJrnl->iJrnlRoot, &pCsr);
-  }
-  if( rc==SQLITE_OK ){
-    rc = sqlite3HctDbCsrLast(pCsr);
-  }
-  if( rc==SQLITE_OK ){
-    if( sqlite3HctDbCsrEof(pCsr)==0 ){
-      HctJournalRecord rec;
-      rc = hctJrnlReadJournalRecord(pCsr, &rec);
-      if( rc==SQLITE_OK ){
-        iMaxCid = rec.iCid;
-        iSchemaCid = (rec.zSchema[0] ? rec.iCid : rec.iSchemaCid);
-      }
-    }else{
-      iMaxCid = base.iCid;
-      iSchemaCid = base.iSchemaCid;
-    }
-  }
-
-  /* Scan the sqlite_hct_journal table from beginning to end. When
-  ** the first missing entry is found, calculate the size of the 
-  ** HctJrnlServer.aCommit[] API and allocate it. Then continue
-  ** scanning the sqlite_hct_journal table, populating aCommit[] along
-  ** the way.  */
-  if( rc==SQLITE_OK ){
-    HctTMapClient *pTClient = sqlite3HctFileTMapClient(pFile);
-    i64 iPrev = base.iCid;
-    int nTrans = 0;
-    u64 *aCommit = 0;
-
-    /* Scan until the first missing entry. Set nTrans to the number of
-    ** number of entries between the first missing one and the last
-    ** present, or to HCT_MAX_LEADING_WRITE, whichever is greater.
-    ** Set iPrev to the largest CID value for which it and all previous
-    ** CIDs have been written into the journal table.  */
-    for(rc = sqlite3HctDbCsrFirst(pCsr);
-        rc==SQLITE_OK && 0==sqlite3HctDbCsrEof(pCsr);
-        rc = sqlite3HctDbCsrNext(pCsr)
-    ){
-      i64 iCid = 0;
-      sqlite3HctDbCsrKey(pCsr, &iCid);
-      if( iPrev!=0 && iCid!=iPrev+1 ){
-        nTrans = iMaxCid - iPrev;
-        break;
-      }
-      iPrev = iCid;
-    }
-    nTrans = MAX(HCT_MAX_LEADING_WRITE, nTrans);
-
-    pServer->nCommit = nTrans*2;
-    aCommit = (u64*)sqlite3HctMalloc(&rc, pServer->nCommit*sizeof(u64));
-    pServer->aCommit = aCommit;
-    pServer->iSnapshot = iPrev;
-
-    /* Scan through whatever is left of the sqlite_hct_journal table, 
-    ** populating the aCommit[] array and the transaction-map (hct_tmap.c)
-    ** along the way. */
-    while( rc==SQLITE_OK && 0==sqlite3HctDbCsrEof(pCsr) ){
-      HctJournalRecord rec;
-      rc = hctJrnlReadJournalRecord(pCsr, &rec);
-      if( rc==SQLITE_OK ){
-        i64 iVal = rec.iValidCid ? rec.iValidCid : rec.iCid;
-        pServer->aCommit[rec.iCid % pServer->nCommit] = iVal;
-        rc = sqlite3HctTMapRecoverySet(pTClient, rec.iTid, rec.iCid);
-      }
-      if( rc==SQLITE_OK ){
-        rc = sqlite3HctDbCsrNext(pCsr);
-      }
-    }
-    sqlite3HctTMapRecoveryFinish(pTClient, rc);
-  }
-
-  if( rc==SQLITE_OK ){
-    HctAtomicStore(&pServer->iSchemaCid, iSchemaCid);
-    pJrnl->pServer = pServer;
-    sqlite3HctFileSetJrnlPtr(pFile, (void*)pServer, hctJrnlDelServer);
-    if( iMaxCid>0 ) sqlite3HctFileSetCID(pFile, iMaxCid);
-  }else{
-    hctJrnlDelServer((void*)pServer);
-  }
-
-  sqlite3HctDbCsrClose(pCsr);
-  return rc;
-#endif
 }
 
 static void hctJrnlTryToFreeLog(HctJournal *pJrnl){
@@ -994,9 +880,49 @@ int sqlite3HctJrnlMode(HctJournal *pJrnl){
   return HctAtomicLoad(&pJrnl->pServer->eMode);
 }
 
+int sqlite3HctJrnlRecoveryMode(sqlite3 *db, HctJournal *pJrnl, int *peMode){
+  int rc = SQLITE_OK;
+  int eMode = SQLITE_HCT_NORMAL;
+  if( pJrnl->pServer->iJrnlRoot ){
+    const char *zSql = "SELECT length(logptr), max(cid) FROM hct_journal";
+    i64 sz = 0;
+    rc = hctDbExecForInt(db, zSql, &sz);
+    if( sz==SIZEOF_FOLLOWER_LOGPTR ){
+      eMode = SQLITE_HCT_FOLLOWER;
+    }else{
+      eMode = SQLITE_HCT_LEADER;
+    }
+  }
+
+  *peMode = eMode;
+  return rc;
+}
+
+/*
+** Parameter aInt points to a sorted list of nInt 64-bit integer values.
+** Return true if iVal appears in this list, or false otherwise.
+*/
+static int hctListContains(int nInt, i64 *aInt, i64 iVal){
+  int i1 = 0;
+  int i2 = nInt;
+  while( i2>i1 ){
+    int iTest = (i1 + i2) / 2;
+    if( aInt[iTest]==iVal ){
+      return 1;
+    }
+    if( aInt[iTest]<iVal ){
+      i1 = iTest+1;
+    }else{
+      i2 = iTest;
+    }
+  }
+  return 0;
+}
+
 int sqlite3HctJrnlFindLogs(
   sqlite3 *db,
   HctJournal *pJrnl, 
+  int nDel, i64 *aDel,
   void *pCtx,
   int (*xLog)(void*, i64, int, const u8*),
   int (*xMap)(void*, i64, i64)
@@ -1018,7 +944,15 @@ int sqlite3HctJrnlFindLogs(
         int nPtr = sqlite3_column_bytes(pSql, 1);
         const u8 *aPtr = (const u8*)sqlite3_column_blob(pSql, 1);
 
-        if( iPrev>=0 && iPrev!=iCid-1 ){
+        if( nPtr>=sizeof(i64) ){
+          i64 iVal;
+          memcpy(&iVal, aPtr, sizeof(i64));
+          if( hctListContains(nDel, aDel, iVal) ){
+            continue;
+          }
+        }
+
+        if( nPtr==SIZEOF_FOLLOWER_LOGPTR && iPrev>=0 && iPrev!=iCid-1 ){
           rc = xLog(pCtx, iCid, nPtr, aPtr);
         }else{
           iPrev = iCid;
@@ -1043,5 +977,22 @@ void **sqlite3HctJrnlLogPtrPtr(HctJournal *pJrnl){
 }
 void sqlite3HctJrnlLogPtrPtrRelease(HctJournal *pJrnl){
   sqlite3_mutex_leave(pJrnl->pServer->pLogPtrMutex);
+}
+
+/*
+** This is called as part of stage 1 recovery if the journal mode before
+** the restart was LEADER. It writes a zero-entry to the hct_journal table
+** for each CID value in the aEntry[] array.
+**
+** Return SQLITE_OK if successful, or an SQLite error code otherwise.
+*/
+int sqlite3HctJrnlZeroEntries(HctJournal *pJrnl, int nEntry, i64 *aEntry){
+  int ii;
+  int rc = SQLITE_OK;
+  for(ii=0; rc==SQLITE_OK && ii<nEntry; ii++){
+    rc = hctJrnlWriteRecord(pJrnl, 1, aEntry[ii], 0, 0, 0, 0, 0);
+  }
+
+  return rc;
 }
 
