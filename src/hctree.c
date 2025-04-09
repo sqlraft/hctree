@@ -1292,6 +1292,7 @@ static int hctAttemptRecovery(HBtree *p){
     if( rc==SQLITE_OK ){
       rc = sqlite3HctFileFindLogs(pFile, &lRb, hctRecordTid);
     }
+    hctIntListSort(&rc, &lRb);
 
     /* Find any non-contiguous journal entries written in follower mode.
     ** Store these in an in-memory cache at HBtree.aJrnlLog[]. */

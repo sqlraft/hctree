@@ -373,52 +373,143 @@ do_execsql_test 6.4 {
   4 {INSERT INTO t1 VALUES(1, 2)}
 }
 
-finish_test
-
-
-
-
-
-do_execsql_test 1.0 {
-  CREATE TABLE t1(a);
-}
-do_test 1.1 {
-  catch_hct_journal_init db
-} {1 {not an empty database}}
-
-db close
-sqlite3 db test.db
-
-do_test 1.2 {
-  catch_hct_journal_init db
-} {1 {not an empty database}}
+#-------------------------------------------------------------------------
 
 hct_reset_db
-do_execsql_test 1.3.1 {
+do_execsql_test 7.1 {
   BEGIN;
 }
-do_test 1.3.2 {
+do_test 7.2 {
   catch_hct_journal_init db
 } {1 {open transaction on database}}
-do_execsql_test 1.3.3 {
+
+do_execsql_test 7.3 {
   COMMIT;
 }
 
 reset_db
-do_test 1.4 {
+do_test 7.4 {
   catch_hct_journal_init db
 } {1 {not an hct database}}
 
 hct_reset_db
-do_test 1.5 {
+do_test 7.5 {
   catch_hct_journal_init db
 } {0 {}}
 
-do_execsql_test 1.6 {
-  SELECT cid, schemacid, quote(hash) FROM sqlite_hct_baseline
-} {
-  6 0 X'00000000000000000000000000000000'
+#-------------------------------------------------------------------------
+# Test that using the wrong kind of COMMIT command is an error.
+#
+hct_reset_db
+catch_hct_journal_init db
+
+do_execsql_test 8.1 {
+  CREATE TABLE t1(a, b);
 }
+
+do_execsql_test 8.2 {
+  SELECT * FROM hct_journal;
+} {
+  1 {} 0 {}
+}
+
+
+# Test with database in NORMAL mode.
+#
+do_execsql_test 8.3.0 {
+  BEGIN CONCURRENT;
+    INSERT INTO t1 VALUES('a', 'b');
+}
+do_test 8.3.1 {
+  sqlite3_hct_journal_follower_commit db "INSERT INTO t1 VALUES('a', 'b')" 2 1
+} {SQLITE_ERROR}
+do_test 8.3.2 {
+  sqlite3_errmsg db
+} {not a FOLLOWER mode db}
+do_execsql_test 8.3.3 {
+  ROLLBACK
+}
+do_execsql_test 8.4.0 {
+  BEGIN CONCURRENT;
+    INSERT INTO t1 VALUES('a', 'b');
+}
+do_test 8.4.1 {
+  sqlite3_hct_journal_leader_commit db "INSERT INTO t1 VALUES('a', 'b')" 
+} {SQLITE_ERROR 0 0}
+do_test 8.4.2 {
+  sqlite3_errmsg db
+} {not a LEADER mode db}
+do_execsql_test 8.4.3 {
+  ROLLBACK
+}
+do_execsql_test 8.5.0 {
+  BEGIN CONCURRENT;
+    INSERT INTO t1 VALUES('a', 'b');
+  COMMIT;
+}
+
+# Test with database in FOLLOWER mode.
+#
+sqlite3_hct_journal_setmode db FOLLOWER
+do_execsql_test 8.6.0 {
+  BEGIN CONCURRENT;
+    INSERT INTO t1 VALUES('a', 'b');
+}
+do_test 8.6.1 {
+  sqlite3_hct_journal_leader_commit db "INSERT INTO t1 VALUES('a', 'b')" 
+} {SQLITE_ERROR 0 0}
+do_test 8.6.2 {
+  sqlite3_errmsg db
+} {not a LEADER mode db}
+do_execsql_test 8.6.3 {
+  ROLLBACK
+}
+do_execsql_test 8.7.0 {
+  BEGIN CONCURRENT;
+    INSERT INTO t1 VALUES('a', 'b');
+}
+do_catchsql_test 8.7.1 {
+  COMMIT
+} {1 {SQL logic error}}
+do_test 8.7.2 {
+  sqlite3_errmsg db
+} {SQL logic error}
+do_test 8.7.3 {
+  sqlite3_get_autocommit db
+} 1
+
+# Test with database in LEADER mode.
+#
+sqlite3_hct_journal_setmode db LEADER
+do_execsql_test 8.8.0 {
+  BEGIN CONCURRENT;
+    INSERT INTO t1 VALUES('a', 'b');
+}
+do_test 8.8.1 {
+  sqlite3_hct_journal_follower_commit db "INSERT INTO t1 VALUES('a', 'b')" 5 1
+} {SQLITE_ERROR}
+do_test 8.8.2 {
+  sqlite3_errmsg db
+} {not a FOLLOWER mode db}
+do_execsql_test 8.8.3 {
+  ROLLBACK
+}
+do_execsql_test 8.8.0 {
+  BEGIN CONCURRENT;
+    INSERT INTO t1 VALUES('a', 'b');
+}
+do_catchsql_test 8.8.1 {
+  COMMIT
+} {1 {SQL logic error}}
+do_test 8.8.2 {
+  sqlite3_errmsg db
+} {SQL logic error}
+do_test 8.8.3 {
+  sqlite3_get_autocommit db
+} 1
+
+
+finish_test
 
 do_execsql_test 1.7 {
   PRAGMA table_info = sqlite_hct_journal
