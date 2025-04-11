@@ -336,10 +336,10 @@ do_execsql_test 6.2 {
   SELECT cid, query FROM hct_journal
 } {1 {}}
 
-proc write_leader {sql} {
-  execsql "BEGIN CONCURRENT"
-  execsql $sql
-  sqlite3_hct_journal_leader_commit db $sql
+proc write_leader {sql {db db}} {
+  execsql "BEGIN CONCURRENT" $db
+  execsql $sql $db
+  sqlite3_hct_journal_leader_commit $db $sql
 }
 
 do_test 6.3 {
@@ -447,6 +447,9 @@ do_execsql_test 8.5.0 {
     INSERT INTO t1 VALUES('a', 'b');
   COMMIT;
 }
+do_catchsql_test 8.5.1 {
+  INSERT INTO t1 DEFAULT VALUES;
+} {0 {}}
 
 # Test with database in FOLLOWER mode.
 #
@@ -477,6 +480,9 @@ do_test 8.7.2 {
 do_test 8.7.3 {
   sqlite3_get_autocommit db
 } 1
+do_catchsql_test 8.7.4 {
+  INSERT INTO t1 DEFAULT VALUES;
+} {1 {SQL logic error}}
 
 # Test with database in LEADER mode.
 #
@@ -507,194 +513,221 @@ do_test 8.8.2 {
 do_test 8.8.3 {
   sqlite3_get_autocommit db
 } 1
+do_catchsql_test 8.8.4 {
+  INSERT INTO t1 DEFAULT VALUES;
+} {1 {SQL logic error}}
 
 
-finish_test
+sqlite3_hct_journal_setmode db NORMAL
 
-do_execsql_test 1.7 {
-  PRAGMA table_info = sqlite_hct_journal
+do_execsql_test 8.9.1 {
+  SELECT cid, query, snapshot, quote(logptr) FROM hct_journal
 } {
-  0 cid            INTEGER 0 {} 1 
-  1 schema         TEXT 0 {} 0 
-  2 data           BLOB 0 {} 0 
-  3 schemacid      INTEGER 0 {} 0 
-  4 hash           BLOB 0 {} 0 
-  5 tid            INTEGER 0 {} 0 
-  6 validcid       INTEGER 0 {} 0
+  1 {} 0 NULL 
 }
 
-do_catchsql_test 1.8 {
-  INSERT INTO sqlite_hct_journal DEFAULT VALUES;
-} {1 {attempt to write a readonly database}}
-do_catchsql_test 1.9 {
-  INSERT INTO sqlite_hct_baseline DEFAULT VALUES;
-} {1 {attempt to write a readonly database}}
+do_execsql_test 8.9.2 {
+  INSERT INTO hct_journal DEFAULT VALUES;
+}
 
-db close
-sqlite3 db test.db
-
-do_catchsql_test 1.10 {
-  INSERT INTO sqlite_hct_journal DEFAULT VALUES;
-} {1 {attempt to write a readonly database}}
-do_catchsql_test 1.11 {
-  INSERT INTO sqlite_hct_baseline DEFAULT VALUES;
-} {1 {attempt to write a readonly database}}
+do_execsql_test 8.9.3 {
+  SELECT cid, query, snapshot, quote(logptr) FROM hct_journal
+} {
+  1 {} 0 NULL 
+  2 {} {} NULL 
+}
 
 #-------------------------------------------------------------------------
 hct_reset_db
 catch_hct_journal_init db
 sqlite3_hct_journal_setmode db LEADER
 
-do_execsql_test 2.0 {
-  CREATE TABLE t1(x, y);
-  INSERT INTO t1 VALUES(1, 2);
-}
+do_test 9.0 {
+  write_leader {
+    CREATE TABLE t1(x, y);
+    INSERT INTO t1 VALUES(1, 2);
+  }
+} {SQLITE_OK 2 1}
 
-do_execsql_test 2.1 {
-  SELECT cid FROM sqlite_hct_journal
-} {7 8}
+do_execsql_test 9.1 {
+  SELECT cid FROM hct_journal
+} {1 2}
 
 db close
 sqlite3 db test.db
 sqlite3_hct_journal_setmode db LEADER
 
-do_execsql_test 2.2 {
-  INSERT INTO t1 VALUES(3, 4);
-}
+do_test 9.2 {
+  write_leader {
+    INSERT INTO t1 VALUES(3, 4);
+  }
+} {SQLITE_OK 3 2}
 
-do_execsql_test 2.3 {
-  SELECT cid FROM sqlite_hct_journal
-} {7 8 9}
+do_execsql_test 9.3 {
+  SELECT cid FROM hct_journal
+} {1 2 3}
 
 sqlite3 db2 test.db
-do_execsql_test -db db2 2.4 {
-  INSERT INTO t1 VALUES(5, 6);
-}
+do_test 9.4 {
+  write_leader {
+    INSERT INTO t1 VALUES(5, 6);
+  }
+} {SQLITE_OK 4 3}
 db2 close
 
-do_execsql_test 2.5 {
-  SELECT cid FROM sqlite_hct_journal
-} {7 8 9 10}
+do_execsql_test 9.5 {
+  SELECT cid FROM hct_journal
+} {1 2 3 4}
 
 #-------------------------------------------------------------------------
 hct_reset_db
 catch_hct_journal_init db
 sqlite3_hct_journal_setmode db LEADER
 
-do_execsql_test 3.1.0 {
-  CREATE TABLE t1(x PRIMARY KEY, y) WITHOUT ROWID;
-  INSERT INTO t1 VALUES('a', 'one');
-  DELETE FROM t1 WHERE x='a';
-}
+do_test 10.1.0 {
+  write_leader { CREATE TABLE t1(x PRIMARY KEY, y) WITHOUT ROWID; }
+  write_leader { INSERT INTO t1 VALUES('a', 'one'); }
+  write_leader { DELETE FROM t1 WHERE x='a'; }
+} {SQLITE_OK 4 3}
 
 do_execsql_test 3.1.1 {
-  SELECT cid, hct_journal_entry(data) FROM sqlite_hct_journal
+  SELECT cid, query, snapshot FROM hct_journal
 } {
-  7 {}
-  8 {t1: ins ('a','one')}
-  9 {t1: del ('a')}
+  1 {} 0 
+  2 { CREATE TABLE t1(x PRIMARY KEY, y) WITHOUT ROWID; } 1 
+  3 { INSERT INTO t1 VALUES('a', 'one'); } 2 
+  4 { DELETE FROM t1 WHERE x='a'; } 3
 }
 
-do_execsql_test 3.1.2 {
-  BEGIN CONCURRENT;
+do_test 3.1.2 {
+  write_leader {
     INSERT INTO t1 VALUES(14, 15);
     INSERT INTO t1 VALUES(16, 17);
     INSERT INTO t1 VALUES(18, 19);
-  COMMIT;
+  }
 
-  SELECT hct_journal_entry(data) FROM sqlite_hct_journal 
-  ORDER BY cid DESC LIMIT 1;
-} {
-  {t1: ins (14,15) t1: ins (16,17) t1: ins (18,19)}
-}
+  string trim [db one {
+    SELECT query FROM hct_journal ORDER BY cid DESC LIMIT 1;
+  }]
+} [string trim {
+    INSERT INTO t1 VALUES(14, 15);
+    INSERT INTO t1 VALUES(16, 17);
+    INSERT INTO t1 VALUES(18, 19);
+}]
 
 hct_reset_db
 catch_hct_journal_init db
 sqlite3_hct_journal_setmode db LEADER
 
-do_execsql_test 3.2.0 {
-  CREATE TABLE t1(x PRIMARY KEY, y);
-  INSERT INTO t1 VALUES('a', 'one');
-  DELETE FROM t1 WHERE x='a';
-}
+do_test 10.2.0 {
+  write_leader { CREATE TABLE t1(x PRIMARY KEY, y); }
+  write_leader { INSERT INTO t1 VALUES('a', 'one'); }
+  write_leader { DELETE FROM t1 WHERE x='a'; }
+} {SQLITE_OK 4 3}
 
 do_execsql_test 3.2.1 {
-  SELECT cid, schema, hct_journal_entry(data) FROM sqlite_hct_journal
+  SELECT cid, query, snapshot FROM hct_journal
 } {
-  7 {CREATE TABLE t1(x PRIMARY KEY, y);} {}
-  8 {}                                   {t1: ins 1/('a','one')}
-  9 {}                                   {t1: del 1}
+  1 {} 0 
+  2 { CREATE TABLE t1(x PRIMARY KEY, y); } 1 
+  3 { INSERT INTO t1 VALUES('a', 'one'); } 2 
+  4 { DELETE FROM t1 WHERE x='a'; } 3
 }
 
-do_execsql_test 3.2.2 {
-  BEGIN CONCURRENT;
+do_test 10.2.2 {
+  write_leader {
     INSERT INTO t1 VALUES(14, 15);
     INSERT INTO t1 VALUES(16, 17);
     INSERT INTO t1 VALUES(18, 19);
-  COMMIT;
+  }
 
-  SELECT hct_journal_entry(data) FROM sqlite_hct_journal 
-  ORDER BY cid DESC LIMIT 1;
-} {
-  {t1: ins 1/(14,15) t1: ins 2/(16,17) t1: ins 3/(18,19)}
-}
+  string trim [db one {
+    SELECT query FROM hct_journal ORDER BY cid DESC LIMIT 1;
+  }]
+} [string trim {
+    INSERT INTO t1 VALUES(14, 15);
+    INSERT INTO t1 VALUES(16, 17);
+    INSERT INTO t1 VALUES(18, 19);
+}]
 
 #-------------------------------------------------------------------------
 hct_reset_db
 catch_hct_journal_init db
 sqlite3_hct_journal_setmode db LEADER
 
-do_execsql_test 4.0 {
-  CREATE TABLE t1(a, b);
-  INSERT INTO t1 VALUES(1, 2);
-  CREATE TABLE t2(a, b);
-  INSERT INTO t2 VALUES(1, 2);
-  CREATE TABLE t3(a, b);
-  INSERT INTO t3 VALUES(1, 2);
-  ALTER TABLE t3 RENAME TO t4;
-}
+do_test 11.0 {
+  write_leader { CREATE TABLE t1(a, b); }
+  write_leader { INSERT INTO t1 VALUES(1, 2); }
+  write_leader { CREATE TABLE t2(a, b); }
+  write_leader { INSERT INTO t2 VALUES(1, 2); }
+  write_leader { CREATE TABLE t3(a, b); }
+  write_leader { INSERT INTO t3 VALUES(1, 2); }
+  write_leader { ALTER TABLE t3 RENAME TO t4; }
+} {SQLITE_OK 8 7}
+
 db close
 sqlite3 db test.db
-sqlite3_hct_journal_setmode db LEADER
 
-do_execsql_test 4.1 {
+do_execsql_test 11.1 {
   INSERT INTO t4 VALUES(3, 4);
 }
 
+
 #-------------------------------------------------------------------------
 hct_reset_db
 catch_hct_journal_init db
 sqlite3_hct_journal_setmode db LEADER
 
-do_execsql_test 5.0 {
-  CREATE TABLE t1(a INTEGER PRIMARY KEY, b);          -- cid=7
-  INSERT INTO t1 VALUES(1, 'one');                    -- cid=8
-  INSERT INTO t1 VALUES(2, 'two');                    -- cid=9
-  INSERT INTO t1 VALUES(3, 'three');                  -- cid=10
-  INSERT INTO t1 VALUES(4, 'four');                   -- cid=11
-  INSERT INTO t1 VALUES(5, 'five');                   -- cid=12
+proc write_follower { db sql cid snapshot } {
+  $db eval { BEGIN CONCURRENT }
+  $db eval $sql
+  sqlite3_hct_journal_follower_commit $db $sql $cid $snapshot
 }
+
+do_test 12.0 {
+  write_leader { CREATE TABLE t1(a INTEGER PRIMARY KEY, b); } ;# cid=2
+  write_leader { INSERT INTO t1 VALUES(1, 'one'); }           ;# cid=3
+  write_leader { INSERT INTO t1 VALUES(2, 'two'); }           ;# cid=4
+  write_leader { INSERT INTO t1 VALUES(3, 'three'); }         ;# cid=5
+  write_leader { INSERT INTO t1 VALUES(4, 'four'); }          ;# cid=6
+  write_leader { INSERT INTO t1 VALUES(5, 'five'); }          ;# cid=7
+} {SQLITE_OK 7 6}
 
 forcedelete test.db2
 sqlite3 db2 file:test.db2?hctree=1 -uri 1
 catch_hct_journal_init db2
 
-do_test 5.1 {
+sqlite3_hct_journal_setmode db2 FOLLOWER
+
+do_test 12.1 {
   db eval { 
-    SELECT cid, schema, data, schemacid FROM sqlite_hct_journal 
-    WHERE cid IN (7, 8, 11, 12);
+    SELECT cid, query, snapshot FROM hct_journal 
+    WHERE cid IN (2, 3, 5, 6, 7)
   } {
-    set rc [sqlite3_hct_journal_write db2 $cid $schema $data $schemacid]
+    write_follower db2 $query $cid $snapshot
   }
 } {}
 
-do_execsql_test -db db2 5.2 {
+do_execsql_test -db db2 12.2 {
   SELECT * FROM t1;
 } {1 one}
 
-do_execsql_test -db db2 5.3 {
-  SELECT cid FROM sqlite_hct_journal
-} {7 8 11 12}
+do_execsql_test -db db2 12.3 {
+  SELECT cid FROM hct_journal
+} {1 2 3 5 6 7}
+
+do_test 12.4 {
+  db eval { 
+    SELECT cid, query, snapshot FROM hct_journal 
+    WHERE cid = 4
+  } {
+    write_follower db2 $query $cid $snapshot
+  }
+} {}
+
+do_execsql_test -db db2 12.25 {
+  SELECT * FROM t1;
+} {1 one 2 two 3 three 4 four 5 five}
 
 finish_test
 

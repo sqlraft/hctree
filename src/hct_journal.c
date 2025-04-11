@@ -647,57 +647,54 @@ int sqlite3_hct_journal_setmode(sqlite3 *db, int eMode){
       sqlite3HctFileSetCID(pFile, iCidMax);
     }
 
-  }else
+  }else{
 
-  /* Switching from LEADER or FOLLOWER back to NORMAL. */
-  if( eMode==SQLITE_HCT_NORMAL ){
     if( eCurrentMode==SQLITE_HCT_FOLLOWER ){
-      u64 iSnap = sqlite3HctJrnlSnapshot(pJrnl);
+      u64 iSnap = pServer->iSnapshot;
+      u64 iTest = 0;
+      int bSeenMiss = 0;
+
+      /* Check that the journal is contiguous. Set rc to SQLITE_ERROR and 
+      ** leave an error message in the db handle if it is not. */
+      for(iTest=pServer->iSnapshot+1; 
+          iTest<pServer->iSnapshot+pServer->nCommit;
+          iTest++
+      ){
+        u64 iVal = HctAtomicLoad(&pServer->aCommit[iTest % pServer->nCommit]);
+        if( iVal==iTest ){
+          if( bSeenMiss ){
+            rc = SQLITE_ERROR;
+            hctJournalSetDbError(db, rc, "non-contiguous journal table");
+            break;
+          }
+          iSnap = iTest;
+        }else{
+          bSeenMiss = 1;
+        }
+      }
+
       assert( iSnap!=0 );
       sqlite3HctFileSetCID(pFile, iSnap);
     }
-    sqlite3_free(pServer->aCommit);
-    pServer->iSnapshot = 0;
-    pServer->nCommit = 0;
-    pServer->aCommit = 0;
-  }else
-
-  /* Switching from LEADER to FOLLOWER */
-  if( eMode==SQLITE_HCT_FOLLOWER ){
-    assert( eCurrentMode==SQLITE_HCT_LEADER );
-    HctAtomicStore(&pServer->iSnapshot, sqlite3HctFileGetSnapshotid(pFile));
-  }else
-
-  /* Switching from FOLLOWER to LEADER */
-  {
-    u64 iTest = 0;
-    u64 iSnap = pServer->iSnapshot;
-    int bSeenMiss = 0;
-
-    assert( eMode==SQLITE_HCT_LEADER );
-    assert( eCurrentMode==SQLITE_HCT_FOLLOWER );
-
-    /* Check that the journal is contiguous. Set rc to SQLITE_ERROR and 
-    ** leave an error message in the db handle if it is not. */
-    for(iTest=pServer->iSnapshot+1; 
-        iTest<pServer->iSnapshot+pServer->nCommit;
-        iTest++
-    ){
-      u64 iVal = HctAtomicLoad(&pServer->aCommit[iTest % pServer->nCommit]);
-      if( iVal==iTest ){
-        if( bSeenMiss ){
-          rc = SQLITE_ERROR;
-          hctJournalSetDbError(db, rc, "non-contiguous journal table");
-          break;
-        }
-        iSnap = iTest;
-      }else{
-        bSeenMiss = 1;
-      }
-    }
 
     if( rc==SQLITE_OK ){
-      sqlite3HctFileSetCID(pFile, iSnap);
+      if( eMode==SQLITE_HCT_NORMAL ){
+        /* Switching from LEADER or FOLLOWER back to NORMAL. */
+        sqlite3_free(pServer->aCommit);
+        pServer->iSnapshot = 0;
+        pServer->nCommit = 0;
+        pServer->aCommit = 0;
+      }else
+
+      if( eMode==SQLITE_HCT_FOLLOWER ){
+        /* Switching from LEADER to FOLLOWER */
+        assert( eCurrentMode==SQLITE_HCT_LEADER );
+        HctAtomicStore(&pServer->iSnapshot, sqlite3HctFileGetSnapshotid(pFile));
+      }else{ 
+        /* Switching from FOLLOWER to LEADER */
+        assert( eMode==SQLITE_HCT_LEADER );
+        assert( eCurrentMode==SQLITE_HCT_FOLLOWER );
+      }
     }
   }
 
@@ -734,7 +731,6 @@ u64 sqlite3HctJrnlSnapshot(HctJournal *pJrnl){
       if( iRet>=iSnap+16 ){
         (void)HctCASBool(&pServer->iSnapshot, iSnap, iRet);
       }
-
     }
   }
   return iRet;
