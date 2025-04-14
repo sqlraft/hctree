@@ -2201,6 +2201,14 @@ static int hctDbFollowRangeOld(
     assert( bMerge==0 );
   }
 
+  /* TODO: Optimizations - this is only required when committing in LEADER
+  ** mode. And can be omitted if hctDbTidIsVisible() was called above. */
+  if( bMerge==0 ){
+    u64 eDummy = 0;
+    u64 iCid = hctDbTMapLookup(pDb, iRangeTidValue, &eDummy);
+    pDb->iReqSnapshotId = MAX(pDb->iReqSnapshotId, iCid);
+  }
+
   *pbMerge = bMerge;
   assert( bRet==0 || iRangeTidValue>0 );
   return bRet;
@@ -2740,8 +2748,10 @@ int sqlite3HctDbCsrSeek(
         *pRes = -1;
       }
     }else{
-
-      if( rc==SQLITE_OK && 0==hctDbCurrentIsVisible(pCsr) ){
+    
+      if( pCsr->eDir==BTREE_DIR_NONE && bExact==0 ){
+        *pRes = -1;
+      }else if( 0==hctDbCurrentIsVisible(pCsr) ){
         switch( pCsr->eDir ){
           case BTREE_DIR_FORWARD:
             *pRes = 1;
