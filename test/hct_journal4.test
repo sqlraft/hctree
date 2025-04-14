@@ -80,6 +80,30 @@ do_writeleader_test 1.7 {
   SELECT * FROM t1 WHERE a>=1 AND a<=3 ORDER BY a;
 } {SQLITE_OK 20 17}
 
+do_writeleader_test 1.8 {
+  UPDATE t1 SET b='eight.one' WHERE a=8;
+} {SQLITE_OK 21 11}
+
+do_writeleader_test 1.9 {
+  UPDATE t1 SET b='eight.two' WHERE a=8;
+} {SQLITE_OK 22 21}
+
+do_writeleader_test 1.10 {
+  DELETE FROM t1 WHERE a=8
+} {SQLITE_OK 23 22}
+
+do_writeleader_test 1.11 {
+  INSERT INTO t1 VALUES(8, 'eight');
+} {SQLITE_OK 24 23}
+
+do_writeleader_test 1.12 {
+  INSERT INTO t2 VALUES(70, 'seventy');
+} {SQLITE_OK 25 3}
+
+do_writeleader_test 1.13 {
+  ALTER TABLE t2 RENAME TO t22;
+} {SQLITE_OK 26 25}
+
 proc q {sql} {
   set nMax 60
   set out [string map [list "\n" {}] $sql]

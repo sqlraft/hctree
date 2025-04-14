@@ -5591,6 +5591,15 @@ int sqlite3HctDbInsert(
   int rc = SQLITE_OK;
   int nRecField = pRec ? pRec->nField : 0;
 
+  if( iRoot==1 ){
+    /* If the sqlite_schema table is being written, set iReqSnapshotId to
+    ** a very large value. The upper layer will interpret this as the
+    ** transaction depending on snapshot (iCid-1) for the purposes of the
+    ** hct_journal table, where iCid is (yet to be assigned) CID value
+    ** of this transaction.  */
+    pDb->iReqSnapshotId = LARGEST_TID;
+  }
+
   /* If this operation is inserting an index entry, figure out how many of
   ** the record fields to consider when determining if a potential write
   ** collision is found in the data structure.  */

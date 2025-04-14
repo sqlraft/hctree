@@ -1753,6 +1753,9 @@ static int btreeFlushToDisk(HBtree *p){
     if( iCid==0 ){
       rc = sqlite3HctDbValidate(p->config.db, p->pHctDb, &iCid);
     }
+    if( iReqSnapshot>iCid ){
+      iReqSnapshot = iCid-1;
+    }
 
     /* If there have been any schema operations, there may have been
     ** CREATE TABLE statements. In this case, for each CREATE TABLE
