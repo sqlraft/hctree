@@ -15,10 +15,6 @@ source $testdir/tester.tcl
 source $testdir/hct_common.tcl
 set testprefix hct_journal4
 
-hct_reset_db
-catch_hct_journal_init db
-sqlite3_hct_journal_setmode db LEADER
-
 proc write_leader {sql {db db}} {
   set sql [string trim $sql]
 
@@ -31,90 +27,101 @@ proc do_writeleader_test {tn sql res} {
   do_test $tn [list write_leader $sql] $res
 }
 
-do_test 1.0 {
-  write_leader { CREATE TABLE t1(a INTEGER PRIMARY KEY, b) }
-  write_leader { CREATE TABLE t2(x INTEGER PRIMARY KEY, y) }
+foreach {tn wo} {
+  1 {}
+  2 "WITHOUT ROWID"
+} {
 
-  write_leader { INSERT INTO t1 VALUES(1, 'one') }
-  write_leader { INSERT INTO t1 VALUES(2, 'two') }
-  write_leader { INSERT INTO t1 VALUES(3, 'three') }
-  write_leader { INSERT INTO t1 VALUES(4, 'four') }
-  write_leader { INSERT INTO t1 VALUES(5, 'five') }
-  write_leader { INSERT INTO t1 VALUES(6, 'six') }
-  write_leader { INSERT INTO t1 VALUES(7, 'seven') }
-  write_leader { INSERT INTO t1 VALUES(8, 'eight') }
-  write_leader { INSERT INTO t1 VALUES(9, 'nine') }
-  write_leader { INSERT INTO t1 VALUES(10, 'ten') }
-  set {} {}
+  hct_reset_db
+  catch_hct_journal_init db
+  sqlite3_hct_journal_setmode db LEADER
+  
+  
+  do_test $tn.1.0 {
+    write_leader " CREATE TABLE t1(a INTEGER PRIMARY KEY, b) $wo "
+    write_leader " CREATE TABLE t2(x INTEGER PRIMARY KEY, y) $wo "
+  
+    write_leader { INSERT INTO t1 VALUES(1, 'one') }
+    write_leader { INSERT INTO t1 VALUES(2, 'two') }
+    write_leader { INSERT INTO t1 VALUES(3, 'three') }
+    write_leader { INSERT INTO t1 VALUES(4, 'four') }
+    write_leader { INSERT INTO t1 VALUES(5, 'five') }
+    write_leader { INSERT INTO t1 VALUES(6, 'six') }
+    write_leader { INSERT INTO t1 VALUES(7, 'seven') }
+    write_leader { INSERT INTO t1 VALUES(8, 'eight') }
+    write_leader { INSERT INTO t1 VALUES(9, 'nine') }
+    write_leader { INSERT INTO t1 VALUES(10, 'ten') }
+    set {} {}
+  
+  } {}
+  
+  do_writeleader_test $tn.1.1 {
+    INSERT INTO t1 VALUES(0, 'zero');
+  } {SQLITE_OK 14 3}
+  
+  do_writeleader_test $tn.1.2 {
+    INSERT INTO t1 VALUES(11, 'eleven');
+  } {SQLITE_OK 15 3}
+  
+  do_writeleader_test $tn.1.3 {
+    UPDATE t1 SET b = 'five.five' WHERE a=5;
+  } {SQLITE_OK 16 8}
+  
+  do_writeleader_test $tn.1.4 {
+    DELETE FROM t1 WHERE a=2;
+  } {SQLITE_OK 17 5}
+  
+  do_writeleader_test $tn.1.5 {
+    INSERT INTO t2 VALUES(100, 'one hundred');
+    SELECT * FROM t1 WHERE a>6 AND a<=8;
+  } {SQLITE_OK 18 12}
+  
+  do_writeleader_test 1.6 {
+    INSERT INTO t2 VALUES(90, 'ninety');
+    SELECT * FROM t1 WHERE a>6 AND a<=8 ORDER BY a DESC;
+  } {SQLITE_OK 19 11}
+  
+  do_writeleader_test 1.7 {
+    INSERT INTO t2 VALUES(80, 'eighty');
+    SELECT * FROM t1 WHERE a>=1 AND a<=3 ORDER BY a;
+  } {SQLITE_OK 20 17}
+  
+  do_writeleader_test 1.8 {
+    UPDATE t1 SET b='eight.one' WHERE a=8;
+  } {SQLITE_OK 21 11}
+  
+  do_writeleader_test 1.9 {
+    UPDATE t1 SET b='eight.two' WHERE a=8;
+  } {SQLITE_OK 22 21}
+  
+  do_writeleader_test 1.10 {
+    DELETE FROM t1 WHERE a=8
+  } {SQLITE_OK 23 22}
+  
+  do_writeleader_test 1.11 {
+    INSERT INTO t1 VALUES(8, 'eight');
+  } {SQLITE_OK 24 23}
 
-} {}
-
-do_writeleader_test 1.1 {
-  INSERT INTO t1 VALUES(0, 'zero');
-} {SQLITE_OK 14 3}
-
-do_writeleader_test 1.2 {
-  INSERT INTO t1 VALUES(11, 'eleven');
-} {SQLITE_OK 15 3}
-
-do_writeleader_test 1.3 {
-  UPDATE t1 SET b = 'five.five' WHERE a=5;
-} {SQLITE_OK 16 8}
-
-do_writeleader_test 1.4 {
-  DELETE FROM t1 WHERE a=2;
-} {SQLITE_OK 17 5}
-
-do_writeleader_test 1.5 {
-  INSERT INTO t2 VALUES(100, 'one hundred');
-  SELECT * FROM t1 WHERE a>6 AND a<=8;
-} {SQLITE_OK 18 12}
-
-do_writeleader_test 1.6 {
-  INSERT INTO t2 VALUES(90, 'ninety');
-  SELECT * FROM t1 WHERE a>6 AND a<=8 ORDER BY a DESC;
-} {SQLITE_OK 19 11}
-
-do_writeleader_test 1.7 {
-  INSERT INTO t2 VALUES(80, 'eighty');
-  SELECT * FROM t1 WHERE a>=1 AND a<=3 ORDER BY a;
-} {SQLITE_OK 20 17}
-
-do_writeleader_test 1.8 {
-  UPDATE t1 SET b='eight.one' WHERE a=8;
-} {SQLITE_OK 21 11}
-
-do_writeleader_test 1.9 {
-  UPDATE t1 SET b='eight.two' WHERE a=8;
-} {SQLITE_OK 22 21}
-
-do_writeleader_test 1.10 {
-  DELETE FROM t1 WHERE a=8
-} {SQLITE_OK 23 22}
-
-do_writeleader_test 1.11 {
-  INSERT INTO t1 VALUES(8, 'eight');
-} {SQLITE_OK 24 23}
-
-do_writeleader_test 1.12 {
-  INSERT INTO t2 VALUES(70, 'seventy');
-} {SQLITE_OK 25 3}
-
-do_writeleader_test 1.13 {
-  ALTER TABLE t2 RENAME TO t22;
-} {SQLITE_OK 26 25}
-
-proc q {sql} {
-  set nMax 60
-  set out [string map [list "\n" {}] $sql]
-  if {[string length $out]>$nMax} {
-    set out "[string range $out 0 [expr $nMax-4]]..."
+  do_writeleader_test 1.12 {
+    INSERT INTO t2 VALUES(70, 'seventy');
+  } {SQLITE_OK 25 3}
+ 
+  do_writeleader_test 1.13 {
+    ALTER TABLE t2 RENAME TO t22;
+  } {SQLITE_OK 26 25}
+ 
+  proc q {sql} {
+    set nMax 60
+    set out [string map [list "\n" {}] $sql]
+    if {[string length $out]>$nMax} {
+      set out "[string range $out 0 [expr $nMax-4]]..."
+    }
+    return $out
   }
-  return $out
-}
-db func q q
+  db func q q
+  execsql_pp {SELECT cid, q(query), snapshot FROM hct_journal}
 
-execsql_pp {SELECT cid, q(query), snapshot FROM hct_journal}
+}
 
 finish_test
 

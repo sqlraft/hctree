@@ -663,7 +663,7 @@ do_test 11.0 {
   write_leader { CREATE TABLE t3(a, b); }
   write_leader { INSERT INTO t3 VALUES(1, 2); }
   write_leader { ALTER TABLE t3 RENAME TO t4; }
-} {SQLITE_OK 8 6}
+} {SQLITE_OK 8 7}
 
 db close
 sqlite3 db test.db
