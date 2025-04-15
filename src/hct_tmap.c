@@ -612,70 +612,16 @@ i64 sqlite3HctTMapStats(sqlite3 *db, int iStat, const char **pzStat){
   return iVal;
 }
 
-int sqlite3HctTMapBuildStart(HctTMapClient *p, u64 iStart, u64 iLast){
-  u64 iFirst = 1 + ((iStart-1) / HCT_TMAP_PAGESIZE) * HCT_TMAP_PAGESIZE;
-  HctTMapFull *pNew = 0;
-  int nMap = 0;
-  i64 nByte = 0;
-  int rc = SQLITE_OK;
-  assert( p->pBuild==0 );
-
-  nMap = ((iLast - iFirst) + HCT_TMAP_PAGESIZE-1) / HCT_TMAP_PAGESIZE;
-  nMap += 2;
-  nByte = sizeof(HctTMapFull) + nMap*sizeof(u64*);
-
-  p->pBuild = pNew = (HctTMapFull*)sqlite3HctMalloc(&rc, nByte);
-  if( pNew ){
-    int nBytePerPage = HCT_TMAP_PAGESIZE * sizeof(u64);
-    u64 ee;
-    pNew->m.aaMap = (u64**)&pNew[1];
-    pNew->m.iFirstTid = iFirst;
-    pNew->m.nMap = nMap;
-    pNew->nRef = 1;
-    for(ee=0; ee<nMap; ee++){
-      pNew->m.aaMap[ee] = (u64*)sqlite3HctMalloc(&rc, nBytePerPage);
-    }
-    if( rc==SQLITE_OK ){
-      for(ee=iFirst; ee<=iLast; ee++){
-        int iMap = (ee - iFirst) / HCT_TMAP_PAGESIZE;
-        int iOff = (ee - iFirst) % HCT_TMAP_PAGESIZE;
-        iOff = HCT_TMAP_ENTRYSLOT(iOff);
-        pNew->m.aaMap[iMap][iOff] = ((u64)1 | HCT_TMAP_COMMITTED);
-      }
-    }
-  }
-
-  return rc;
-}
-
-void sqlite3HctTMapBuildSet(HctTMapClient *p, u64 iTid, u64 iCid){
-  HctTMapFull *pNew = p->pBuild;
-  int iMap;
-  int iOff;
-  u64 iFirst = 0;
-
-  assert( pNew );
-  assert( iTid>=pNew->m.iFirstTid );
-
-  iFirst = pNew->m.iFirstTid;
-  iMap = (iTid - iFirst) / HCT_TMAP_PAGESIZE;
-  iOff = (iTid - iFirst) % HCT_TMAP_PAGESIZE;
-  assert( iMap<pNew->m.nMap );
-
-  iOff = HCT_TMAP_ENTRYSLOT(iOff);
-  pNew->m.aaMap[iMap][iOff] = ((u64)iCid | HCT_TMAP_COMMITTED);
-}
-
 int sqlite3HctTMapRecoverySet(HctTMapClient *p, u64 iTid, u64 iCid){
   int rc = SQLITE_OK;
   HctTMapFull *pNew = p->pBuild;
   if( pNew==0 ){
-    u64 iFirst = 1;
+    u64 iFirst = 0;
     u64 iEof = p->pServer->pList->m.iFirstTid;
     u64 iLast = iEof + (HCT_TMAP_PAGESIZE*2);
     int nMap = 0;
     if( iTid>=HCT_TMAP_PAGESIZE ){
-      iFirst = 1 + ((iTid / HCT_TMAP_PAGESIZE) - 1) * HCT_TMAP_PAGESIZE;
+      iFirst = ((iTid / HCT_TMAP_PAGESIZE) - 1) * HCT_TMAP_PAGESIZE;
     }
     nMap = ((iLast - iFirst) + HCT_TMAP_PAGESIZE-1) / HCT_TMAP_PAGESIZE;
     assert( nMap>0 );
