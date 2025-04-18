@@ -148,5 +148,6 @@ void sqlite3HctTMapRecoveryFinish(HctTMapClient*, int rc);
 
 int sqlite3HctTMapServerSet(HctTMapServer *pServer, u64 iTid, u64 iCid);
 
+int sqlite3HctTmapVtabInit(sqlite3 *db);
 
 

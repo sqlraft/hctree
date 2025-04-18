@@ -9313,6 +9313,7 @@ int Sqlitetest1_Init(Tcl_Interp *interp){
   };
   static int bitmask_size = sizeof(Bitmask)*8;
   int i;
+  extern int hct_extra_logging;
   extern int sqlite3_sync_count, sqlite3_fullsync_count;
   extern int sqlite3_opentemp_count;
   extern int sqlite3_like_count;
@@ -9418,6 +9419,8 @@ int Sqlitetest1_Init(Tcl_Interp *interp){
       (char*)&sqlite3_sync_count, TCL_LINK_INT);
   Tcl_LinkVar(interp, "sqlite_fullsync_count",
       (char*)&sqlite3_fullsync_count, TCL_LINK_INT);
+  Tcl_LinkVar(interp, "hct_extra_logging",
+      (char*)&hct_extra_logging, TCL_LINK_INT);
 #if defined(SQLITE_ENABLE_TREETRACE)
   Tcl_LinkVar(interp, "sqlite3_unsupported_treetrace",
       (char*)&sqlite3TreeTrace, TCL_LINK_INT);
