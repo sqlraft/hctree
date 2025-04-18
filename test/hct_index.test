@@ -76,17 +76,34 @@ do_test 1.2 {
 #show_all_entries
 
 puts [time {
-do_execsql_test -db db2 1.3 {
+do_execsql_test -db db2 1.3.asc {
   SELECT * FROM vals ORDER BY topic, value;
 } {
   1 1 1 2 1 1 3 1 1 4 1 1 5 1 1 6 1 1 7 1 1 8 1 1
 }
 }]
 
+puts [time {
+do_execsql_test -db db2 1.3.desc {
+  SELECT * FROM vals ORDER BY topic DESC, value DESC;
+} {
+  8 1 1 7 1 1 6 1 1 5 1 1 4 1 1 3 1 1 2 1 1 1 1 1 
+}
+}]
+
 foreach dbx [lsort [array names A]] {
-  do_execsql_test -db $dbx 1.4.$dbx {
+  do_execsql_test -db $dbx 1.4.$dbx.1 {
     SELECT * FROM vals ORDER BY topic, value
   } $A($dbx)
+
+  set rev [list]
+  foreach {a b c} $A($dbx) {
+    set rev [linsert $rev 0 $a $b $c]
+  }
+
+  do_execsql_test -db $dbx 1.4.$dbx.2 {
+    SELECT * FROM vals ORDER BY topic DESC, value DESC
+  } $rev
 
   $dbx close
 }
@@ -123,7 +140,12 @@ do_execsql_test 2.2 {
 
 do_execsql_test -db db2 2.3 {
     SELECT * FROM t1
-  END;
+} {4 four}
+
+#show_pagemap
+#show_all_entries
+do_execsql_test -db db2 2.4 {
+    SELECT * FROM t1 ORDER BY rowid DESC
 } {4 four}
 
 finish_test
