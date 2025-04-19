@@ -128,6 +128,7 @@ static Tcl_ThreadCreateType tclScriptThread(ClientData pSqlThread){
   Sqlitetest1_Init(interp);
   Sqlitetest_mutex_Init(interp);
   Sqlite3_Init(interp);
+  SqlitetestThread_Init(interp);
 
   rc = Tcl_Eval(interp, p->zScript);
   pRes = Tcl_GetObjResult(interp);

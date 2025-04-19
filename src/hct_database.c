@@ -16,6 +16,17 @@
 #include <string.h>
 #include <assert.h>
 
+#define DEBUG_EXTRA_LOGGING 1
+int hct_extra_logging = 0;
+
+static void hctExtraLogging(const char *zFunc, int iLine, char *zMsg){
+  sqlite3_log(SQLITE_NOTICE, "%s:%d: %s", zFunc, iLine, zMsg);
+  sqlite3_free(zMsg);
+}
+
+#define HCT_EXTRA_LOGGING(x) if( hct_extra_logging ) { hctExtraLogging(__func__, __LINE__, sqlite3_mprintf x); }
+
+
 typedef struct HctDatabase HctDatabase;
 typedef struct HctDbIndexEntry HctDbIndexEntry;
 typedef struct HctDbIndexLeaf HctDbIndexLeaf;
@@ -2181,6 +2192,13 @@ static int hctDbFollowRangeOld(
     bRet = 1;
     assert( bMerge==0 );
   }
+
+  HCT_EXTRA_LOGGING((
+      "%sfollowing, %smerging for history pointer "
+      "(iRangeTid=%lld, iFollowTid=%lld, iOldPg=%lld)",
+      (bRet ? "" : "not "), (bMerge ? "" : "not "),
+      iRangeTidValue, (pPtr->iFollowTid & HCT_TID_MASK), pPtr->iOld
+  ));
 
   *pbMerge = bMerge;
   assert( bRet==0 || iRangeTidValue>0 );
@@ -6035,6 +6053,11 @@ int sqlite3HctDbCsrOpen(
 
   assert( pDb->iSnapshotId!=0 );
 
+  HCT_EXTRA_LOGGING((
+      "opening cursor with snapshot=%lld, iLocalMinTid=%lld", 
+      pDb->iSnapshotId, pDb->iLocalMinTid
+  ));
+
   /* Search for an existing cursor that can be reused. */
   HctDbCsr **pp;
   for(pp=&pDb->pScannerList; *pp; pp=&(*pp)->pNextScanner){
@@ -6186,6 +6209,35 @@ int sqlite3HctDbCsrLast(HctDbCsr *pCsr){
   return rc;
 }
 
+static void hctExtraLoggingNewRangeCsr(
+  const char *zFunc, 
+  int iLine,
+  HctDbCsr *pCsr
+){
+  char *zLow = 0;
+  char *zHigh = 0;
+  char *zMsg = 0;
+  HctDbRangeCsr *p = &pCsr->aRange[pCsr->nRange-1];
+
+  if( pCsr->pKeyInfo ){
+    if( p->lowkey.pKey ) zLow = sqlite3HctDbUnpackedToText(p->lowkey.pKey);
+    if( p->highkey.pKey ) zHigh = sqlite3HctDbUnpackedToText(p->highkey.pKey);
+  }else{
+    zLow = sqlite3_mprintf("%lld", p->lowkey.iKey);
+    zHigh = sqlite3_mprintf("%lld", p->highkey.iKey);
+  }
+
+  zMsg = sqlite3_mprintf(
+      "created range cursor %d lowkey=(%s) highkey=(%s)",
+      pCsr->nRange - 1, zLow, zHigh
+  );
+  sqlite3_free(zLow);
+  sqlite3_free(zHigh);
+  hctExtraLogging(zFunc, iLine, zMsg);
+}
+
+#define HCT_EXTRA_LOGGING_NEWRANGECSR(pCsr) \
+  if( hct_extra_logging ){hctExtraLoggingNewRangeCsr(__func__, __LINE__, pCsr);}
 
 static int hctDbCsrNext(HctDbCsr *pCsr){
   HctDatabase *pDb = pCsr->pDb;
@@ -6208,14 +6260,27 @@ static int hctDbCsrNext(HctDbCsr *pCsr){
         hctDbCsrDescendRange(&rc, pCsr, ptr.iRangeTid, ptr.iOld, bMerge);
         if( rc==SQLITE_OK ){
           HctDbRangeCsr *p = &pCsr->aRange[pCsr->nRange-1];
-          if( p->eRange==HCT_RANGE_FAN ){
-            p->iCell = -1;
+          if( p->lowkey.pKey 
+           && hctDbCompareKey(p->lowkey.pKey->pKeyInfo,&p->lowkey,&p->highkey)>=0
+          ){
+            hctDbCsrAscendRange(pCsr);
           }else{
-            int bExact = 0;
-            hctDbLeafSearch(pDb, 
-                p->pg.aOld, p->lowkey.iKey, p->lowkey.pKey, &p->iCell, &bExact
-            );
-            if( bExact==0 ) p->iCell--;
+
+            if( p->eRange==HCT_RANGE_FAN ){
+              p->iCell = -1;
+            }else{
+              int bExact = 0;
+              hctDbLeafSearch(pDb, 
+                  p->pg.aOld, p->lowkey.iKey, p->lowkey.pKey, &p->iCell, &bExact
+              );
+
+              if( bExact==0 ) p->iCell--;
+#if 1
+              if( p->iCell>=0 ) p->iCell--;
+#endif
+            }
+
+            HCT_EXTRA_LOGGING_NEWRANGECSR(pCsr);
           }
         }
       }
@@ -6224,16 +6289,31 @@ static int hctDbCsrNext(HctDbCsr *pCsr){
         HctDbRangeCsr *p = &pCsr->aRange[pCsr->nRange-1];
 
         p->iCell++;
+        HCT_EXTRA_LOGGING((
+            "moving range cursor %d to cell %d on physical page %lld",
+            pCsr->nRange-1, 
+            p->iCell, p->pg.iOldPg
+        ));
         if( p->iCell<hctPagenentry(p->pg.aOld) && (
             p->eRange==HCT_RANGE_FAN 
          || hctDbCompareCellKey(&rc, pDb, p->pg.aOld, p->iCell, &p->highkey)<0
         )){
+
+#if 1
+          if( p->eRange==HCT_RANGE_MERGE 
+           && hctDbCompareCellKey(&rc,pDb,p->pg.aOld,p->iCell,&p->lowkey)<=0 
+          ){
+            break;
+          }
+#endif
+
           if( p->eRange==HCT_RANGE_MERGE ){
             return SQLITE_OK;
           }
           break;
         }
         sqlite3HctFilePageRelease(&p->pg);
+        HCT_EXTRA_LOGGING(("range cursor %d at EOF", pCsr->nRange-1));
         hctDbCsrAscendRange(pCsr);
       }
 
@@ -6246,12 +6326,17 @@ static int hctDbCsrNext(HctDbCsr *pCsr){
   assert( pPg->nHeight==0 );
 
   pCsr->iCell++;
+  HCT_EXTRA_LOGGING((
+      "moving to cell %d on physical page %lld",
+      pCsr->iCell, pCsr->pg.iOldPg
+  ));
   if( pCsr->iCell==pPg->nEntry ){
     u32 iPeerPg = pPg->iPeerPg;
     if( iPeerPg==0 ){
       /* Main cursor is now at EOF */
       pCsr->iCell = -1;
       sqlite3HctFilePageRelease(&pCsr->pg);
+      HCT_EXTRA_LOGGING(("at EOF"));
     }else{
       /* Jump to peer page */
       rc = sqlite3HctFilePageRelease(&pCsr->pg);
@@ -6259,6 +6344,10 @@ static int hctDbCsrNext(HctDbCsr *pCsr){
         rc = sqlite3HctFilePageGet(pDb->pFile, iPeerPg, &pCsr->pg);
         pCsr->iCell = 0;
       }
+      HCT_EXTRA_LOGGING((
+          "jump to peer page %lld (physical %lld)",
+          iPeerPg, pCsr->pg.iOldPg
+      ));
     }
   }
 
@@ -6355,6 +6444,54 @@ static int hctDbCsrPrev(HctDbCsr *pCsr){
   return rc;
 }
 
+static void hctExtraLoggingLogCsrPos(
+  const char *zFunc, 
+  int iLine, 
+  HctDbCsr *pCsr
+){
+  char *zMsg = 0;
+  if( pCsr->iCell<0 ){
+    zMsg = sqlite3_mprintf("at EOF");
+  }else{
+    char *zKey = 0;
+
+    int bRange = 0;
+    int iCell = -1;
+    i64 iPg = -1;
+
+    if( pCsr->nRange ){
+      HctDbRangeCsr *p = &pCsr->aRange[pCsr->nRange-1];
+      bRange = 1;
+      iCell = p->iCell;
+      iPg = p->pg.iOldPg;
+    }else{
+      iCell = pCsr->iCell;
+      iPg = pCsr->pg.iOldPg;
+    }
+
+    if( pCsr->pKeyInfo ){
+      int nData = 0;
+      const u8 *aData = 0;
+      sqlite3HctDbCsrData(pCsr, &nData, &aData);
+      zKey = sqlite3HctDbRecordToText(0, aData, nData);
+    }else{
+      i64 iKey = 0;
+      sqlite3HctDbCsrKey(pCsr, &iKey);
+      zKey = sqlite3_mprintf("%lld", iKey);
+    }
+
+    zMsg = sqlite3_mprintf("at %scell %d, phys. page %lld, key (%s)",
+        bRange ? "(range cursor) " : "", iCell, iPg, zKey
+    );
+    sqlite3_free(zKey);
+  }
+
+  hctExtraLogging(zFunc, iLine, zMsg);
+}
+
+#define HCT_EXTRA_LOGGING_CSRPOS(pCsr) \
+  if( hct_extra_logging ){hctExtraLoggingLogCsrPos(__func__, __LINE__, pCsr);}
+
 int sqlite3HctDbCsrNext(HctDbCsr *pCsr){
   int rc = SQLITE_OK;
 
@@ -6364,6 +6501,9 @@ int sqlite3HctDbCsrNext(HctDbCsr *pCsr){
   do {
     rc = hctDbCsrNext(pCsr);
   }while( rc==SQLITE_OK && pCsr->iCell>=0 && hctDbCurrentIsVisible(pCsr)==0 );
+
+  HCT_EXTRA_LOGGING_CSRPOS(pCsr);
+
   return rc;
 }
 
@@ -7080,6 +7220,38 @@ static char *hex_encode(const u8 *aIn, int nIn){
   return zRet;
 }
 
+char *sqlite3HctDbUnpackedToText(UnpackedRecord *pRec){
+  char *zRet = 0;
+  const char *zSep = "";
+  int ii;
+
+  for(ii=0; ii<pRec->nField; ii++){
+    sqlite3_value *pVal = (sqlite3_value*)&pRec->aMem[ii];
+    switch( sqlite3_value_type(pVal) ){
+      case SQLITE_NULL:
+        zRet = sqlite3_mprintf("%z%sNULL", zRet, zSep);
+        break;
+      case SQLITE_INTEGER:
+        zRet = sqlite3_mprintf("%z%s%lld", zRet,zSep,sqlite3_value_int64(pVal));
+        break;
+      case SQLITE_FLOAT:
+        zRet = sqlite3_mprintf("%z%s%f", zRet,zSep,sqlite3_value_double(pVal));
+        break;
+      case SQLITE_TEXT:
+        zRet = sqlite3_mprintf("%z%s%s", zRet, zSep, sqlite3_value_text(pVal));
+        break;
+      default:
+        int n = sqlite3_value_bytes(pVal);
+        const u8 *a = (const u8*)sqlite3_value_blob(pVal);
+        zRet = sqlite3_mprintf("%z%s%z", zRet, zSep, hex_encode(a, n));
+        break;
+    }
+
+    zSep = ",";
+  }
+
+  return zRet;
+}
 
 char *sqlite3HctDbRecordToText(sqlite3 *db, const u8 *aRec, int nRec){
   char *zRet = 0;
@@ -7191,11 +7363,11 @@ static int hctdbLoadPage(
   static const char *azType[] = {
     "!INVALID!",                /* 0x00 */
     "intkey",                   /* 0x01 */
-    "",                         /* 0x02 */
+    "0x02",                     /* 0x02 */
     "index",                    /* 0x03 */
-    "",                         /* 0x04 */
+    "0x03",                     /* 0x04 */
     "overflow",                 /* 0x05 */
-    "",                         /* 0x06 */
+    "history",                  /* 0x06 */
   };
   int rc = SQLITE_OK;
   HctDbPageHdr *pHdr = (HctDbPageHdr*)aPg;
@@ -8017,6 +8189,9 @@ int sqlite3HctVtabInit(sqlite3 *db){
   }
   if( rc==SQLITE_OK ){
     rc = sqlite3HctJrnlInit(db);
+  }
+  if( rc==SQLITE_OK ){
+    rc = sqlite3HctTmapVtabInit(db);
   }
   return rc;
 }

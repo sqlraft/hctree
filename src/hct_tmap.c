@@ -759,3 +759,244 @@ void sqlite3HctTMapRecoveryFinish(HctTMapClient *p, int rc){
   }
 }
 
+/*************************************************************************
+** Beginning of vtab implemetation.
+*************************************************************************/
+
+#define HCT_TMAP_SCHEMA           \
+"  CREATE TABLE hcttmap("         \
+"    tid INTEGER,"                \
+"    cid INTEGER,"                \
+"    state TEXT"                  \
+"  );"
+
+typedef struct tmap_vtab tmap_vtab;
+typedef struct tmap_cursor tmap_cursor;
+
+struct tmap_vtab {
+  sqlite3_vtab base;              /* Base class - must be first */
+  HctTMapClient *pClient;
+};
+
+struct tmap_cursor {
+  sqlite3_vtab_cursor base;       /* Base class - must be first */
+  i64 iTid;
+  i64 iEof;
+  HctTMap *pMap;                  /* Map to iterate through */
+};
+
+static i64 tmapReadValue(HctTMap *pMap, i64 iTid){
+  int iMap = (iTid - pMap->iFirstTid) / HCT_TMAP_PAGESIZE;
+  int iOff = (iTid - pMap->iFirstTid) % HCT_TMAP_PAGESIZE;
+  assert( iOff>=0 && iMap>=0 && iMap<=pMap->nMap );
+  return pMap->aaMap[iMap][HCT_TMAP_ENTRYSLOT(iOff)];
+}
+
+/*
+** This xConnect() method is invoked to create a new hcttmap virtual table.
+*/
+static int tmapConnect(
+  sqlite3 *db,
+  void *pAux,
+  int argc, const char *const*argv,
+  sqlite3_vtab **ppVtab,
+  char **pzErr
+){
+  int rc = SQLITE_OK;
+  tmap_vtab *pNew = 0;
+  Btree *pBt = db->aDb[0].pBt;
+
+  if( sqlite3IsHct(pBt)==0 ){
+    rc = SQLITE_ERROR;
+  }else{
+    pNew = sqlite3MallocZero(sizeof(tmap_vtab));
+    if( pNew==0 ){
+      rc = SQLITE_NOMEM;
+    }else{
+      pNew->pClient = sqlite3HctFileTMapClient(
+          sqlite3HctDbFile( sqlite3HctDbFind(db, 0) )
+      );
+
+      sqlite3_declare_vtab(db, HCT_TMAP_SCHEMA);
+    }
+  }
+
+  *ppVtab = (sqlite3_vtab*)pNew;
+  return rc;
+}
+
+/*
+** This method is the destructor for tmap_vtab objects.
+*/
+static int tmapDisconnect(sqlite3_vtab *pVtab){
+  tmap_vtab *p = (tmap_vtab*)pVtab;
+  sqlite3_free(p);
+  return SQLITE_OK;
+}
+
+/*
+** Constructor for a new tmap_cursor object.
+*/
+static int tmapOpen(sqlite3_vtab *p, sqlite3_vtab_cursor **ppCursor){
+  tmap_cursor *pCur;
+  pCur = sqlite3MallocZero(sizeof(*pCur));
+  if( pCur==0 ) return SQLITE_NOMEM;
+  *ppCursor = &pCur->base;
+  return SQLITE_OK;
+}
+
+/*
+** Destructor for a tmap_cursor.
+*/
+static int tmapClose(sqlite3_vtab_cursor *cur){
+  tmap_cursor *pCur = (tmap_cursor*)cur;
+  sqlite3_free(pCur);
+  return SQLITE_OK;
+}
+
+/*
+** Return TRUE if the cursor has been moved off of the last row of output.
+*/
+static int tmapEof(sqlite3_vtab_cursor *cur){
+  tmap_cursor *pCur = (tmap_cursor*)cur;
+  return pCur->iTid>=pCur->iEof;
+}
+
+/*
+** Advance a tmap_cursor to its next row of output.
+*/
+static int tmapNext(sqlite3_vtab_cursor *cur){
+  tmap_cursor *pCur = (tmap_cursor*)cur;
+  pCur->iTid++;
+  return SQLITE_OK;
+}
+
+/*
+** Return values of columns for the row at which the pgmap_cursor
+** is currently pointing.
+*/
+static int tmapColumn(
+  sqlite3_vtab_cursor *cur,   /* The cursor */
+  sqlite3_context *ctx,       /* First argument to sqlite3_result_...() */
+  int i                       /* Which column to return */
+){
+  tmap_cursor *pCur = (tmap_cursor*)cur;
+
+  if( i==0 ){
+    /* column "tid" */
+    sqlite3_result_int64(ctx, pCur->iTid);
+  }else{
+    i64 iVal = tmapReadValue(pCur->pMap, pCur->iTid);
+
+    if( i==1 ){
+      /* column "cid" */
+      sqlite3_result_int64(ctx, iVal & HCT_TMAP_CID_MASK);
+    }else if( iVal!=0 ){
+      const char *zState = "???";
+      /* column "state" */
+      switch( iVal & HCT_TMAP_STATE_MASK ){
+        case HCT_TMAP_WRITING:
+          zState = "WRITING";
+          break;
+        case HCT_TMAP_VALIDATING:
+          zState = "VALIDATING";
+          break;
+        case HCT_TMAP_ROLLBACK:
+          zState = "ROLLBACK";
+          break;
+        case HCT_TMAP_COMMITTED:
+          zState = "COMMITTED";
+          break;
+      }
+
+      sqlite3_result_text(ctx, zState, -1, SQLITE_STATIC);
+    }
+  }
+
+  return SQLITE_OK;
+}
+
+/*
+** Return the rowid for the current row.  In this implementation, the
+** rowid is the same as the tid value.
+*/
+static int tmapRowid(sqlite3_vtab_cursor *cur, sqlite_int64 *pRowid){
+  tmap_cursor *pCur = (tmap_cursor*)cur;
+  *pRowid = pCur->iTid;
+  return SQLITE_OK;
+}
+
+/*
+** This method is called to "rewind" the tmap_cursor object back
+** to the first row of output.  This method is always called at least
+** once prior to any call to tmapColumn() or tmapRowid() or 
+** tmapEof().
+*/
+static int tmapFilter(
+  sqlite3_vtab_cursor *pVtabCursor, 
+  int idxNum, const char *idxStr,
+  int argc, sqlite3_value **argv
+){
+  i64 iEof;
+  tmap_cursor *pCur = (tmap_cursor*)pVtabCursor;
+  tmap_vtab *pTab = (tmap_vtab*)(pCur->base.pVtab);
+  pCur->pMap = (HctTMap*)(pTab->pClient->pMap);
+  pCur->iTid = pCur->pMap->iFirstTid;
+
+  for(iEof=pCur->pMap->iFirstTid + (pCur->pMap->nMap * HCT_TMAP_PAGESIZE);
+      iEof>pCur->pMap->iFirstTid;
+      iEof--
+  ){
+    i64 iVal = tmapReadValue(pCur->pMap, iEof-1);
+    if( iVal ) break;
+  }
+  pCur->iEof = iEof;
+
+  return SQLITE_OK;
+}
+
+/*
+** SQLite will invoke this method one or more times while planning a query
+** that uses the virtual table.  This routine needs to create
+** a query plan for each invocation and compute an estimated cost for that
+** plan.
+*/
+static int tmapBestIndex(
+  sqlite3_vtab *tab,
+  sqlite3_index_info *pIdxInfo
+){
+  pIdxInfo->estimatedCost = (double)10;
+  pIdxInfo->estimatedRows = 10;
+  return SQLITE_OK;
+}
+
+int sqlite3HctTmapVtabInit(sqlite3 *db){
+  static sqlite3_module tmapModule = {
+    /* iVersion    */ 0,
+    /* xCreate     */ 0,
+    /* xConnect    */ tmapConnect,
+    /* xBestIndex  */ tmapBestIndex,
+    /* xDisconnect */ tmapDisconnect,
+    /* xDestroy    */ 0,
+    /* xOpen       */ tmapOpen,
+    /* xClose      */ tmapClose,
+    /* xFilter     */ tmapFilter,
+    /* xNext       */ tmapNext,
+    /* xEof        */ tmapEof,
+    /* xColumn     */ tmapColumn,
+    /* xRowid      */ tmapRowid,
+    /* xUpdate     */ 0,
+    /* xBegin      */ 0,
+    /* xSync       */ 0,
+    /* xCommit     */ 0,
+    /* xRollback   */ 0,
+    /* xFindMethod */ 0,
+    /* xRename     */ 0,
+    /* xSavepoint  */ 0,
+    /* xRelease    */ 0,
+    /* xRollbackTo */ 0,
+    /* xShadowName */ 0
+  };
+
+  return sqlite3_create_module(db, "hcttmap", &tmapModule, 0);
+}

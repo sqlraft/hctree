@@ -1273,6 +1273,7 @@ static int test_extended_errcode(
 */
 static void testLogCallback(void *unused, int err, const char *zMsg){
   printf("log: (%d) %s\n", err, zMsg);
+  fflush(stdout);
 }
 
 /*

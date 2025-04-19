@@ -243,6 +243,7 @@ void sqlite3HctDbSetSavePhysical(
 );
 
 char *sqlite3HctDbRecordToText(sqlite3 *db, const u8 *aRec, int nRec);
+char *sqlite3HctDbUnpackedToText(UnpackedRecord *pRec);
 
 void sqlite3HctDbTMapScan(HctDatabase *pDb);
 

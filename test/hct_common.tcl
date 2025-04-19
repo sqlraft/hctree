@@ -16,6 +16,32 @@ proc show_db_page {pgno} {
   "
 }
 
+proc show_all_entries {} {
+  execsql_pp {
+    SELECT * FROM hctentry
+  }
+}
+
+proc show_all_pages {} {
+  execsql_pp {
+    SELECT * FROM hctdb
+  }
+}
+
+proc show_pagemap {} {
+  execsql_pp { 
+    SELECT slot, value, comment, 
+        CASE WHEN physical_in_use THEN 'P' ELSE '' END ||
+        CASE WHEN logical_in_use THEN 'L' ELSE '' END ||
+        CASE WHEN logical_evicted THEN 'E' ELSE '' END ||
+        CASE WHEN logical_irrevicted THEN 'I' ELSE '' END ||
+        CASE WHEN logical_is_root THEN 'R' ELSE '' END
+        AS flags
+    FROM hctpgmap WHERE flags!='';
+  }
+}
+
+
 proc catch_hct_journal_init {db} {
   set rc [sqlite3_hct_journal_init $db]
   if {$rc!="SQLITE_OK"} {
@@ -144,19 +170,46 @@ proc do_perm_test {tn sql} {
   }
 }
 
-proc dump_pagemap {} {
-  execsql_pp { 
-    SELECT slot, value, comment, 
-        CASE WHEN physical_in_use THEN 'P' ELSE '' END ||
-        CASE WHEN logical_in_use THEN 'L' ELSE '' END ||
-        CASE WHEN logical_evicted THEN 'E' ELSE '' END ||
-        CASE WHEN logical_irrevicted THEN 'I' ELSE '' END ||
-        CASE WHEN logical_is_root THEN 'R' ELSE '' END
-        AS flags
-    FROM hctpgmap WHERE flags!='';
+
+proc execsql_pp {sql {db db}} {
+  set nCol 0
+  $db eval $sql A {
+    if {$nCol==0} {
+      set nCol [llength $A(*)]
+      foreach c $A(*) { 
+        set aWidth($c) [string length $c] 
+        lappend data $c
+      }
+    }
+    foreach c $A(*) { 
+      set n [string length $A($c)]
+      if {$n > $aWidth($c)} {
+        set aWidth($c) $n
+      }
+      lappend data $A($c)
+    }
+  }
+  if {$nCol>0} {
+    set nTotal 0
+    foreach e [array names aWidth] { incr nTotal $aWidth($e) }
+    incr nTotal [expr ($nCol-1) * 3]
+    incr nTotal 4
+
+    set fmt ""
+    foreach c $A(*) { 
+      lappend fmt "% -$aWidth($c)s"
+    }
+    set fmt "| [join $fmt { | }] |"
+    
+    puts [string repeat - $nTotal]
+    for {set i 0} {$i < [llength $data]} {incr i $nCol} {
+      set vals [lrange $data $i [expr $i+$nCol-1]]
+      puts [format $fmt {*}$vals]
+      if {$i==0} { puts [string repeat - $nTotal] }
+    }
+    puts [string repeat - $nTotal]
   }
 }
-
 
 
 
