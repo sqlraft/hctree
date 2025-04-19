@@ -1,0 +1,80 @@
+# 2025 April 18
+#
+# The author disclaims copyright to this source code.  In place of
+# a legal notice, here is a blessing:
+#
+#    May you do good and not evil.
+#    May you find forgiveness for yourself and forgive others.
+#    May you share freely, never taking more than you give.
+#
+#*************************************************************************
+# This file implements regression tests for SQLite library.
+#
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+set testprefix hct_migrate1
+
+proc rand {min max} {
+  expr {$min + int(abs(rand() * (1 + $max - $min)))}
+}
+db func rand rand
+
+proc randtext {n} {
+  set char [list a B c D e F g H i J k L m N o P q R s T u V w X y Z]
+  set ret ""
+  for {set ii 0} {$ii<$n} {incr ii} {
+    append ret [lindex $char [rand 0 [llength $char]]]
+  }
+  set ret
+}
+db func randtext randtext
+
+# Create SQLite format database.
+do_execsql_test 1.0 {
+  PRAGMA page_size = 4096;
+  CREATE TABLE n1(
+    a TEXT,
+    b INTEGER,
+    c TEXT
+  );
+
+  CREATE INDEX i1 ON n1(b DESC, c);
+  CREATE INDEX i2 ON n1(c COLLATE nocase DESC);
+
+  CREATE TABLE n2(a DESC PRIMARY KEY) WITHOUT ROWID;
+}
+
+do_execsql_test 1.1 {
+  WITH ss(i) AS (
+    SELECT 1 UNION ALL SELECT i+1 FROM ss WHERE i<50000
+  )
+  INSERT INTO n1 SELECT randtext(10), rand(1, 100), randtext(30) FROM ss;
+
+  WITH ss(i) AS (
+    SELECT 1 UNION ALL SELECT i+1 FROM ss WHERE i<500
+  )
+  INSERT INTO n2 SELECT randtext(10) FROM ss;
+}
+
+proc migrate {src dest} {
+  set cmd [list  \
+    [info nameofexec]                            \
+    [file join $::testdir .. tool hct_migrate.tcl] \
+    --jobs 1 $src $dest
+  ]
+
+  exec {*}$cmd
+}
+
+forcedelete test.db2
+migrate test.db test.db2
+
+sqlite3 db2 test.db2
+do_execsql_test -db db2 1.2 {
+  PRAGMA integrity_check
+} {ok}
+
+finish_test
+
+
