@@ -1,5 +1,5 @@
-C Improve\sperformance\sof\sDbCsrPrev()\soperations\son\shctree\sdatabases\swith\smany\shistory\spointers.
-D 2025-04-18T21:02:11.846
+C Merge\sbranch\shctree\swith\sthis\sbranch.
+D 2025-04-19T14:01:37.507
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md e108e1e69ae8e8a59e93c455654b8ac9356a11720d3345df2a4743e9590fb20d
@@ -2355,8 +2355,8 @@ F tool/version-info.c 3b36468a90faf1bbd59c65fd0eb66522d9f941eedd364fabccd7227350
 F tool/warnings-clang.sh bbf6a1e685e534c92ec2bfba5b1745f34fb6f0bc2a362850723a9ee87c1b31a7
 F tool/warnings.sh 49a486c5069de041aedcbde4de178293e0463ae9918ecad7539eedf0ec77a139
 F tool/win/sqlite.vsix deb315d026cc8400325c5863eef847784a219a2f
-P 50389aa0cfd8e7048a41d32b6abd21f5fc4f15ca180015716f36a56876f38675
+P 409491262a29420d83b4a3399ee57cb804b9cbeaa4d020751bbb17128eddf428 98c0874d1f8a15f1ca991d9be018e1c15eda83aefbcbf04e63ac121bf888fbfe
 R 519f879bda9015e13bbaed24b551bc1e
 U dan
-Z 6f5ce1eaff66430ead1e5c2edd077119
+Z 17239478d82d44a7dd1b9582942a53d7
 # Remove this line to create a well-formed Fossil manifest.
