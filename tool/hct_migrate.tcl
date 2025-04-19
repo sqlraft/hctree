@@ -124,14 +124,20 @@ proc plan_migration {} {
     # empty lists.
     set lColCollate [list]
     set lCol [list]
+    set lColDir [list]
     src eval {
-        SELECT seqno, coll FROM pragma_index_xinfo($name)
+        SELECT seqno, coll, desc FROM pragma_index_xinfo($name)
     } {
       lappend lCol "c$seqno"
       if {$coll!="BINARY"} {
         lappend lColCollate "c$seqno COLLATE $coll"
       } else {
         lappend lColCollate "c$seqno"
+      }
+      if {$desc} {
+        lappend lColDir "c$seqno DESC"
+      } else {
+        lappend lColDir "c$seqno"
       }
     }
   
@@ -145,7 +151,7 @@ proc plan_migration {} {
     if {[llength $lColCollate]>0} {
       # An index or WITHOUT ROWID table.
       set cols [join $lColCollate { ,}]
-      set pk [join $lCol { ,}]
+      set pk [join $lColDir { ,}]
       set ct "CREATE TABLE imp$iImp ($cols, PRIMARY KEY($pk)) WITHOUT ROWID;"
       set ct "($cols, PRIMARY KEY($pk)) WITHOUT ROWID;"
       append ct " -- $display"
