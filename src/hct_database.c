@@ -2175,6 +2175,11 @@ static int hctDbFollowRangeOld(
   int bMerge = 0;
   u64 iRangeTidValue = (pPtr->iRangeTid & HCT_TID_MASK);
 
+  if( pPtr->iOld==0 ){
+    *pbMerge = 0;
+    return 0;
+  }
+
   /* HctDatabase.iTid is set when writing, validating or rolling back a
   ** transaction. When writing or validating, old-ranges created by this
   ** transaction should not be merge in, even if they are followed. But, when
@@ -2194,10 +2199,10 @@ static int hctDbFollowRangeOld(
   }
 
   HCT_EXTRA_LOGGING((
-      "%sfollowing, %smerging for history pointer "
-      "(iRangeTid=%lld, iFollowTid=%lld, iOldPg=%lld)",
-      (bRet ? "" : "not "), (bMerge ? "" : "not "),
-      iRangeTidValue, (pPtr->iFollowTid & HCT_TID_MASK), pPtr->iOld
+        "%sfollowing, %smerging for history pointer "
+        "(iRangeTid=%lld, iFollowTid=%lld, iOldPg=%lld)",
+        (bRet ? "" : "not "), (bMerge ? "" : "not "),
+        iRangeTidValue, (pPtr->iFollowTid & HCT_TID_MASK), pPtr->iOld
   ));
 
   *pbMerge = bMerge;
@@ -6228,8 +6233,8 @@ static void hctExtraLoggingNewRangeCsr(
   }
 
   zMsg = sqlite3_mprintf(
-      "created range cursor %d lowkey=(%s) highkey=(%s)",
-      pCsr->nRange - 1, zLow, zHigh
+      "created range cursor %d lowkey=(%s) highkey=(%s) (pg=%lld cell=%d)",
+      pCsr->nRange - 1, zLow, zHigh, p->pg.iOldPg, p->iCell
   );
   sqlite3_free(zLow);
   sqlite3_free(zHigh);
@@ -6260,8 +6265,9 @@ static int hctDbCsrNext(HctDbCsr *pCsr){
         hctDbCsrDescendRange(&rc, pCsr, ptr.iRangeTid, ptr.iOld, bMerge);
         if( rc==SQLITE_OK ){
           HctDbRangeCsr *p = &pCsr->aRange[pCsr->nRange-1];
-          if( p->lowkey.pKey 
-           && hctDbCompareKey(p->lowkey.pKey->pKeyInfo,&p->lowkey,&p->highkey)>=0
+          HctDbKey *pLow = &p->lowkey;
+          if( pLow->pKey
+           && hctDbCompareKey(pLow->pKey->pKeyInfo, pLow, &p->highkey)>=0
           ){
             hctDbCsrAscendRange(pCsr);
           }else{
@@ -6271,13 +6277,11 @@ static int hctDbCsrNext(HctDbCsr *pCsr){
             }else{
               int bExact = 0;
               hctDbLeafSearch(pDb, 
-                  p->pg.aOld, p->lowkey.iKey, p->lowkey.pKey, &p->iCell, &bExact
+                  p->pg.aOld, pLow->iKey, pLow->pKey, &p->iCell, &bExact
               );
 
               if( bExact==0 ) p->iCell--;
-#if 1
               if( p->iCell>=0 ) p->iCell--;
-#endif
             }
 
             HCT_EXTRA_LOGGING_NEWRANGECSR(pCsr);
@@ -6299,13 +6303,11 @@ static int hctDbCsrNext(HctDbCsr *pCsr){
          || hctDbCompareCellKey(&rc, pDb, p->pg.aOld, p->iCell, &p->highkey)<0
         )){
 
-#if 1
           if( p->eRange==HCT_RANGE_MERGE 
            && hctDbCompareCellKey(&rc,pDb,p->pg.aOld,p->iCell,&p->lowkey)<=0 
           ){
             break;
           }
-#endif
 
           if( p->eRange==HCT_RANGE_MERGE ){
             return SQLITE_OK;
@@ -6404,20 +6406,29 @@ static int hctDbCsrPrev(HctDbCsr *pCsr){
         do {
           hctDbCsrDescendRange(&rc, pCsr, ptr.iRangeTid, ptr.iOld, bMerge);
           memset(&ptr, 0, sizeof(ptr));
+
           if( rc==SQLITE_OK ){
             HctDbRangeCsr *p = &pCsr->aRange[pCsr->nRange-1];
-            if( p->eRange==HCT_RANGE_FAN ){
-              p->iCell = ((HctDbPageHdr*)p->pg.aOld)->nEntry-1;
+            HctDbKey *pLow = &p->lowkey;
+            if( pLow->pKey
+             && hctDbCompareKey(pLow->pKey->pKeyInfo, pLow, &p->highkey)>=0
+            ){
+              hctDbCsrAscendRange(pCsr);
             }else{
-              int bExact;
-              hctDbLeafSearch(pDb, p->pg.aOld, 
-                  p->highkey.iKey, p->highkey.pKey, &p->iCell, &bExact
-              );
-              p->iCell--;
-            }
+              if( p->eRange==HCT_RANGE_FAN ){
+                p->iCell = ((HctDbPageHdr*)p->pg.aOld)->nEntry-1;
+              }else{
+                int bExact;
+                hctDbLeafSearch(pDb, p->pg.aOld, 
+                    p->highkey.iKey, p->highkey.pKey, &p->iCell, &bExact
+                );
+                p->iCell--;
+              }
 
-            if( p->iCell>=0 ){
-              hctDbCsrGetRange(pCsr, &ptr);
+              if( p->iCell>=0 ){
+                hctDbCsrGetRange(pCsr, &ptr);
+              }
+              HCT_EXTRA_LOGGING_NEWRANGECSR(pCsr);
             }
           }
         }while( hctDbFollowRangeOld(pDb, &ptr, &bMerge) );
@@ -6436,6 +6447,7 @@ static int hctDbCsrPrev(HctDbCsr *pCsr){
           break;
         }
         sqlite3HctFilePageRelease(&p->pg);
+        HCT_EXTRA_LOGGING(("range cursor %d at EOF", pCsr->nRange-1));
         hctDbCsrAscendRange(pCsr);
       }
     }while( pCsr->nRange );
@@ -6514,6 +6526,9 @@ int sqlite3HctDbCsrPrev(HctDbCsr *pCsr){
   do {
     rc = hctDbCsrPrev(pCsr);
   }while( rc==SQLITE_OK && pCsr->iCell>=0 && hctDbCurrentIsVisible(pCsr)==0 );
+
+  HCT_EXTRA_LOGGING_CSRPOS(pCsr);
+
   return rc;
 }
 
