@@ -231,7 +231,9 @@ proc mk_stock_define {} {
   foreach c [concat [split $::cursor_apis ";"] [split $::tree_apis ";"]] {
     if {[string trim $c]==""} continue
     array set A [parse_signature $c]
+    if {$A(name)=="BtreeSeekCount"} { append ret "#ifdef SQLITE_DEBUG\n" }
     append ret "#define sqlite3$A(name) sqlite3Stock$A(name)\n"
+    if {$A(name)=="BtreeSeekCount"} { append ret "#endif /* SQLITE_DEBUG */\n" }
   }
 
   foreach r $::extra_redefines {
@@ -247,7 +249,9 @@ proc mk_stock_undef {} {
   foreach c [concat [split $::cursor_apis ";"] [split $::tree_apis ";"]] {
     if {[string trim $c]==""} continue
     array set A [parse_signature $c]
+    if {$A(name)=="BtreeSeekCount"} { append ret "#ifdef SQLITE_DEBUG\n" }
     append ret "#undef sqlite3$A(name)\n"
+    if {$A(name)=="BtreeSeekCount"} { append ret "#endif /* SQLITE_DEBUG */\n" }
   }
 
   foreach r $::extra_redefines {
