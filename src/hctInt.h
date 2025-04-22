@@ -66,7 +66,7 @@ struct HctBuffer {
   int nBuf;
   int nAlloc;
 };
-int sqlite3HctBufferGrow(HctBuffer *pBuf, int nSize);
+void sqlite3HctBufferGrow(HctBuffer *pBuf, int nSize);
 void sqlite3HctBufferFree(HctBuffer *pBuf);
 
 
@@ -323,7 +323,10 @@ int sqlite3HctStatsInit(sqlite3*);
 /*************************************************************************
 ** Utility functions:
 */
-void *sqlite3HctMalloc(int *pRc, i64 nByte);
+void *sqlite3HctMallocRc(int *pRc, i64 nByte);
+
+void *sqlite3HctMalloc(i64 nByte);
+void *sqlite3HctRealloc(void*, i64 nByte);
 
 /*************************************************************************
 ** hctree.c:

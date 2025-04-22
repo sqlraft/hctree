@@ -461,7 +461,7 @@ int sqlite3HctJournalNew(
   HctJournal *pNew;
 
   assert( *pp==0 );
-  pNew = sqlite3HctMalloc(&rc, sizeof(HctJournal));
+  pNew = sqlite3HctMallocRc(&rc, sizeof(HctJournal));
   if( pNew ){
     HctFile *pFile = sqlite3HctDbFile(pDb);
     pNew->pDb = pDb;
@@ -475,8 +475,10 @@ int sqlite3HctJournalNew(
 }
 
 void sqlite3HctJournalClose(HctJournal *pJrnl){
-  hctJrnlTryToFreeLog(pJrnl);
-  sqlite3_free(pJrnl);
+  if( pJrnl ){
+    hctJrnlTryToFreeLog(pJrnl);
+    sqlite3_free(pJrnl);
+  }
 }
 
 /*
@@ -616,7 +618,7 @@ int sqlite3_hct_journal_setmode(sqlite3 *db, int eMode){
 
 
     rc = hctDbExecForInt(db, "SELECT max(cid) FROM hct_journal", &iCidMax);
-    aCommit = (u64*)sqlite3HctMalloc(&rc, HCT_MAX_LEADING_WRITE*sizeof(u64));
+    aCommit = (u64*)sqlite3HctMallocRc(&rc, HCT_MAX_LEADING_WRITE*sizeof(u64));
 
     if( rc==SQLITE_OK ){
       rc = hctDbExecForInt(db, 
@@ -762,7 +764,7 @@ int sqlite3HctJrnlInit(sqlite3 *db){
 int sqlite3HctJournalServerNew(void **pJrnlPtr){
   int rc = SQLITE_OK;
   HctJrnlServer *pNew = 0;
-  pNew = (HctJrnlServer*)sqlite3HctMalloc(&rc, sizeof(HctJrnlServer));
+  pNew = (HctJrnlServer*)sqlite3HctMallocRc(&rc, sizeof(HctJrnlServer));
   pNew->pLogPtrMutex = sqlite3_mutex_alloc(SQLITE_MUTEX_FAST);
   *pJrnlPtr = (void*)pNew;
   return rc;

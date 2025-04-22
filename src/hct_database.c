@@ -518,18 +518,11 @@ static void hctMemcpy(void *a, const void *b, size_t c){
 
 #define HCTDB_MAX_EXTRA_CELL_DATA (8+4+8+4)
 
-int sqlite3HctBufferGrow(HctBuffer *pBuf, int nSize){
-  int rc = SQLITE_OK;
+void sqlite3HctBufferGrow(HctBuffer *pBuf, int nSize){
   if( nSize>pBuf->nAlloc ){
-    u8 *aNew = sqlite3_realloc(pBuf->aBuf, nSize);
-    if( aNew==0 ){
-      rc = SQLITE_NOMEM_BKPT;
-    }else{
-      pBuf->aBuf = aNew;
-      pBuf->nAlloc = nSize;
-    }
+    pBuf->aBuf = sqlite3HctRealloc(pBuf->aBuf, nSize);
+    pBuf->nAlloc = nSize;
   }
-  return rc;
 }
 
 void sqlite3HctBufferFree(HctBuffer *pBuf){
@@ -537,12 +530,9 @@ void sqlite3HctBufferFree(HctBuffer *pBuf){
   memset(pBuf, 0, sizeof(HctBuffer));
 }
 
-static int hctBufferSet(HctBuffer *pBuf, const u8 *aData, int nData){
-  int rc = sqlite3HctBufferGrow(pBuf, nData);
-  if( rc==SQLITE_OK ){
-    hctMemcpy(pBuf->aBuf, aData, nData);
-  }
-  return rc;
+static void hctBufferSet(HctBuffer *pBuf, const u8 *aData, int nData){
+  sqlite3HctBufferGrow(pBuf, nData);
+  hctMemcpy(pBuf->aBuf, aData, nData);
 }
 
 
@@ -614,12 +604,9 @@ static void hctDbPageArrayReset(HctDbPageArray *pArray){
   pArray->nDyn = 0;
 }
 
-static int hctDbPageArrayGrow(HctDbPageArray *pArray){
+static void hctDbPageArrayGrow(HctDbPageArray *pArray){
   assert( pArray->aDyn==0 );
-  pArray->aDyn = sqlite3MallocZero(sizeof(HctFilePage) * HCTDB_MAX_PAGEARRAY);
-  if( pArray->aDyn==0 ){
-    return SQLITE_NOMEM_BKPT;
-  }
+  pArray->aDyn = sqlite3HctMalloc(sizeof(HctFilePage) * HCTDB_MAX_PAGEARRAY);
   pArray->nDyn = HCTDB_MAX_PAGEARRAY;
   pArray->aPg = pArray->aDyn;
   hctMemcpy(pArray->aPg, pArray->aStatic, 
@@ -631,19 +618,15 @@ static int hctDbPageArrayGrow(HctDbPageArray *pArray){
 /*
 ** Grow the dynamic arrays used by the writer, if necessary
 */
-static int hctDbWriterGrow(HctDbWriter *pWriter){
-  int rc = SQLITE_OK;
+static void hctDbWriterGrow(HctDbWriter *pWriter){
   if( pWriter->writepg.aDyn==0 ){
     if( pWriter->writepg.nPg>=(HCTDB_STATIC_PAGEARRAY-2) 
      || pWriter->discardpg.nPg>=(HCTDB_STATIC_PAGEARRAY-2) 
     ){
-      rc = hctDbPageArrayGrow(&pWriter->writepg);
-      if( rc==SQLITE_OK ){
-        rc = hctDbPageArrayGrow(&pWriter->discardpg);
-      }
+      hctDbPageArrayGrow(&pWriter->writepg);
+      hctDbPageArrayGrow(&pWriter->discardpg);
     }
   }
-  return rc;
 }
 
 HctDatabase *sqlite3HctDbOpen(
@@ -654,18 +637,18 @@ HctDatabase *sqlite3HctDbOpen(
   int rc = *pRc;
   HctDatabase *pNew = 0;
 
-  pNew = (HctDatabase*)sqlite3HctMalloc(&rc, sizeof(*pNew));
-  if( pNew ){
-    pNew->pFile = sqlite3HctFileOpen(&rc, zFile, pConfig);
-    pNew->pConfig = pConfig;
-    if( pNew->pFile ) pNew->pgsz = sqlite3HctFilePgsz(pNew->pFile);
+  pNew = (HctDatabase*)sqlite3HctMalloc(sizeof(*pNew));
+  pNew->pFile = sqlite3HctFileOpen(&rc, zFile, pConfig);
+  pNew->pConfig = pConfig;
+  assert( (pNew->pFile==0)==(rc!=SQLITE_OK) );
+  if( pNew->pFile ){
+    pNew->pgsz = sqlite3HctFilePgsz(pNew->pFile);
   }
 
   if( rc!=SQLITE_OK ){
     sqlite3HctDbClose(pNew);
     pNew = 0;
   }
-
   *pRc = rc;
   return pNew;
 }
@@ -693,22 +676,6 @@ HctFile *sqlite3HctDbFile(HctDatabase *pDb){
 
 int sqlite3HctDbRootNew(HctDatabase *p, u32 *piRoot){
   return sqlite3HctFileRootPgno(p->pFile, piRoot);
-}
-
-void sqlite3HctDbRootPageInit(
-  int bIndex,                     /* True for an index, false for intkey */
-  u8 *aPage,                      /* Buffer to initialize */
-  int szPage                      /* Size of aPage[] in bytes */
-){
-  HctDbLeaf *pLeaf = (HctDbLeaf*)aPage;
-  memset(aPage, 0, szPage);
-  if( bIndex ){
-    pLeaf->pg.hdrFlags = HCT_PAGETYPE_INDEX | HCT_PAGETYPE_LEFTMOST;
-  }else{
-    pLeaf->pg.hdrFlags = HCT_PAGETYPE_INTKEY | HCT_PAGETYPE_LEFTMOST;
-  }
-  pLeaf->hdr.nFreeBytes = szPage - sizeof(HctDbLeaf);
-  pLeaf->hdr.nFreeGap = pLeaf->hdr.nFreeBytes;
 }
 
 static void hctDbRootPageInit(
@@ -746,6 +713,15 @@ static void hctDbRootPageInit(
   }
 }
 
+void sqlite3HctDbRootPageInit(
+  int bIndex,                     /* True for an index, false for intkey */
+  u8 *aPage,                      /* Buffer to initialize */
+  int szPage                      /* Size of aPage[] in bytes */
+){
+  hctDbRootPageInit(bIndex, 0, 0, aPage, szPage);
+}
+
+
 /*
 ** Open a read transaction, if one is not already open.
 */
@@ -757,7 +733,7 @@ int sqlite3HctDbStartRead(HctDatabase *pDb, HctJournal *pJrnl){
   if( pDb->iSnapshotId==0 && SQLITE_OK==(rc=sqlite3HctFileNewDb(pDb->pFile)) ){
     if( pDb->aTmp==0 ){
       pDb->pgsz = sqlite3HctFilePgsz(pDb->pFile);
-      pDb->aTmp = (u8*)sqlite3HctMalloc(&rc, pDb->pgsz);
+      pDb->aTmp = (u8*)sqlite3HctMallocRc(&rc, pDb->pgsz);
     }
     if( rc==SQLITE_OK ){
       u64 iSnapshot = 0;
@@ -1251,7 +1227,7 @@ static int hctDbLoadRecord(
   *pnData = p->nSize;
   if( paData ){
     if( p->flags & HCTDB_HAS_OVFL ){
-      rc = sqlite3HctBufferGrow(pBuf, p->nSize);
+      sqlite3HctBufferGrow(pBuf, p->nSize);
       *paData = pBuf->aBuf;
       if( rc==SQLITE_OK ){
         u32 pgOvfl;
@@ -1304,10 +1280,8 @@ static int hctDbLoadRecordFP(
   rc = hctDbLoadRecord(pDb, &pFP->buf, aPg, iCell, &nKey, &aKey);
   if( rc==SQLITE_OK ){
     if( aKey!=pFP->buf.aBuf ){
-      rc = sqlite3HctBufferGrow(&pFP->buf, nKey);
-      if( rc==SQLITE_OK ){
-        hctMemcpy(pFP->buf.aBuf, aKey, nKey);
-      }
+      sqlite3HctBufferGrow(&pFP->buf, nKey);
+      hctMemcpy(pFP->buf.aBuf, aKey, nKey);
     }
     pFP->iKey = nKey;
     pFP->aKey = pFP->buf.aBuf;
@@ -1460,7 +1434,7 @@ static void hctDbGetKey(
       int nRec = 0;
       rc = hctDbLoadRecord(pDb, &pKey->buf, aPg, iCell, &nRec, &aRec);
       if( aRec!=pKey->buf.aBuf && bDup && rc==SQLITE_OK ){
-        rc = hctBufferSet(&pKey->buf, aRec, nRec);
+        hctBufferSet(&pKey->buf, aRec, nRec);
         aRec = pKey->buf.aBuf;
       }
       pKey->pKey = hctDbAllocateUnpacked(&rc, pKeyInfo);
@@ -3264,7 +3238,7 @@ static int hctDbInsertFlushWrite(HctDatabase *pDb, HctDbWriter *p){
 
     if( nOrig>ArraySize(aStatic) ){
       int nByte = sizeof(HctDbWriterOrigin) * nOrig;
-      aOrig = aDyn = (HctDbWriterOrigin*)sqlite3HctMalloc(&rc, nByte);
+      aOrig = aDyn = (HctDbWriterOrigin*)sqlite3HctMallocRc(&rc, nByte);
     }
 
     if( rc==SQLITE_OK ){
@@ -4159,7 +4133,7 @@ static HctBalance *hctDbBalanceSpace(int *pRc, HctDatabase *pDb){
     int nPg = ArraySize(p->aPg);
     int nSzAlloc = (nPg * 2 * MAX_CELLS_PER_PAGE(pDb->pgsz)) + 1;
 
-    pDb->pBalance = p = (HctBalance*)sqlite3HctMalloc(pRc, 
+    pDb->pBalance = p = (HctBalance*)sqlite3HctMallocRc(pRc, 
         sizeof(HctBalance) + 
         nPg * pDb->pgsz + 
         sizeof(HctDbCellSz) * nSzAlloc
@@ -4935,7 +4909,7 @@ static int hctDbDelete(
     if( hctPagetype(aTarget)==HCT_PAGETYPE_INDEX ){
       int nField = p->writecsr.pKeyInfo->nAllField;
       int nByte = nField + 9;
-      aNull = sqlite3HctMalloc(&rc, nByte);
+      aNull = sqlite3HctMallocRc(&rc, nByte);
       if( rc!=SQLITE_OK ) return rc;
       if( nField<=126 ){
         aNull[0] = nField+1;
@@ -5269,8 +5243,7 @@ static int hctDbInsert(
   }
 
   p->bDoCleanup = 1;
-  rc = hctDbWriterGrow(p);
-  if( rc ) return rc;
+  hctDbWriterGrow(p);
 
   /* This block sets stack variables:
   **

@@ -155,7 +155,7 @@ static void hctPManMutexEnter(HctPManClient *pClient){
 /*
 ** Utility malloc function for hct. Allocate nByte bytes of zeroed memory.
 */
-void *sqlite3HctMalloc(int *pRc, i64 nByte){
+void *sqlite3HctMallocRc(int *pRc, i64 nByte){
   void *pRet = 0;
   assert( nByte!=0 );
   if( *pRc==SQLITE_OK ){
@@ -163,6 +163,40 @@ void *sqlite3HctMalloc(int *pRc, i64 nByte){
     if( pRet==0 ){
       *pRc = SQLITE_NOMEM_BKPT;
     }
+  }
+  return pRet;
+}
+
+/*
+** Equivalent to sqlite3MallocZero(nByte). Except that if the call
+** to sqlite3MallocZero() fails, the process aborts.
+*/
+void *sqlite3HctMalloc(i64 nByte){
+  void *pRet = sqlite3MallocZero(nByte);
+  assert( nByte>0 );
+  if( pRet==0 ){
+    sqlite3_log(SQLITE_ABORT, 
+        "FATAL: attempt to sqlite3MallocZero() %d bytes failed, exiting...",
+        (int)nByte
+    );
+    abort();
+  }
+  return pRet;
+}
+
+/*
+** Equivalent to sqlite3_realloc64(pIn, nByte). Except that if the call
+** to sqlite3_realloc64() fails, the process aborts.
+*/
+void *sqlite3HctRealloc(void *pIn, i64 nByte){
+  void *pRet = sqlite3_realloc(pIn, nByte);
+  assert( nByte>0 );
+  if( pRet==0 ){
+    sqlite3_log(SQLITE_ABORT, 
+        "FATAL: attempt to sqlite3_realloc() %d bytes failed, exiting...",
+        (int)nByte
+    );
+    abort();
   }
   return pRet;
 }
@@ -177,7 +211,7 @@ HctPManServer *sqlite3HctPManServerNew(
 ){
   int rc = *pRc;
   HctPManServer *pRet = 0;
-  pRet = sqlite3HctMalloc(&rc, sizeof(*pRet));
+  pRet = sqlite3HctMallocRc(&rc, sizeof(*pRet));
   if( pRet ){
     pRet->pFileServer = pFileServer;
     pRet->pMutex = sqlite3_mutex_alloc(SQLITE_MUTEX_RECURSIVE);
@@ -229,7 +263,7 @@ static HctPManPageset *hctPManPagesetNew(int *pRc, int nAlloc){
   const int nByte = sizeof(HctPManPageset) + nAlloc*sizeof(u32);
   HctPManPageset *pRet = 0;
 
-  pRet = (HctPManPageset*)sqlite3HctMalloc(pRc, nByte);
+  pRet = (HctPManPageset*)sqlite3HctMallocRc(pRc, nByte);
   if( pRet ){
     pRet->aPg = (u32*)&pRet[1];
     pRet->nAlloc = nAlloc;
@@ -277,7 +311,7 @@ HctPManClient *sqlite3HctPManClientNew(
   HctFile *pFile                  /* File object */
 ){
   HctPManClient *pClient = 0;
-  pClient = (HctPManClient*)sqlite3HctMalloc(pRc, sizeof(HctPManClient));
+  pClient = (HctPManClient*)sqlite3HctMallocRc(pRc, sizeof(HctPManClient));
   if( pClient ){
     pClient->pConfig = pConfig;
     pClient->pServer = pServer;
@@ -783,7 +817,7 @@ static int pmanConnect(
   int rc;
 
   rc = sqlite3_declare_vtab(db, HCT_PMAN_SCHEMA);
-  pNew = (pman_vtab*)sqlite3HctMalloc(&rc, sizeof(*pNew));
+  pNew = (pman_vtab*)sqlite3HctMallocRc(&rc, sizeof(*pNew));
   if( pNew ){
     pNew->db = db;
   }
@@ -941,7 +975,7 @@ static int pmanFilter(
       nRow += hctPagesetSize(pSet);
     }
   }
-  pCur->aRow = sqlite3HctMalloc(&rc, sizeof(HctPmanRow) * nRow);
+  pCur->aRow = sqlite3HctMallocRc(&rc, sizeof(HctPmanRow) * nRow);
   if( pCur->aRow ){
     for(ii=0; ii<2; ii++){
       int i2;

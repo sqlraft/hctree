@@ -1028,7 +1028,9 @@ static int hctFileServerInit(
     }
     sqlite3_free(unc.aTid);
 
-    rc = sqlite3HctJournalServerNew(&p->pJrnlPtr);
+    if( rc==SQLITE_OK ){
+      rc = sqlite3HctJournalServerNew(&p->pJrnlPtr);
+    }
   }
   return rc;
 }
@@ -1301,7 +1303,7 @@ static int hctFileServerFind(HctFile *pFile, const char *zFile){
     if( rc==SQLITE_OK ){
       assert( fd>0 );
       hctFileLock(&rc, fd, zFile);
-      pServer = (HctFileServer*)sqlite3HctMalloc(&rc, sizeof(*pServer));
+      pServer = (HctFileServer*)sqlite3HctMallocRc(&rc, sizeof(*pServer));
       if( pServer==0 ){
         close(fd);
       }else{
@@ -1342,7 +1344,7 @@ HctFile *sqlite3HctFileOpen(int *pRc, const char *zFile, HctConfig *pConfig){
   int rc = *pRc;
   HctFile *pNew;
 
-  pNew = (HctFile*)sqlite3HctMalloc(&rc, sizeof(*pNew));
+  pNew = (HctFile*)sqlite3HctMallocRc(&rc, sizeof(*pNew));
   if( pNew ){
     pNew->pConfig = pConfig;
     rc = hctFileServerFind(pNew, zFile);
@@ -2208,7 +2210,7 @@ void sqlite3HctFileICArrays(
   }
 
   if( rc==SQLITE_OK ){
-    aLogic = (u8*)sqlite3HctMalloc(&rc, (nLogic + nPhys) * sizeof(u8));
+    aLogic = (u8*)sqlite3HctMallocRc(&rc, (nLogic + nPhys) * sizeof(u8));
     if( aLogic ){
       aPhys = &aLogic[nLogic];
     }
@@ -2348,7 +2350,7 @@ static int pgmapConnect(
   int rc;
 
   rc = sqlite3_declare_vtab(db, HCT_PGMAP_SCHEMA);
-  pNew = (pgmap_vtab*)sqlite3HctMalloc(&rc, sizeof(*pNew));
+  pNew = (pgmap_vtab*)sqlite3HctMallocRc(&rc, sizeof(*pNew));
   if( pNew ){
     pNew->db = db;
   }

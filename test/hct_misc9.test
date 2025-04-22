@@ -151,6 +151,23 @@ do_execsql_test -db db2 7.1.2 {
   SELECT * FROM x1
 } {}
 
+#-------------------------------------------------------------------------
+#
+db close
+
+forcedelete test.db test.db-pagemap
+file mkdir test.db-pagemap
+
+do_test 8.0 {
+  list [catch { sqlite3 db file:test.db?hctree=1 -uri 1 } msg] $msg
+} {1 {unable to open database file}}
+
+do_test 8.1 {
+  info commands db
+} {}
+
+
+
 
 finish_test
 

@@ -447,7 +447,7 @@ static int hctLogReaderOpen(const char *zFile, HctLogReader *pReader){
     memset(&sStat, 0, sizeof(sStat));
     fstat(fd, &sStat);
     pReader->nFile = (int)sStat.st_size;
-    pReader->aFile = (u8*)sqlite3HctMalloc(&rc, pReader->nFile + 8);
+    pReader->aFile = (u8*)sqlite3HctMallocRc(&rc, pReader->nFile + 8);
     if( pReader->aFile ){
       int nRead = read(fd, pReader->aFile, pReader->nFile);
       if( nRead!=pReader->nFile ){
@@ -633,7 +633,7 @@ int sqlite3HctBtreeOpen(
     pNew->config.szLogChunk = HCT_DEFAULT_SZLOGCHUNK;
     pNew->config.pgsz = HCT_DEFAULT_PAGESIZE;
     rc = sqlite3HctTreeNew(&pNew->pHctTree);
-    pNew->pFakePager = (Pager*)sqlite3HctMalloc(&rc, 4096);
+    pNew->pFakePager = (Pager*)sqlite3HctMallocRc(&rc, 4096);
   }else{
     rc = SQLITE_NOMEM;
   }
@@ -949,7 +949,7 @@ static int hctIntListAppend(HctIntList *pList, i64 iVal){
 */
 static void hctIntListSort(int *pRc, HctIntList *p){
   if( *pRc==SQLITE_OK && p->nInt>1 ){
-    i64 *aWork = (i64*)sqlite3HctMalloc(pRc, p->nInt * sizeof(i64));
+    i64 *aWork = (i64*)sqlite3HctMallocRc(pRc, p->nInt * sizeof(i64));
     if( aWork ){
       memcpy(aWork, p->aInt, p->nInt * sizeof(i64));
       p->nInt = hctTopDownSplitMerge(p->aInt, 0, p->nInt, aWork);
@@ -1221,7 +1221,7 @@ static void hctMapSplitMerge(HctJrnlMap *aB, int nElem, HctJrnlMap *aA){
 static void hctMapSort(int *pRc, int nMap, HctJrnlMap *aMap){
   if( *pRc==SQLITE_OK && nMap>1 ){
     int nByte = nMap * sizeof(HctJrnlMap);
-    HctJrnlMap *aWork = (HctJrnlMap*)sqlite3HctMalloc(pRc, nByte);
+    HctJrnlMap *aWork = (HctJrnlMap*)sqlite3HctMallocRc(pRc, nByte);
     if( aWork ){
       memcpy(aWork, aMap, nMap*sizeof(HctJrnlMap));
       hctMapSplitMerge(aMap, nMap, aWork);
@@ -3125,7 +3125,7 @@ int sqlite3HctBtreeClearTable(Btree *pBt, int iTable, i64 *pnChange){
       pRec = sqlite3VdbeAllocUnpackedRecord(pKeyInfo);
       if( pRec==0 ) rc = SQLITE_NOMEM_BKPT;
     }
-    pCsr = (BtCursor*)sqlite3HctMalloc(&rc, sizeof(HBtCursor));
+    pCsr = (BtCursor*)sqlite3HctMallocRc(&rc, sizeof(HBtCursor));
     if( rc==SQLITE_OK ){
       rc = sqlite3HctBtreeCursor(pBt, iTable, 0, pKeyInfo, pCsr);
     }

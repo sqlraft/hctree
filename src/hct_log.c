@@ -68,7 +68,7 @@ int sqlite3HctLogNew(
   HctLog *pNew = 0;
   int rc = SQLITE_OK;
 
-  pNew = (HctLog*)sqlite3HctMalloc(&rc, sizeof(HctLog));
+  pNew = (HctLog*)sqlite3HctMallocRc(&rc, sizeof(HctLog));
   if( pNew ){
     pNew->aFile[0].fd = -1;
     pNew->aFile[1].fd = -1;
@@ -76,7 +76,7 @@ int sqlite3HctLogNew(
     pNew->pFile = pFile;
     pNew->pJrnl = pJrnl;
 
-    pNew->aBuf = (u8*)sqlite3HctMalloc(&rc, JRNL_BUFFER_SIZE);
+    pNew->aBuf = (u8*)sqlite3HctMallocRc(&rc, JRNL_BUFFER_SIZE);
     pNew->nBuf = JRNL_BUFFER_SIZE;
     if( rc!=SQLITE_OK ){
       sqlite3_free(pNew);
