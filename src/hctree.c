@@ -27,26 +27,27 @@ typedef struct BtSchemaOp BtSchemaOp;
 
 typedef struct HBtree HBtree;
 typedef struct HBtCursor HBtCursor;
-typedef struct HctLogFile HctLogFile;
+typedef struct HctJrnlLog HctJrnlLog;
+typedef struct HctJrnlMap HctJrnlMap;
 typedef struct HctMainStats HctMainStats;
 
-
-/*
-** An object to help with writing a log file.
-*/
-struct HctLogFile {
-  int fd;                         /* File descriptor open on log file */
-  char *zLogFile;                 /* Full path to log file */
-  u8 *aBuf;                       /* malloc'd buffer for writing log file */
-  int nBuf;                       /* Size of aBuf[] in bytes */
-  i64 iFileOff;                   /* Current write offset in file */
-  int iBufferOff;                 /* Current write offset in buffer */
-};
 
 struct HctMainStats {
   i64 nRetry;
   i64 nRetryKey;
   i64 nKeyOp;
+};
+
+struct HctJrnlLog {
+  i64 iCid;
+  i64 iTid;
+  u8 *aLogData;
+  int nLogData;
+};
+
+struct HctJrnlMap {
+  i64 iCid;
+  i64 iTid;
 };
 
 /*
@@ -81,17 +82,18 @@ struct HBtree {
   int nRollbackOp;
 
   int openFlags;
-  HctLogFile *pLog;               /* Object for writing to log file */
+  HctLog *pHctLog;                /* Log file or files */
   u32 iNextRoot;                  /* Next root page to allocate if pHctDb==0 */
   u32 aMeta[SQLITE_N_BTREE_META]; /* 16 database meta values */
   int eMetaState;                 /* HCT_METASTATE_XXX value */
 
   int bRecoveryDone;
-#if 0
-  u64 iJrnlRoot;                  /* Root of sqlite_hct_journal */
-  u64 iBaseRoot;                  /* Root of sqlite_hct_baseline */
-#endif
-  HctJournal *pHctJrnl;
+  HctJournal *pHctJrnl;           /* hct_journal sub-system */
+
+  HctJrnlLog *aJrnlLog;
+  int nJrnlLog;
+  HctJrnlMap *aJrnlMap;
+  int nJrnlMap;
 
   Pager *pFakePager;
   HctMainStats stats;
@@ -383,34 +385,29 @@ struct HctLogReader {
 };
 
 static void hctLogReaderNext(HctLogReader *pReader){
-  u32 aInt[2];
 
-  if( (pReader->iFile + sizeof(aInt))>pReader->nFile ){
+  if( (pReader->iFile + 12)>pReader->nFile ){
     pReader->bEof = 1;
   }else{
-    memcpy(aInt, &pReader->aFile[pReader->iFile], sizeof(aInt));
-    pReader->iRoot = (i64)aInt[0];
-    if( pReader->iRoot==0 ){
+    i64 iRoot;
+    u32 nByte;
+
+    memcpy(&iRoot, &pReader->aFile[pReader->iFile], sizeof(iRoot));
+    pReader->iFile += sizeof(iRoot);
+    memcpy(&nByte, &pReader->aFile[pReader->iFile], sizeof(nByte));
+    pReader->iFile += sizeof(nByte);
+
+    if( iRoot==0 ){
       pReader->bEof = 1;
     }else{
-      pReader->nKey = (int)aInt[1];
-      pReader->iFile += sizeof(aInt);
-      if( pReader->nKey==0 ){
-        pReader->aKey = 0;
-        if( pReader->iFile+sizeof(i64)>pReader->nFile ){
-          pReader->bEof = 1;
-        }else{
-          memcpy(&pReader->iKey, &pReader->aFile[pReader->iFile], sizeof(i64));
-          pReader->iFile += sizeof(i64);
-        }
+      pReader->iRoot = iRoot;
+      if( nByte==0xFFFFFFFF ){
+        memcpy(&pReader->iKey, &pReader->aFile[pReader->iFile], sizeof(i64));
+        pReader->iFile += sizeof(i64);
       }else{
-        pReader->iKey = 0;
-        if( pReader->iFile+pReader->nKey>pReader->nFile ){
-          pReader->bEof = 1;
-        }else{
-          pReader->aKey = &pReader->aFile[pReader->iFile];
-          pReader->iFile += pReader->nKey;
-        }
+        pReader->nKey = nByte;
+        pReader->aKey = &pReader->aFile[pReader->iFile];
+        pReader->iFile += pReader->nKey;
       }
     }
   }
@@ -419,6 +416,21 @@ static void hctLogReaderNext(HctLogReader *pReader){
 static void hctLogReaderClose(HctLogReader *pReader){
   sqlite3_free(pReader->aFile);
   memset(pReader, 0, sizeof(*pReader));
+}
+
+/*
+** Initialize an HctLogReader object to scan the log managed by the
+** HctJrnlLog passed as the first argument.
+**
+** An HctLogReader initialized by this function should not be passed
+** to hctLogReaderClose(), as it does not own the pReader->aFile buffer.
+*/
+static void hctLogReaderJrnlOpen(HctJrnlLog *pJLog, HctLogReader *pReader){
+  memset(pReader, 0, sizeof(HctLogReader));
+  pReader->iTid = pJLog->iTid;
+  pReader->aFile = pJLog->aLogData;
+  pReader->nFile = pJLog->nLogData;
+  hctLogReaderNext(pReader);
 }
 
 static int hctLogReaderOpen(const char *zFile, HctLogReader *pReader){
@@ -442,7 +454,7 @@ static int hctLogReaderOpen(const char *zFile, HctLogReader *pReader){
         rc = sqlite3HctIoerr(SQLITE_IOERR);
       }else{
         memcpy(&pReader->iTid, pReader->aFile, sizeof(i64));
-        pReader->iFile = sizeof(i64);
+        memcpy(&pReader->iFile, &pReader->aFile[8], sizeof(int));
         if( pReader->iTid==0 ){
           pReader->bEof = 1;
         }else{
@@ -460,49 +472,66 @@ static int hctLogReaderOpen(const char *zFile, HctLogReader *pReader){
 
 static int btreeFlushData(HBtree *p, int bRollback);
 
-static int hctRecoverOne(void *pCtx, const char *zFile){
-  HBtree *p = (HBtree*)pCtx;
+static i64 hctMapFindCid(HBtree *p, i64 iTid){
+  int i1 = 0;
+  int i2 = p->nJrnlMap;
+
+  while( i2>i1 ){
+    int iTest = (i1 + i2) / 2;
+    if( p->aJrnlMap[iTest].iTid==iTid ){
+      return p->aJrnlMap[iTest].iCid;
+    }
+    if( p->aJrnlMap[iTest].iTid<iTid ){
+      i1 = iTest+1;
+    }else{
+      i2 = iTest;
+    }
+  }
+
+  return -1;
+}
+
+static int hctRecoverOneLog(HBtree *p, HctLogReader *pRdr){
   int rc = SQLITE_OK;
   u32 iPrevRoot = 0;
   RecoverCsr csr;
-  HctLogReader rdr;
 
   memset(&csr, 0, sizeof(csr));
-  rc = hctLogReaderOpen(zFile, &rdr);
-  if( rc==SQLITE_OK && rdr.bEof==0 ){
 
-    assert( rdr.iTid!=0 );
+  if( pRdr->bEof==0 ){
+
+    assert( pRdr->iTid!=0 );
     sqlite3HctDbRollbackMode(p->pHctDb, 2);
-    sqlite3HctDbRecoverTid(p->pHctDb, rdr.iTid);
-    for(/* no-op */; rdr.bEof==0; hctLogReaderNext(&rdr)){
+    sqlite3HctDbRecoverTid(p->pHctDb, pRdr->iTid);
+    for(/* no-op */; pRdr->bEof==0; hctLogReaderNext(pRdr)){
       int op = 0;
 
-      if( rdr.iRoot!=iPrevRoot ){
-        iPrevRoot = rdr.iRoot;
+      if( pRdr->iRoot!=iPrevRoot ){
+        iPrevRoot = pRdr->iRoot;
         hctRecoverCursorClose(p, &csr);
-        rc = hctRecoverCursorOpen(p, rdr.iRoot, &csr);
+        rc = hctRecoverCursorOpen(p, pRdr->iRoot, &csr);
       }
 
-      if( rdr.nKey ){
-        sqlite3VdbeRecordUnpack(csr.pKeyInfo, rdr.nKey, rdr.aKey, csr.pRec);
+      if( pRdr->nKey ){
+        sqlite3VdbeRecordUnpack(csr.pKeyInfo, pRdr->nKey, pRdr->aKey, csr.pRec);
       }
-      rc = sqlite3HctDbCsrRollbackSeek(csr.pCsr, csr.pRec, rdr.iKey, &op);
+      rc = sqlite3HctDbCsrRollbackSeek(csr.pCsr, csr.pRec, pRdr->iKey, &op);
 
       if( rc==SQLITE_OK && op!=0 ){
         HctTreeCsr *pTCsr = csr.pTreeCsr;
         if( op<0 ){
           /* rollback requires deleting the key */
-          hctRecoverDebug(&csr, "delete", rdr.iKey, rdr.aKey, rdr.nKey);
+          hctRecoverDebug(&csr, "delete", pRdr->iKey, pRdr->aKey, pRdr->nKey);
           rc = sqlite3HctTreeDeleteKey(
-              pTCsr, csr.pRec, rdr.iKey, rdr.nKey, rdr.aKey
+              pTCsr, csr.pRec, pRdr->iKey, pRdr->nKey, pRdr->aKey
           );
         }else if( op>0 ){
           const u8 *aOld = 0;
           int nOld = 0;
           rc = sqlite3HctDbCsrData(csr.pCsr, &nOld, &aOld);
           if( rc==SQLITE_OK ){
-            hctRecoverDebug(&csr, "insert", rdr.iKey, aOld, nOld);
-            rc = sqlite3HctTreeInsert(pTCsr, csr.pRec, rdr.iKey, nOld, aOld, 0);
+            hctRecoverDebug(&csr, "insert", pRdr->iKey, aOld, nOld);
+            rc = sqlite3HctTreeInsert(pTCsr, csr.pRec,pRdr->iKey,nOld,aOld,0);
           }
         }
       }
@@ -514,135 +543,46 @@ static int hctRecoverOne(void *pCtx, const char *zFile){
     }
     sqlite3HctDbRollbackMode(p->pHctDb, 0);
     if( rc==SQLITE_OK && p->pHctJrnl ){
-      rc = sqlite3HctJrnlRollbackEntry(p->pHctJrnl, rdr.iTid);
+      i64 iCid = hctMapFindCid(p, pRdr->iTid);
+      if( iCid>0 ){
+        rc = sqlite3HctJrnlRollbackEntry(p->pHctJrnl, iCid);
+      }
     }
     sqlite3HctDbRecoverTid(p->pHctDb, 0);
   }
 
+  return rc;
+}
+
+static int hctRecoverOne(void *pCtx, const char *zFile){
+  HBtree *p = (HBtree*)pCtx;
+  int rc = SQLITE_OK;
+  HctLogReader rdr;
+
+  rc = hctLogReaderOpen(zFile, &rdr);
+
   if( rc==SQLITE_OK ){
-    /* TODO!!! */
-    unlink(zFile);
+    rc = hctRecoverOneLog(p, &rdr);
   }
+
   hctLogReaderClose(&rdr);
   return rc;
 }
 
 static int hctRecoverLogs(HBtree *p){
   HctFile *pFile = sqlite3HctDbFile(p->pHctDb);
-  return sqlite3HctFileFindLogs(pFile, (void*)p, hctRecoverOne);
-}
-
-
-/*
-** Free a pLog object and close the associated log file handle. If parameter
-** bUnlink is true, also unlink() the log file.
-*/
-static void hctLogFileClose(HctLogFile *pLog, int bUnlink){
-  if( pLog ){
-    close(pLog->fd);
-    if( bUnlink ) unlink(pLog->zLogFile);
-    sqlite3_free(pLog->zLogFile);
-    sqlite3_free(pLog->aBuf);
-    sqlite3_free(pLog);
-  }
-}
-
-/*
-** Open a log file object.
-*/
-static int hctLogFileOpen(char *zLogFile, int nBuf, HctLogFile **ppLog){
   int rc = SQLITE_OK;
-  HctLogFile *pLog;
+  int ii;
 
-  pLog = (HctLogFile*)sqlite3HctMalloc(&rc, sizeof(HctLogFile));
-  if( pLog ){
-    pLog->zLogFile = zLogFile;
-    pLog->fd = open(zLogFile, O_CREAT|O_RDWR, 0644);
-    if( pLog->fd<0 ){
-      rc = SQLITE_CANTOPEN_BKPT;
-    }else{
-      pLog->nBuf = nBuf;
-      pLog->aBuf = sqlite3HctMalloc(&rc, nBuf);
-    }
+  rc = sqlite3HctFileFindLogs(pFile, (void*)p, hctRecoverOne);
+  for(ii=0; rc==SQLITE_OK && ii<p->nJrnlLog; ii++){
+    HctJrnlLog *pJLog = &p->aJrnlLog[ii];
+    HctLogReader rdr;
+    hctLogReaderJrnlOpen(pJLog, &rdr);
+    rc = hctRecoverOneLog(p, &rdr);
   }
 
-  if( rc!=SQLITE_OK ){
-    hctLogFileClose(pLog, 0);
-    pLog = 0;
-  }
-
-  *ppLog = pLog;
   return rc;
-}
-
-static int hctLogFileWrite(HctLogFile *pLog, const void *aData, int nData){
-  int nRem = nData;
-  const u8 *aRem = (u8*)aData;
-  
-  assert( pLog->iBufferOff<=pLog->nBuf );
-  while( 1 ){
-
-    int nCopy = MIN(pLog->nBuf - pLog->iBufferOff, nRem);
-    if( nCopy>0 ){
-      memcpy(&pLog->aBuf[pLog->iBufferOff], aRem, nCopy);
-      pLog->iBufferOff += nCopy;
-      nRem -= nCopy;
-      if( nRem==0 ) break;
-      aRem += nCopy;
-    }
-
-    if( write(pLog->fd, pLog->aBuf, pLog->nBuf)!=pLog->nBuf ){
-      return sqlite3HctIoerr(SQLITE_IOERR_WRITE);
-    }
-    pLog->iFileOff += pLog->nBuf;
-    pLog->iBufferOff = 0;
-  }
-
-  return SQLITE_OK;
-}
-
-
-static void hctLogFileRestart(HctLogFile *pLog){
-  memset(pLog->aBuf, 0, 8);
-  lseek(pLog->fd, 0, SEEK_SET);
-  pLog->iFileOff = 0;
-  pLog->iBufferOff = 8;
-}
-
-
-static int hctLogFileWriteTid(HctLogFile *pLog, u64 iTid){
-  lseek(pLog->fd, 0, SEEK_SET);
-  if( write(pLog->fd, &iTid, sizeof(iTid))!=sizeof(iTid) ){
-    return sqlite3HctIoerr(SQLITE_IOERR_WRITE);
-  }
-  return SQLITE_OK;
-}
-
-static int hctLogFileFinish(HctLogFile *pLog, u64 iTid){
-  int rc = SQLITE_OK;
-  int bDone = 0;
-  if( pLog->iFileOff==0 ){
-    bDone = 1;
-    memcpy(pLog->aBuf, &iTid, sizeof(iTid));
-  }
-  if( rc==SQLITE_OK ){
-    static const u8 aZero[8] = {0,0,0,0, 0,0,0,0};
-    rc = hctLogFileWrite(pLog, aZero, sizeof(aZero));
-    if( rc==SQLITE_OK ){
-      assert( pLog->iBufferOff>0 );
-      if( write(pLog->fd, pLog->aBuf, pLog->iBufferOff)!=pLog->iBufferOff ){
-        rc = sqlite3HctIoerr(SQLITE_IOERR_WRITE);
-      }
-    }
-  }
-  if( bDone==0 && rc==SQLITE_OK ){
-    rc = hctLogFileWriteTid(pLog, iTid);
-  }
-  return rc;
-}
-
-static int btreeLogFileZero(HctLogFile *pLog){
-  return hctLogFileWriteTid(pLog, 0);
 }
 
 
@@ -702,6 +642,14 @@ int sqlite3HctBtreeOpen(
     pNew->pHctDb = sqlite3HctDbOpen(&rc, zFilename, &pNew->config);
   }
 
+  if( rc==SQLITE_OK && pNew->pHctDb ){
+    rc = sqlite3HctJournalNew(pNew->pHctDb, &pNew->pHctJrnl);
+  }
+  if( rc==SQLITE_OK && pNew->pHctDb ){
+    HctFile *pFile = sqlite3HctDbFile(pNew->pHctDb);
+    rc = sqlite3HctLogNew(pFile, pNew->pHctJrnl, &pNew->pHctLog);
+  }
+
   if( rc!=SQLITE_OK ){
     sqlite3HctBtreeClose((Btree*)pNew);
     pNew = 0;
@@ -719,7 +667,7 @@ int sqlite3HctBtreeClose(Btree *pBt){
     while(p->pCsrList){
       sqlite3HctBtreeCloseCursor((BtCursor*)p->pCsrList);
     }
-    hctLogFileClose(p->pLog, 1);
+    sqlite3HctLogClose(p->pHctLog);
     sqlite3HctBtreeRollback((Btree*)p, SQLITE_OK, 0);
     sqlite3HctBtreeCommit((Btree*)p);
     if( p->xSchemaFree ){
@@ -931,51 +879,6 @@ int sqlite3HctBtreeNewDb(Btree *p){
   return rc;
 }
 
-static int hctDetectJournals(HBtree *p){
-  int rc = SQLITE_OK;
-  if( p->pHctJrnl==0 ){
-    rc = sqlite3HctJournalNewIf(
-        (Schema*)p->pSchema, p->pHctTree, p->pHctDb, &p->pHctJrnl
-    );
-  }
-  return rc;
-}
-
-/*
-** This is called by sqlite3_hct_journal_init() after the journal and
-** baseline tables have been created in the database to initialize the
-** journal sub-system.
-**
-** Return SQLITE_OK if successful, or an SQLite error code if an error
-** occurs.
-*/
-int sqlite3HctDetectJournals(sqlite3 *db){
-  HBtree *p = (HBtree*)db->aDb[0].pBt;
-  int rc = hctDetectJournals(p);
-  if( rc==SQLITE_OK ){
-    rc = sqlite3HctDbStartRead(p->pHctDb, 0);
-  }
-  if( rc==SQLITE_OK ){
-    rc = sqlite3HctJrnlRecovery(p->pHctJrnl, p->pHctDb);
-  }
-  sqlite3HctDbEndRead(p->pHctDb);
-  return rc;
-}
-
-typedef struct HctFreelistCtx HctFreelistCtx;
-struct HctFreelistCtx {
-  /* Physical pages that need to be preserved for log and journal rollback */
-  int nAlloc;
-  int nPg;
-  i64 *aPg;
-
-  /* Root pages in the current schema */
-  int nRootAlloc;
-  int nRoot;
-  i64 *aRoot;
-
-  HBtree *p;
-};
 
 static int hctTopDownMerge(
   i64 *aB, 
@@ -1013,21 +916,49 @@ static int hctTopDownSplitMerge(i64 *aB, int iBegin, int iEnd, i64 *aA){
 }
 
 /*
-** Sort the array of aPg[] page numbers in ascending order. Discard 
-** any duplicates. 
+** Object to manage a list of 64-bit integers.
 */
-static void hctFreelistSort(int *pRc, HctFreelistCtx *p){
-  if( *pRc==SQLITE_OK && p->nPg>1 ){
-    i64 *aWork = (i64*)sqlite3HctMalloc(pRc, p->nPg * sizeof(i64));
+typedef struct HctIntList HctIntList;
+struct HctIntList {
+  i64 *aInt;
+  int nInt;
+  int nAlloc;
+};
+
+/*
+** Append value iVal to the int-list passed as the first argument. Return
+** SQLITE_OK if successful, or an SQLite error code (i.e. SQLITE_NOMEM)
+** otherwise.
+*/
+static int hctIntListAppend(HctIntList *pList, i64 iVal){
+  if( pList->nInt==pList->nAlloc ){
+    int nNew = pList->nAlloc ? pList->nAlloc*2 : 256;
+    i64 *aNew = (i64*)sqlite3Realloc(pList->aInt, nNew*sizeof(i64));
+    if( !aNew ) return SQLITE_NOMEM_BKPT;
+    pList->aInt = aNew;
+    pList->nAlloc = nNew;
+  }
+
+  pList->aInt[pList->nInt++] = iVal;
+  return SQLITE_OK;
+}
+
+/*
+** Sort the contents of the int-list passed as the first argument. Discard
+** any duplicates.
+*/
+static void hctIntListSort(int *pRc, HctIntList *p){
+  if( *pRc==SQLITE_OK && p->nInt>1 ){
+    i64 *aWork = (i64*)sqlite3HctMalloc(pRc, p->nInt * sizeof(i64));
     if( aWork ){
-      memcpy(aWork, p->aPg, p->nPg * sizeof(i64));
-      p->nPg = hctTopDownSplitMerge(p->aPg, 0, p->nPg, aWork);
+      memcpy(aWork, p->aInt, p->nInt * sizeof(i64));
+      p->nInt = hctTopDownSplitMerge(p->aInt, 0, p->nInt, aWork);
       sqlite3_free(aWork);
 #ifdef SQLITE_DEBUG
       {
         int ii;
-        for(ii=1; ii<p->nPg; ii++){
-          assert( p->aPg[ii]>p->aPg[ii-1] );
+        for(ii=1; ii<p->nInt; ii++){
+          assert( p->aInt[ii]>p->aInt[ii-1] );
         }
       }
 #endif
@@ -1035,17 +966,119 @@ static void hctFreelistSort(int *pRc, HctFreelistCtx *p){
   }
 }
 
+static void hctIntListZero(HctIntList *p){
+  sqlite3_free(p->aInt);
+  memset(p, 0, sizeof(*p));
+}
+
+
+typedef struct HctFreelistCtx HctFreelistCtx;
+struct HctFreelistCtx {
+  /* Physical pages that need to be preserved for log and journal rollback */
+  HctIntList lPhys;
+
+  /* Root pages in the current schema */
+  HctIntList lRoot;
+
+  HBtree *p;
+};
+
+/*
+** Sort the array of aPg[] page numbers in ascending order. Discard 
+** any duplicates. 
+*/
+static void hctFreelistSort(int *pRc, HctFreelistCtx *p){
+  hctIntListSort(pRc, &p->lPhys);
+}
+
 static int hctSavePhysical(void *pCtx, i64 iPhys){
   HctFreelistCtx *p = (HctFreelistCtx*)pCtx;
-  if( p->nPg==p->nAlloc ){
-    int nNew = (p->nPg>0) ? p->nPg * 4 : 64;
-    i64 *aNew = (i64*)sqlite3_realloc(p->aPg, nNew*sizeof(i64));;
-    if( aNew==0 ) return SQLITE_NOMEM;
-    p->aPg = aNew;
-    p->nAlloc = nNew;
+  return hctIntListAppend(&p->lPhys, iPhys);
+}
+
+static int hctCacheJrnlLog(
+  void *pCtx,
+  i64 iCid,
+  int nData,
+  const u8 *aData
+){
+  int rc = SQLITE_OK;
+  HBtree *p = (HBtree*)pCtx;
+  HctJrnlLog *pLog = 0;
+
+  if( (p->nJrnlLog & (p->nJrnlLog-1))==0 ){
+    int nNew = p->nJrnlLog ? p->nJrnlLog*2 : 1;
+    HctJrnlLog *aNew = 0;
+    aNew = (HctJrnlLog*)sqlite3Realloc(p->aJrnlLog, nNew*sizeof(HctJrnlLog));
+    if( !aNew ) return SQLITE_NOMEM_BKPT;
+    p->aJrnlLog = aNew;
   }
-  p->aPg[p->nPg++] = iPhys;
-  return SQLITE_OK;
+  pLog = &p->aJrnlLog[p->nJrnlLog++];
+  pLog->iCid = iCid;
+
+  rc = sqlite3HctLogLoadData(
+      p->pHctLog, nData, aData, &pLog->iTid, &pLog->nLogData, &pLog->aLogData
+  );
+  assert( rc==SQLITE_OK );
+
+  return rc;
+}
+
+static int hctCacheJrnlMap(
+  void *pCtx,
+  i64 iCid,
+  i64 iTid
+){
+  int rc = SQLITE_OK;
+  HBtree *p = (HBtree*)pCtx;
+  HctJrnlMap *pMap = 0;
+
+  /* If necessary, allocate more space for the HBtree.aJrnlMap[] array. */
+  if( (p->nJrnlMap==0)
+   || (p->nJrnlMap>=1024 && (p->nJrnlMap & (p->nJrnlMap-1))==0) ){
+    int nNew = p->nJrnlMap ? p->nJrnlMap*2 : 1024;
+    HctJrnlMap *aNew = 0;
+    aNew = (HctJrnlMap*)sqlite3Realloc(p->aJrnlLog, nNew*sizeof(HctJrnlMap));
+    if( !aNew ) return SQLITE_NOMEM_BKPT;
+    p->aJrnlMap = aNew;
+  }
+
+  pMap = &p->aJrnlMap[p->nJrnlMap++];
+  pMap->iCid = iCid;
+  pMap->iTid = iTid;
+
+  return rc;
+}
+
+static int hctScanOneToSavePages(HctFreelistCtx *p, HctLogReader *pRdr){
+  int rc = SQLITE_OK;
+  u32 iPrevRoot =0;
+  RecoverCsr csr;
+
+  sqlite3HctDbSetSavePhysical(p->p->pHctDb, hctSavePhysical, (void*)p);
+  memset(&csr, 0, sizeof(csr));
+  sqlite3HctDbRecoverTid(p->p->pHctDb, pRdr->iTid);
+
+  for(/* no-op */; rc==SQLITE_OK && pRdr->bEof==0; hctLogReaderNext(pRdr)){
+
+    if( pRdr->iRoot!=iPrevRoot ){
+      hctRecoverCursorClose(p->p, &csr);
+      rc = hctRecoverCursorOpen(p->p, pRdr->iRoot, &csr);
+      iPrevRoot = pRdr->iRoot;
+    }
+
+    if( rc==SQLITE_OK ){
+      int dy = 0;               /* Dummy var for CsrRollbackSeek() */
+      if( pRdr->nKey ){
+        sqlite3VdbeRecordUnpack(csr.pKeyInfo,pRdr->nKey,pRdr->aKey,csr.pRec);
+      }
+      rc = sqlite3HctDbCsrRollbackSeek(csr.pCsr, csr.pRec, pRdr->iKey, &dy);
+    }
+  }
+
+  hctRecoverCursorClose(p->p, &csr);
+  sqlite3HctDbSetSavePhysical(p->p->pHctDb, 0, 0);
+  return rc;
 }
 
 static int hctScanOne(void *pCtx, const char *zFile){
@@ -1053,53 +1086,19 @@ static int hctScanOne(void *pCtx, const char *zFile){
   int rc = SQLITE_OK;
   HctLogReader rdr;
 
-  sqlite3HctDbSetSavePhysical(p->p->pHctDb, hctSavePhysical, pCtx);
-
   rc = hctLogReaderOpen(zFile, &rdr);
-  if( rc==SQLITE_OK && rdr.bEof==0 ){
-    u32 iPrevRoot =0;
-    RecoverCsr csr;
-    memset(&csr, 0, sizeof(csr));
-    sqlite3HctDbRecoverTid(p->p->pHctDb, rdr.iTid);
-    for(/* no-op */; rc==SQLITE_OK && rdr.bEof==0; hctLogReaderNext(&rdr)){
 
-      if( rdr.iRoot!=iPrevRoot ){
-        hctRecoverCursorClose(p->p, &csr);
-        rc = hctRecoverCursorOpen(p->p, rdr.iRoot, &csr);
-        iPrevRoot = rdr.iRoot;
-      }
-
-      if( rc==SQLITE_OK ){
-        int dummy = 0;
-        if( rdr.nKey ){
-          sqlite3VdbeRecordUnpack(csr.pKeyInfo, rdr.nKey, rdr.aKey, csr.pRec);
-        }
-        rc = sqlite3HctDbCsrRollbackSeek(csr.pCsr, csr.pRec, rdr.iKey, &dummy);
-      }
-    }
-
-    hctRecoverCursorClose(p->p, &csr);
+  if( rc==SQLITE_OK ){
+    rc = hctScanOneToSavePages(p, &rdr);
   }
 
-  sqlite3HctDbSetSavePhysical(p->p->pHctDb, 0, 0);
   hctLogReaderClose(&rdr);
   return rc;
 }
 
 static void hctRootpageAdd(int *pRc, HctFreelistCtx *pCtx, i64 iRoot){
   if( *pRc==SQLITE_OK ){
-    if( pCtx->nRoot==pCtx->nRootAlloc ){
-      int nNew = (pCtx->nRoot>0) ? pCtx->nRoot * 4 : 64;
-      i64 *aNew = (i64*)sqlite3_realloc(pCtx->aRoot, nNew*sizeof(i64));;
-      if( aNew==0 ){
-        *pRc = SQLITE_NOMEM;
-        return;
-      }
-      pCtx->aRoot = aNew;
-      pCtx->nRootAlloc = nNew;
-    }
-
-    pCtx->aRoot[pCtx->nRoot++] = iRoot;
+    *pRc = hctIntListAppend(&pCtx->lRoot, iRoot);
   }
 }
 
@@ -1146,6 +1145,7 @@ static void hctRootpageList(int *pRc, HctFreelistCtx *pCtx){
 ** This is a complicated procedure.
 */
 static int hctRecoverFreeList(HBtree *p){
+  int ii;                         /* Loop counter */
   HctFreelistCtx ctx;
   HctFile *pFile = sqlite3HctDbFile(p->pHctDb);
   int rc = SQLITE_OK;
@@ -1153,24 +1153,16 @@ static int hctRecoverFreeList(HBtree *p){
   memset(&ctx, 0, sizeof(ctx));
   ctx.p = p;
 
-  /* If this is a replication database, scan all journal entries that may
-  ** be rolled back using a call to sqlite3_hct_journal_rollback(). Record
-  ** the set of physical pages that may be required by this call in the 
-  ** ctx.aPg[] array.  */
-  if( p->pHctJrnl ){
-    void *pCtx = (void*)&ctx;
-    rc = sqlite3HctJrnlSavePhysical(
-        p->config.db, p->pHctJrnl, hctSavePhysical, pCtx
-    );
-  }
-
-  /* Also scan any log files, adding the list of physical pages that must
+  /* Scan any live log files, adding the list of physical pages that must 
   ** be preserved to the ctx.aPg[] array.  */
-  if( rc==SQLITE_OK ){
-    sqlite3HctDbRollbackMode(p->pHctDb, 2);
-    rc = sqlite3HctFileFindLogs(pFile, (void*)&ctx, hctScanOne);
-    sqlite3HctDbRollbackMode(p->pHctDb, 0);
+  sqlite3HctDbRollbackMode(p->pHctDb, 2);
+  rc = sqlite3HctFileFindLogs(pFile, (void*)&ctx, hctScanOne);
+  for(ii=0; rc==SQLITE_OK && ii<p->nJrnlLog; ii++){
+    HctLogReader rdr;
+    hctLogReaderJrnlOpen(&p->aJrnlLog[ii], &rdr);
+    rc = hctScanOneToSavePages(&ctx, &rdr);
   }
+  sqlite3HctDbRollbackMode(p->pHctDb, 0);
 
   /* Sort the list of physical page numbers accumulated above. */
   hctFreelistSort(&rc, &ctx);
@@ -1182,36 +1174,184 @@ static int hctRecoverFreeList(HBtree *p){
   ** be preserved, and the set of root pages in the current db schema. */
   if( rc==SQLITE_OK ){
     rc = sqlite3HctFileRecoverFreelists(
-        pFile, ctx.nRoot, ctx.aRoot, ctx.nPg, ctx.aPg
+        pFile, ctx.lRoot.nInt, ctx.lRoot.aInt, ctx.lPhys.nInt, ctx.lPhys.aInt
     );
   }
 
-  sqlite3_free(ctx.aPg);
-  sqlite3_free(ctx.aRoot);
+  hctIntListZero(&ctx.lPhys);
+  hctIntListZero(&ctx.lRoot);
   return rc;
+}
+
+
+static int hctMapMerge(HctJrnlMap *aB, HctJrnlMap *aA, int n1, int n2){
+  int i1 = 0;
+  int i2 = n1;
+  int out;
+
+  for(out=0; i1<n1 || i2<n2; out++){
+    if( i1<n1 && (i2>=n2 || aA[i1].iTid<aA[i2].iTid) ){
+      aB[out] = aA[i1];
+      i1++;
+    }else{
+      aB[out] = aA[i2];
+      i2++;
+    }
+  }
+
+  return out;
+}
+
+/*
+** Sort the elements of aA[] into array aB[]. Both arrays contain nElem
+** elements.
+*/
+static void hctMapSplitMerge(HctJrnlMap *aB, int nElem, HctJrnlMap *aA){
+  if( nElem>1 ){
+    int iMid = nElem/2;
+    hctMapSplitMerge(aA, iMid, aB);
+    hctMapSplitMerge(&aA[iMid], nElem-iMid, &aB[iMid]);
+    hctMapMerge(aB, aA, iMid, nElem-iMid);
+  }
+}
+
+/*
+** Sort the aMap[] array in order of HctJrnlMap.iTid.
+*/
+static void hctMapSort(int *pRc, int nMap, HctJrnlMap *aMap){
+  if( *pRc==SQLITE_OK && nMap>1 ){
+    int nByte = nMap * sizeof(HctJrnlMap);
+    HctJrnlMap *aWork = (HctJrnlMap*)sqlite3HctMalloc(pRc, nByte);
+    if( aWork ){
+      memcpy(aWork, aMap, nMap*sizeof(HctJrnlMap));
+      hctMapSplitMerge(aMap, nMap, aWork);
+      sqlite3_free(aWork);
+#ifdef SQLITE_DEBUG
+      {
+        int ii;
+        for(ii=1; ii<nMap; ii++){
+          assert( aMap[ii].iTid>aMap[ii-1].iTid );
+        }
+      }
+#endif
+    }
+  }
+}
+
+static int hctUnlinkLog(void *pCtx, const char *zFile){
+  (void)pCtx;
+  return ((unlink(zFile)==0) ? SQLITE_OK : SQLITE_IOERR_DELETE);
+}
+
+/*
+** This is an sqlite3HctFileFindLogs() callback. The context argument is
+** actually a pointer to an object of type HctIntList. This callback reads
+** the first 8 bytes from each log file, and if it is a valid TID, adds
+** it to the pCtx list.
+*/
+static int hctRecordTid(void *pCtx, const char *zFile){
+  HctIntList *p = (HctIntList*)pCtx;
+  int fd = 0;
+  struct stat sStat;
+
+  fd = open(zFile, O_RDONLY);
+  if( fd<0 ) return SQLITE_CANTOPEN_BKPT;
+
+  memset(&sStat, 0, sizeof(sStat));
+  fstat(fd, &sStat);
+  if( sStat.st_size>=sizeof(i64) ){
+    i64 iTid;
+    read(fd, &iTid, sizeof(iTid));
+    if( iTid!=0 && hctIntListAppend(p, iTid)!=SQLITE_OK ){
+      return SQLITE_NOMEM;
+    }
+  }
+
+  return SQLITE_OK;
 }
 
 static int hctAttemptRecovery(HBtree *p){
   int rc = SQLITE_OK;
-  if( p->bRecoveryDone==0 ){
-    HctFile *pFile = sqlite3HctDbFile(p->pHctDb);
-    if( p->pHctDb && sqlite3HctFileStartRecovery(pFile, 0) ){
-      p->bRecoveryDone = 1;
-      rc = hctRecoverFreeList(p);
+  HctFile *pFile = sqlite3HctDbFile(p->pHctDb);
 
-      if( rc==SQLITE_OK ){
-        rc = hctRecoverLogs(p);
-      }
+  assert( p->bRecoveryDone==0 );
+  if( p->pHctDb && sqlite3HctFileStartRecovery(pFile, 0) ){
+    int eMode = SQLITE_HCT_NORMAL;
+    int ii;
+    p->bRecoveryDone = 1;
+    HctIntList lRb = {0,0,0};
+    HctIntList lZero = {0,0,0};
 
-      if( rc==SQLITE_OK && p->pHctJrnl ){
-        sqlite3HctDbRollbackMode(p->pHctDb, 0);
-        rc = sqlite3HctJrnlRecovery(p->pHctJrnl, p->pHctDb);
+    /* Find the journal recovery mode - the mode the database was in when
+    ** the previous user exited. */
+    rc = sqlite3HctJrnlRecoveryMode(p->config.db, p->pHctJrnl, &eMode);
+
+    /* Find the list of TIDs that will be rolled back due to live journals
+    ** in the file-system. We need this list before analyzing the current
+    ** hct_journal table. */
+    if( rc==SQLITE_OK ){
+      rc = sqlite3HctFileFindLogs(pFile, &lRb, hctRecordTid);
+    }
+    hctIntListSort(&rc, &lRb);
+
+    /* Find any non-contiguous journal entries written in follower mode.
+    ** Store these in an in-memory cache at HBtree.aJrnlLog[]. */
+    if( rc==SQLITE_OK ){
+      rc = sqlite3HctJrnlFindLogs(
+          p->config.db, p->pHctJrnl, 
+          lRb.nInt, lRb.aInt,
+          (void*)p, hctCacheJrnlLog, hctCacheJrnlMap
+      );
+      if( eMode==SQLITE_HCT_LEADER ){
+        for(ii=1; ii<p->nJrnlMap; ii++){
+          i64 jj;
+          for(jj=p->aJrnlMap[ii-1].iCid+1; 
+              rc==SQLITE_OK && jj<p->aJrnlMap[ii].iCid; 
+              jj++
+          ){
+            rc = hctIntListAppend(&lZero, jj);
+          }
+        }
       }
-      rc = sqlite3HctDbFinishRecovery(p->pHctDb, 0, rc);
+      hctMapSort(&rc, p->nJrnlMap, p->aJrnlMap);
     }
 
-    p->bRecoveryDone = (rc==SQLITE_OK);
+    if( rc==SQLITE_OK ){
+      rc = hctRecoverFreeList(p);
+    }
+
+    if( rc==SQLITE_OK ){
+      rc = hctRecoverLogs(p);
+    }
+
+    rc = sqlite3HctDbFinishRecovery(p->pHctDb, 0, rc);
+
+    /* If all recovery operations were successful, delete all log files */
+    if( rc==SQLITE_OK ){
+      rc = sqlite3HctFileFindLogs(pFile, 0, hctUnlinkLog);
+    }
+
+    /* Add any required zero records to hct_journal */
+    if( rc==SQLITE_OK ){
+      rc = sqlite3HctJrnlZeroEntries(p->pHctJrnl, lZero.nInt, lZero.aInt);
+    }
+
+    /* Clean up arrays cached by sqlite3HctJrnlFindLogs() */
+    for(ii=0; ii<p->nJrnlLog; ii++){
+      sqlite3_free(p->aJrnlLog[ii].aLogData);
+    }
+    sqlite3_free(p->aJrnlLog);
+    sqlite3_free(p->aJrnlMap);
+    p->aJrnlLog = 0;
+    p->aJrnlMap = 0;
+    p->nJrnlLog = 0;
+    p->nJrnlMap = 0;
+
+    hctIntListZero(&lRb);
+    hctIntListZero(&lZero);
   }
+
+  p->bRecoveryDone = (rc==SQLITE_OK);
 
   return rc;
 }
@@ -1322,18 +1462,18 @@ int sqlite3HctBtreeBeginTrans(Btree *pBt, int wrflag, int *pSchemaVersion){
 int sqlite3HctBtreeSchemaLoaded(Btree *pBt){
   int rc = SQLITE_OK;
   HBtree *const p = (HBtree*)pBt;
+
+  /* Make sure the journal sub-system knows the root page of hct_journal. */
+  sqlite3HctJrnlSetRoot(p->pHctJrnl, (Schema*)p->pSchema);
+
+  /* If recovery is not yet done, do it now. */
   if( p->bRecoveryDone==0 ){
-    rc = hctDetectJournals(p);
-    if( rc==SQLITE_OK ){
-      rc = hctAttemptRecovery(p);
-    }
+    rc = hctAttemptRecovery(p);
     if( rc==SQLITE_OK ){
       sqlite3HctDbEndRead(p->pHctDb);
     }
   }
-  if( rc==SQLITE_OK && p->pHctJrnl ){
-    sqlite3HctJournalFixSchema(p->pHctJrnl, p->config.db, p->pSchema);
-  }
+
   return rc;
 }
 
@@ -1466,28 +1606,6 @@ static int btreeFlushOneToDisk(void *pCtx, u32 iRoot, KeyInfo *pKeyInfo){
   return rc;
 }
 
-static int btreeLogIntkey(HctLogFile *pLog, u32 iRoot, i64 iRowid){
-  u8 aBuf[16];
-  memcpy(&aBuf[0], &iRoot, sizeof(u32));
-  memset(&aBuf[4], 0, sizeof(u32));
-  memcpy(&aBuf[8], &iRowid, sizeof(i64));
-  return hctLogFileWrite(pLog, aBuf, sizeof(aBuf));
-}
-
-static int btreeLogIndex(
-  HctLogFile *pLog, 
-  u32 iRoot, 
-  const u8 *aData, int nData
-){
-  if( hctLogFileWrite(pLog, &iRoot, sizeof(iRoot))
-   || hctLogFileWrite(pLog, &nData, sizeof(nData))
-   || hctLogFileWrite(pLog, aData, nData)
-  ){
-    return sqlite3HctIoerr(SQLITE_IOERR_WRITE);
-  }
-  return SQLITE_OK;
-}
-
 static int btreeLogOneToDisk(void *pCtx, u32 iRoot, KeyInfo *pKeyInfo){
   HBtree *p = (HBtree*)pCtx;
   HctTreeCsr *pCsr = 0;
@@ -1503,11 +1621,11 @@ static int btreeLogOneToDisk(void *pCtx, u32 iRoot, KeyInfo *pKeyInfo){
         int nData = 0;
         const u8 *aData = 0;
         sqlite3HctTreeCsrData(pCsr, &nData, &aData);
-        rc = btreeLogIndex(p->pLog, iRoot, aData, nData);
+        rc = sqlite3HctLogRecord(p->pHctLog, iRoot, nData, aData);
       }else{
         i64 iRowid = 0;
         sqlite3HctTreeCsrKey(pCsr, &iRowid);
-        rc = btreeLogIntkey(p->pLog, iRoot, iRowid);
+        rc = sqlite3HctLogRecord(p->pHctLog, iRoot, iRowid, 0);
       }
 
       if( rc!=SQLITE_OK ) break;
@@ -1539,17 +1657,8 @@ static int btreeFlushData(HBtree *p, int bRollback){
 static int btreeWriteLog(HBtree *p){
   int rc = SQLITE_OK;
 
-  if( p->pLog==0 ){
-    char *zLog = sqlite3HctDbLogFile(p->pHctDb);
-    if( zLog==0 ){
-      rc = SQLITE_NOMEM_BKPT;
-    }else{
-      rc = hctLogFileOpen(zLog, p->config.szLogChunk, &p->pLog);
-    }
-  }
-
+  rc = sqlite3HctLogBegin(p->pHctLog);
   if( rc==SQLITE_OK ){
-    hctLogFileRestart(p->pLog);
     rc = sqlite3HctTreeForeach(p->pHctTree, 0, (void*)p, btreeLogOneToDisk);
   }
 
@@ -1597,19 +1706,15 @@ static int btreeFlushToDisk(HBtree *p){
   int rcok = SQLITE_OK;
   u64 iTid = 0;
   u64 iCid = 0;
-  int bTmapScan = 0;
-  int bCustomValid = 0;           /* True if xValidate() was invoked */
 
   /* Write a log file for this transaction. The TID field is still set
   ** to zero at this point.  */
   rc = btreeWriteLog(p);
 
   if( rc==SQLITE_OK ){
+
     /* Obtain the TID for this transaction.  */
-    iTid = sqlite3HctJrnlWriteTid(p->pHctJrnl, &iCid);
-    if( iTid==0 ){
-      sqlite3HctDbStartWrite(p->pHctDb, &iTid);
-    }
+    sqlite3HctDbStartWrite(p->pHctDb, &iTid);
 
     /* Invoke the SQLITE_TESTCTRL_HCT_MTCOMMIT hook, if applicable */
     if( p->config.db->xMtCommit ){
@@ -1617,7 +1722,9 @@ static int btreeFlushToDisk(HBtree *p){
     }
 
     assert( iTid>0 );
-    if( p->pLog ) rc = hctLogFileFinish(p->pLog, iTid);
+    if( p->pHctLog ){
+      rc = sqlite3HctLogFinish(p->pHctLog, iTid);
+    }
   }
 
   /* Write all the new database entries to the database. Any write/write
@@ -1630,30 +1737,43 @@ static int btreeFlushToDisk(HBtree *p){
   /* Assuming the data has been flushed to disk without error or a
   ** write/write conflict, allocate a CID and validate the transaction. */
   if( rc==SQLITE_OK ){
+    u64 iReqSnapshot = sqlite3HctDbReqSnapshot(p->pHctDb);
+
     /* Invoke the SQLITE_TESTCTRL_HCT_MTCOMMIT hook, if applicable */
     if( p->config.db->xMtCommit ){
       p->config.db->xMtCommit(p->config.db->pMtCommitCtx, 1);
     }
 
-    /* Validate the transaction. */
-    rc = sqlite3HctDbValidate(p->config.db, p->pHctDb, &iCid, &bTmapScan);
+    /* If the db is in FOLLOWER mode, then the CID value has already been
+    ** supplied by the caller - we just have to grab it from the HctJrnl
+    ** object. Also if in FOLLOWER mode, there is no validation step. 
+    **
+    ** Otherwise, if not in FOLLOWER mode - validate the transaction.  */
+    iCid = sqlite3HctJrnlFollowerModeCid(p->pHctJrnl);
+    if( iCid==0 ){
+      rc = sqlite3HctDbValidate(p->config.db, p->pHctDb, &iCid);
+    }
+    if( iReqSnapshot>iCid ){
+      iReqSnapshot = iCid-1;
+    }
+
+    /* If there have been any schema operations, there may have been
+    ** CREATE TABLE statements. In this case, for each CREATE TABLE
+    ** statement check that the write to the sqlite_schema table did not
+    ** create a duplicate table name.  */
     if( rc==SQLITE_OK && p->nSchemaOp ){
-      /* If there have been any schema operations, there may have been
-      ** CREATE TABLE statements. For each CREATE TABLE statement, check
-      ** that the write to the sqlite_schema table did not create a duplicate
-      ** table name.  */
       rc = hctValidateSchema(p, iTid);
     }
 
     /* If validation passed and this database is configured for replication,
-    ** write the journal entry and invoke the custom validation hook */
-    if( rc==SQLITE_OK && p->pHctJrnl ){
-      rc = sqlite3HctJrnlLog(
-        p->pHctJrnl,
-        p->config.db,
-        (Schema*)p->pSchema,
-        iCid, iTid, &bCustomValid
-      );
+    ** write the journal entry.  */
+    if( iCid!=0 ){
+      const u8 *aPtr = 0;
+      int nPtr = 0;
+      sqlite3HctLogSetCid(p->pHctLog, iCid);
+      sqlite3HctLogPointer(p->pHctLog, iTid, &nPtr, &aPtr);
+      assert( aPtr==0 || memcmp(&iTid, aPtr, sizeof(iTid))==0 );
+      rc = sqlite3HctJrnlLog(p->pHctJrnl, iCid, iReqSnapshot, nPtr, aPtr, rc);
     }
   }
 
@@ -1663,11 +1783,6 @@ static int btreeFlushToDisk(HBtree *p){
     rcok = SQLITE_BUSY_SNAPSHOT;
     rc = btreeFlushData(p, 1);
     if( rc==SQLITE_DONE ) rc = SQLITE_OK;
-    if( iCid>0 && p->pHctJrnl ){
-      rc = sqlite3HctJrnlWriteEmpty(p->pHctJrnl, iCid, iTid, 
-          (bCustomValid ? 0 : p->config.db)
-      );
-    }
   }
 
   /* Do any DROP TABLE commands */
@@ -1682,18 +1797,15 @@ static int btreeFlushToDisk(HBtree *p){
 
   /* Zero the log file and set the entry in the transaction-map to 
   ** finish the transaction. */
-  if( rc==SQLITE_OK && p->pLog ){
-    rc = btreeLogFileZero(p->pLog);
+  if( rc==SQLITE_OK && p->pHctLog ){
+    rc = sqlite3HctLogZero(p->pHctLog);
   }
   if( rc==SQLITE_OK ){
     rc = sqlite3HctDbEndWrite(p->pHctDb, iCid, rcok!=SQLITE_OK);
   }
   assert( rc==SQLITE_OK );
-  if( bTmapScan ){
-    sqlite3HctDbTMapScan(p->pHctDb);
-  }
+  sqlite3HctDbTMapScan(p->pHctDb);
 
-  sqlite3HctJrnlInvokeHook(p->pHctJrnl, p->config.db);
   return (rc==SQLITE_OK ? rcok : rc);
 }
 
@@ -1803,6 +1915,13 @@ int sqlite3HctBtreeCommitPhaseTwo(Btree *pBt, int bCleanup){
   if( p->eTrans==SQLITE_TXN_ERROR ) return SQLITE_BUSY_SNAPSHOT;
 
   if( p->eTrans==SQLITE_TXN_WRITE ){
+
+    if( sqlite3HctJrnlCommitOk(p->pHctJrnl)==0 ){
+      /* This case is when a straight COMMIT is run in FOLLOWER or 
+      ** LEADER mode. */
+      return SQLITE_ERROR;
+    }
+
     if( p->pCsrList ){
       /* Cannot commit with open cursors in hctree */
       return SQLITE_LOCKED;
@@ -2025,20 +2144,21 @@ int sqlite3HctBtreeCursor(
   HBtCursor *const pCur = (HBtCursor*)pCursor;
   HBtree *const p = (HBtree*)pBt;
   int rc = SQLITE_OK;
-  int bNosnap = 0;
   int bNoscan = (iTable==1);
-  int bReadonly = sqlite3HctJournalIsReadonly(p->pHctJrnl, iTable, &bNosnap);
+  int bNosnap = sqlite3HctJournalIsNosnap(p->pHctJrnl, iTable);
 
   assert( p->eTrans!=SQLITE_TXN_NONE );
   assert( p->eTrans!=SQLITE_TXN_ERROR );
   assert( pCur->pHctTreeCsr==0 );
 
+#if 0
   /* If this is an attempt to open a read/write cursor on either the
   ** sqlite_hct_journal or sqlite_hct_baseline tables, return an error
   ** immediately.  */
   if( wrFlag && bReadonly ){
     return SQLITE_READONLY;
   }
+#endif
 
   pCur->pKeyInfo = pKeyInfo;
   rc = sqlite3HctTreeCsrOpen(p->pHctTree, iTable, &pCur->pHctTreeCsr);
@@ -2852,7 +2972,7 @@ int sqlite3HctBtreeInsert(
 int sqlite3HctSchemaOp(Btree *pBt, const char *zSql){
   int rc = SQLITE_OK;
   HBtree *const p = (HBtree*)pBt;
-  if( p->pHctJrnl ){
+  if( p->pHctJrnl && 0 ){
     HctTreeCsr *pCsr = 0;
 
     rc = sqlite3HctTreeCsrOpen(p->pHctTree, HCT_TREE_SCHEMAOP_ROOT, &pCsr);

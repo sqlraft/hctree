@@ -515,7 +515,8 @@ LIBOBJS0 = alter.o analyze.o attach.o auth.o \
          wal.o walker.o where.o wherecode.o whereexpr.o \
          window.o \
          hct_tree.o hct_file.o hct_database.o hct_tmap.o hct_pman.o \
-         hct_record.o hct_stats.o btwrapper.o hct_journal.o hct_journalhash.o
+         hct_record.o hct_stats.o btwrapper.o hct_journal.o hct_journalhash.o \
+         hct_log.o
 
 LIBOBJS = $(LIBOBJS0)
 
@@ -647,6 +648,7 @@ SRC += \
   $(TOP)/src/hct_tree.c \
   $(TOP)/src/hct_file.c \
   $(TOP)/src/hct_journal.c \
+  $(TOP)/src/hct_log.c \
   $(TOP)/src/hct_journalhash.c \
   $(TOP)/src/hct_database.c \
   $(TOP)/src/hct_stats.c \
@@ -658,6 +660,7 @@ SRC += \
   $(TOP)/src/hctJrnlInt.h      \
   $(TOP)/src/hctPManInt.h  \
   $(TOP)/src/hctTMapInt.h \
+  $(TOP)/src/hctLogInt.h \
   $(TOP)/src/btreeModules.h \
   $(TOP)/src/btreeDefine.h \
   $(TOP)/src/btreeUndef.h \
@@ -1202,35 +1205,38 @@ global.o:	$(TOP)/src/global.c $(DEPS_OBJ_COMMON)
 hash.o:	$(TOP)/src/hash.c $(DEPS_OBJ_COMMON)
 	$(T.cc.sqlite) -c $(TOP)/src/hash.c
 
-hctree.o:	$(TOP)/src/hash.c $(DEPS_OBJ_COMMON)
+hctree.o:	$(TOP)/src/hctree.c $(DEPS_OBJ_COMMON)
 	$(T.cc.sqlite) $(CFLAGS.libsqlite3) -c $(TOP)/src/hctree.c
 
-hct_tree.o:	$(TOP)/src/hash.c $(DEPS_OBJ_COMMON)
+hct_tree.o:	$(TOP)/src/hct_tree.c $(DEPS_OBJ_COMMON)
 	$(T.cc.sqlite) $(CFLAGS.libsqlite3) -c $(TOP)/src/hct_tree.c
 
-hct_file.o:	$(TOP)/src/hash.c $(DEPS_OBJ_COMMON)
+hct_file.o:	$(TOP)/src/hct_file.c $(DEPS_OBJ_COMMON)
 	$(T.cc.sqlite) $(CFLAGS.libsqlite3) -c $(TOP)/src/hct_file.c
 
-hct_database.o:	$(TOP)/src/hash.c $(DEPS_OBJ_COMMON)
+hct_database.o:	$(TOP)/src/hct_database.c $(DEPS_OBJ_COMMON)
 	$(T.cc.sqlite) $(CFLAGS.libsqlite3) -c $(TOP)/src/hct_database.c
 
-hct_tmap.o:	$(TOP)/src/hash.c $(DEPS_OBJ_COMMON)
+hct_tmap.o:	$(TOP)/src/hct_tmap.c $(DEPS_OBJ_COMMON)
 	$(T.cc.sqlite) $(CFLAGS.libsqlite3) -c $(TOP)/src/hct_tmap.c
 
-hct_pman.o:	$(TOP)/src/hash.c $(DEPS_OBJ_COMMON)
+hct_pman.o:	$(TOP)/src/hct_pman.c $(DEPS_OBJ_COMMON)
 	$(T.cc.sqlite) $(CFLAGS.libsqlite3) -c $(TOP)/src/hct_pman.c
 
-hct_record.o:	$(TOP)/src/hash.c $(DEPS_OBJ_COMMON)
+hct_record.o:	$(TOP)/src/hct_record.c $(DEPS_OBJ_COMMON)
 	$(T.cc.sqlite) $(CFLAGS.libsqlite3) -c $(TOP)/src/hct_record.c
 
-hct_stats.o:	$(TOP)/src/hash.c $(DEPS_OBJ_COMMON)
+hct_stats.o:	$(TOP)/src/hct_stats.c $(DEPS_OBJ_COMMON)
 	$(T.cc.sqlite) $(CFLAGS.libsqlite3) -c $(TOP)/src/hct_stats.c
 
-btwrapper.o:	$(TOP)/src/hash.c $(DEPS_OBJ_COMMON)
+btwrapper.o:	$(TOP)/src/btwrapper.c $(DEPS_OBJ_COMMON)
 	$(T.cc.sqlite) $(CFLAGS.libsqlite3) -c $(TOP)/src/btwrapper.c
 
-hct_journal.o:	$(TOP)/src/hash.c $(DEPS_OBJ_COMMON)
+hct_journal.o:	$(TOP)/src/hct_journal.c $(DEPS_OBJ_COMMON)
 	$(T.cc.sqlite) $(CFLAGS.libsqlite3) -c $(TOP)/src/hct_journal.c
+
+hct_log.o:	$(TOP)/src/hct_log.c $(DEPS_OBJ_COMMON)
+	$(T.cc.sqlite) $(CFLAGS.libsqlite3) -c $(TOP)/src/hct_log.c
 
 hct_journalhash.o:	$(TOP)/src/hash.c $(DEPS_OBJ_COMMON)
 	$(T.cc.sqlite) $(CFLAGS.libsqlite3) -c $(TOP)/src/hct_journalhash.c

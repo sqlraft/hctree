@@ -50,6 +50,12 @@ proc catch_hct_journal_init {db} {
   return "0 {}"
 }
 
+proc hct_write_leader {db sql} {
+  execsql "BEGIN CONCURRENT" $db
+  execsql $sql $db
+  sqlite3_hct_journal_leader_commit $db $sql
+}
+
 proc test_dbs_match {tn sql} {
   uplevel [list do_execsql_test $tn $sql [db2 eval $sql]]
 }

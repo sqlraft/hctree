@@ -67,66 +67,7 @@
 #include "hctInt.h"
 
 typedef struct HctTMapFull HctTMapFull;
-typedef struct HctTMapRef HctTMapRef;
 
-/*
-** The following object type represents a reference to an HctTMapFull
-** object. The reference is taken and released under the cover of the
-** associated HctTMapServer.mutex mutex.
-**
-** pRefNext/pRefPrev:
-**   These are used to link this object into the linked list at 
-**   HctTMapFull.pRefList. They may only be accessed under the cover
-**   of the associated HctTMapServer.mutex mutex.
-**
-** pMap:
-**   Pointer to the HctTMapFull object, if any, that this reference
-**   currently points to.
-**
-** refMask:
-**   This may be set to one of four values. It is always modified using
-**   CAS instructions.
-**
-**      Zero:
-**        HctTMapRef.pMap is not valid (always NULL).
-**
-**      HCT_TMAPREF_SERVER:
-**        When the reference is first taken, under cover of the server mutex,
-**        refMask is set to this value.
-**         
-**      HCT_TMAPREF_SERVER|HCT_TMAPREF_CLIENT:
-**        When a client actually wishes to use the tmap indicated by this
-**        reference, it uses a CAS instruction to set refMask to this value.
-**        It may then use the tmap object. This does not require the mutex.
-**
-**        If the client finds that refMask is not HCT_TMAPREF_SERVER, but
-**        has been set to 0, then the reference has been revoked. In this
-**        case it is not safe for the client to touch pMap. It must
-**        reinitialize the HctTmapRef object (under cover of the server
-**        mutex).
-**
-**        When the read transaction is over, and the client does not need
-**        need the tmap object, it uses a CAS instruction to set refMask
-**        back to HCT_TMAPREF_SERVER. If, when doing so, it finds that the
-**        HCT_TMAPREF_SERVER bit has already been cleared, then it must
-**        release the reference immediately (under cover of the server
-**        mutex).
-**
-**      HCT_TMAPREF_CLIENT:
-*/
-struct HctTMapRef {
-  u32 refMask;
-  HctTMapFull *pMap;
-  HctTMapRef *pRefNext;
-  HctTMapRef *pRefPrev;
-};
-
-/*
-** Bits from HctTMapRef.refMask.
-*/
-#define HCT_TMAPREF_CLIENT 0x01
-#define HCT_TMAPREF_SERVER 0x02
-#define HCT_TMAPREF_BOTH   0x03
 
 /*
 ** Event counters used by the hctstats virtual table.
@@ -185,7 +126,7 @@ struct HctTMapClient {
 struct HctTMapServer {
   sqlite3_mutex *pMutex;          /* Mutex to protect this object */
   int nClient;                    /* Number of connected clients */
-  u64 iMinMinTid;                 /* Smallest iMinTid value in pList */
+  u64 iMinMinTid;                 /* Smallest iLockValue value in pClientList */
   HctTMapFull *pList;             /* List of tmaps. Newest first */
   HctTMapClient *pClientList;     /* List of clients */
 };
@@ -536,13 +477,20 @@ int sqlite3HctTMapEnd(HctTMapClient *pClient, u64 iCID){
 ** The server mutex must be held to call this function.
 */
 static int hctTMapNewObject(HctTMapServer *pServer){
-  u64 iFirst = (pServer->iMinMinTid / HCT_TMAP_PAGESIZE) * HCT_TMAP_PAGESIZE;
+  u64 iFirst = 0;
   HctTMapFull *pOld = pServer->pList;
   HctTMapFull *pNew = 0;
   int nMap = 0;
   int nDiscard = 0;
   int nByte = 0;
   int rc = SQLITE_OK;
+
+  /* Figure out the first TID in the new map object. The new map object
+  ** must include all TID values greater than or equal to iMinMinTid for
+  ** all clients. Writers in LEADER mode require TID values greater than
+  ** or equal to (iMinMinTid - HCT_MAX_LEADING_WRITE).  */
+  iFirst = (u64)MAX(0, ((i64)pServer->iMinMinTid - HCT_MAX_LEADING_WRITE));
+  iFirst = (iFirst / HCT_TMAP_PAGESIZE) * HCT_TMAP_PAGESIZE;
 
   assert( sqlite3_mutex_held(pServer->pMutex) );
   assert( (iFirst % HCT_TMAP_PAGESIZE)==0 );
@@ -617,6 +565,11 @@ int sqlite3HctTMapNewTID(
   return rc;
 }
 
+/*
+** Loop through all clients connected to the same transaction-map as the
+** client passed as the only argument. Adjust HctTMapClient.iLockValue
+** and HctTMapServer.iMinMinTid values as required.
+*/
 void sqlite3HctTMapScan(HctTMapClient *p){
   HctTMapClient *pClient = 0;
   u64 iSafe = p->iLockValue & HCT_TMAP_CID_MASK;
@@ -663,12 +616,12 @@ int sqlite3HctTMapRecoverySet(HctTMapClient *p, u64 iTid, u64 iCid){
   int rc = SQLITE_OK;
   HctTMapFull *pNew = p->pBuild;
   if( pNew==0 ){
-    u64 iFirst = 1;
+    u64 iFirst = 0;
     u64 iEof = p->pServer->pList->m.iFirstTid;
     u64 iLast = iEof + (HCT_TMAP_PAGESIZE*2);
     int nMap = 0;
     if( iTid>=HCT_TMAP_PAGESIZE ){
-      iFirst = 1 + ((iTid / HCT_TMAP_PAGESIZE) - 1) * HCT_TMAP_PAGESIZE;
+      iFirst = ((iTid / HCT_TMAP_PAGESIZE) - 1) * HCT_TMAP_PAGESIZE;
     }
     nMap = ((iLast - iFirst) + HCT_TMAP_PAGESIZE-1) / HCT_TMAP_PAGESIZE;
     assert( nMap>0 );
@@ -700,6 +653,7 @@ int sqlite3HctTMapRecoverySet(HctTMapClient *p, u64 iTid, u64 iCid){
   }
   p->iBuildMin = MIN(p->iBuildMin, iTid);
 
+  assert( pNew->m.iFirstTid<=iTid );
   while( rc==SQLITE_OK && pNew->m.iFirstTid>iTid ){
     int ii;
     HctTMapFull *pAlloc = 0;
@@ -728,6 +682,7 @@ int sqlite3HctTMapRecoverySet(HctTMapClient *p, u64 iTid, u64 iCid){
   if( rc==SQLITE_OK ){
     int iMap = (iTid - pNew->m.iFirstTid) / HCT_TMAP_PAGESIZE;
     int iOff = (iTid - pNew->m.iFirstTid) % HCT_TMAP_PAGESIZE;
+    iOff = HCT_TMAP_ENTRYSLOT(iOff);
     pNew->m.aaMap[iMap][iOff] = (iCid | HCT_TMAP_COMMITTED);
   }
 
@@ -739,6 +694,7 @@ void sqlite3HctTMapRecoveryFinish(HctTMapClient *p, int rc){
   if( pNew ){
     p->pBuild = 0;
     if( rc==SQLITE_OK ){
+      HctTMapClient *pCli = 0;
       pNew->pNext = p->pServer->pList;
       p->pServer->pList = pNew;
       p->pServer->iMinMinTid = p->iBuildMin;
@@ -748,6 +704,13 @@ void sqlite3HctTMapRecoveryFinish(HctTMapClient *p, int rc){
           hctTMapFreeMap(p->pServer, pNew->pNext);
         }
       }
+
+      ENTER_TMAP_MUTEX(p);
+      for(pCli=p->pServer->pClientList; pCli; pCli=pCli->pNextClient){
+        hctTMapUpdateSafe(pCli);
+      }
+      LEAVE_TMAP_MUTEX(p);
+
     }else{
       int ii;
       for(ii=0; ii<pNew->m.nMap; ii++){

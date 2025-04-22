@@ -311,6 +311,12 @@ struct HctDatabaseStats {
 ** iJrnlWriteCid:
 **   This value is set within calls to sqlite3_hct_journal_write(). The CID
 **   of the journal entry being written to the db.
+**
+** iLocalMinTid:
+**   This is set whenever a read-transaction is ongoing. The client may
+**   assume that the transactions associated with this and all smaller TID
+**   values have been fully committed or rolled back. No pointers associated
+**   with such values need be followed.
 */
 struct HctDatabase {
   HctFile *pFile;
@@ -327,6 +333,7 @@ struct HctDatabase {
 
   HctTMap *pTmap;                 /* Transaction map (non-NULL if trans open) */
   u64 iSnapshotId;                /* Snapshot id for reading */
+  u64 iReqSnapshotId;             /* Required snapshot to replicate trans. */
   u64 iLocalMinTid;
   HctDbWriter pa;
   HctDbCsr rbackcsr;              /* Used to find old values during rollback */
@@ -756,17 +763,22 @@ int sqlite3HctDbStartRead(HctDatabase *pDb, HctJournal *pJrnl){
       u64 iSnapshot = 0;
       HctTMapClient *pTMapClient = sqlite3HctFileTMapClient(pDb->pFile);
 
-      iSnapshot = sqlite3HctJournalSnapshot(pJrnl);
+      iSnapshot = sqlite3HctJrnlSnapshot(pJrnl);
       rc = sqlite3HctTMapBegin(pTMapClient, iSnapshot, &pDb->pTmap);
       assert( rc==SQLITE_OK );  /* todo */
 
-      iSnapshot = sqlite3HctJournalSnapshot(pJrnl);
       if( iSnapshot==0 ){
         iSnapshot = sqlite3HctFileGetSnapshotid(pDb->pFile);
       }
       pDb->iSnapshotId = iSnapshot;
       pDb->iLocalMinTid = sqlite3HctTMapCommitedTID(pTMapClient);
       assert( pDb->iSnapshotId>0 );
+
+      assert( pDb->iReqSnapshotId==0 );
+      pDb->iReqSnapshotId = 1;
+      if( pDb->iSnapshotId>(HCT_MAX_LEADING_WRITE/2) ){
+        pDb->iReqSnapshotId = pDb->iSnapshotId - (HCT_MAX_LEADING_WRITE/2);
+      }
     }
   }
 
@@ -796,7 +808,8 @@ static void hctPutU32(u8 *a, u32 val){
 */
 static int hctDbTidIsVisible(HctDatabase *pDb, u64 iTid, int bNosnap){
 
-  if( (iTid & HCT_TID_MASK)<=pDb->iLocalMinTid ) return 1;
+  // if( (iTid & HCT_TID_MASK)<=pDb->iLocalMinTid ) return 1;
+
   while( 1 ){
     u64 eState = 0;
     u64 iCid = hctDbTMapLookup(pDb, (iTid & HCT_TID_MASK), &eState);
@@ -810,6 +823,7 @@ static int hctDbTidIsVisible(HctDatabase *pDb, u64 iTid, int bNosnap){
       if( bNosnap==0 && iCid>pDb->iSnapshotId ){
         return 0;
       }
+      pDb->iReqSnapshotId = MAX(pDb->iReqSnapshotId, iCid);
       return 1;
     }
     assert( eState==HCT_TMAP_VALIDATING );
@@ -830,7 +844,7 @@ static int hctDbTidIsVisible(HctDatabase *pDb, u64 iTid, int bNosnap){
 ** false if the write should proceed.
 */
 static int hctDbTidIsConflict(HctDatabase *pDb, u64 iTid){
-  if( iTid==pDb->iTid || iTid<=pDb->iLocalMinTid || iTid==LARGEST_TID ){
+  if( iTid==pDb->iTid /* || iTid<=pDb->iLocalMinTid */ || iTid==LARGEST_TID ){
     return 0;
   }else{
     u64 eState = 0;
@@ -842,6 +856,7 @@ static int hctDbTidIsConflict(HctDatabase *pDb, u64 iTid){
       eState = HCT_TMAP_COMMITTED;
     }
 
+    pDb->iReqSnapshotId = MAX(pDb->iReqSnapshotId, iCid);
     if( eState==HCT_TMAP_COMMITTED && iCid<=pDb->iSnapshotId ) return 0;
     if( iCid==pDb->iJrnlWriteCid ) return 0;
     return 1;
@@ -1412,6 +1427,10 @@ void sqlite3HctDbRecordTrim(UnpackedRecord *pRec){
 i64 sqlite3HctDbSnapshotId(HctDatabase *pDb){
   assert( pDb->iSnapshotId>0 );
   return pDb->iSnapshotId;
+}
+
+u64 sqlite3HctDbReqSnapshot(HctDatabase *pDb){
+  return pDb->iReqSnapshotId;
 }
 
 /*
@@ -2162,9 +2181,9 @@ struct HctRangePtr {
 ** This happens if the transaction with TID iRangeTid is not visible to
 ** the reader. Or, if the only reason to follow the pointer is in order
 ** to follow other pointers on the indicated page, (*pbMerge) is set to
-** true. This happens when iRangeTid is included in the transaction, but
-** there exists one or more transactions with TID values smaller than iRangeTid
-** that are not.
+** false. This happens when iRangeTid is included in the transaction, but
+** there exists one or more transactions with TID values smaller than 
+** iRangeTid that are not.
 */
 static int hctDbFollowRangeOld(
   HctDatabase *pDb, 
@@ -2204,6 +2223,14 @@ static int hctDbFollowRangeOld(
         (bRet ? "" : "not "), (bMerge ? "" : "not "),
         iRangeTidValue, (pPtr->iFollowTid & HCT_TID_MASK), pPtr->iOld
   ));
+
+  /* TODO: Optimizations - this is only required when committing in LEADER
+  ** mode. And can be omitted if hctDbTidIsVisible() was called above. */
+  if( bMerge==0 ){
+    u64 eDummy = 0;
+    u64 iCid = hctDbTMapLookup(pDb, iRangeTidValue, &eDummy);
+    pDb->iReqSnapshotId = MAX(pDb->iReqSnapshotId, iCid);
+  }
 
   *pbMerge = bMerge;
   assert( bRet==0 || iRangeTidValue>0 );
@@ -2744,8 +2771,10 @@ int sqlite3HctDbCsrSeek(
         *pRes = -1;
       }
     }else{
-
-      if( rc==SQLITE_OK && 0==hctDbCurrentIsVisible(pCsr) ){
+    
+      if( pCsr->eDir==BTREE_DIR_NONE && bExact==0 ){
+        *pRes = -1;
+      }else if( 0==hctDbCurrentIsVisible(pCsr) ){
         switch( pCsr->eDir ){
           case BTREE_DIR_FORWARD:
             *pRes = 1;
@@ -2848,7 +2877,7 @@ int sqlite3HctDbIsIndex(HctDatabase *pDb, u32 iRoot, int *pbIndex){
 }
 
 char *sqlite3HctDbLogFile(HctDatabase *pDb){
-  return sqlite3HctFileLogFile(pDb->pFile);
+  return sqlite3HctFileLogFile(pDb->pFile, 0);
 }
 
 static void hctDbCsrInit(
@@ -5528,6 +5557,51 @@ static int hctDbInsert(
   return rc;
 }
 
+static int hctDbInsertWithRetry(
+  HctDatabase *pDb,
+  u32 iRoot,
+  UnpackedRecord *pRec,           /* The key value for index tables */
+  i64 iKey,                       /* For intkey tables, the key value */
+  int bDel,                       /* True for a delete, false for insert */
+  int nData, const u8 *aData,     /* Record/key to insert */
+  int *pnRetry                    /* OUT: number of operations to retry */
+){
+  int rc = SQLITE_OK;
+
+  rc = hctDbInsert(pDb, &pDb->pa, iRoot, pRec, iKey, 0, bDel, nData, aData);
+  if( rc!=SQLITE_OK ){
+    hctDbWriterCleanup(pDb, &pDb->pa, 1);
+  }
+  if( rc==SQLITE_LOCKED || (rc&0xFF)==SQLITE_BUSY ){
+    if( rc==SQLITE_LOCKED ){
+      rc = SQLITE_OK;
+      pDb->nCasFail++;
+    }
+    *pnRetry = pDb->pa.nWriteKey;
+    pDb->pa.nWriteKey = 0;
+  }else{
+    *pnRetry = 0;
+  }
+
+  return rc;
+}
+
+int sqlite3HctDbJrnlWrite(
+  HctDatabase *pDb,               /* Database to insert into or delete from */
+  u32 iRoot,                      /* Root page of hct_journal table */
+  i64 iKey,                       /* intkey value */
+  int nData, const u8 *aData,     /* Record to insert */
+  int *pnRetry                    /* OUT: number of operations to retry */
+){
+  int rc = SQLITE_OK;
+
+  assert( pDb->eMode==HCT_MODE_NORMAL );
+  pDb->eMode = HCT_MODE_ROLLBACK;
+  rc = hctDbInsertWithRetry(pDb, iRoot, 0, iKey, 0, nData, aData, pnRetry);
+  pDb->eMode = HCT_MODE_NORMAL;
+  return rc;
+}
+
 int sqlite3HctDbInsert(
   HctDatabase *pDb,               /* Database to insert into or delete from */
   u32 iRoot,                      /* Root page of table to modify */
@@ -5539,6 +5613,15 @@ int sqlite3HctDbInsert(
 ){
   int rc = SQLITE_OK;
   int nRecField = pRec ? pRec->nField : 0;
+
+  if( iRoot==1 ){
+    /* If the sqlite_schema table is being written, set iReqSnapshotId to
+    ** a very large value. The upper layer will interpret this as the
+    ** transaction depending on snapshot (iCid-1) for the purposes of the
+    ** hct_journal table, where iCid is (yet to be assigned) CID value
+    ** of this transaction.  */
+    pDb->iReqSnapshotId = LARGEST_TID;
+  }
 
   /* If this operation is inserting an index entry, figure out how many of
   ** the record fields to consider when determining if a potential write
@@ -5596,20 +5679,7 @@ int sqlite3HctDbInsert(
   }
 
   if( rc==SQLITE_OK ){
-    rc = hctDbInsert(pDb, &pDb->pa, iRoot, pRec, iKey, 0, bDel, nData, aData);
-    if( rc!=SQLITE_OK ){
-      hctDbWriterCleanup(pDb, &pDb->pa, 1);
-    }
-  }
-  if( rc==SQLITE_LOCKED || (rc&0xFF)==SQLITE_BUSY ){
-    if( rc==SQLITE_LOCKED ){
-      rc = SQLITE_OK;
-      pDb->nCasFail++;
-    }
-    *pnRetry = pDb->pa.nWriteKey;
-    pDb->pa.nWriteKey = 0;
-  }else{
-    *pnRetry = 0;
+    rc = hctDbInsertWithRetry(pDb,iRoot,pRec,iKey, bDel, nData, aData, pnRetry);
   }
 
  insert_done:
@@ -5999,6 +6069,7 @@ int sqlite3HctDbEndRead(HctDatabase *pDb){
     sqlite3HctTMapEnd(pTMapClient, pDb->iSnapshotId);
     pDb->pTmap = 0;
     pDb->iSnapshotId = 0;
+    pDb->iReqSnapshotId = 0;
     pDb->bConcurrent = 0;
   }
   return SQLITE_OK;
@@ -6035,11 +6106,12 @@ void sqlite3HctDbRecoverTid(HctDatabase *pDb, u64 iTid){
 int sqlite3HctDbFinishRecovery(HctDatabase *pDb, int iStage, int rc){
   /* assert( pDb->eMode==HCT_MODE_ROLLBACK ); */
   assert( iStage==0 || iStage==1 );
-  assert( pDb->iSnapshotId>0 );
+  assert( pDb->iSnapshotId>0 || rc!=SQLITE_OK );
 
   pDb->iTid = 0;
   pDb->eMode = HCT_MODE_NORMAL;
   pDb->iSnapshotId = 0;
+  pDb->iReqSnapshotId = 0;
   pDb->iLocalMinTid = 0;
   return sqlite3HctFileFinishRecovery(pDb->pFile, iStage, rc);
 }
@@ -6720,8 +6792,25 @@ static int hctDbValidateIndex(HctDatabase *pDb, HctDbCsr *pCsr){
   return rc;
 }
 
+/*
+** A transaction has recently been committed, or rolled back after data
+** was written to the db (i.e. as a result of failed validation). Do a
+** tmap scan if required.
+*/
 void sqlite3HctDbTMapScan(HctDatabase *pDb){
-  sqlite3HctTMapScan(sqlite3HctFileTMapClient(pDb->pFile));
+  u64 nFinalWrite = 0;
+  int nPageScan = pDb->pConfig->nPageScan;
+
+  /* Set nWrite to the number of pages written by this transaction. It 
+  ** doesn't matter if it is slightly inaccurate in some cases.  */
+  int nWrite = sqlite3HctFileWriteCount(pDb->pFile) - pDb->nWriteCount;
+
+  assert( nWrite>=0 );
+  if( nWrite==0 ) nWrite = 1;
+  nFinalWrite = sqlite3HctFileIncrWriteCount(pDb->pFile, nWrite);
+  if( (nFinalWrite / nPageScan)!=((nFinalWrite-nWrite) / nPageScan) ){
+    sqlite3HctTMapScan(sqlite3HctFileTMapClient(pDb->pFile));
+  }
 }
 
 int 
@@ -6729,22 +6818,12 @@ __attribute__ ((noinline))
 sqlite3HctDbValidate(
   sqlite3 *db, 
   HctDatabase *pDb, 
-  u64 *piCid, 
-  int *pbTmapscan
+  u64 *piCid
 ){
   HctDbCsr *pCsr = 0;
   u64 *pEntry = hctDbFindTMapEntry(pDb->pTmap, pDb->iTid);
   u64 iCid = *piCid;
-  u64 nFinalWrite = 0;
   int rc = SQLITE_OK;
-  int nPageScan = pDb->pConfig->nPageScan;
-
-  /* Set nWrite to the number of pages written by this transaction. This
-  ** is used for scheduling tmap scans only, so it doesn't matter if it
-  ** is slightly inaccurate in some cases.  */
-  int nWrite = sqlite3HctFileWriteCount(pDb->pFile) - pDb->nWriteCount;
-  assert( nWrite>=0 );
-  if( nWrite==0 ) nWrite = 1;
 
   assert( *pEntry==0 );
   if( iCid==0 ){
@@ -6752,11 +6831,6 @@ sqlite3HctDbValidate(
     iCid = sqlite3HctFileAllocateCID(pDb->pFile, 1);
   }
   HctAtomicStore(pEntry, HCT_TMAP_VALIDATING | iCid);
-
-  nFinalWrite = sqlite3HctFileIncrWriteCount(pDb->pFile, nWrite);
-  if( (nFinalWrite / nPageScan)!=((nFinalWrite-nWrite) / nPageScan) ){
-    *pbTmapscan = 1;
-  }
 
   assert( pDb->eMode==HCT_MODE_NORMAL );
 
