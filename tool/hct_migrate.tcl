@@ -8,6 +8,7 @@ proc usage {} {
   puts stderr "Usage: $::argv0 ?SWITCHES? <source> <destination>"
   puts stderr ""
   puts stderr "   --jobs NJOB (default 12)"
+  puts stderr "   --only TABLE (default \"\")"
   puts stderr ""
   exit -1
 }
@@ -15,6 +16,7 @@ proc usage {} {
 # Default values for the two options.
 #
 set G(-jobs)           12
+set G(-only)           ""
 
 if {[llength $argv]<2} usage
 
@@ -33,6 +35,10 @@ for {set i 0} {$i < [llength $argv]-2} {incr i} {
     set val [lindex $argv $i]
     if {[string is integer -strict $val]==0} { usage }
     set G(-jobs) $val
+  } elseif {$nX>=2 && [string compare -length $nX $x "-only"]==0} {
+    if {$i == [llength $argv]-3} { usage }
+    incr i
+    set G(-only) [lindex $argv $i]
   } else {
     usage
   }
@@ -83,6 +89,7 @@ proc plan_migration {} {
 
   # This loop runs one iteration for each non-virtual, non-schema table 
   # or index in the database being migrated.
+  set onlytbl $G(-only)
   set rc [catch {
     set srcdata [src eval {
       SELECT 
@@ -92,11 +99,13 @@ proc plan_migration {} {
           ) AS display,
           rootpage,
           row_number() OVER () AS iImp
-      FROM sqlite_schema WHERE type='index' OR (
-          type = 'table' AND
-          sql NOT LIKE 'create virtual%'
-      );
-    }] 
+      FROM sqlite_schema WHERE ($onlytbl=tbl_name OR $onlytbl='') AND (
+          type='index' OR (
+              type = 'table' AND
+              sql NOT LIKE 'create virtual%'
+          )
+      )
+    }]
   } msg]
 
   if {$rc} {
