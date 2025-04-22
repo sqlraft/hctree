@@ -1,5 +1,5 @@
-C Fix\sa\sfailing\sassert()\sin\s\shct_tmap.c.
-D 2025-04-15T17:45:01.607
+C Documentation\supdates.
+D 2025-04-22T15:47:14.007
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md e108e1e69ae8e8a59e93c455654b8ac9356a11720d3345df2a4743e9590fb20d
@@ -66,7 +66,7 @@ F doc/hctree/mkthreadtest.tcl 58b1c401b35dcabd978f5a9663376a5beee441bdd9d1e49536
 F doc/hctree/pagetest.c 4d5f3aee508e32ff08dfd81b0c79f9ebfad04590f4d9283bd5df7e08674f9112
 F doc/hctree/perftest1.tcl f886f47adfd660a6e0648c8272227a037a209a4abdc5b6451a87224249beff1b
 F doc/hctree/replication.md 45c7df44a05c9843d70e4cf8bccf001548c1b7e13080491666fee5800caeb5a9
-F doc/hctree/replication2.md 195678c4bc4bb02f7b4e498d72142cd222e73af307da7d8623a60c0bbd7f67fb
+F doc/hctree/replication2.md 382e8076e1a0b333178372a9962d07de5eacd1e66459adcb911d60724c14fedb
 F doc/hctree/slides.html 763e1e5b40201595f0924a589c8e6e9a7ca3ca593ed0045d372e66e12ece7aef
 F doc/hctree/slides.wiki 4151889c5485fecd8a71d5d0089645998a2db5ebc3360b570f763e59effed60c
 F doc/hctree/testing.wiki 398878d3636512df24cdd4650e87423163ecc9bc371d40e5876237a42f8b59e1
@@ -2314,8 +2314,8 @@ F tool/version-info.c 3b36468a90faf1bbd59c65fd0eb66522d9f941eedd364fabccd7227350
 F tool/warnings-clang.sh bbf6a1e685e534c92ec2bfba5b1745f34fb6f0bc2a362850723a9ee87c1b31a7
 F tool/warnings.sh 49a486c5069de041aedcbde4de178293e0463ae9918ecad7539eedf0ec77a139
 F tool/win/sqlite.vsix deb315d026cc8400325c5863eef847784a219a2f
-P 631ff9b8bd64017cd28568f8245d99e3f053735ef45ac168c3584c1291f6d9be
-R b946045bebfc2c991bd29d6509ac61ab
+P 3cf7b0aa3dc5d0ed075980ab41ead0fb949c74cda825091f6ab539f168bac91d
+R 60240ebfb87566cecb1fa01e8235c9f5
 U dan
-Z f621d35290c5066d517e2041880ee313
+Z 11e11a09261a4ed2af0dee7b6fba2aff
 # Remove this line to create a well-formed Fossil manifest.

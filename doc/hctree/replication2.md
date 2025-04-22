@@ -1,13 +1,15 @@
 
-Simpler Leader/Follower Replication for Hctree
+Simple Leader/Follower Replication for Hctree
 ====================================================
 
-Hctree currently has a set of fairly complicated features that can be used to
-implement the type of leader/follower replication that bedrock uses:
+Hctree had, at one point, a prototype of a set of fairly complicated features
+that could be used to implement the type of leader/follower replication that
+bedrock uses:
 
   <https://sqlite.org/hctree/doc/hctree/doc/hctree/replication.md>
 
-This page describes a simpler alternative. The key features of which are that:
+This page describes a simpler replacement for these features. The key features
+of which are that:
 
   *  **Transactions are stored as SQL text**, as in current bedrock.
 
