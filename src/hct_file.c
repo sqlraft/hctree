@@ -2505,6 +2505,10 @@ static int pgmapFilter(
   max1 &= HCT_PGNO_MASK;
   max2 &= HCT_PGNO_MASK;
   pCur->iMaxSlotno = max1>max2 ? max1 : max2;
+  if( idxNum ){
+    assert( argc==1 );
+    pCur->iMaxSlotno = pCur->slotno = sqlite3_value_int64(argv[0]);
+  }
   rc = pgmapLoadSlot(pCur);
   return rc;
 }
@@ -2519,8 +2523,28 @@ static int pgmapBestIndex(
   sqlite3_vtab *tab,
   sqlite3_index_info *pIdxInfo
 ){
-  pIdxInfo->estimatedCost = (double)10;
-  pIdxInfo->estimatedRows = 10;
+  int iPgnoEq = -1;
+  int i;
+
+  /* Search for a "slot = ?" constraint. */
+  for(i=0; i<pIdxInfo->nConstraint; i++){
+    struct sqlite3_index_constraint *p = &pIdxInfo->aConstraint[i];
+    if( p->usable && p->iColumn==0 && p->op==SQLITE_INDEX_CONSTRAINT_EQ ){
+      iPgnoEq = i;
+    }
+  }
+
+  if( iPgnoEq>=0 ){
+    pIdxInfo->idxNum = 1;
+    pIdxInfo->aConstraintUsage[iPgnoEq].argvIndex = 1;
+    pIdxInfo->estimatedCost = (double)10;
+    pIdxInfo->estimatedRows = 10;
+  }else{
+    pIdxInfo->idxNum = 0;
+    pIdxInfo->estimatedCost = (double)100;
+    pIdxInfo->estimatedRows = 100;
+  }
+
   return SQLITE_OK;
 }
 
