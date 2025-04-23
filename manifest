@@ -1,5 +1,5 @@
-C Tests\sfor\scode\sin\shct_database.c.
-D 2025-04-22T17:24:17.184
+C Add\sthe\s"--only"\soption\sto\shct_migrate.tcl.\sFor\stesting\smigration\sof\sa\ssingle\stable.
+D 2025-04-23T16:57:31.293
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md e108e1e69ae8e8a59e93c455654b8ac9356a11720d3345df2a4743e9590fb20d
@@ -2238,7 +2238,7 @@ F tool/fuzzershell.c 41480c8a1e4749351f381431ecfdfceba645396c5d836f8d26b51a33c4a
 F tool/genfkey.README cf68fddd4643bbe3ff8e31b8b6d8b0a1b85e20f4
 F tool/genfkey.test b6afd7b825d797a1e1274f519ab5695373552ecad5cd373530c63533638a5a4f
 F tool/getlock.c f4c39b651370156cae979501a7b156bdba50e7ce
-F tool/hct_migrate.tcl e8b7591de5222b2319840c3337fa66877a65d9347ac054c4101d4939df744ec7
+F tool/hct_migrate.tcl 873ba1ccf7b141d99fddc4378c5732c3b27d0eb07b718b42077d7290da687529
 F tool/hct_mkbtreewrapper.tcl 6ad0681baa75bc96639c396f869bc18b90bcc74e2fecfc77a9d42bc76f3505ec
 F tool/hct_mkspeedtable.tcl 30ae66edc2497bb6effdfe533a378519ab5e8749b7c23de79e3a95ec8aabae88
 F tool/hct_thread_test.c 8345b642e27b877b14c90ec2b866a5cbfcc6a8100fadfb947a61c129f33f93f6
@@ -2317,8 +2317,9 @@ F tool/version-info.c 3b36468a90faf1bbd59c65fd0eb66522d9f941eedd364fabccd7227350
 F tool/warnings-clang.sh bbf6a1e685e534c92ec2bfba5b1745f34fb6f0bc2a362850723a9ee87c1b31a7
 F tool/warnings.sh 49a486c5069de041aedcbde4de178293e0463ae9918ecad7539eedf0ec77a139
 F tool/win/sqlite.vsix deb315d026cc8400325c5863eef847784a219a2f
-P 277eedd14e01d8f427054e9aadd1f6fcbfbb64389ed224a4e6f1c9bebed1a62f
-R 461dbf6e96db94b4d5cc3c3b3e0d68f4
+P 358c8ab5dc9d5b1bd817b946ec02594510157f0c3278787906ccfbbe040a221e
+Q +7cef755ffe8091551ab6d5c421a2fe143e8646d501c665209a2a2a9dfb97fcb4
+R 6853d40f60a3b7fd9f9657401e8c67f8
 U dan
-Z a11bcb4a3e5885b31265a8477465db60
+Z 585e2f5eae654b3d7b0ee757378dc714
 # Remove this line to create a well-formed Fossil manifest.
