@@ -22,6 +22,8 @@ sqlite_log_to_stdout
 
 hct_reset_db
 
+set NROW 200
+
 do_execsql_test 1.0 {
   CREATE TABLE vals(
     ii INTEGER PRIMARY KEY,
@@ -54,7 +56,7 @@ proc rand {min max} {
 }
 
 do_test 1.2 {
-  for {set j 0} {$j < 200} {incr j} {
+  for {set j 0} {$j < $NROW} {incr j} {
     set rowid [rand 1 8]
     set val   [rand 1 1000]
     execsql { UPDATE vals SET value = $val WHERE ii = $rowid }
