@@ -400,6 +400,16 @@ do_execsql_test 17.1 {
   COMMIT;
 } {1}
 
+#-------------------------------------------------------------------------
+hct_reset_db
+do_execsql_test 18.0 {
+  CREATE TABLE t1(x, y);
+  CREATE INDEX i1 ON t1(y);
+}
+
+do_execsql_test 18.1 {
+  PRAGMA integrity_check
+} {ok}
 
 finish_test
 
