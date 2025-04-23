@@ -15,6 +15,11 @@ set testdir [file dirname $argv0]
 source $testdir/tester.tcl
 set testprefix hct_delete3
 
+# Setup for logging 
+db close
+sqlite3_shutdown
+sqlite_log_to_stdout
+
 hct_reset_db
 sqlite3 db2 test.db
 
@@ -87,8 +92,8 @@ foreach {tn keytype} {
     DELETE FROM t1 WHERE x=1;
   }
   
-  show_db_lists
-  show_db_entries
+  #show_db_lists
+  #show_db_entries
   
   do_execsql_test 1.$tn.7 {
     SELECT x FROM t1 ORDER BY x;

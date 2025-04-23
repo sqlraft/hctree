@@ -2506,8 +2506,10 @@ static int pgmapFilter(
   max2 &= HCT_PGNO_MASK;
   pCur->iMaxSlotno = max1>max2 ? max1 : max2;
   if( idxNum ){
+    i64 iVal = sqlite3_value_int64(argv[0]);
     assert( argc==1 );
-    pCur->iMaxSlotno = pCur->slotno = sqlite3_value_int64(argv[0]);
+    pCur->iMaxSlotno = MIN(pCur->iMaxSlotno, iVal);
+    pCur->slotno = MAX(pCur->slotno, iVal);
   }
   rc = pgmapLoadSlot(pCur);
   return rc;
