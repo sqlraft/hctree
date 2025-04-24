@@ -92,30 +92,6 @@ proc reader_program {nMs} {
         ORDER BY ii ASC
       }]
 
-      if {0 && [llength $lVal]!=24} {
-        after 500
-        puts "FROM INDEX:"
-        execsql_pp {
-            SELECT ii, topic, value 
-              FROM vals 
-              WHERE topic=1 
-        }
-        puts "FROM TABLE:"
-        execsql_pp {SELECT * FROM vals}
-
-#set hct_extra_logging 1
-        puts "FROM INDEX 2:"
-        execsql_pp {SELECT * FROM vals ORDER BY topic, value}
-set hct_extra_logging 0
-
-        execsql_pp { SELECT * FROM hcttmap; }
-        show_pagemap
-        show_all_pages
-        show_all_entries
-
-        exit
-      }
-
       set lData [list \
         [lindex $lVal 2] \
         [lindex $lVal 8] \
@@ -166,6 +142,9 @@ do_test "1.2.([llength $r3] selects)" {
     # puts "valid read $res"
   }
 } {}
+
+#show_pagemap
+#show_all_entries
 
 
 finish_test

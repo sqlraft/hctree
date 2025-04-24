@@ -105,5 +105,30 @@ do_execsql_test -db db2 4.4 {
   SELECT * FROM t1;
 } {1 two}
 
+#-------------------------------------------------------------------------
+hct_reset_db
+do_execsql_test 5.0 {
+  CREATE TABLE t1(a INTEGER PRIMARY KEY, b, c);
+  CREATE INDEX i1 ON t1(b, c);
+
+  INSERT INTO t1 VALUES(1, 'abc', 'def');
+  INSERT INTO t1 VALUES(2, 'abc', 'def');
+}
+
+do_execsql_test 5.1 {
+  BEGIN;
+    UPDATE t1 SET c = 'AAA' WHERE a=1;
+    SELECT * FROM t1 WHERE b='abc' AND c='def';
+} {2 abc def}
+
+do_execsql_test 5.2 {
+    SELECT * FROM t1 WHERE b='abc' AND c IN ('aaa', 'def');
+} {2 abc def}
+
+do_execsql_test 5.3 {
+  COMMIT;
+  SELECT * FROM t1 WHERE b='abc' AND c='def';
+} {2 abc def}
+
 finish_test
 

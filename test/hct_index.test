@@ -101,9 +101,13 @@ foreach dbx [lsort [array names A]] {
   set rev [list]
   foreach {a b c} $A($dbx) {
     set rev [linsert $rev 0 $a $b $c]
+    do_execsql_test -db $dbx 1.4.$dbx.2."$a,$b,$c" {
+      SELECT rowid, topic, value FROM vals 
+      WHERE topic=$b AND value=$c AND +rowid=$a
+    } [list $a $b $c]
   }
 
-  do_execsql_test -db $dbx 1.4.$dbx.2 {
+  do_execsql_test -db $dbx 1.4.$dbx.3 {
     SELECT * FROM vals ORDER BY topic DESC, value DESC
   } $rev
 
