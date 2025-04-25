@@ -3729,20 +3729,28 @@ static int hctDbExtendWriteArray(
   return rc;
 }
 
-static int hctDbCsrLoadAndDecode(
-  HctDbCsr *pCsr, 
-  int iCell, 
-  UnpackedRecord **ppRec
-){
-  const u8 *aPg = pCsr->pg.aNew ? pCsr->pg.aNew : pCsr->pg.aOld;
+/*
+** Cursor pCsr must point to an index b-tree, not an intkey b-tree, and
+** it must be valid. This function loads the current record from the
+** database and sets *ppRec to point to the decoded version. SQLITE_OK
+** is returned if successful, or else an SQLite error code if something
+** goes wrong.
+*/
+int sqlite3HctDbCsrLoadAndDecode(HctDbCsr *pCsr, UnpackedRecord **ppRec){
   int nData = 0;
   const u8 *aData = 0;
-  int rc;
+  const u8 *aPg = 0;
+  int iCell = 0;
+  int rc = SQLITE_OK;
+
+  assert( pCsr->pg.aNew==0 );
+  aPg = hctDbCsrPageAndCell(pCsr, &iCell);
 
   rc = hctDbLoadRecord(pCsr->pDb, &pCsr->rec, aPg, iCell, &nData, &aData);
   if( rc==SQLITE_OK ){
     rc = hctDbCsrAllocateUnpacked(pCsr);
   }
+
   if( rc==SQLITE_OK ){
     *ppRec = pCsr->pRec;
     sqlite3VdbeRecordUnpack(pCsr->pKeyInfo, nData, aData, pCsr->pRec);
@@ -3750,10 +3758,6 @@ static int hctDbCsrLoadAndDecode(
   }
 
   return rc;
-}
-
-int sqlite3HctDbCsrLoadAndDecode(HctDbCsr *pCsr, UnpackedRecord **ppRec){
-  return hctDbCsrLoadAndDecode(pCsr, pCsr->iCell, ppRec);
 }
 
 /*
@@ -6438,11 +6442,13 @@ static int hctDbCsrNext(HctDbCsr *pCsr){
 static int hctDbCsrGoLeft(HctDbCsr *pCsr){
   int rc = SQLITE_OK;
 
+  assert( pCsr->nRange==0 );
   if( hctIsLeftmost(pCsr->pg.aOld)==0 ){
     int nHeight = ((HctDbPageHdr*)pCsr->pg.aOld)->nHeight;
     if( pCsr->pKeyInfo ){
       UnpackedRecord *pRec = 0;
-      rc = hctDbCsrLoadAndDecode(pCsr, 0, &pRec);
+      pCsr->iCell = 0;
+      rc = sqlite3HctDbCsrLoadAndDecode(pCsr, &pRec);
       if( rc==SQLITE_OK ){
         int bDummy;
         HctFilePage pg = pCsr->pg;
