@@ -167,6 +167,26 @@ void *sqlite3HctMalloc(int *pRc, i64 nByte){
   return pRet;
 }
 
+/*
+** Wrapper around sqlite3_mprintf(). Except that this version abort()s if
+** a memory allocation fails.
+*/
+char *sqlite3HctMprintf(char *zFmt, ...){
+  char *zRet = 0;
+  va_list ap;
+
+  va_start(ap, zFmt);
+  zRet = sqlite3_vmprintf(zFmt, ap);
+  va_end(ap);
+
+  if( !zRet ){
+    sqlite3_log(SQLITE_ABORT,
+        "FATAL: attempt to sqlite3_vmprintf() failed, exiting..."
+    );
+    abort();
+  }
+  return zRet;
+}
 
 /*
 ** Allocate and return a new HctPManServer object.

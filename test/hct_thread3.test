@@ -13,7 +13,7 @@
 
 set testdir [file dirname $argv0]
 source $testdir/tester.tcl
-set testprefix hct_thread2
+set testprefix hct_thread3
 
 # Setup for logging 
 db close
@@ -88,6 +88,16 @@ proc program {nMs} {
         continue
       }
 
+      dbX eval {
+        SELECT c.jobID AS cj, p.jobId AS pj
+        FROM jobs AS c, jobs AS p 
+        WHERE c.parentJobId!=0 AND c.state!='FINISHED' 
+          AND p.jobId=c.parentJobID AND p.state=='FINISHED'
+      } {
+        error "child job is $cj, but parent job $pj is FINISHED"
+      }
+      dbX eval {SELECT * FROM jobs}
+
       # Step 3:
       set iParentJob [dbX one {
         SELECT parentJobID FROM jobs WHERE jobID=$iChildJob
@@ -97,7 +107,7 @@ proc program {nMs} {
       }]
       if {$parent_state=="FINISHED" || $parent_state==""} {
         dbX eval END
-        error "error! - child job is $iChildJob, parent ($iParentJob) is $parent_state"
+        error "child job is $iChildJob, parent ($iParentJob) is $parent_state"
       }
 
       # Step 4:
@@ -118,14 +128,19 @@ proc program {nMs} {
           set bFinished 0
         }
         if {$bFinished} {
+          set lUnfinished [dbX eval {
+            SELECT jobID FROM jobs WHERE state!='FINISHED' AND parentJobID=$iParentJob
+          }]
+          if {[llength $lUnfinished]} {
+            error "Unfinished children of $iParentJob: $lUnfinished"
+          }
+
           dbX eval {
             UPDATE jobs SET state = 'FINISHED' WHERE jobID = $iParentJob
           }
-
           insert_job dbX
-
           if {($nFinish % 10)==0} {
-            dbX eval { DELETE FROM jobs WHERE state='FINISHED' }
+#            dbX eval { DELETE FROM jobs WHERE state='FINISHED' }
           }
         }
 
@@ -182,7 +197,6 @@ do_test "1.1.(running threads for ${nMs} ms)" {
   if {[info exists r1]==0} { vwait r1 }
   if {[info exists r2]==0} { vwait r2 }
 } {}
-puts "r1: $r1"
 
 do_test 1.2 { set ::r1 } {}
 do_test 1.3 { set ::r2 } {}

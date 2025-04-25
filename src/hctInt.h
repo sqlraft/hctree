@@ -314,6 +314,7 @@ int sqlite3HctStatsInit(sqlite3*);
 ** Utility functions:
 */
 void *sqlite3HctMalloc(int *pRc, i64 nByte);
+char *sqlite3HctMprintf(char *zFmt, ...);
 
 /*************************************************************************
 ** hctree.c:
