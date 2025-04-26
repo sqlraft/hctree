@@ -2495,6 +2495,13 @@ static int hctBtreeMovetoUnpacked(
   int res1 = 0;
   int res2 = -1;
 
+  int bResetRc = 0;
+
+  if( pIdxKey && pIdxKey->default_rc==0 && pCur->eDir==BTREE_DIR_FORWARD ){
+    bResetRc = 1;
+    pIdxKey->default_rc = 1;
+  }
+
   pCur->isLast = 0;
   rc = sqlite3HctTreeCsrSeek(pCur->pHctTreeCsr, pIdxKey, intKey, &res1);
   if( rc==SQLITE_OK && pCur->pHctDbCsr ){
@@ -2563,6 +2570,15 @@ static int hctBtreeMovetoUnpacked(
         if( rc==SQLITE_DONE ) rc = SQLITE_OK;
         *pRes = -1;
       }
+    }
+  }
+
+  if( bResetRc ){
+    pIdxKey->default_rc = 0;
+    if( sqlite3HctBtreeEof((BtCursor*)pCur)==0 ){
+      u32 nKey;
+      const void *a = sqlite3HctBtreePayloadFetch((BtCursor*)pCur, &nKey);
+      *pRes = sqlite3VdbeRecordCompareWithSkip(nKey, a, pIdxKey, 0);
     }
   }
 
