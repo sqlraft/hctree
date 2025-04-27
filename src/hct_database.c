@@ -1511,6 +1511,7 @@ static int hctDbIndexSearch(
   if( pRec ) xCompare = find_record_compare(pRec, xCompare);
   memset(&buf, 0, sizeof(buf));
 
+  *pbExact = 0;
   while( i2>i1 ){
     int iTest = (i1+i2)/2;
     int res;
@@ -1527,9 +1528,7 @@ static int hctDbIndexSearch(
 
     if( res==0 ){
       *pbExact = 1;
-      *piPos = iTest;
-      sqlite3HctBufferFree(&buf);
-      return SQLITE_OK;
+      i2 = iTest;
     }else if( res<0 ){
       i1 = iTest+1;
     }else{
@@ -1539,7 +1538,6 @@ static int hctDbIndexSearch(
 
   assert( i1==i2 && i2>=0 );
   sqlite3HctBufferFree(&buf);
-  *pbExact = 0;
   *piPos = i2;
   return rc;
 }
