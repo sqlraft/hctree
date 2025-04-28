@@ -432,15 +432,6 @@ struct HctJournalRecord {
   i64 iValidCid;
 };
 
-int sqlite3HctJrnlSavePhysical( 
-  sqlite3 *db,
-  HctJournal *pJrnl, 
-  int (*xSave)(void*, i64 iPhys), 
-  void *pSave
-){
-  return SQLITE_OK;
-}
-
 static void hctJrnlTryToFreeLog(HctJournal *pJrnl){
   HctJrnlServer *pServer = pJrnl->pServer;
   if( pServer->pLogPtr ){

@@ -140,7 +140,6 @@ void sqlite3HctTreeCsrClear(HctTreeCsr *pCsr);
 u32 sqlite3HctTreeCsrRoot(HctTreeCsr *pCsr);
 
 int sqlite3HctTreeCsrIsEmpty(HctTreeCsr *pCsr);
-int sqlite3HctTreeCsrTblIsEmpty(HctTree *p, u32 pgnoRoot);
 
 /* 
 ** Iterate through non-empty tables/indexes within an HctTree structure. Used
@@ -197,8 +196,6 @@ int sqlite3HctDbEndWrite(HctDatabase*, u64, int);
 int sqlite3HctDbEndRead(HctDatabase*);
 int sqlite3HctDbValidate(sqlite3*, HctDatabase*, u64 *piCid);
 
-i64 sqlite3HctDbTid(HctDatabase *);
-
 void sqlite3HctDbRollbackMode(HctDatabase*,int);
 
 int sqlite3HctDbCsrOpen(HctDatabase*, struct KeyInfo*, u32 iRoot, HctDbCsr**);
@@ -221,13 +218,9 @@ void sqlite3HctDbCsrKey(HctDbCsr*, i64 *piKey);
 int sqlite3HctDbCsrData(HctDbCsr *pCsr, int *pnData, const u8 **paData);
 int sqlite3HctDbCsrLoadAndDecode(HctDbCsr *pCsr, UnpackedRecord **ppRec);
 
-int sqlite3HctDbIsIndex(HctDatabase *pDb, u32 iRoot, int *pbIndex);
-
 int sqlite3HctDbStartRecovery(HctDatabase *pDb, int iStage);
 int sqlite3HctDbFinishRecovery(HctDatabase *db, int iStage, int rc);
 void sqlite3HctDbRecoverTid(HctDatabase *db, u64 iTid);
-
-char *sqlite3HctDbLogFile(HctDatabase*);
 
 i64 sqlite3HctDbNCasFail(HctDatabase*);
 
@@ -267,15 +260,6 @@ void sqlite3HctDbRecordTrim(UnpackedRecord *pRec);
 i64 sqlite3HctDbSnapshotId(HctDatabase *pDb);
 
 u64 sqlite3HctDbReqSnapshot(HctDatabase *pDb);
-
-int sqlite3HctDbCsrFindLastWrite(
-  HctDbCsr *pCsr,                 /* Cursor to seek */
-  UnpackedRecord *pRec,           /* Key for index/without rowid tables */
-  i64 iKey,                       /* Key for intkey tables */
-  u64 *piCid                      /* Last CID to write to this key */
-);
-
-void sqlite3HctDbJrnlWriteCid(HctDatabase *pDb, u64 iVal);
 
 int sqlite3HctDbDirectInsert(
   HctDbCsr *pCsr, 
@@ -335,9 +319,6 @@ char *sqlite3HctMprintf(char *zFmt, ...);
 
 #include <hctJrnlInt.h>
 HctJournal *sqlite3HctJrnlFind(sqlite3*);
-
-int sqlite3HctBtreeIsNewTable(Btree *pBt, u64 iRoot);
-u64 sqlite3HctBtreeSnapshotId(Btree *pBt);
 
 i64 sqlite3HctMainStats(sqlite3 *db, int iStat, const char **pzStat);
 

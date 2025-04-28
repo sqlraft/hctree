@@ -2717,55 +2717,6 @@ static int hctDbCsrSeekAndDescend(
   return rc;
 }
 
-/*
-** Find the CID of the last transaction to write to a specified key.
-**
-** This must be called from within a transaction.
-*/
-int sqlite3HctDbCsrFindLastWrite(
-  HctDbCsr *pCsr,                 /* Cursor to seek */
-  UnpackedRecord *pRec,           /* Key for index/without rowid tables */
-  i64 iKey,                       /* Key for intkey tables */
-  u64 *piCid                      /* Last CID to write to this key */
-){
-  int rc = SQLITE_OK;
-  u64 iCid = 0;
-  int bExact = 0;
-
-  rc = hctDbCsrSeekAndDescend(pCsr, pRec, iKey, 1, &bExact);
-  if( rc==SQLITE_OK && bExact ){
-    u64 iTid = 0;
-    if( pCsr->nRange>1 ){
-      /* In this case the key has been deleted. Find the TID of the 
-      ** transaction that deleted it. */
-      HctDbRangeCsr *p = &pCsr->aRange[pCsr->nRange-2];
-      HctRangePtr ptr;
-      hctDbGetRange(p->pg.aOld, p->iCell, &ptr);
-      iTid = ptr.iRangeTid;
-    }else{
-      HctDbCell cell;
-      hctDbCellGetByIdx(pCsr->pDb, pCsr->pg.aOld, pCsr->iCell, &cell);
-      if( pCsr->nRange ){
-        assert( pCsr->nRange==1 );
-        iTid = cell.iRangeTid;
-      }else{
-        iTid = cell.iTid;
-      }
-    }
-
-    if( iTid ){
-      u64 dummy = 0;
-      iTid = (iTid & HCT_TID_MASK);
-      iCid = hctDbTMapLookup(pCsr->pDb, iTid, &dummy);
-    }else{
-      iCid = 1;
-    }
-  }
-
-  *piCid = iCid;
-  return rc;
-}
-
 static char *hctDbDebugKey(UnpackedRecord *pRec, i64 iKey){
   char *zKey = 0;
   if( pRec ){
@@ -2842,7 +2793,6 @@ int sqlite3HctDbCsrSeek(
 ){
   int rc = SQLITE_OK;
   int bExact;
-  int bResetRc = 0;
 
   /* Should not be called while committing, validating or during rollback. */
   assert( pCsr->pDb->eMode==HCT_MODE_NORMAL );
@@ -2970,20 +2920,6 @@ int sqlite3HctDbCsrRollbackSeek(
 
   *pOp = op;
   return rc;
-}
-
-int sqlite3HctDbIsIndex(HctDatabase *pDb, u32 iRoot, int *pbIndex){
-  HctFilePage pg;
-  int rc = sqlite3HctFilePageGet(pDb->pFile, iRoot, &pg);
-  if( rc==SQLITE_OK ){
-    *pbIndex = (hctPagetype(pg.aOld)==HCT_PAGETYPE_INDEX);
-    sqlite3HctFilePageRelease(&pg);
-  }
-  return rc;
-}
-
-char *sqlite3HctDbLogFile(HctDatabase *pDb){
-  return sqlite3HctFileLogFile(pDb->pFile, 0);
 }
 
 static void hctDbCsrInit(
@@ -6216,17 +6152,6 @@ int sqlite3HctDbStartWrite(HctDatabase *p, u64 *piTid){
   return rc;
 }
 
-i64 sqlite3HctDbTid(HctDatabase *p){
-  return p->iTid;
-}
-
-/*
-** Set HctDatabase.iJrnlWriteCid.
-*/
-void sqlite3HctDbJrnlWriteCid(HctDatabase *pDb, u64 iVal){
-  pDb->iJrnlWriteCid = iVal;
-}
-
 static u64 *hctDbFindTMapEntry(HctTMap *pTmap, u64 iTid){
   int iMap, iEntry;
   assert( pTmap->iFirstTid<=iTid );
@@ -6286,21 +6211,7 @@ int sqlite3HctDbEndRead(HctDatabase *pDb){
 ** zero without grabbing the mutex.
 */
 int sqlite3HctDbStartRecovery(HctDatabase *pDb, int iStage){
-  assert( iStage==0 || iStage==1 );
-  assert( pDb->eMode==HCT_MODE_NORMAL );
-  if( sqlite3HctFileStartRecovery(pDb->pFile, iStage) ){
-    memset(&pDb->pa, 0, sizeof(pDb->pa));
-    hctDbPageArrayReset(&pDb->pa.writepg);
-    hctDbPageArrayReset(&pDb->pa.discardpg);
-    pDb->eMode = HCT_MODE_ROLLBACK;
-
-    /* During recovery the connection should read the latest version of
-    ** the db - no exceptions. Set these two to the largest possible 
-    ** values to ensure that this happens.  */
-    pDb->iSnapshotId = LARGEST_TID-1;
-    pDb->iLocalMinTid = LARGEST_TID-1;
-  }
-  return (pDb->eMode==HCT_MODE_ROLLBACK);
+  return sqlite3HctFileStartRecovery(pDb->pFile, iStage);
 }
 
 void sqlite3HctDbRecoverTid(HctDatabase *pDb, u64 iTid){

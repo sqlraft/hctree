@@ -193,8 +193,7 @@ struct HctFileServer {
   HctPManServer *pPManServer;     /* Page manager server */
   int eInitState;
 
-  void *pJrnlPtr;
-  void(*xJrnlDel)(void*);
+  void *pJrnlPtr;                 /* Pointer to HctJrnlServer object */
 
   i64 st_dev;                     /* File identification 1 */
   i64 st_ino;                     /* File identification 2 */
@@ -1177,23 +1176,6 @@ int sqlite3HctFileNewDb(HctFile *pFile){
 }
 
 
-/*
-** Return true if the db has not yet been created on disk. Or false 
-** if it already has.
-*/
-int sqlite3HctFileIsNewDb(HctFile *pFile){
-  int bRet = 0;
-  if( pFile->szPage==0 ){
-    HctFileServer *p = pFile->pServer;
-    sqlite3_mutex_enter(p->pMutex);
-    if( p->szPage==0 ){
-      bRet = 1;
-    }
-    sqlite3_mutex_leave(p->pMutex);
-  }
-  return bRet;
-}
-
 #if 0
 #include <sys/time.h>
 static sqlite3_int64 current_time(){
@@ -1506,11 +1488,6 @@ static int hctFileClearFlag(HctFile *pFile, u32 iSlot, u64 mask){
   return rc;
 }
 
-
-int sqlite3HctFileRootFree(HctFile *pFile, u32 iRoot){
-  /* TODO - do something with freed root-page */
-  return SQLITE_OK;
-}
 
 int sqlite3HctFilePageClearIsRoot(HctFile *pFile, u32 iRoot){
   return hctFileClearFlag(pFile, iRoot, HCT_PMF_LOGICAL_IS_ROOT);
@@ -1942,17 +1919,6 @@ int sqlite3HctFilePgsz(HctFile *pFile){
   return pFile->szPage;
 }
 
-void sqlite3HctFileSetJrnlPtr(
-  HctFile *pFile, 
-  void *pPtr, 
-  void(*xDel)(void*)
-){
-  assert( pFile->pServer->pJrnlPtr==0 );
-  assert( pFile->pServer->xJrnlDel==0 );
-  pFile->pServer->pJrnlPtr = pPtr;
-  pFile->pServer->xJrnlDel = xDel;
-}
-
 void *sqlite3HctFileGetJrnlPtr(HctFile *pFile){
   return pFile->pServer->pJrnlPtr;
 }
@@ -2035,14 +2001,6 @@ int sqlite3HctFileLogFileId(HctFile *pFile, int iFile){
 char *sqlite3HctFileLogFileName(HctFile *pFile, int iId){
   HctFileServer *pServer = pFile->pServer;
   return sqlite3_mprintf("%s-log-%d", pServer->zPath, iId);
-}
-
-char *sqlite3HctFileLogFile(HctFile *pFile, int iFile){
-  char *zRet = 0;
-  HctFileServer *pServer = pFile->pServer;
-  assert( iFile==0 || iFile==1 );
-  zRet = sqlite3_mprintf("%s-log-%d", pServer->zPath, pFile->iFileId*2+iFile);
-  return zRet;
 }
 
 int sqlite3HctFileStartRecovery(HctFile *pFile, int iStage){

@@ -33,10 +33,6 @@ int sqlite3HctJrnlLog(
     HctJournal *, u64 iCid, u64 iSnap, int nPtr, const u8 *aPtr, int rc
 );
 
-int sqlite3HctJrnlSavePhysical(sqlite3 *db, HctJournal *pJrnl, 
-  int (*xSave)(void*, i64 iPhys), void *pSave
-);
-
 /*
 ** Register the hct_journal_entry() SQL user-function with the database
 ** handle. For decoding the "data" column of the sqlite_hct_journal table.
@@ -60,12 +56,6 @@ int sqlite3HctJrnlCommitOk(HctJournal *pJrnl);
 u64 sqlite3HctJrnlFollowerModeCid(HctJournal *pJrnl);
 
 void sqlite3HctJrnlSetRoot(HctJournal *pJrnl, Schema *pSchema);
-
-/*
-** Return true if it is guaranteed that the transaction with TID value iTid
-** will never need to be rolled back as part of journal recovery.
-*/
-int sqlite3HctJrnlIsSafe(HctJournal *pJrnl, i64 iTid);
 
 /*
 ** Return one of SQLITE_HCT_NORMAL, SQLITE_HCT_FOLLOWER or SQLITE_HCT_LEADER

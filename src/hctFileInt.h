@@ -28,12 +28,6 @@ void sqlite3HctFileClose(HctFile *pFile);
 */
 int sqlite3HctFileNewDb(HctFile *pFile);
 
-/*
-** Return true if the db has not yet been created on disk. Or false 
-** if it already has.
-*/
-int sqlite3HctFileIsNewDb(HctFile *pFile);
-
 u32 sqlite3HctFileMaxpage(HctFile *pFile);
 
 typedef struct HctFilePage HctFilePage;
@@ -53,7 +47,6 @@ struct HctFilePage {
 ** transaction is rolled back).
 */
 int sqlite3HctFileRootPgno(HctFile *pFile, u32 *piRoot);
-int sqlite3HctFileRootFree(HctFile *pFile, u32 iRoot);
 int sqlite3HctFileRootNew(HctFile *pFile, u32 iRoot, HctFilePage*);
 
 
@@ -146,7 +139,6 @@ int sqlite3HctFileClearPhysInUse(HctFile *pFile, u32 pgno, int bReuseNow);
 
 void sqlite3HctFileDebugPrint(HctFile *pFile, const char *zFmt, ...);
 
-char *sqlite3HctFileLogFile(HctFile *pFile, int);
 int sqlite3HctFileStartRecovery(HctFile *pFile, int iStage);
 int sqlite3HctFileFinishRecovery(HctFile *pFile, int iStage, int rc);
 int sqlite3HctFileRecoverFreelists(
@@ -187,7 +179,6 @@ u64 sqlite3HctFileWriteCount(HctFile *pFile);
 */
 int sqlite3HctFileNFile(HctFile *pFile, int *pbFixed);
 
-void sqlite3HctFileSetJrnlPtr(HctFile *pFile, void *pPtr, void(*xDel)(void*));
 void *sqlite3HctFileGetJrnlPtr(HctFile *pFile);
 
 int sqlite3HctIoerr(int rc);
