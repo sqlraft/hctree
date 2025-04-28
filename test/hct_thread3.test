@@ -18,9 +18,10 @@ set testprefix hct_thread3
 # Setup for logging 
 db close
 sqlite3_shutdown
-#sqlite_log_to_stdout
+sqlite_log_to_stdout
 
 expr srand(0)
+#set hct_extra_write_logging 1
 
 hct_reset_db
 
@@ -129,9 +130,35 @@ proc program {nMs} {
         }
         if {$bFinished} {
           set lUnfinished [dbX eval {
-            SELECT jobID FROM jobs WHERE state!='FINISHED' AND parentJobID=$iParentJob
+            SELECT jobID FROM jobs 
+            WHERE state!='FINISHED' AND parentJobID=$iParentJob
           }]
           if {[llength $lUnfinished]} {
+            execsql_pp {SELECT * FROM jobs} dbX
+            execsql_pp {PRAGMA integrity_check} dbX
+            puts ----
+set hct_extra_logging 1
+execsql_pp "PRAGMA vdbe_trace = 1" dbX
+            execsql_pp "
+              SELECT 1 FROM jobs 
+                WHERE parentJobID!=0 AND parentJobID=$iParentJob AND
+                state IN ('QUEUED', 'RUNQUEUED', 'RUNNING', 'PAUSED')
+              LIMIT 1
+            " dbX
+execsql_pp "PRAGMA vdbe_trace = 0" dbX
+set hct_extra_logging 0
+            puts ----
+            execsql_pp ROLLBACK dbX
+            puts "Unfinished children of $iParentJob: $lUnfinished"
+            execsql_pp "
+              SELECT jobid FROM jobs 
+                WHERE parentJobID!=0 AND parentJobID=$iParentJob AND
+                state IN ('QUEUED', 'RUNQUEUED', 'RUNNING', 'PAUSED')
+            " dbX
+            puts ----
+
+            puts "Unfinished children of $iParentJob: $lUnfinished"
+            exit -1
             error "Unfinished children of $iParentJob: $lUnfinished"
           }
 
@@ -140,7 +167,7 @@ proc program {nMs} {
           }
           insert_job dbX
           if {($nFinish % 10)==0} {
-            # dbX eval { DELETE FROM jobs WHERE state='FINISHED' }
+            dbX eval { DELETE FROM jobs WHERE state='FINISHED' }
           }
         }
 
@@ -150,11 +177,10 @@ proc program {nMs} {
       # Step 6:
       catch { dbX eval COMMIT }
       catch { dbX eval ROLLBACK }
-
     }
 
     dbX close
-    array get C
+    set nFinish
   }]
 }
 
@@ -173,6 +199,45 @@ proc program_util {} {
     proc rand {min max} {
       expr {$min + int(abs(rand() * (1 + $max - $min)))}
     }
+proc execsql_pp {sql {db db}} {
+  set nCol 0
+  $db eval $sql A {
+    if {$nCol==0} {
+      set nCol [llength $A(*)]
+      foreach c $A(*) { 
+        set aWidth($c) [string length $c] 
+        lappend data $c
+      }
+    }
+    foreach c $A(*) { 
+      set n [string length $A($c)]
+      if {$n > $aWidth($c)} {
+        set aWidth($c) $n
+      }
+      lappend data $A($c)
+    }
+  }
+  if {$nCol>0} {
+    set nTotal 0
+    foreach e [array names aWidth] { incr nTotal $aWidth($e) }
+    incr nTotal [expr ($nCol-1) * 3]
+    incr nTotal 4
+
+    set fmt ""
+    foreach c $A(*) { 
+      lappend fmt "% -$aWidth($c)s"
+    }
+    set fmt "| [join $fmt { | }] |"
+    
+    puts [string repeat - $nTotal]
+    for {set i 0} {$i < [llength $data]} {incr i $nCol} {
+      set vals [lrange $data $i [expr $i+$nCol-1]]
+      puts [format $fmt {*}$vals]
+      if {$i==0} { puts [string repeat - $nTotal] }
+    }
+    puts [string repeat - $nTotal]
+  }
+}
   }
 }
 
@@ -185,21 +250,28 @@ db eval BEGIN
   insert_job db
 db eval COMMIT
 
-set nMs 5000
+set nMs [expr 5000]
 
 set prg1 [program $nMs]
 sqlthread spawn r1 $prg1
 sqlthread spawn r2 $prg1
-
-# catch { eval [program 500] } r1
 
 do_test "1.1.(running threads for ${nMs} ms)" {
   if {[info exists r1]==0} { vwait r1 }
   if {[info exists r2]==0} { vwait r2 }
 } {}
 
-do_test 1.2 { set ::r1 } {}
-do_test 1.3 { set ::r2 } {}
+do_test 1.2.($::r1) { 
+  set res $::r1
+  if {[string is integer -strict $::res]} { set res "" }
+  set res
+} {}
+
+do_test 1.3.($::r2) { 
+  set res $::r2
+  if {[string is integer -strict $::res]} { set res "" }
+  set res
+} {}
 
 # execsql_pp { SELECT * FROM jobs }
 
