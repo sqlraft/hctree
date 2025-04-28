@@ -1,5 +1,5 @@
-C Fix\sa\sproblem\swith\smulti-column\sIN(...)\squeries.
-D 2025-04-27T14:40:16.161
+C Fix\suninitiatlized\svariable\sproblem\swith\sthe\slog\sfile\sreader\sused\sduring\scrash\srecovery.
+D 2025-04-28T10:43:48.367
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md e108e1e69ae8e8a59e93c455654b8ac9356a11720d3345df2a4743e9590fb20d
@@ -768,8 +768,8 @@ F src/hctJrnlInt.h 4eb878a6c2489595aa6dead87f13da836fde7450f847c8582b498a89ca529
 F src/hctLogInt.h 44b72c10335f41efe1eb54df524218d4edbb07896a642093bc59badaa3aa7ecc
 F src/hctPManInt.h 3936d01947aace587fd73c51246b7bd5cdbc79833248b839e7d9ffd737ded8b7
 F src/hctTMapInt.h 1adfad9e4ef177482646e5242d945ce75f74cf9c17f3ac55f556ff30846e8595
-F src/hct_database.c 2ed9ae80d5ccd9f5aeec5e35a8fee168080985e4eabcfc3e44c644780a68a553
-F src/hct_file.c 2bf114dbad304feeff4b72470ea652ed623e0c62079111af25c93fc1f2ffde13
+F src/hct_database.c c6726e26ae79b5e7502336c8f6c1d9d531b7e4bddfc09dd248df3f7eb4fb4979
+F src/hct_file.c 0637bc37f88d49e06f696a7bb751463a5dda1399b0e81b5a6f033d73cc184b2d
 F src/hct_journal.c 01b7d45553dad5dbbf1274fe3d3b53b827ab7fd8319979f1c61dc5aba2be5eee
 F src/hct_journalhash.c 5af4886fd8c126a96c78278f6e62a8e31de9b8e683b167c487b033a87fabb7a3
 F src/hct_log.c 41b6bff3f4f9753760fcd8c249b5fc6d1608c8166b81d0e2552132c0c83e59d5
@@ -778,7 +778,7 @@ F src/hct_record.c 89e030773cdd9d00c1d3a10ce35478a87f6a143ae3c9ce2ec5842c83822a5
 F src/hct_stats.c f3bf6890dd72a942724133a2f76224a22a0adcf1d5ffce422ec056bc28d58b5a
 F src/hct_tmap.c f21de4cb39d08ae0e12df92bd1a30125c1b21461eb7321252072b0f204362af6
 F src/hct_tree.c bc4ce8b9e86e6d5bf3c162b379eade9360eba3ddda7b91f643158485dd6ea10e
-F src/hctree.c a5f298997f7904e31fb17e5349c0e8191ae61570dbd2b8f385d2ce0839e3eff3
+F src/hctree.c f737f0e919de7b825ab70cce94559d02cc2fbff384d319e6252a7c7b61dca38a
 F src/hwtime.h f9c2dfb84dce7acf95ce6d289e46f5f9d3d1afd328e53da8f8e9008e3b3caae6
 F src/in-operator.md 10cd8f4bcd225a32518407c2fb2484089112fd71
 F src/insert.c d1365fe92a984a62416b5e0f725f9d886d62f3efca20397049502b9d16657eb2
@@ -2319,9 +2319,8 @@ F tool/version-info.c 3b36468a90faf1bbd59c65fd0eb66522d9f941eedd364fabccd7227350
 F tool/warnings-clang.sh bbf6a1e685e534c92ec2bfba5b1745f34fb6f0bc2a362850723a9ee87c1b31a7
 F tool/warnings.sh 49a486c5069de041aedcbde4de178293e0463ae9918ecad7539eedf0ec77a139
 F tool/win/sqlite.vsix deb315d026cc8400325c5863eef847784a219a2f
-P 91994b40994bae64a4d6dfed8dc4d17f08c71ef73c2698be131f84ea4b4f112a
-Q +7f009c4e4feb811464e5b7ef689058e84ad02eb995dce486c8e340fac0515298
-R 4764fb77ec053aa59775bd289e8dd77b
+P 9181a1a9bfaa13db0147d3c406ff24dc9e34b7771132277b9e55ee4e1377a2eb
+R dd9a85ae13c638dbbb29650f54c24f79
 U dan
-Z 475357247f50d4e67fa28a68ff93f009
+Z 187ed8c6f7680114f4592a77273e0671
 # Remove this line to create a well-formed Fossil manifest.

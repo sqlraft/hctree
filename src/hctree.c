@@ -404,10 +404,13 @@ static void hctLogReaderNext(HctLogReader *pReader){
       if( nByte==0xFFFFFFFF ){
         memcpy(&pReader->iKey, &pReader->aFile[pReader->iFile], sizeof(i64));
         pReader->iFile += sizeof(i64);
+        pReader->nKey = 0;
+        pReader->aKey = 0;
       }else{
         pReader->nKey = nByte;
         pReader->aKey = &pReader->aFile[pReader->iFile];
         pReader->iFile += pReader->nKey;
+        pReader->iKey = 0;
       }
     }
   }

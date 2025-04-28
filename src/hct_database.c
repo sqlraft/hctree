@@ -612,7 +612,6 @@ static void hctDbPageArrayGrow(HctDbPageArray *pArray){
   hctMemcpy(pArray->aPg, pArray->aStatic, 
       sizeof(HctFilePage)*HCTDB_STATIC_PAGEARRAY
   );
-  return SQLITE_OK;
 }
 
 /*
@@ -1438,7 +1437,7 @@ static void hctDbGetKey(
         assert( pKey->pKey==0 );
       }else{
         if( aRec!=pKey->buf.aBuf && bDup && rc==SQLITE_OK ){
-          rc = hctBufferSet(&pKey->buf, aRec, nRec);
+          hctBufferSet(&pKey->buf, aRec, nRec);
           aRec = pKey->buf.aBuf;
         }
         pKey->pKey = hctDbAllocateUnpacked(&rc, pKeyInfo);

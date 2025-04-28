@@ -1353,7 +1353,6 @@ HctFile *sqlite3HctFileOpen(int *pRc, const char *zFile, HctConfig *pConfig){
 
       sqlite3_mutex_enter(pServer->pMutex);
       rc = hctFileServerInit(pServer, pConfig, zFile);
-      assert( rc==SQLITE_OK );
       if( rc==SQLITE_OK && pServer->szPage>0 ){
         pNew->szPage = pServer->szPage;
         pNew->pMapping = pServer->pMapping;
