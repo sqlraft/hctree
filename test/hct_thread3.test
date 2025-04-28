@@ -16,9 +16,9 @@ source $testdir/tester.tcl
 set testprefix hct_thread3
 
 # Setup for logging 
-db close
-sqlite3_shutdown
-sqlite_log_to_stdout
+#db close
+#sqlite3_shutdown
+#sqlite_log_to_stdout
 
 expr srand(0)
 #set hct_extra_write_logging 1
@@ -26,6 +26,7 @@ expr srand(0)
 hct_reset_db
 
 do_execsql_test 1.0 {
+  PRAGMA page_size = 512;
   CREATE TABLE jobs(
     jobID       INTEGER NOT NULL PRIMARY KEY,
     parentJobID INTEGER NOT NULL DEFAULT 0,
@@ -251,31 +252,28 @@ db eval BEGIN
 db eval COMMIT
 
 set nMs [expr 5000]
+set nThread 2
 
 set prg1 [program $nMs]
-sqlthread spawn r1 $prg1
-sqlthread spawn r2 $prg1
+for {set ii 0} {$ii<$nThread} {incr ii} {
+  sqlthread spawn TH($ii) $prg1
+}
 
 do_test "1.1.(running threads for ${nMs} ms)" {
-  if {[info exists r1]==0} { vwait r1 }
-  if {[info exists r2]==0} { vwait r2 }
+  for {set ii 0} {$ii<$nThread} {incr ii} {
+    if {[info exists TH($ii)]==0} { vwait TH($ii) }
+  }
 } {}
 
-do_test 1.2.($::r1) { 
-  set res $::r1
-  if {[string is integer -strict $::res]} { set res "" }
-  set res
-} {}
-
-do_test 1.3.($::r2) { 
-  set res $::r2
-  if {[string is integer -strict $::res]} { set res "" }
-  set res
-} {}
+for {set ii 0} {$ii<$nThread} {incr ii} {
+  do_test 1.2.$ii { 
+    set res $TH($ii)
+    if {[string is integer -strict $::res]} { set res "" }
+    set res
+  } {}
+}
 
 # execsql_pp { SELECT * FROM jobs }
-
-
 #show_pagemap
 #show_all_entries
 
