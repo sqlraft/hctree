@@ -1,5 +1,5 @@
-C Merge\slatest\shctree\schanges\sinto\sthis\sbranch.
-D 2025-04-28T11:23:30.651
+C Fix\sa\sproblem\swith\sbuilding\sthe\samalgamation\son\sthis\sbranch.
+D 2025-04-28T14:58:38.561
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md e108e1e69ae8e8a59e93c455654b8ac9356a11720d3345df2a4743e9590fb20d
@@ -734,7 +734,7 @@ F ext/wasm/tests/opfs/sahpool/sahpool-pausing.js f264925cfc82155de38cecb3d204c36
 F ext/wasm/tests/opfs/sahpool/sahpool-worker.js bd25a43fc2ab2d1bafd8f2854ad3943ef673f7c3be03e95ecf1612ff6e8e2a61
 F ext/wasm/wasmfs.make 68999f5bd8c489239592d59a420f8c627c99169bbd6fa16a404751f757b9f702
 F magic.txt 5ade0bc977aa135e79e3faaea894d5671b26107cc91e70783aa7dc83f22f3ba0
-F main.mk 2cb546cf3efaaff9659c4a170db3ad1a6fdbfbd0b0fe86e6a6486fe968015809
+F main.mk 7bdf4f1be5aefb1b4e639f3bb8e4408852c053bded8c916206c44e09736a8401
 F mptest/config01.test 3c6adcbc50b991866855f1977ff172eb6d901271
 F mptest/config02.test 4415dfe36c48785f751e16e32c20b077c28ae504
 F mptest/crash01.test 61e61469e257df0850df4293d7d4d6c2af301421
@@ -2361,8 +2361,8 @@ F tool/version-info.c 3b36468a90faf1bbd59c65fd0eb66522d9f941eedd364fabccd7227350
 F tool/warnings-clang.sh bbf6a1e685e534c92ec2bfba5b1745f34fb6f0bc2a362850723a9ee87c1b31a7
 F tool/warnings.sh 49a486c5069de041aedcbde4de178293e0463ae9918ecad7539eedf0ec77a139
 F tool/win/sqlite.vsix deb315d026cc8400325c5863eef847784a219a2f
-P 35f3ea723f8761ff10f192880587ee7510cbe2cca46cf695a63d11e56eef86d7 a0d7b53270ec13c5049de1d3cc63ad383d2dee1402c829e1754634529b2c2ea9
-R 805f601499079ee10d20a807c435e5ee
+P 2824666fab35c6f306f4fa8ca10efa2dcb483ef9fa67b175b91a94089241aab6
+R 6b70f7ab10d99280a9b2196e5f5e261a
 U dan
-Z f8ea4c3bf9a482a8913546c4033fb41d
+Z f244258e214e6b4419070d2732bdcc6f
 # Remove this line to create a well-formed Fossil manifest.
