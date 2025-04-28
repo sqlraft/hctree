@@ -833,7 +833,7 @@ static int hctDbTidIsConflict(HctDatabase *pDb, u64 iTid){
 
     pDb->iReqSnapshotId = MAX(pDb->iReqSnapshotId, iCid);
     if( eState==HCT_TMAP_COMMITTED && iCid<=pDb->iSnapshotId ) return 0;
-    if( iCid==pDb->iJrnlWriteCid ) return 0;
+    /* if( iCid==pDb->iJrnlWriteCid ) return 0; */
     return 1;
 
     if( eState==HCT_TMAP_WRITING || eState==HCT_TMAP_VALIDATING ) return 1;
@@ -5185,6 +5185,7 @@ static int hctDbWriteWriteConflict(
       if( hctDbTidIsConflict(pDb, iTid) ){
         rc = HCT_SQLITE_BUSY;
       }
+
     }
   }else if( pOp->iInsert>0 ){
     int iCell = 0;
@@ -5611,6 +5612,29 @@ int sqlite3HctDbJrnlWrite(
   return rc;
 }
 
+/*
+** This function is used while debugging hctree only. 
+**
+** It returns a string describing the current position of cursor pCsr. It
+** is the responsibility of the caller to eventually free the returned
+** string using sqlite3_free().
+*/
+static char *hctDbCsrDebugPosition(HctDbCsr *pCsr){
+  char *zRet = 0;
+  i64 iPg = 0;
+  int iCell = 0;
+  if( pCsr->nRange ){
+    iCell = pCsr->iCell;
+    iPg = (i64)pCsr->pg.iOldPg;
+  }else{
+    iCell = pCsr->aRange[pCsr->nRange-1].iCell;
+    iPg = (i64)pCsr->aRange[pCsr->nRange-1].pg.iOldPg;
+  }
+
+  zRet = sqlite3HctMprintf("(phys. page %lld, cell %d)", iPg, iCell);
+  return zRet;
+}
+
 int sqlite3HctDbInsert(
   HctDatabase *pDb,               /* Database to insert into or delete from */
   u32 iRoot,                      /* Root page of table to modify */
@@ -5676,6 +5700,7 @@ int sqlite3HctDbInsert(
       }else if( op>0 ){
         rc = sqlite3HctDbCsrData(&pDb->rbackcsr, &nData, &aData);
         bDel = 0;
+
       }else{
         /* TODO: It would be nice to assert( op!=0 ) here, but this fails
         ** if the original op being rolled back was a no-op delete. If
