@@ -140,7 +140,7 @@ proc program {nMs} {
           }
           insert_job dbX
           if {($nFinish % 10)==0} {
-#            dbX eval { DELETE FROM jobs WHERE state='FINISHED' }
+            # dbX eval { DELETE FROM jobs WHERE state='FINISHED' }
           }
         }
 
