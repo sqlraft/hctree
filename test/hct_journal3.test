@@ -14,191 +14,44 @@ set testdir [file dirname $argv0]
 source $testdir/tester.tcl
 set testprefix hct_journal3
 
-proc catch_hct_journal_init {db} {
-  set rc [sqlite3_hct_journal_init $db]
-  if {$rc!="SQLITE_OK"} {
-    return [list 1 [sqlite3_errmsg $db]]
-  }
-  return "0 {}"
-}
-
 hct_reset_db
 catch_hct_journal_init db
 sqlite3_hct_journal_setmode db LEADER
 
+do_test 1.0 {
+  hct_write_leader db {
+    CREATE TABLE t1(a INTEGER PRIMARY KEY, b TEXT);
+  }
+
+  for {set i 1} {$i <= 10000} {incr i} {
+    set txt [string repeat [expr rand()] 4]
+    hct_write_leader db "
+      INSERT INTO t1 VALUES($i, '$txt')
+    "
+  }
+
+  set {} {}
+} {}
+
 forcedelete test.db2
 sqlite3 db2 file:test.db2?hctree=1 -uri 1
-
-# puts [db2 eval {SELECT 1 WHERE (SELECT count(*) FROM sqlite_schema)=0}]
 catch_hct_journal_init db2
-
-#execsql_pp { SELECT * FROM sqlite_master } db2
-
-do_execsql_test 1.0 {
-  BEGIN;
-    CREATE TABLE t1(a INTEGER PRIMARY KEY, b);
-    INSERT INTO t1 VALUES(123, 'onetwothree');
-  COMMIT;
-  INSERT INTO t1 VALUES(456, 'fourfivesix');
-}
+sqlite3_hct_journal_setmode db2 FOLLOWER
 
 do_execsql_test 1.1 {
-  SELECT count(*) FROM sqlite_hct_journal
-} {2}
-
-#execsql_pp { PRAGMA table_info = sqlite_hct_journal }
-#execsql_pp { SELECT cid FROM sqlite_hct_journal }
+  PRAGMA table_info = hct_journal
+} {
+  0 cid INTEGER 0 {} 1 
+  1 query TEXT 0 {} 0 
+  2 snapshot INTEGER 0 {} 0 
+  3 logptr BLOB 0 {} 0
+}
 
 do_test 1.2 {
-  set lRet [list]
-  db eval {SELECT * FROM sqlite_hct_journal ORDER BY cid ASC} x { 
-    lappend lRet [sqlite3_hct_journal_write db2 \
-        $x(cid) $x(schema) $x(data) $x(schemacid)
-    ]
+  db eval {SELECT cid, query, snapshot FROM hct_journal} {
+    hct_write_follower
   }
-  set lRet
-} {SQLITE_OK SQLITE_OK}
-
-do_execsql_test -db db2 1.3 {
-  SELECT * FROM t1
-} {123 onetwothree 456 fourfivesix}
-
-do_execsql_test -db db2 1.4 {
-  SELECT count(*) FROM sqlite_hct_journal
-} {2}
-
-#--------------------------------------------------------------------------
-
-hct_reset_db
-catch_hct_journal_init db
-sqlite3_hct_journal_setmode db LEADER
-
-forcedelete test.db2
-sqlite3 db2 file:test.db2?hctree=1 -uri 1
-catch_hct_journal_init db2
-
-do_execsql_test 2.0 {
-  CREATE TABLE t1(a INTEGER PRIMARY KEY, b TEXT);
-  INSERT INTO t1 VALUES(1, 'one');
-  INSERT INTO t1 VALUES(2, 'two');
-  INSERT INTO t1 VALUES(3, 'three');
-  INSERT INTO t1 VALUES(4, 'four');
-  INSERT INTO t1 VALUES(5, 'five');
-
-  SELECT cid FROM sqlite_hct_journal
-} {7 8 9 10 11 12}
-
-
-foreach {tn cid lCid lB} {
-  1     7    {7}                 {}
-  2     8    {7 8}               {one}
-  3     10   {7 8 10}            {one}
-  4     12   {7 8 10 12}         {one}
-  5     11   {7 8 10 11 12}      {one}
-  6      9   {7 8 9 10 11 12}    {one two three four five}
-} {
-  do_test 2.1.$tn.1 {
-    db eval { SELECT * FROM sqlite_hct_journal WHERE cid = $cid } x {}
-    sqlite3_hct_journal_write db2 $x(cid) $x(schema) $x(data) $x(schemacid)
-  } {SQLITE_OK}
-
-  do_execsql_test -db db2 2.1.$tn.2 {
-    SELECT cid FROM sqlite_hct_journal
-  } $lCid
-
-  do_execsql_test -db db2 2.1.$tn.3 {
-    SELECT b FROM t1
-  } $lB
-}
-
-proc test_dbs_match {tn sql} {
-  uplevel [list do_execsql_test $tn $sql [db2 eval $sql]]
-}
-
-set sql {
-  SELECT 
-    cid, schema, hct_journal_entry(data), schemacid
-  FROM sqlite_hct_journal
-}
-test_dbs_match 2.2 "SELECT rowid, * FROM t1"
-test_dbs_match 2.3 $sql
-
-db2 close
-forcedelete test.db2
-sqlite3 db2 file:test.db2?hctree=1 -uri 1
-catch_hct_journal_init db2
-
-foreach {tn cid visible} {
-  1     7        {}
-  2     8        {1 one}
-  3     10       {1 one}
-  4     12       {1 one}
-  5     11       {1 one}
-  6      9       {1 one 2 two 3 three 4 four 5 five}
-} {
-  do_test 2.4.$tn.1 {
-    db eval { SELECT * FROM sqlite_hct_journal WHERE cid = $cid } x {}
-    sqlite3_hct_journal_write db2 $x(cid) $x(schema) $x(data) $x(schemacid)
-  } {SQLITE_OK}
-
-  do_execsql_test -db db2 2.4.$tn.2 {
-    SELECT * FROM t1
-  } $visible
-}
-
-
-#--------------------------------------------------------------------------
-hct_reset_db
-catch_hct_journal_init db
-sqlite3_hct_journal_setmode db LEADER
-
-do_execsql_test 3.0 {
-  BEGIN;
-    CREATE TABLE t1(a INTEGER PRIMARY KEY, b);
-    INSERT INTO t1 VALUES(1000, 'one thousand');
-    INSERT INTO t1 VALUES(2000, 'two thousand');
-    INSERT INTO t1 VALUES(3000, 'three thousand');
-    INSERT INTO t1 VALUES(4000, 'four thousand');
-    INSERT INTO t1 VALUES(5000, 'five thousand');
-  COMMIT;
-
-  UPDATE t1 SET b = 'three thousand and one' WHERE a=3000;
-  UPDATE t1 SET b = 'three thousand and two' WHERE a=3000;
-  UPDATE t1 SET b = 'three thousand and three' WHERE a=3000;
-  UPDATE t1 SET b = 'three thousand and four' WHERE a=3000;
-}
-
-execsql_pp {
-  SELECT cid, schema, hex(data), row_number() OVER () AS x FROM sqlite_hct_journal
-}
-
-foreach {tn iList} {
-  1    {1 2 3 4 5}
-  2    {1 2 3 5 4}
-  3    {1 5 4 3 2}
-  4    {1 5 2 3 4}
-} {
-  forcedelete test.db2
-  sqlite3 db2 file:test.db2?hctree=1 -uri 1
-  catch_hct_journal_init db2
-  unset -nocomplain x
-
-  foreach ii $iList {
-    db eval {
-      SELECT * FROM (
-          SELECT *, row_number() OVER () AS x FROM sqlite_hct_journal
-      ) WHERE x = CAST($ii AS INTEGER)
-    } x {
-    }
-
-    do_test 3.1.$tn.$ii {
-      set ar [list $x(cid) $x(schema) $x(data) $x(schemacid)]
-      sqlite3_hct_journal_write db2 {*}$ar
-    } {SQLITE_OK}
-  }
-
-  test_dbs_match 3.1.$tn.match "SELECT * FROM t1"
-}
+} {}
 
 finish_test
 

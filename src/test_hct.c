@@ -48,95 +48,6 @@ static int test_hct_journal_init(
   return TCL_OK;
 }
 
-typedef struct ValidationHook ValidationHook;
-struct ValidationHook {
-  Tcl_Interp *interp;
-  Tcl_Obj *pScript;
-};
-
-static void testValidationHookDestroy(void *pCtx){
-  ValidationHook *pHook = (ValidationHook*)pCtx;
-  Tcl_DecrRefCount(pHook->pScript);
-  ckfree(pHook);
-}
-static void testJournalHookDummy(
-  sqlite3_context *pCtx, 
-  int nArg, 
-  sqlite3_value **apArg
-){
-}
-
-static int testValidationHook(
-  void *pArg,
-  sqlite3_int64 iCid,
-  const char *zSchema,
-  const void *pData, int nData,
-  sqlite3_int64 iSchemaCid
-){
-  ValidationHook *pHook = (ValidationHook*)pArg;
-  Tcl_Obj *pEval = 0;
-  Tcl_Interp *p = pHook->interp;
-  int rc = TCL_OK;
-  int res = 0;
-
-  pEval = Tcl_DuplicateObj(pHook->pScript);
-  Tcl_IncrRefCount(pEval);
-  if( Tcl_ListObjAppendElement(p, pEval, Tcl_NewWideIntObj(iCid))
-   || Tcl_ListObjAppendElement(p, pEval, Tcl_NewStringObj(zSchema, -1))
-   || Tcl_ListObjAppendElement(p, pEval, Tcl_NewByteArrayObj(pData, nData))
-   || Tcl_ListObjAppendElement(p, pEval, Tcl_NewWideIntObj(iSchemaCid))
-  ){
-    rc = TCL_ERROR;
-  }
-
-  if( rc==TCL_OK ){
-    rc = Tcl_EvalObjEx(p, pEval, TCL_EVAL_DIRECT);
-  }
-  if( rc==TCL_OK ){
-    Tcl_Obj *pObj = Tcl_GetObjResult(p);
-    Tcl_GetIntFromObj(p, pObj, &res);
-  }
-
-  Tcl_DecrRefCount(pEval);
-  assert( rc==TCL_OK );
-  return res;
-}
-
-/*
-** tclcmd: sqlite3_hct_journal_hook DB SCRIPT
-*/
-static int test_hct_journal_hook(
-  ClientData clientData,          /* Unused */
-  Tcl_Interp *interp,             /* The TCL interpreter */
-  int objc,                       /* Number of arguments */
-  Tcl_Obj *CONST objv[]           /* Command arguments */
-){
-  ValidationHook *pNew = 0;
-  sqlite3 *db = 0;
-  int rc = TCL_OK;
-
-  if( objc!=3 ){
-    Tcl_WrongNumArgs(interp, 1, objv, "DB SCRIPT");
-    return TCL_ERROR;
-  }
-  rc = getDbPointer(interp, Tcl_GetString(objv[1]), &db);
-  if( rc!=TCL_OK ) return rc;
-
-  pNew = (ValidationHook*)ckalloc(sizeof(ValidationHook));
-  memset(pNew, 0, sizeof(ValidationHook));
-  pNew->interp = interp;
-  pNew->pScript = Tcl_DuplicateObj(objv[2]);
-  Tcl_IncrRefCount(pNew->pScript);
-
-  sqlite3_hct_journal_hook(db, (void*)pNew, testValidationHook);
-  sqlite3_create_function_v2(
-      db, "_hct_journal_hook_dummy", 0, SQLITE_UTF8, (void*)pNew,
-      testJournalHookDummy, 0, 0, testValidationHookDestroy
-  );
-
-  return TCL_OK;
-}
-
 /*
 ** tclcmd: sqlite3_hct_journal_mode DB
 */
@@ -159,10 +70,13 @@ static int test_hct_journal_mode(
 
   eRet = sqlite3_hct_journal_mode(db);
   switch( eRet ){
-    case SQLITE_HCT_JOURNAL_MODE_FOLLOWER:
+    case SQLITE_HCT_NORMAL:
+      Tcl_SetObjResult(interp, Tcl_NewStringObj("NORMAL", -1));
+      break;
+    case SQLITE_HCT_FOLLOWER:
       Tcl_SetObjResult(interp, Tcl_NewStringObj("FOLLOWER", -1));
       break;
-    case SQLITE_HCT_JOURNAL_MODE_LEADER:
+    case SQLITE_HCT_LEADER:
       Tcl_SetObjResult(interp, Tcl_NewStringObj("LEADER", -1));
       break;
     default:
@@ -182,13 +96,14 @@ static int test_hct_journal_setmode(
   int objc,                       /* Number of arguments */
   Tcl_Obj *CONST objv[]           /* Command arguments */
 ){
-  const char *azArg[] = { "FOLLOWER", "LEADER", 0 };
+  const char *azArg[] = { "NORMAL", "FOLLOWER", "LEADER", 0 };
   sqlite3 *db = 0;
   int rc = TCL_OK;
   int eVal;
 
-  assert( SQLITE_HCT_JOURNAL_MODE_FOLLOWER==0 );
-  assert( SQLITE_HCT_JOURNAL_MODE_LEADER==1 );
+  assert( SQLITE_HCT_NORMAL==0 );
+  assert( SQLITE_HCT_FOLLOWER==1 );
+  assert( SQLITE_HCT_LEADER==2 );
 
   if( objc!=3 ){
     Tcl_WrongNumArgs(interp, 1, objv, "DB");
@@ -238,72 +153,47 @@ static int test_hct_journal_snapshot(
 }
 
 /*
-** tclcmd: sqlite3_hct_journal_write DB MINCID
+** tclcmd: sqlite3_hct_journal_leader_commit DB DATA
 */
-static int test_hct_journal_truncate(
+static int test_hct_journal_leader_commit(
   ClientData clientData,          /* Unused */
   Tcl_Interp *interp,             /* The TCL interpreter */
   int objc,                       /* Number of arguments */
   Tcl_Obj *CONST objv[]           /* Command arguments */
 ){
   sqlite3 *db = 0;
-  sqlite3_int64 iMinCid = 0;
   int rc = TCL_OK;
-
-  if( objc!=3 ){
-    Tcl_WrongNumArgs(interp, 1, objv, "DB MINCID");
-    return TCL_ERROR;
-  }
-  rc = getDbPointer(interp, Tcl_GetString(objv[1]), &db);
-  if( rc!=TCL_OK ) return rc;
-  rc = Tcl_GetWideIntFromObj(interp, objv[2], &iMinCid);
-  if( rc!=TCL_OK ) return rc;
-
-  rc = sqlite3_hct_journal_truncate(db, iMinCid);
-  Tcl_SetObjResult(interp, Tcl_NewStringObj(sqlite3ErrName(rc), -1));
-  return TCL_OK;
-}
-
-/*
-** tclcmd: sqlite3_hct_journal_write DB CID SCHEMA DATA SCHEMA_VERSION
-*/
-static int test_hct_journal_write(
-  ClientData clientData,          /* Unused */
-  Tcl_Interp *interp,             /* The TCL interpreter */
-  int objc,                       /* Number of arguments */
-  Tcl_Obj *CONST objv[]           /* Command arguments */
-){
+  const char *zSql = 0;
+  int nSql = 0;
   sqlite3_int64 iCid = 0;
-  sqlite3_int64 iSchemaCid = 0;
-  const char *zSchema = 0;
-  const unsigned char *aData = 0;
-  int nData = 0;
-  int rc;
-  sqlite3 *db = 0;
+  sqlite3_int64 iSnapshot = 0;
+  Tcl_Obj *pRet = 0;
 
-  if( objc!=6 ){
-    Tcl_WrongNumArgs(interp, 1, objv, "DB CID SCHEMA DATA SCHEMACID");
+  if( objc!=3 ){
+    Tcl_WrongNumArgs(interp, 1, objv, "DB SQL");
     return TCL_ERROR;
   }
   rc = getDbPointer(interp, Tcl_GetString(objv[1]), &db);
   if( rc!=TCL_OK ) return rc;
-  rc = Tcl_GetWideIntFromObj(interp, objv[2], &iCid);
-  if( rc!=TCL_OK ) return rc;
-  zSchema = Tcl_GetString(objv[3]);
-  aData = Tcl_GetByteArrayFromObj(objv[4], &nData);
-  rc = Tcl_GetWideIntFromObj(interp, objv[5], &iSchemaCid);
-  if( rc!=TCL_OK ) return rc;
+  zSql = Tcl_GetStringFromObj(objv[2], &nSql);
 
-  rc = sqlite3_hct_journal_write(db, iCid, zSchema, aData, nData, iSchemaCid);
+  rc = sqlite3_hct_journal_leader_commit(
+      db, (const unsigned char*)zSql, nSql, &iCid, &iSnapshot
+  );
 
-  Tcl_SetObjResult(interp, Tcl_NewStringObj(sqlite3ErrName(rc), -1));
+  pRet = Tcl_NewObj();
+  Tcl_ListObjAppendElement(interp,pRet,Tcl_NewStringObj(sqlite3ErrName(rc),-1));
+  Tcl_ListObjAppendElement(interp, pRet, Tcl_NewWideIntObj(iCid));
+  Tcl_ListObjAppendElement(interp, pRet, Tcl_NewWideIntObj(iSnapshot));
+  Tcl_SetObjResult(interp, pRet);
+
   return TCL_OK;
 }
 
 /*
-** tclcmd: sqlite3_hct_journal_rollback DB MINCID
+** tclcmd: sqlite3_hct_journal_follower_commit DB DATA CID SNAPSHOT
 */
-static int test_hct_journal_rollback(
+static int test_hct_journal_follower_commit(
   ClientData clientData,          /* Unused */
   Tcl_Interp *interp,             /* The TCL interpreter */
   int objc,                       /* Number of arguments */
@@ -311,16 +201,29 @@ static int test_hct_journal_rollback(
 ){
   sqlite3 *db = 0;
   int rc = TCL_OK;
+  const char *zSql = 0;
+  int nSql = 0;
+  sqlite3_int64 iCid = 0;
+  sqlite3_int64 iSnapshot = 0;
+  Tcl_Obj *pRet = 0;
 
-  if( objc!=3 ){
-    Tcl_WrongNumArgs(interp, 1, objv, "DB MINCID");
+  if( objc!=5 ){
+    Tcl_WrongNumArgs(interp, 1, objv, "DB SQL CID SNAPSHOT");
     return TCL_ERROR;
   }
   rc = getDbPointer(interp, Tcl_GetString(objv[1]), &db);
   if( rc!=TCL_OK ) return rc;
+  zSql = Tcl_GetStringFromObj(objv[2], &nSql);
+  if( Tcl_GetWideIntFromObj(interp, objv[3], &iCid) ) return TCL_ERROR;
+  if( Tcl_GetWideIntFromObj(interp, objv[4], &iSnapshot) ) return TCL_ERROR;
 
-  rc = sqlite3_hct_journal_rollback(db, SQLITE_HCT_ROLLBACK_MAXIMUM);
-  Tcl_SetObjResult(interp, Tcl_NewStringObj(sqlite3ErrName(rc), -1));
+  rc = sqlite3_hct_journal_follower_commit(
+      db, (const unsigned char*)zSql, nSql, iCid, iSnapshot
+  );
+
+  pRet = Tcl_NewStringObj(sqlite3ErrName(rc),-1);
+  Tcl_SetObjResult(interp, pRet);
+
   return TCL_OK;
 }
 
@@ -333,13 +236,11 @@ int SqliteHctTest_Init(Tcl_Interp *interp){
     Tcl_ObjCmdProc *x;
   } aCmd[] = {
     { "sqlite3_hct_journal_init",            test_hct_journal_init },
-    { "sqlite3_hct_journal_hook", test_hct_journal_hook },
     { "sqlite3_hct_journal_mode",            test_hct_journal_mode },
     { "sqlite3_hct_journal_setmode",         test_hct_journal_setmode },
-    { "sqlite3_hct_journal_write",           test_hct_journal_write },
     { "sqlite3_hct_journal_snapshot",        test_hct_journal_snapshot },
-    { "sqlite3_hct_journal_truncate",        test_hct_journal_truncate },
-    { "sqlite3_hct_journal_rollback",        test_hct_journal_rollback },
+    { "sqlite3_hct_journal_leader_commit",   test_hct_journal_leader_commit },
+    { "sqlite3_hct_journal_follower_commit", test_hct_journal_follower_commit },
   };
   int ii = 0;
 

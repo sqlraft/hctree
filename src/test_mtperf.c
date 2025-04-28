@@ -51,10 +51,6 @@
 **       * Causes a checkpoint to be run if the wal-hook is invoked with
 **         a parameter of more than -nwalpage. Checkpoint is run outside
 **         of the commit mutex, assuming one is used.
-**
-**   -follower PATH
-**
-**   -truncate INTEGER
 */
 
 /**************************************************************************
@@ -128,7 +124,6 @@ struct TT_Thread {
   FastPrng *pPrng;
   int bDoCheckpoint;
   int bCheckpointer;
-  int iTruncate;
 
   int nStep;
   TT_Step *aStep;
@@ -157,7 +152,6 @@ struct TT_Test {
   int nWalPage;                   /* Target size of wal files in pages */
   int nJrnlTruncate;              /* Truncate journal to this much */
   Tcl_Obj *pSqlConfig;            /* SQL script to configure db handles */
-  Tcl_Obj *pFollower;             /* Path to follower database */
   TT_Thread *aThread;
 };
 
@@ -375,64 +369,13 @@ static void *ttThreadMain(void *pArg){
       );
       break;
     }
-
-    if( rc==SQLITE_OK && pThread->iTruncate ){
-      sqlite3_hct_journal_truncate(pThread->fdb, pThread->iTruncate);
-      sqlite3_hct_journal_truncate(pThread->db, pThread->iTruncate);
-      pThread->iTruncate = 0;
-    }
   }
 
   return 0;
 }
 
-static int ttValidationHook(
-  void *pCopyOfArg,
-  sqlite3_int64 iCid,
-  const char *zSchema,
-  const void *pData, int nData,
-  sqlite3_int64 iSchemaCid
-){
-  TT_Thread *pThread = (TT_Thread*)pCopyOfArg;
-  sqlite3 *fdb = pThread->fdb;
-  int rc = SQLITE_OK;
-  int nJrnlTruncate = pThread->pTest->nJrnlTruncate;
-
-  rc = sqlite3_hct_journal_write(fdb, iCid, zSchema, pData, nData, iSchemaCid);
-  if( rc!=SQLITE_OK ){
-    sqlite3_hct_journal_write(fdb, iCid, "", 0, 0, 0);
-  }
-
-  if( nJrnlTruncate && (iCid % nJrnlTruncate)==0 ){
-    pThread->iTruncate = (iCid - nJrnlTruncate);
-  }
-
-  return rc;
-}
-
 static int ttRunTest(TT_Test *p){
   int ii = 0;
-
-  /* If one is configured, open a follower database handle for each thread. 
-  ** And configure a custom-validation hook on the main db.  */
-  if( p->pFollower ){
-    const char *zPath = Tcl_GetString(p->pFollower);
-    for(ii=0; ii<p->nThread; ii++){
-      TT_Thread *pThread = &p->aThread[ii];
-      int rc = sqlite3_open_v2(zPath, &pThread->fdb, 
-          SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE |
-          SQLITE_OPEN_URI |SQLITE_OPEN_NOMUTEX, 0
-      );
-      if( rc!=SQLITE_OK ){
-        Tcl_ResetResult(p->interp);
-        Tcl_AppendResult(p->interp, 
-            "error opening follower db \"", zPath, "\"", (char*)0
-        );
-        return TCL_ERROR;
-      }
-      sqlite3_hct_journal_hook(pThread->db, pThread, ttValidationHook);
-    }
-  }
 
   for(ii=0; ii<p->nThread; ii++){
     TT_Thread *pThread = &p->aThread[ii];
@@ -485,7 +428,7 @@ static int ttTestResult(TT_Test *p){
 
 static int ttConfigure(TT_Test *p, Tcl_Obj *pOpt, Tcl_Obj *pVal){
   const char *azOpt[] = {
-    "-nsecond", "-ntransaction", "-sqlconfig", "-nwalpage", "-follower", 
+    "-nsecond", "-ntransaction", "-sqlconfig", "-nwalpage",
     "-jtruncate", 0
   };
   Tcl_Interp *interp = p->interp;
@@ -539,25 +482,7 @@ static int ttConfigure(TT_Test *p, Tcl_Obj *pOpt, Tcl_Obj *pVal){
       Tcl_SetObjResult(interp, Tcl_NewIntObj(p->nWalPage));
       break;
     }
-    case 4: assert( 0==strcmp(azOpt[iOpt], "-follower") ); {
-      if( pVal ){
-        if( p->pFollower ){
-          Tcl_DecrRefCount(p->pFollower);
-          p->pFollower = 0;
-        }
-        if( Tcl_GetCharLength(pVal)>0 ){
-          p->pFollower = Tcl_DuplicateObj(pVal);
-          Tcl_IncrRefCount(p->pFollower);
-        }
-      }
-      if( p->pFollower ){
-        Tcl_SetObjResult(interp, p->pFollower);
-      }else{
-        Tcl_ResetResult(interp);
-      }
-      break;
-    }
-    case 5: assert( 0==strcmp(azOpt[iOpt], "-jtruncate") ); {
+    case 4: assert( 0==strcmp(azOpt[iOpt], "-jtruncate") ); {
       if( pVal ){
         int nJrnlTruncate = 0;
         rc = Tcl_GetIntFromObj(interp, pVal, &nJrnlTruncate);
@@ -684,7 +609,6 @@ static void tt_del(ClientData clientData){
     }
     if( p->pDatabase ) Tcl_DecrRefCount(p->pDatabase);
     if( p->pSqlConfig ) Tcl_DecrRefCount(p->pSqlConfig);
-    if( p->pFollower ) Tcl_DecrRefCount(p->pFollower);
     ckfree(p->aThread);
     ckfree(p);
   }

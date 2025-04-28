@@ -12,6 +12,9 @@
 */
 
 #include <tcl.h>
+
+#if 0 
+
 #include <assert.h>
 #include <sqlite3.h>
 #include <sqlite3hct.h>
@@ -1833,10 +1836,13 @@ static int test_hct_testserver(
   return rc;
 }
 
+#endif
+
 /*
 ** Register commands with the TCL interpreter.
 */
 int SqliteHctServerTest_Init(Tcl_Interp *interp){
+#if 0
   struct TestCmd {
     const char *zName;
     Tcl_ObjCmdProc *x;
@@ -1848,7 +1854,7 @@ int SqliteHctServerTest_Init(Tcl_Interp *interp){
   for(ii=0; ii<sizeof(aCmd)/sizeof(aCmd[0]); ii++){
     Tcl_CreateObjCommand(interp, aCmd[ii].zName, aCmd[ii].x, 0, 0);
   }
-
+#endif
   return TCL_OK;
 }
 
