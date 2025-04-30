@@ -1,0 +1,51 @@
+# 2025 April 30
+#
+# The author disclaims copyright to this source code.  In place of
+# a legal notice, here is a blessing:
+#
+#    May you do good and not evil.
+#    May you find forgiveness for yourself and forgive others.
+#    May you share freely, never taking more than you give.
+#
+#*************************************************************************
+# This file implements regression tests for SQLite library.
+#
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+set testprefix hct_tmap1
+
+hct_reset_db
+
+do_execsql_test 1.0 {
+  CREATE TABLE t1(a INTEGER PRIMARY KEY, t TEXT);
+}
+
+do_test 1.1 {
+  for {set ii 0} {$ii < 30000} {incr ii} {
+    execsql {
+      INSERT INTO t1(t) VALUES( hex(randomblob(10)) );
+    }
+  }
+} {}
+
+db close
+sqlite3 db test.db
+
+for {set ii 1} {$ii <= 20} {incr ii} {
+  do_test 1.2.$ii {
+    for {set jj 0} {$jj < 500} {incr jj} {
+      execsql { INSERT INTO t1(t) VALUES( hex(randomblob(10)) ) }
+    }
+
+    execsql {
+      SELECT count(*) FROM t1;
+    }
+  } [expr 30000 + ($ii * 500)]
+}
+
+
+finish_test
+
+
+
