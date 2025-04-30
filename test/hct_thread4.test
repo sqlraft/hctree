@@ -1,0 +1,176 @@
+# 2022 November 16
+#
+# The author disclaims copyright to this source code.  In place of
+# a legal notice, here is a blessing:
+#
+#    May you do good and not evil.
+#    May you find forgiveness for yourself and forgive others.
+#    May you share freely, never taking more than you give.
+#
+#*************************************************************************
+# This file implements regression tests for SQLite library.
+#
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+set testprefix hct_thread4
+
+# Setup for logging 
+db close
+#sqlite3_shutdown
+#sqlite_log_to_stdout
+
+expr srand(0)
+#set hct_extra_write_logging 1
+
+hct_reset_db
+
+set nRow [expr 10]
+
+do_execsql_test 1.0 {
+  PRAGMA page_size = 512;
+  CREATE TABLE tbl(
+    a INTEGER PRIMARY KEY,
+    b INTEGER
+  );
+  CREATE INDEX idx ON tbl(b);
+
+  WITH s(i) AS (
+    SELECT 1 UNION ALL SELECT i+1 FROM s WHERE i<$nRow
+  )
+  INSERT INTO tbl SELECT i, i FROM s;
+}
+
+# Each thread does:
+#
+#   1. Open transaction.
+#
+#   2. Runs 3 update statements of the form:
+#
+#        UPDATE tbl SET b=rand(1, $nRow) WHERE a=rand(1, $nRow)
+#
+#   3. Check that the results of:
+#
+#        SELECT * FROM tbl ORDER BY a ASC;
+#        SELECT * FROM tbl ORDER BY a DESC;
+#        SELECT * FROM tbl ORDER BY b ASC;
+#        SELECT * FROM tbl ORDER BY b DESC;
+#
+#      and others are consistent.
+#
+#   4. COMMIT transaction.
+#
+proc program {nMs} {
+  return [string map [list %UTIL% [program_util] %NMS% $nMs %NROW% $::nRow] {
+    %UTIL% 
+
+    sqlite3 dbX test.db
+    dbX func rand rand
+
+    set end_of_time [expr [clock_milliseconds] + %NMS%]
+    set nFinish 0
+
+    while {[clock_milliseconds]<$end_of_time} {
+
+      # Step 1:
+      dbX eval { BEGIN CONCURRENT }
+
+      # Step 2:
+      dbX eval { UPDATE tbl SET b=rand(1, %NROW%) WHERE a=rand(1, %NROW%) }
+      dbX eval { UPDATE tbl SET b=rand(1, %NROW%) WHERE a=rand(1, %NROW%) }
+      dbX eval { UPDATE tbl SET b=rand(1, %NROW%) WHERE a=rand(1, %NROW%) }
+
+      # Step 3:
+      set lData1 [dbX eval {SELECT a, b FROM tbl ORDER BY a ASC}]
+      set lData2 [dbX eval {SELECT a, b FROM tbl ORDER BY a DESC}]
+      set lData3 [dbX eval {SELECT a, b FROM tbl ORDER BY b ASC}]
+      set lData4 [dbX eval {SELECT a, b FROM tbl ORDER BY b DESC}]
+
+      set lData5 [dbX eval {
+        SELECT a, b FROM tbl WHERE +b>(%NROW%)/5 AND +b<(%NROW%)*4/5
+      }]
+      set lData6 [dbX eval {
+        SELECT a, b FROM tbl WHERE b>(%NROW%)/5 AND b<(%NROW%)*4/5 
+        ORDER BY b
+      }]
+      set lData7 [dbX eval {
+        SELECT a, b FROM tbl WHERE b>(%NROW%)/5 AND b<(%NROW%)*4/5 
+        ORDER BY b DESC
+      }]
+
+      if {[llength $lData1]!=(%NROW% * 2)} {
+        error "inconsistent results (lData1): {$lData1}"
+      }
+      if {$lData1!=[lsort -integer -stride 2 $lData2]} {
+        error "inconsistent results (lData2): {$lData1} {$lData2}"
+      }
+      if {$lData1!=[lsort -integer -stride 2 $lData3]} {
+        error "inconsistent results (lData3): {$lData1} {$lData3}"
+      }
+      if {$lData1!=[lsort -integer -stride 2 $lData4]} {
+        error "inconsistent results (lData4): {$lData1} {$lData4}"
+      }
+
+      if {$lData5!=[lsort -integer -stride 2 $lData6]} {
+        error "inconsistent results (lData6): {$lData5} {$lData6}"
+      }
+      if {$lData5!=[lsort -integer -stride 2 $lData7]} {
+        error "inconsistent results (lData7): {$lData5} {$lData7}"
+      }
+
+      # Step 3:
+      if { [catch { dbX eval COMMIT }] } {
+        dbX eval ROLLBACK
+      }
+    }
+
+    dbX close
+    set nFinish
+  }]
+}
+
+proc program_util {} {
+  set ret [list]
+  foreach cmd {
+    execsql_pp
+    rand
+  } {
+    lappend ret "proc $cmd {[info args $cmd]} {[info body $cmd]}"
+  }
+
+  join $ret "\n"
+}
+
+proc rand {min max} {
+  expr {$min + int(abs(rand() * (1 + $max - $min)))}
+}
+
+set nMs [expr 5000]
+set nThread 2
+
+set prg1 [program $nMs]
+for {set ii 0} {$ii<$nThread} {incr ii} {
+  sqlthread spawn TH($ii) $prg1
+}
+
+do_test "1.1.(running threads for ${nMs} ms)" {
+  for {set ii 0} {$ii<$nThread} {incr ii} {
+    if {[info exists TH($ii)]==0} { vwait TH($ii) }
+  }
+} {}
+
+for {set ii 0} {$ii<$nThread} {incr ii} {
+  do_test 1.2.$ii { 
+    set res $TH($ii)
+    if {[string is integer -strict $::res]} { set res "" }
+    set res
+  } {}
+}
+
+#execsql_pp { SELECT * FROM tbl }
+#execsql_pp { SELECT * FROM hcttmap }
+#show_pagemap
+#show_all_entries
+
+finish_test
+

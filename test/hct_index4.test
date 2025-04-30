@@ -1,0 +1,109 @@
+# 2022 November 16
+#
+# The author disclaims copyright to this source code.  In place of
+# a legal notice, here is a blessing:
+#
+#    May you do good and not evil.
+#    May you find forgiveness for yourself and forgive others.
+#    May you share freely, never taking more than you give.
+#
+#*************************************************************************
+# This file implements regression tests for SQLite library.
+#
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+set testprefix hct_index4
+
+# Setup for logging 
+db close
+sqlite3_shutdown
+sqlite_log_to_stdout
+
+expr srand(0)
+#set hct_extra_write_logging 1
+
+reset_db
+execsql { PRAGMA journal_mode = wal }
+
+hct_reset_db
+
+proc rand {min max} {
+  expr {$min + int(abs(rand() * (1 + $max - $min)))}
+}
+db func rand rand
+
+
+set nRow [expr 10]
+
+do_execsql_test 1.0 {
+  PRAGMA page_size = 512;
+  CREATE TABLE tbl(
+    a INTEGER PRIMARY KEY,
+    b INTEGER
+  );
+  CREATE INDEX idx ON tbl(b);
+
+  WITH s(i) AS (
+    SELECT 1 UNION ALL SELECT i+1 FROM s WHERE i<$nRow
+  )
+  INSERT INTO tbl SELECT i, i FROM s;
+}
+
+set nTrans 200
+
+for {set ii 0} {$ii < $nTrans} {incr ii} {
+  set cmd "db_$ii"
+  sqlite3 $cmd test.db
+
+  execsql {
+    UPDATE tbl SET b=rand(1, $nRow) WHERE a=rand(1, $nRow);
+  }
+
+  $cmd eval { BEGIN; }
+  lappend R($cmd) [$cmd eval {SELECT a, b FROM tbl}]
+  lappend R($cmd) [$cmd eval {
+    SELECT a, b FROM tbl WHERE b>2 AND b<8 ORDER BY a
+  }]
+}
+
+for {set ii 0} {$ii < $nTrans} {incr ii} {
+  set cmd "db_$ii"
+
+  set l1 [$cmd eval {SELECT a, b FROM tbl ORDER BY a}]
+  set l2 [$cmd eval {SELECT a, b FROM tbl ORDER BY a DESC}]
+  set l3 [$cmd eval {SELECT a, b FROM tbl ORDER BY b}]
+  set l4 [$cmd eval {SELECT a, b FROM tbl ORDER BY b DESC}]
+
+  set l5 [$cmd eval {SELECT a, b FROM tbl WHERE b>2 AND b<8 ORDER BY b}]
+
+  set l6 [$cmd eval {SELECT a, b FROM tbl WHERE b>2 AND b<8 ORDER BY b DESC}]
+
+  set c1 [lindex $R($cmd) 0]
+  set c2 [lindex $R($cmd) 1]
+
+  do_test 1.$cmd {
+    foreach v [list l1 l2 l3 l4] {
+      if {[lsort -integer -stride 2 [set $v]]!=$c1} {
+        error "inconsistent data ($v): c1=($c1) $v=([set $v])"
+      }
+    }
+
+    foreach v [list l5 l6] {
+      if {[lsort -integer -stride 2 [set $v]]!=$c2} {
+        error "inconsistent data ($v): c2=($c2) $v=([set $v])"
+      }
+    }
+
+  } {}
+
+  $cmd close
+}
+
+#execsql_pp { SELECT * FROM tbl }
+#execsql_pp { SELECT * FROM hcttmap }
+#show_pagemap
+#show_all_entries
+
+finish_test
+

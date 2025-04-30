@@ -17,8 +17,8 @@ set testprefix hct_index3
 
 # Setup for logging 
 db close
-sqlite3_shutdown
-sqlite_log_to_stdout
+#sqlite3_shutdown
+#sqlite_log_to_stdout
 
 hct_reset_db
 
@@ -141,6 +141,87 @@ do_execsql_test -db db2 2.3 {
 } {22 45  22 46  22 47}
 set hct_extra_logging 0
 
+#-------------------------------------------------------------------------
+hct_reset_db
+
+do_execsql_test 3.0 {
+  BEGIN;
+    CREATE TABLE t2(a INTEGER PRIMARY KEY, b);
+    CREATE UNIQUE INDEX i2 ON t2(b);
+    INSERT INTO t2 VALUES(1, 22);
+    INSERT INTO t2 VALUES(2, 23);
+    INSERT INTO t2 VALUES(3, 24);
+  COMMIT;
+}
+
+do_execsql_test 3.1 {
+  BEGIN;
+    DELETE FROM t2 WHERE a=2; 
+    INSERT INTO t2 VALUES(4, 23);
+} {}
+
+do_catchsql_test 3.2 {
+  INSERT INTO t2 VALUES(5, 23);
+} {1 {UNIQUE constraint failed: t2.b}}
+
+do_execsql_test 3.3 {
+  COMMIT
+} 
+
+#-------------------------------------------------------------------------
+hct_reset_db
+
+do_execsql_test 4.0 {
+  BEGIN;
+    CREATE TABLE t2(a INTEGER PRIMARY KEY, b NOT NULL, c);
+    CREATE INDEX i2 ON t2(b, c);
+    INSERT INTO t2 VALUES(1, 1, 1);
+    INSERT INTO t2 VALUES(2, 1, 2);
+    INSERT INTO t2 VALUES(3, 2, 1);
+    INSERT INTO t2 VALUES(4, 2, 2);
+  COMMIT;
+}
+
+do_execsql_test 4.1 {
+  SELECT 2 IN (SELECT b FROM t2);
+} {1}
+
+do_execsql_test 4.2 {
+  BEGIN;
+    DELETE FROM t2 WHERE a=3;
+    SELECT 2 IN (SELECT b FROM t2);
+} {1}
+
+#-------------------------------------------------------------------------
+hct_reset_db
+do_execsql_test 5.0 {
+  BEGIN;
+    CREATE TABLE t3(a INTEGER PRIMARY KEY, b TEXT, c TEXT);
+    CREATE INDEX t3b ON t3(b);
+
+    INSERT INTO t3 VALUES(1, 'one', 'i');
+    INSERT INTO t3 VALUES(2, 'two', 'ii');
+    INSERT INTO t3 VALUES(3, 'three', 'iii');
+  COMMIT;
+}
+
+sqlite3 db2 test.db
+do_execsql_test -db db2 5.1 {
+  BEGIN;
+    SELECT * FROM t3 WHERE b='two';
+} {2 two ii}
+
+do_execsql_test 5.2 {
+  DELETE FROM t3 WHERE a = 2;
+}
+
+do_execsql_test -db db2 5.2 {
+    SELECT * FROM t3 WHERE a=2
+} {2 two ii}
+
+do_execsql_test -db db2 5.3 {
+    SELECT * FROM t3 WHERE b='two';
+} {2 two ii}
 
 finish_test
 

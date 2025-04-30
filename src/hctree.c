@@ -1278,7 +1278,7 @@ static int hctAttemptRecovery(HBtree *p){
   HctFile *pFile = sqlite3HctDbFile(p->pHctDb);
 
   assert( p->bRecoveryDone==0 );
-  if( p->pHctDb && sqlite3HctFileStartRecovery(pFile, 0) ){
+  if( p->pHctDb && sqlite3HctDbStartRecovery(p->pHctDb, 0) ){
     int eMode = SQLITE_HCT_NORMAL;
     int ii;
     p->bRecoveryDone = 1;
@@ -2096,18 +2096,6 @@ int sqlite3HctBtreeSavepoint(Btree *pBt, int op, int iSavepoint){
   return rc;
 }
 
-int sqlite3HctBtreeIsNewTable(Btree *pBt, u64 iRoot){
-  HBtree *const p = (HBtree*)pBt;
-  int ii;
-  for(ii=0; ii<p->nSchemaOp && p->aSchemaOp[ii].pgnoRoot!=iRoot; ii++);
-  return ii<p->nSchemaOp;
-}
-
-u64 sqlite3HctBtreeSnapshotId(Btree *pBt){
-  HBtree *const p = (HBtree*)pBt;
-  return sqlite3HctDbSnapshotId(p->pHctDb);
-}
-
 static int hctreeAddNewSchemaOp(HBtree *p, u32 iRoot, int eOp){
   BtSchemaOp *aSchemaOp;
   sqlite3 *db = p->config.db;
@@ -2632,6 +2620,7 @@ static int hctBtreeMovetoUnpacked(
   }
 
   if( pCur->eDir==BTREE_DIR_NONE ){
+    assert( pIdxKey==0 || pIdxKey->nField==pCur->pKeyInfo->nUniqField );
     if( res1==0 || pCur->pHctDbCsr==0 ){
       *pRes = res1;
       pCur->bUseTree = 1;

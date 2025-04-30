@@ -4888,7 +4888,7 @@ case OP_SeekGT: {       /* jump0, in3, group, ncycle */
         if( (oc & 0x0001)==(OP_SeekLT & 0x0001) ) oc++;
       }
     }
-    sqlite3BtreeCursorDir(pC->uc.pCursor, 
+    sqlite3BtreeCursorDir(pC->uc.pCursor,
         (oc==OP_SeekGE || oc==OP_SeekGT) ? BTREE_DIR_FORWARD : BTREE_DIR_REVERSE
     );
     rc = sqlite3BtreeTableMoveto(pC->uc.pCursor, (u64)iKey, 0, &res);
