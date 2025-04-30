@@ -489,7 +489,9 @@ static int hctTMapNewObject(HctTMapServer *pServer){
   ** must include all TID values greater than or equal to iMinMinTid for
   ** all clients. Writers in LEADER mode require TID values greater than
   ** or equal to (iMinMinTid - HCT_MAX_LEADING_WRITE).  */
-  iFirst = (u64)MAX(0, ((i64)pServer->iMinMinTid - HCT_MAX_LEADING_WRITE));
+  iFirst = (u64)MAX(
+      (i64)pOld->m.iFirstTid, ((i64)pServer->iMinMinTid - HCT_MAX_LEADING_WRITE)
+  );
   iFirst = (iFirst / HCT_TMAP_PAGESIZE) * HCT_TMAP_PAGESIZE;
 
   assert( sqlite3_mutex_held(pServer->pMutex) );
