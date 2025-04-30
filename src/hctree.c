@@ -2620,6 +2620,7 @@ static int hctBtreeMovetoUnpacked(
   }
 
   if( pCur->eDir==BTREE_DIR_NONE ){
+    assert( pIdxKey==0 || pIdxKey->nField==pCur->pKeyInfo->nUniqField );
     if( res1==0 || pCur->pHctDbCsr==0 ){
       *pRes = res1;
       pCur->bUseTree = 1;
