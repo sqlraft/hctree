@@ -13,7 +13,7 @@
 
 set testdir [file dirname $argv0]
 source $testdir/tester.tcl
-set testprefix hct_thread3
+set testprefix hct_thread4
 
 # Setup for logging 
 db close

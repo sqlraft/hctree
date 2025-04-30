@@ -1,5 +1,5 @@
-C Fix\sproblems\swith\srange\sscans\sand\sfollowing\shistory\spointers.
-D 2025-04-30T17:37:19.751
+C Fix\sthe\snames\sof\stests\sin\shct_thread4.test.
+D 2025-04-30T17:44:40.992
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md e108e1e69ae8e8a59e93c455654b8ac9356a11720d3345df2a4743e9590fb20d
@@ -1398,7 +1398,7 @@ F test/hct_simple_rollback.test 951ac7844d53f9ab45d1d36afde9b629a1e97ac7e8091399
 F test/hct_thread1.test 7059d1ba2657e49738d60c59a3f806252da39b89a1547480175b7249f335cd8f
 F test/hct_thread2.test 26a87477894c9770648398f5ac59fd0b9353beefcbbbfd255bb480964ba44a2e
 F test/hct_thread3.test 5a769476bbfee4b40201297ef6befa998fe1725011c8d671bc7ca34e32806b95
-F test/hct_thread4.test aec9ee1261e2cf84248fc80505dd6a6a6697d980e897326892aeedc2eb222721
+F test/hct_thread4.test 00ef0ebc406461b0e19a5b0c2a68d26b61ed96097dd24adeed411d45f78f2fcb
 F test/hct_update1.test 37cb8df3311ad092b157955dfdde91e9a55e0a6ec1d858ba9b0f0d327c516cad
 F test/hct_update2.test 9b9fd0080b4c07d2226a189d1355c90be6e798785155455e8fc903b5bd085f9d
 F test/hct_update3.test f399f2841d37fa812e869d3b20c87c766489a666dc85e4b0e2259e7887b8f5f1
@@ -2322,8 +2322,8 @@ F tool/version-info.c 3b36468a90faf1bbd59c65fd0eb66522d9f941eedd364fabccd7227350
 F tool/warnings-clang.sh bbf6a1e685e534c92ec2bfba5b1745f34fb6f0bc2a362850723a9ee87c1b31a7
 F tool/warnings.sh 49a486c5069de041aedcbde4de178293e0463ae9918ecad7539eedf0ec77a139
 F tool/win/sqlite.vsix deb315d026cc8400325c5863eef847784a219a2f
-P d1c025f7c5e3bb001485f31d321e21a492ca75405976361ac929c8a31b9960ca
-R 1eea1f772c3fdd33150e8700442b7322
+P c0d732c21b4de2eae3030bc50325d7b408ba1229eaa638788b4df399f52e3e93
+R 1d6e3176f4b861d37f3a8f16d9fc960c
 U dan
-Z 502c271057d8dbff190406ca71bfeb2e
+Z 69f7a709d2d2a01ca4abfef7c0f6b5ed
 # Remove this line to create a well-formed Fossil manifest.
