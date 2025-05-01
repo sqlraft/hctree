@@ -27,6 +27,7 @@ struct HctConfig {
   int nTryBeforeUnevict;
   int bQuiescentIntegrityCheck;   /* PRAGMA hct_quiescent_integrity_check */
   int pgsz;
+  int bHctExtraLogging;           /* PRAGMA hct_extra_logging = ? */
   sqlite3 *db;
 };
 

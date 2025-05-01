@@ -3324,10 +3324,19 @@ int sqlite3HctBtreePragma(Btree *pBt, char **aFnctl){
     if( zRight ){
       iVal = sqlite3Atoi(zRight);
     }
-    if( iVal>0 ){
+    if( iVal>=0 ){
       p->config.db->bCTNoCookie = (iVal==0 ? 0 : 1);
     }
     zRet = hctDbMPrintf(&rc, "%d", p->config.db->bCTNoCookie);
+  }else if( 0==sqlite3_stricmp("hct_extra_logging", zLeft) ){
+    int iVal = 0;
+    if( zRight ){
+      iVal = sqlite3Atoi(zRight);
+    }
+    if( iVal>=0 ){
+      p->config.bHctExtraLogging = (iVal==0 ? 0 : 1);
+    }
+    zRet = hctDbMPrintf(&rc, "%d", p->config.bHctExtraLogging);
   }else{
     rc = SQLITE_NOTFOUND;
   }

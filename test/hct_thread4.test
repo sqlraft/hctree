@@ -17,15 +17,15 @@ set testprefix hct_thread4
 
 # Setup for logging 
 db close
-#sqlite3_shutdown
-#sqlite_log_to_stdout
+sqlite3_shutdown
+sqlite_log_to_stdout
 
 expr srand(0)
 #set hct_extra_write_logging 1
 
 hct_reset_db
 
-set nRow [expr 10]
+set nRow [expr 50]
 
 do_execsql_test 1.0 {
   PRAGMA page_size = 512;
@@ -84,6 +84,7 @@ proc program {nMs} {
       set lData1 [dbX eval {SELECT a, b FROM tbl ORDER BY a ASC}]
       set lData2 [dbX eval {SELECT a, b FROM tbl ORDER BY a DESC}]
       set lData3 [dbX eval {SELECT a, b FROM tbl ORDER BY b ASC}]
+
       set lData4 [dbX eval {SELECT a, b FROM tbl ORDER BY b DESC}]
 
       set lData5 [dbX eval {

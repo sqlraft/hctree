@@ -34,7 +34,17 @@ proc rand {min max} {
 db func rand rand
 
 
-set nRow [expr 10]
+set nRow [expr 100]
+set nTrans 200
+
+set lQuery [list                         \
+  "SELECT a, b FROM tbl ORDER BY a"      \
+  "SELECT a, b FROM tbl ORDER BY a DESC" \
+  "SELECT a, b FROM tbl ORDER BY b"      \
+  "SELECT a, b FROM tbl ORDER BY b DESC" \
+  "SELECT a, b FROM tbl WHERE b>($nRow/5) AND b<($nRow*4/5) ORDER BY b" \
+  "SELECT a, b FROM tbl WHERE b>($nRow/5) AND b<($nRow*4/5) ORDER BY b DESC" \
+]
 
 do_execsql_test 1.0 {
   PRAGMA page_size = 512;
@@ -50,54 +60,77 @@ do_execsql_test 1.0 {
   INSERT INTO tbl SELECT i, i FROM s;
 }
 
-set nTrans 200
-
 for {set ii 0} {$ii < $nTrans} {incr ii} {
+
+  execsql {
+    BEGIN;
+      UPDATE tbl SET b=rand(1, $nRow) WHERE a=rand(1, $nRow);
+      UPDATE tbl SET b=rand(1, $nRow) WHERE a=rand(1, $nRow);
+      UPDATE tbl SET b=rand(1, $nRow) WHERE a=rand(1, $nRow);
+    COMMIT;
+  }
+
   set cmd "db_$ii"
   sqlite3 $cmd test.db
 
-  execsql {
-    UPDATE tbl SET b=rand(1, $nRow) WHERE a=rand(1, $nRow);
-  }
-
   $cmd eval { BEGIN; }
-  lappend R($cmd) [$cmd eval {SELECT a, b FROM tbl}]
-  lappend R($cmd) [$cmd eval {
-    SELECT a, b FROM tbl WHERE b>2 AND b<8 ORDER BY a
-  }]
+  foreach q $lQuery {
+    lappend R($cmd) [$cmd eval $q]
+  }
 }
 
 for {set ii 0} {$ii < $nTrans} {incr ii} {
   set cmd "db_$ii"
 
-  set l1 [$cmd eval {SELECT a, b FROM tbl ORDER BY a}]
-  set l2 [$cmd eval {SELECT a, b FROM tbl ORDER BY a DESC}]
-  set l3 [$cmd eval {SELECT a, b FROM tbl ORDER BY b}]
-  set l4 [$cmd eval {SELECT a, b FROM tbl ORDER BY b DESC}]
-
-  set l5 [$cmd eval {SELECT a, b FROM tbl WHERE b>2 AND b<8 ORDER BY b}]
-
-  set l6 [$cmd eval {SELECT a, b FROM tbl WHERE b>2 AND b<8 ORDER BY b DESC}]
-
-  set c1 [lindex $R($cmd) 0]
-  set c2 [lindex $R($cmd) 1]
-
-  do_test 1.$cmd {
-    foreach v [list l1 l2 l3 l4] {
-      if {[lsort -integer -stride 2 [set $v]]!=$c1} {
-        error "inconsistent data ($v): c1=($c1) $v=([set $v])"
-      }
-    }
-
-    foreach v [list l5 l6] {
-      if {[lsort -integer -stride 2 [set $v]]!=$c2} {
-        error "inconsistent data ($v): c2=($c2) $v=([set $v])"
-      }
-    }
-
-  } {}
+  set tn 0
+  foreach q $lQuery res $R($cmd) {
+    do_execsql_test -db $cmd 1.$cmd.$tn $q $res
+    incr tn
+  }
 
   $cmd close
+  unset R($cmd)
+}
+
+
+set lCmd [list]
+for {set ii 0} {$ii < 2000} {incr ii} {
+  execsql {
+    BEGIN;
+      UPDATE tbl SET b=rand(1, $nRow) WHERE a=rand(1, $nRow);
+      UPDATE tbl SET b=rand(1, $nRow) WHERE a=rand(1, $nRow);
+      UPDATE tbl SET b=rand(1, $nRow) WHERE a=rand(1, $nRow);
+    COMMIT;
+  }
+
+  set cmd "db_$ii"
+  sqlite3 $cmd test.db
+
+  $cmd eval { BEGIN; }
+  foreach q $lQuery {
+    lappend R($cmd) [$cmd eval $q]
+  }
+  
+  lappend lCmd $cmd
+  if {[llength $lCmd]==40} {
+    foreach cmd $lCmd {
+      set tn 0
+      foreach q $lQuery res $R($cmd) {
+        do_execsql_test -db $cmd 2.$ii.$cmd.$tn $q $res
+        incr tn
+      }
+    }
+
+    foreach cmd [lrange $lCmd 0 9] {
+      $cmd close
+      unset R($cmd)
+    }
+    set lCmd [lrange $lCmd 10 end]
+  }
+}
+foreach cmd $lCmd {
+  $cmd close
+  unset R($cmd)
 }
 
 #execsql_pp { SELECT * FROM tbl }
