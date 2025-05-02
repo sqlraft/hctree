@@ -1840,6 +1840,43 @@ static int hctDbCellOffset(const u8 *aPage, int iCell, u8 *pFlags){
 }
 
 /*
+** Return a pointer to the current page accessed by the cursor. Before
+** returning, also set output variable (*piCell) to the index of the
+** current cell within the page.
+*/
+static const u8 *hctDbCsrPageAndCell(HctDbCsr *pCsr, int *piCell){
+  const u8 *aPg = 0;
+  int iCell = 0;
+  if( pCsr->nRange ){
+    aPg = pCsr->aRange[pCsr->nRange-1].pg.aOld;
+    iCell = pCsr->aRange[pCsr->nRange-1].iCell;
+  }else{
+    aPg = pCsr->pg.aOld;
+    iCell = pCsr->iCell;
+  }
+
+  *piCell = iCell;
+  return aPg;
+}
+
+static u64 hctDbGetTid(const u8 *aPg, int iCell){
+  u64 iTid = 0;
+  u8 flags;
+  int iOff = hctDbCellOffset(aPg, iCell, &flags);
+  if( flags & HCTDB_HAS_TID ){
+    iTid = hctGetU64(&aPg[iOff]);
+  }
+  return iTid;
+}
+
+static u64 hctDbCsrTid(HctDbCsr *pCsr){
+  const u8 *aPg = 0;
+  int iCell = 0;
+  aPg = hctDbCsrPageAndCell(pCsr, &iCell);
+  return hctDbGetTid(aPg, iCell);
+}
+
+/*
 ** If the cursor is open on an index tree, ensure that the UnpackedRecord
 ** structure is allocated. Return SQLITE_NOMEM if an OOM is encountered
 ** while attempting to allocate said structure, or SQLITE_OK otherwise.
@@ -1870,26 +1907,6 @@ static const u8 *hctDbCsrPageAndCellIdx(
     aPg = pCsr->aRange[iIdx].pg.aOld;
     iCell = pCsr->aRange[iIdx].iCell;
   }
-  *piCell = iCell;
-  return aPg;
-}
-
-/*
-** Return a pointer to the current page accessed by the cursor. Before
-** returning, also set output variable (*piCell) to the index of the
-** current cell within the page.
-*/
-static const u8 *hctDbCsrPageAndCell(HctDbCsr *pCsr, int *piCell){
-  const u8 *aPg = 0;
-  int iCell = 0;
-  if( pCsr->nRange ){
-    aPg = pCsr->aRange[pCsr->nRange-1].pg.aOld;
-    iCell = pCsr->aRange[pCsr->nRange-1].iCell;
-  }else{
-    aPg = pCsr->pg.aOld;
-    iCell = pCsr->iCell;
-  }
-
   *piCell = iCell;
   return aPg;
 }
@@ -2613,8 +2630,9 @@ static int hctDbCsrRollbackDescend(
   int *pbExact
 ){
   HctDatabase *pDb = pCsr->pDb;
-  int bExact = 0;
   int rc = SQLITE_OK;
+
+  *pbExact = 0;
 
   assert( pDb->eMode==HCT_MODE_ROLLBACK );
   while( 1 ){
@@ -2623,7 +2641,7 @@ static int hctDbCsrRollbackDescend(
 
     hctDbCsrGetRange(pCsr, &ptr);
 
-    if( (ptr.iFollowTid & HCT_TID_MASK)<pCsr->pDb->iTid ) break;
+    if( (ptr.iFollowTid & HCT_TID_MASK)<pDb->iTid ) break;
 
     rc = hctDbCsrExtendRange(pCsr);
     if( rc==SQLITE_OK ){
@@ -2634,21 +2652,24 @@ static int hctDbCsrRollbackDescend(
       p->iRangeTid = ptr.iRangeTid & HCT_TID_MASK;
       if( hctPagetype(p->pg.aOld)==HCT_PAGETYPE_HISTORY ){
         p->eRange = HCT_RANGE_FAN;
-        p->iCell = hctDbFanSearch(&rc, pCsr->pDb, p->pg.aOld, pRec, iKey);
-        bExact = 0;
+        p->iCell = hctDbFanSearch(&rc, pDb, p->pg.aOld, pRec, iKey);
       }else{
-        p->eRange = HCT_RANGE_MERGE;
+        int bExact = 0;
         rc = hctDbLeafSearch(
-            pCsr->pDb, p->pg.aOld, iKey, pRec, &p->iCell, &bExact
+            pDb, p->pg.aOld, iKey, pRec, &p->iCell, &bExact
         );
-        if( rc!=SQLITE_OK || bExact ) break;
-        p->iCell--;
+        if( bExact ){
+          if( hctDbCsrTid(pCsr)!=pDb->iTid ){
+            *pbExact = 1;
+            break;
+          }
+        }
+        if( !bExact ) p->iCell--;
         if( p->iCell<0 ) break;
       }
     }
   }
 
-  *pbExact = bExact;
   return rc;
 }
 
@@ -2978,8 +2999,7 @@ int sqlite3HctDbCsrRollbackSeek(
 ){
   HctDatabase *pDb = pCsr->pDb;
   int rc = SQLITE_OK;
-  int bExact = 0;
-  int op = 0;
+  int bLeafHit = 0;
 
   hctDbCsrReset(pCsr);
 
@@ -2997,32 +3017,32 @@ int sqlite3HctDbCsrRollbackSeek(
   **   4) None of the above. No rollback required.
   */
 
-  rc = hctDbCsrSeek(pCsr, 0, 0, 0, pRec, iKey, &bExact);
-  if( rc==SQLITE_OK && bExact==0 ){
-    rc = hctDbCsrRollbackDescend(pCsr, pRec, iKey, &bExact);
-  }
-
-  if( rc==SQLITE_OK && bExact ){
-    HctDbCell cell;
-    int iCell = 0;
-    const u8 *aPg = hctDbCsrPageAndCell(pCsr, &iCell);
-
-    memset(&cell, 0, sizeof(cell));
-    hctDbCellGetByIdx(pDb, aPg, iCell, &cell);
-    if( cell.iTid==pDb->iTid ){
-      op = -1;
-      rc = hctDbCsrRollbackDescend(pCsr, pRec, iKey, &bExact);
+  rc = hctDbCsrSeek(pCsr, 0, 0, 0, pRec, iKey, &bLeafHit);
+  if( rc==SQLITE_OK && bLeafHit ){
+    u64 iLeafTid = hctDbCsrTid(pCsr);
+    if( iLeafTid!=pDb->iTid ){
+      /* Last thing that happened to this key was that it was written by
+      ** a transaction other than the one being rolled back. So this
+      ** is case (4) - set (*pOp) to 0 and return early.  */
+      *pOp = 0;
+      return SQLITE_OK;
     }
 
-    if( rc==SQLITE_OK 
-     && bExact 
-     && pCsr->nRange && pDb->iTid==pCsr->aRange[pCsr->nRange-1].iRangeTid
-    ){
-      op = +1;
+    /* Either case (1) or (2). If this is case (2), (*pOp) will be changed
+    ** to +1 below.  */
+    *pOp = -1;
+  }
+
+  if( rc==SQLITE_OK && pCsr->iCell>=0 ){
+    int bHistHit = 0;
+    rc = hctDbCsrRollbackDescend(pCsr, pRec, iKey, &bHistHit);
+    assert( bHistHit==0 || pCsr->nRange>0 );
+    if( bHistHit && pDb->iTid==pCsr->aRange[pCsr->nRange-1].iRangeTid ){
+      /* Either case (3) or case (2). */
+      *pOp = +1;
     }
   }
 
-  *pOp = op;
   return rc;
 }
 
@@ -5782,9 +5802,11 @@ static void hctDbDebugRollbackOp(
     char *zPos = hctDbCsrDebugPosition(&pDb->rbackcsr);
     const u8 *aData = 0;
     int nData = 0;
+    i64 iTid = (i64)hctDbCsrTid(&pDb->rbackcsr);
+
     sqlite3HctDbCsrData(&pDb->rbackcsr, &nData, &aData);
     zRes = sqlite3HctDbRecordToText(0, aData, nData);
-    zRes = sqlite3HctMprintf("(%z) from %z", zRes, zPos);
+    zRes = sqlite3HctMprintf("(%z) from %z (tid=%lld)", zRes, zPos, iTid);
   }else{
     zRes = sqlite3HctMprintf("<no-op>");
   }
@@ -7049,16 +7071,6 @@ sqlite3HctDbValidate(
   return rc;
 }
 
-
-static u64 hctDbCsrTid(HctDbCsr *pCsr){
-  u64 iTid = 0;
-  u8 flags = 0;
-  int iOff = hctDbCellOffset(pCsr->pg.aOld, pCsr->iCell, &flags);
-  if( flags & HCTDB_HAS_TID ){
-    iTid = hctGetU64(&pCsr->pg.aOld[iOff]);
-  }
-  return iTid;
-}
 
 static int compareName(const u8 *a, const u8 *b, int n){
   int ii;
