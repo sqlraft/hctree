@@ -6302,6 +6302,12 @@ int sqlite3HctDbEndWrite(HctDatabase *p, u64 iCid, int bRollback){
   assert( p->eMode==HCT_MODE_NORMAL );
   assert( p->pa.writepg.nPg==0 );
 
+  if( iCid==0 ){
+    assert( bRollback );
+    assert( p->iSnapshotId );
+    iCid = p->iSnapshotId;
+  }
+
   HctAtomicStore(pEntry, iCid|(bRollback?HCT_TMAP_ROLLBACK:HCT_TMAP_COMMITTED));
   p->iTid = 0;
   return rc;
