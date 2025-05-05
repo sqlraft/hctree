@@ -26,6 +26,8 @@ expr srand(0)
 hct_reset_db
 
 set nRow [expr 50]
+set nMs [expr 100]
+set nThread 16
 
 do_execsql_test 1.0 {
   PRAGMA page_size = 512;
@@ -41,7 +43,7 @@ do_execsql_test 1.0 {
   INSERT INTO tbl SELECT i, i FROM s;
 }
 
-# Each thread does:
+## Each thread does:
 #
 #   1. Open transaction.
 #
@@ -60,8 +62,10 @@ do_execsql_test 1.0 {
 #
 #   4. COMMIT transaction.
 #
-proc program {nMs} {
-  return [string map [list %UTIL% [program_util] %NMS% $nMs %NROW% $::nRow] {
+proc program {nMs iId} {
+  return [string map [list \
+      %UTIL% [program_util] %NMS% $nMs %NROW% $::nRow %ID% $iId
+  ] {
     %UTIL% 
 
     sqlite3 dbX test.db
@@ -83,13 +87,16 @@ proc program {nMs} {
       # Step 3:
       set lData1 [dbX eval {SELECT a, b FROM tbl ORDER BY a ASC}]
       set lData2 [dbX eval {SELECT a, b FROM tbl ORDER BY a DESC}]
+dbX eval {PRAGMA hct_extra_logging = 1}
       set lData3 [dbX eval {SELECT a, b FROM tbl ORDER BY b ASC}]
-
+dbX eval {PRAGMA hct_extra_logging = 0}
       set lData4 [dbX eval {SELECT a, b FROM tbl ORDER BY b DESC}]
 
       set lData5 [dbX eval {
         SELECT a, b FROM tbl WHERE +b>(%NROW%)/5 AND +b<(%NROW%)*4/5
       }]
+
+
       set lData6 [dbX eval {
         SELECT a, b FROM tbl WHERE b>(%NROW%)/5 AND b<(%NROW%)*4/5 
         ORDER BY b
@@ -100,12 +107,33 @@ proc program {nMs} {
       }]
 
       if {[llength $lData1]!=(%NROW% * 2)} {
+puts [time {
+set data [dbX eval {
+        SELECT a, b FROM tbl ORDER BY a ASC
+}]
+}]
+puts "data==lData1: [expr {$data==$lData1}]"
+puts "data:   $data"
+puts "lData1: $lData1"
+
         error "inconsistent results (lData1): {$lData1}"
       }
       if {$lData1!=[lsort -integer -stride 2 $lData2]} {
         error "inconsistent results (lData2): {$lData1} {$lData2}"
       }
       if {$lData1!=[lsort -integer -stride 2 $lData3]} {
+dbX eval {PRAGMA hct_extra_logging = 1}
+puts [time {
+set data [dbX eval { SELECT a, b FROM tbl ORDER BY b ASC}]
+}]
+dbX eval {PRAGMA hct_extra_logging = 0}
+
+puts "data==lData3: [expr {$data==$lData3}]"
+puts "data  : $data"
+puts "lData3: $lData3"
+puts "sorted: [lsort -integer -stride 2 $lData3]"
+puts "lData1: $lData1"
+
         error "inconsistent results (lData3): {$lData1} {$lData3}"
       }
       if {$lData1!=[lsort -integer -stride 2 $lData4]} {
@@ -113,13 +141,36 @@ proc program {nMs} {
       }
 
       if {$lData5!=[lsort -integer -stride 2 $lData6]} {
+puts "lData5: $lData5"
+puts "sorted: [lsort -integer -stride 2 $lData6]"
+puts "lData6: $lData6"
+puts "sorted: [lsort -integer -stride 2 -index 1 $lData5]"
+dbX eval {PRAGMA hct_extra_logging = 1}
+puts [time {
+set data [dbX eval {
+        SELECT a, b FROM tbl WHERE b>(%NROW%)/5 AND b<(%NROW%)*4/5 
+        ORDER BY b
+}]
+}]
+puts [time {
+set data2 [dbX eval {
+        SELECT a, b FROM tbl WHERE +b>(%NROW%)/5 AND +b<(%NROW%)*4/5 
+}]
+}]
+dbX eval {PRAGMA hct_extra_logging = 0}
+puts "data==lData6: [expr {$data==$lData6}]"
+puts "data2==lData5: [expr {$data2==$lData5}]"
+
+puts "data: $data"
+puts "data2: $data2"
+
         error "inconsistent results (lData6): {$lData5} {$lData6}"
       }
       if {$lData5!=[lsort -integer -stride 2 $lData7]} {
         error "inconsistent results (lData7): {$lData5} {$lData7}"
       }
 
-      # Step 3:
+      # Step 4:
       if { [catch { dbX eval COMMIT }] } {
         dbX eval ROLLBACK
       }
@@ -146,15 +197,12 @@ proc rand {min max} {
   expr {$min + int(abs(rand() * (1 + $max - $min)))}
 }
 
-set nMs [expr 5000]
-set nThread 2
-
-set prg1 [program $nMs]
 for {set ii 0} {$ii<$nThread} {incr ii} {
+  set prg1 [program $nMs $ii]
   sqlthread spawn TH($ii) $prg1
 }
 
-do_test "1.1.(running threads for ${nMs} ms)" {
+do_test "1.1.(running $nThread threads for ${nMs} ms)" {
   for {set ii 0} {$ii<$nThread} {incr ii} {
     if {[info exists TH($ii)]==0} { vwait TH($ii) }
   }
@@ -169,9 +217,9 @@ for {set ii 0} {$ii<$nThread} {incr ii} {
 }
 
 #execsql_pp { SELECT * FROM tbl }
-#execsql_pp { SELECT * FROM hcttmap }
-#show_pagemap
-#show_all_entries
+execsql_pp { SELECT * FROM hcttmap }
+show_pagemap
+show_all_entries
 
 finish_test
 

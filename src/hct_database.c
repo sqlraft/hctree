@@ -809,13 +809,18 @@ static int hctDbTidIsVisible(HctDatabase *pDb, u64 iTid, int bNosnap){
   while( 1 ){
     u64 eState = 0;
     u64 iCid = hctDbTMapLookup(pDb, (iTid & HCT_TID_MASK), &eState);
-    if( iTid & HCT_TID_ROLLBACK_OVERRIDE ){
+
+    if( (iTid & HCT_TID_ROLLBACK_OVERRIDE) ){
+      assert( (eState==HCT_TMAP_ROLLBACK && iCid>0)
+           || (eState==HCT_TMAP_COMMITTED && iCid==0)
+      );
       eState = HCT_TMAP_COMMITTED;
     }
     if( eState==HCT_TMAP_WRITING || eState==HCT_TMAP_ROLLBACK ){
       return 0;
     }
     if( eState==HCT_TMAP_COMMITTED ){
+      assert( iCid>0 || (iTid & HCT_TID_MASK)<pDb->pTmap->iFirstTid );
       if( bNosnap==0 && iCid>pDb->iSnapshotId ){
         return 0;
       }
@@ -848,7 +853,7 @@ static int hctDbTidIsConflict(HctDatabase *pDb, u64 iTid){
 
     /* This should only be called while writing or validating. */
     assert( pDb->iTid );
-    if( iTid & HCT_TID_ROLLBACK_OVERRIDE ){
+    if( (iTid & HCT_TID_ROLLBACK_OVERRIDE) && eState==HCT_TMAP_ROLLBACK ){
       eState = HCT_TMAP_COMMITTED;
     }
 
@@ -6297,20 +6302,27 @@ static u64 *hctDbFindTMapEntry(HctTMap *pTmap, u64 iTid){
 */
 int sqlite3HctDbEndWrite(HctDatabase *p, u64 iCid, int bRollback){
   int rc = SQLITE_OK;
-  u64 *pEntry = hctDbFindTMapEntry(p->pTmap, p->iTid);
+  if( bRollback==0 ){
+    u64 *pEntry = hctDbFindTMapEntry(p->pTmap, p->iTid);
 
-  assert( p->eMode==HCT_MODE_NORMAL );
-  assert( p->pa.writepg.nPg==0 );
+    assert( p->eMode==HCT_MODE_NORMAL );
+    assert( p->pa.writepg.nPg==0 );
 
-  if( iCid==0 ){
-    assert( bRollback );
-    assert( p->iSnapshotId );
-    iCid = p->iSnapshotId;
+    HCT_EXTRA_WR_LOGGING(
+        ("%p: mapping %lld to %lld (COMMITTED)", p, p->iTid, iCid)
+    );
+    HctAtomicStore(pEntry, iCid|HCT_TMAP_COMMITTED);
   }
-
-  HctAtomicStore(pEntry, iCid|(bRollback?HCT_TMAP_ROLLBACK:HCT_TMAP_COMMITTED));
   p->iTid = 0;
   return rc;
+}
+
+void sqlite3HctDbSetTmapForRollback(HctDatabase *p){
+  u64 *pEntry = hctDbFindTMapEntry(p->pTmap, p->iTid);
+  HCT_EXTRA_WR_LOGGING(
+      ("%p: mapping %lld to %lld (ROLLBACK)", p, p->iTid, p->iSnapshotId)
+  );
+  HctAtomicStore(pEntry, p->iSnapshotId|HCT_TMAP_ROLLBACK);
 }
 
 static void hctDbFreeCsrList(HctDbCsr *pList){

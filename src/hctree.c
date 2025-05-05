@@ -1784,6 +1784,7 @@ static int btreeFlushToDisk(HBtree *p){
   assert( rc!=SQLITE_BUSY );
   if( rc==SQLITE_BUSY_SNAPSHOT ){
     rcok = SQLITE_BUSY_SNAPSHOT;
+    sqlite3HctDbSetTmapForRollback(p->pHctDb);
     rc = btreeFlushData(p, 1);
     if( rc==SQLITE_DONE ) rc = SQLITE_OK;
   }

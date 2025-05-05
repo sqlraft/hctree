@@ -18,7 +18,7 @@ set testprefix hct_thread2
 # Setup for logging 
 db close
 sqlite3_shutdown
-#sqlite_log_to_stdout
+sqlite_log_to_stdout
 
 hct_reset_db
 # db eval { PRAGMA journal_mode = wal }
@@ -112,8 +112,9 @@ proc reader_program {nMs} {
 }
 
 
-set nMs 5000
+set nMs 500
 
+set hct_extra_write_logging 1
 set prg1 [program 1 $nMs]
 sqlthread spawn r1 $prg1
 
@@ -128,6 +129,7 @@ do_test "1.1.(running threads for ${nMs} ms)" {
   if {[info exists r2]==0} { vwait r2 }
   if {[info exists r3]==0} { vwait r3 }
 } {}
+set hct_extra_write_logging 0
 
 
 array set C1 $r1
