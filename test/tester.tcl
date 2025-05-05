@@ -1346,6 +1346,7 @@ proc finalize_testing {} {
       incr nErr
     }
   }
+
   if {[lindex [sqlite3_status SQLITE_STATUS_MALLOC_COUNT 0] 1]>0 ||
               [sqlite3_memory_used]>0} {
     output2 "Unfreed memory: [sqlite3_memory_used] bytes in\
@@ -1361,6 +1362,7 @@ proc finalize_testing {} {
       sqlite3_memdebug_dump ./memusage.txt
     }
   }
+
   show_memstats
   output2 "Maximum memory usage: [sqlite3_memory_highwater 1] bytes"
   output2 "Current memory usage: [sqlite3_memory_highwater] bytes"

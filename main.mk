@@ -2182,9 +2182,9 @@ dbhash$(T.exe):	$(TOP)/tool/dbhash.c sqlite3.o sqlite3.h
 	$(T.link) -o $@ $(TOP)/tool/dbhash.c sqlite3.o $(LDFLAGS.libsqlite3)
 xbin: dbhash$(T.exe)
 
-hct_thread_test$(EXE): $(TOP)/tool/hct_thread_test.c libsqlite3.a sqlite3.h
-	$(TCCX) -o hct_thread_test$(EXE) \
-	$(TOP)/tool/hct_thread_test.c libsqlite3.a $(TLIBS) $(THREADLIB)
+hct_thread_test$(T.exe): $(TOP)/tool/hct_thread_test.c libsqlite3.a sqlite3.h
+	$(T.cc.sqlite) -o hct_thread_test$(EXE) \
+	$(TOP)/tool/hct_thread_test.c libsqlite3.a $(LDFLAGS.libsqlite3)
 
 
 RSYNC_SRC = \
