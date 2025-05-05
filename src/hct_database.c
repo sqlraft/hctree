@@ -2303,13 +2303,12 @@ static int hctDbFollowRangeOld(
 
 static int hctDbCsrExtendRange(HctDbCsr *pCsr){
   if( pCsr->nRange==pCsr->nRangeAlloc ){
-    int nNew = pCsr->nRangeAlloc ? pCsr->nRangeAlloc*2 : 16;
+    i64 nNew = pCsr->nRangeAlloc ? pCsr->nRangeAlloc*2 : 16;
     HctDbRangeCsr *aNew = 0;
 
-    aNew = (HctDbRangeCsr*)sqlite3_realloc(
+    aNew = (HctDbRangeCsr*)sqlite3HctRealloc(
         pCsr->aRange, nNew*sizeof(HctDbRangeCsr)
     );
-    if( aNew==0 ) return SQLITE_NOMEM_BKPT;
     pCsr->nRangeAlloc = nNew;
     pCsr->aRange = aNew;
   }
@@ -5221,7 +5220,7 @@ static int hctDbDelete(
   }
 
   if( rc==SQLITE_OK && pOp->bFullDel==0 ){
-    prev.iRangeTid |= iTidOr;
+    // prev.iRangeTid |= iTidOr;
     pOp->aEntry = pDb->aTmp;
     pOp->nEntry = hctDbCellPut(pOp->aEntry, &prev, nLocalSz);
     pOp->entryFlags = prevFlags | HCTDB_HAS_RANGETID | HCTDB_HAS_RANGEOLD;
