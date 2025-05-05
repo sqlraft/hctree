@@ -816,8 +816,9 @@ static int hctDbTidIsVisible(HctDatabase *pDb, u64 iTid, int bNosnap){
     u64 eState = 0;
     u64 iCid = hctDbTMapLookup(pDb, (iTid & HCT_TID_MASK), &eState);
 
-    if( (iTid & HCT_TID_ROLLBACK_OVERRIDE) ){
+    if( (iTid & HCT_TID_ROLLBACK_OVERRIDE) && iCid>0 ){
       assert( (eState==HCT_TMAP_ROLLBACK && iCid>0)
+           || (eState==HCT_TMAP_VALIDATING && iCid>0)
            || eState==HCT_TMAP_COMMITTED
       );
       eState = HCT_TMAP_COMMITTED;
@@ -6308,27 +6309,55 @@ static u64 *hctDbFindTMapEntry(HctTMap *pTmap, u64 iTid){
 */
 int sqlite3HctDbEndWrite(HctDatabase *p, u64 iCid, int bRollback){
   int rc = SQLITE_OK;
-  if( bRollback==0 ){
-    u64 *pEntry = hctDbFindTMapEntry(p->pTmap, p->iTid);
+  u64 iVal = iCid | HCT_TMAP_COMMITTED;;
+  u64 *pEntry = hctDbFindTMapEntry(p->pTmap, p->iTid);
 
-    assert( p->eMode==HCT_MODE_NORMAL );
-    assert( p->pa.writepg.nPg==0 );
-
-    HCT_EXTRA_WR_LOGGING(
-        ("%p: mapping %lld to %lld (COMMITTED)", p, p->iTid, iCid)
-    );
-    HctAtomicStore(pEntry, iCid|HCT_TMAP_COMMITTED);
+  assert( p->eMode==HCT_MODE_NORMAL );
+  assert( p->pa.writepg.nPg==0 );
+  if( bRollback ){
+    iVal = p->iSnapshotId | HCT_TMAP_ROLLBACK;
   }
+  HctAtomicStore(pEntry, iVal);
+
+  HCT_EXTRA_WR_LOGGING(("%p: mapping %lld to %lld (%s)",
+        p, p->iTid, iVal & HCT_TID_MASK, (bRollback?"ROLLBACK":"COMMITTED")
+  ));
+
   p->iTid = 0;
   return rc;
 }
 
+/*
+** This is called when it has been determined that a transaction that has
+** already been written to the db must be rolled back. It sets the tmap
+** slot for the transaction to VALIDATING|$snapshot, where $snapshot was
+** the id of the snapshot that the transaction being rolled back was 
+** executed against. Once rollback has finished, the slot will be set
+** to ROLLBACK|$snapshot.
+**
+** The mapped CID value is $snapshot because this is a known CID value
+** for which all the rolled back keys are visible. This value must be
+** set now, before any HCT_TID_ROLLBACK_OVERRIDE keys are written to the
+** database, as these are eligible for visibility (subject to the CID check)
+** immediately.
+**
+** An alternative would be to not consider the HCT_TID_ROLLBACK_OVERRIDE
+** keys as eligible for visibility until the tmap slot is set to
+** HCT_TMAP_ROLLBACK. But this doesn't work as the range-cursor code
+** doesn't like keys changing visibility mid-transaction.
+**
+** We cannot set the tmap slot to ROLLBACK|$snapshot here, as then the
+** code in hct_tmap.c might increase the iMinMinTid value before all the
+** HCT_TID_ROLLBACK_OVERRIDE keys are written - causing a client to 
+** incorrectly assume a rolled back key was committed..
+*/
 void sqlite3HctDbSetTmapForRollback(HctDatabase *p){
   u64 *pEntry = hctDbFindTMapEntry(p->pTmap, p->iTid);
   HCT_EXTRA_WR_LOGGING(
-      ("%p: mapping %lld to %lld (ROLLBACK)", p, p->iTid, p->iSnapshotId)
+      ("%p: mapping %lld to %lld (VALIDATING)", p, p->iTid, p->iSnapshotId)
   );
-  HctAtomicStore(pEntry, p->iSnapshotId|HCT_TMAP_ROLLBACK);
+  /* Why VALIDATING? See header comment for this function... */
+  HctAtomicStore(pEntry, p->iSnapshotId|HCT_TMAP_VALIDATING);
 }
 
 static void hctDbFreeCsrList(HctDbCsr *pList){

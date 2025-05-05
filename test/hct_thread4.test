@@ -87,9 +87,7 @@ proc program {nMs iId} {
       # Step 3:
       set lData1 [dbX eval {SELECT a, b FROM tbl ORDER BY a ASC}]
       set lData2 [dbX eval {SELECT a, b FROM tbl ORDER BY a DESC}]
-dbX eval {PRAGMA hct_extra_logging = 0}
       set lData3 [dbX eval {SELECT a, b FROM tbl ORDER BY b ASC}]
-dbX eval {PRAGMA hct_extra_logging = 0}
       set lData4 [dbX eval {SELECT a, b FROM tbl ORDER BY b DESC}]
 
       set lData5 [dbX eval {
@@ -217,9 +215,9 @@ for {set ii 0} {$ii<$nThread} {incr ii} {
 }
 
 #execsql_pp { SELECT * FROM tbl }
-execsql_pp { SELECT * FROM hcttmap }
-show_pagemap
-show_all_entries
+#execsql_pp { SELECT * FROM hcttmap }
+#show_pagemap
+#show_all_entries
 
 finish_test
 
