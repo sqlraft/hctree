@@ -20,28 +20,6 @@ int hct_extra_logging = 0;
 
 int hct_extra_write_logging = 0;
 
-static void hctExtraLogging(
-  const char *zFunc, 
-  int iLine, 
-  void *pHctDb,
-  char *zMsg
-){
-  sqlite3_log(SQLITE_NOTICE, "%s:%d: %p: %s", zFunc, iLine, pHctDb, zMsg);
-  sqlite3_free(zMsg);
-}
-
-static void hctExtraWriteLogging(const char *zFunc, int iLine, char *zMsg){
-  sqlite3_log(SQLITE_NOTICE, "%s:%d: %s", zFunc, iLine, zMsg);
-  sqlite3_free(zMsg);
-}
-
-#define HCT_EXTRA_LOGGING(pDb, x)                                \
-  if( pDb->pConfig->bHctExtraLogging ) {                         \
-    hctExtraLogging(__func__, __LINE__, pDb, sqlite3_mprintf x); \
-  }
-
-#define HCT_EXTRA_WR_LOGGING(x) if( hct_extra_write_logging ) { hctExtraWriteLogging(__func__, __LINE__, sqlite3_mprintf x); }
-
 typedef struct HctDatabase HctDatabase;
 typedef struct HctDbIndexEntry HctDbIndexEntry;
 typedef struct HctDbIndexLeaf HctDbIndexLeaf;
@@ -534,6 +512,34 @@ static void hctMemcpy(void *a, const void *b, size_t c){
 
 #define HCTDB_MAX_EXTRA_CELL_DATA (8+4+8+4)
 
+
+static void hctExtraLogging(
+  const char *zFunc, 
+  int iLine, 
+  HctDatabase *pHctDb,
+  char *zMsg
+){
+  if( pHctDb->pConfig->bHctExtraLogging>1 ){
+    sqlite3HctExtraLogging(pHctDb->pConfig, zFunc, iLine, zMsg);
+  }else{
+    sqlite3_log(SQLITE_NOTICE, "%s:%d: %p: %s", zFunc, iLine, pHctDb, zMsg);
+    sqlite3_free(zMsg);
+  }
+}
+
+static void hctExtraWriteLogging(const char *zFunc, int iLine, char *zMsg){
+  sqlite3_log(SQLITE_NOTICE, "%s:%d: %s", zFunc, iLine, zMsg);
+  sqlite3_free(zMsg);
+}
+
+#define HCT_EXTRA_LOGGING(pDb, x)                                \
+  if( pDb->pConfig->bHctExtraLogging ) {                         \
+    hctExtraLogging(__func__, __LINE__, pDb, sqlite3_mprintf x); \
+  }
+
+#define HCT_EXTRA_WR_LOGGING(x) if( hct_extra_write_logging ) { hctExtraWriteLogging(__func__, __LINE__, sqlite3_mprintf x); }
+
+
 void sqlite3HctBufferGrow(HctBuffer *pBuf, int nSize){
   if( nSize>pBuf->nAlloc ){
     pBuf->aBuf = sqlite3HctRealloc(pBuf->aBuf, nSize);
@@ -812,7 +818,7 @@ static int hctDbTidIsVisible(HctDatabase *pDb, u64 iTid, int bNosnap){
 
     if( (iTid & HCT_TID_ROLLBACK_OVERRIDE) ){
       assert( (eState==HCT_TMAP_ROLLBACK && iCid>0)
-           || (eState==HCT_TMAP_COMMITTED && iCid==0)
+           || eState==HCT_TMAP_COMMITTED
       );
       eState = HCT_TMAP_COMMITTED;
     }

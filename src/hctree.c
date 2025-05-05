@@ -661,12 +661,64 @@ int sqlite3HctBtreeOpen(
   return rc;
 }
 
+
+void sqlite3HctExtraLogging(
+  HctConfig *pConfig, 
+  const char *zFunc,
+  int iLine,
+  char *zMsg
+){
+  HctConfigLogEntry *pEntry;
+
+  /* Check if the pConfig->aLogEntry[] array needs to be expanded. And
+  ** expand it if it does.  */
+  if( pConfig->nLogEntry>=pConfig->nLogAlloc ){
+    HctConfigLogEntry *aNew;
+    i64 nNew = (pConfig->nLogEntry ? pConfig->nLogEntry*2 : 4096);
+    i64 nByte = nNew * sizeof(HctConfigLogEntry);
+
+    aNew = (HctConfigLogEntry*)sqlite3HctRealloc(pConfig->aLogEntry, nByte);
+    nByte -= (pConfig->nLogEntry * sizeof(HctConfigLogEntry));
+    memset(&aNew[pConfig->nLogEntry], 0, nByte);
+    pConfig->nLogAlloc = nNew;
+    pConfig->aLogEntry = aNew;
+  }
+
+  pEntry = &pConfig->aLogEntry[pConfig->nLogEntry];
+  pConfig->nLogEntry++;
+  pEntry->zFunc = zFunc;
+  pEntry->iLine = iLine;
+  pEntry->zMsg = zMsg;
+}
+
+static char *hctGetLog(HctConfig *pConfig){
+  int ii;
+  char *zRet = 0;
+  for(ii=0; ii<pConfig->nLogEntry; ii++){
+    HctConfigLogEntry *p = &pConfig->aLogEntry[ii];
+    zRet = sqlite3HctMprintf("%z%s:%d %s\n", zRet, p->zFunc, p->iLine, p->zMsg);
+  }
+  return zRet;
+}
+
+static void hctFreeLog(HctConfig *pConfig){
+  int ii;
+  for(ii=0; ii<pConfig->nLogEntry; ii++){
+    sqlite3_free(pConfig->aLogEntry[ii].zMsg);
+  }
+  sqlite3_free(pConfig->aLogEntry);
+  pConfig->aLogEntry = 0;
+  pConfig->nLogEntry = 0;
+  pConfig->nLogAlloc = 0;
+}
+
 /*
 ** Close an open database and invalidate all cursors.
 */
 int sqlite3HctBtreeClose(Btree *pBt){
   HBtree *const p = (HBtree*)pBt;
   if( p ){
+    hctFreeLog(&p->config);
     while(p->pCsrList){
       sqlite3HctBtreeCloseCursor((BtCursor*)p->pCsrList);
     }
@@ -3335,9 +3387,12 @@ int sqlite3HctBtreePragma(Btree *pBt, char **aFnctl){
       iVal = sqlite3Atoi(zRight);
     }
     if( iVal>=0 ){
-      p->config.bHctExtraLogging = (iVal==0 ? 0 : 1);
+      p->config.bHctExtraLogging = iVal;
     }
     zRet = hctDbMPrintf(&rc, "%d", p->config.bHctExtraLogging);
+  }else if( 0==sqlite3_stricmp("hct_log", zLeft) ){
+    zRet = hctGetLog(&p->config);
+    hctFreeLog(&p->config);
   }else{
     rc = SQLITE_NOTFOUND;
   }

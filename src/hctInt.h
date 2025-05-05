@@ -15,6 +15,12 @@ typedef unsigned int u32;
 #define HctCASBool(PTR,OLD,NEW) \
     (int)__sync_bool_compare_and_swap((PTR),(OLD),(NEW))
 
+typedef struct HctConfigLogEntry HctConfigLogEntry;
+struct HctConfigLogEntry {
+  const char *zFunc;
+  int iLine;
+  char *zMsg;
+};
 
 /*
 */
@@ -29,6 +35,10 @@ struct HctConfig {
   int pgsz;
   int bHctExtraLogging;           /* PRAGMA hct_extra_logging = ? */
   sqlite3 *db;
+
+  int nLogEntry;
+  int nLogAlloc;
+  HctConfigLogEntry *aLogEntry;
 };
 
 #define HCT_TID_MASK  ((((u64)0x00FFFFFF) << 32)|0xFFFFFFFF)
@@ -70,6 +80,12 @@ struct HctBuffer {
 void sqlite3HctBufferGrow(HctBuffer *pBuf, int nSize);
 void sqlite3HctBufferFree(HctBuffer *pBuf);
 
+void sqlite3HctExtraLogging(
+  HctConfig *pConfig, 
+  const char *zFunc,
+  int iLine,
+  char *zMsg
+);
 
 
 /*************************************************************************

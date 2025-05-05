@@ -26,7 +26,7 @@ expr srand(0)
 hct_reset_db
 
 set nRow [expr 50]
-set nMs [expr 100]
+set nMs [expr 1000]
 set nThread 16
 
 do_execsql_test 1.0 {
@@ -87,7 +87,7 @@ proc program {nMs iId} {
       # Step 3:
       set lData1 [dbX eval {SELECT a, b FROM tbl ORDER BY a ASC}]
       set lData2 [dbX eval {SELECT a, b FROM tbl ORDER BY a DESC}]
-dbX eval {PRAGMA hct_extra_logging = 1}
+dbX eval {PRAGMA hct_extra_logging = 0}
       set lData3 [dbX eval {SELECT a, b FROM tbl ORDER BY b ASC}]
 dbX eval {PRAGMA hct_extra_logging = 0}
       set lData4 [dbX eval {SELECT a, b FROM tbl ORDER BY b DESC}]
