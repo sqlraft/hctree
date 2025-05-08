@@ -2977,21 +2977,18 @@ int sqlite3HctBtreeInsert(
 
   hctBtreeClearIsLast(pCur->pBtree, pCur);
 
-  if( pCur->isDirectWrite 
-   && seekResult<0
-   && sqlite3HctDbCsrIsLast(pCur->pHctDbCsr)
-  ){
-    bDirectAppend = 1;
-  }
-
   if( flags & BTREE_PREFORMAT ){
     /* If the PREFORMAT flag is set, copy the data for this entry from 
     ** cursor HctDatabase.pPreformatCsr - which was populated by the 
     ** previous call to sqlite3HctBtreeTransferRow().  */
     BtCursor *pExt = pCur->pBtree->pPreformatCsr;
     u32 nFetch = 0;
+
     assert( pExt );
-    assert( bDirectAppend );
+    assert( pCur->isDirectWrite );
+    assert( seekResult<0 );
+    assert( sqlite3HctDbCsrIsLast(pCur->pHctDbCsr) );
+    bDirectAppend = 1;
     if( pCur->pKeyInfo==0 ){
       iKey = sqlite3BtreeIntegerKey(pExt);
     }
@@ -3005,34 +3002,42 @@ int sqlite3HctBtreeInsert(
       if( rc!=SQLITE_OK ) return rc;
       aData = pBuf->aBuf;
     }
-  }else
-
-  if( pX->pKey ){
-    aData = pX->pKey;
-    nData = pX->nKey;
-    nZero = 0;
-    iKey = 0;
-    if( bDirectAppend==0 ){
-      /* If bDirectAppend is set, then it is already known that this will 
-      ** be an append to the table. So there is no need for an unpacked 
-      ** record.  */
-      if( pX->nMem ){
-        memset(&r, 0, sizeof(r));
-        r.pKeyInfo = pCur->pKeyInfo;
-        r.aMem = pX->aMem;
-        r.nField = pX->nMem;
-        pRec = &r;
-      }else{
-        pRec = sqlite3VdbeAllocUnpackedRecord(pCur->pKeyInfo);
-        if( pRec==0 ) return SQLITE_NOMEM_BKPT;
-        sqlite3VdbeRecordUnpack(pCur->pKeyInfo, nData, aData, pRec);
-      }
-    }
   }else{
-    aData = pX->pData;
-    nData = pX->nData;
-    nZero = pX->nZero;
-    iKey = pX->nKey;
+
+    if( pCur->isDirectWrite 
+     && seekResult<0
+     && sqlite3HctDbCsrIsLast(pCur->pHctDbCsr)
+    ){
+      bDirectAppend = 1;
+    }
+
+    if( pX->pKey ){
+      aData = pX->pKey;
+      nData = pX->nKey;
+      nZero = 0;
+      iKey = 0;
+      if( bDirectAppend==0 ){
+        /* If bDirectAppend is set, then it is already known that this will 
+        ** be an append to the table. So there is no need for an unpacked 
+        ** record.  */
+        if( pX->nMem ){
+          memset(&r, 0, sizeof(r));
+          r.pKeyInfo = pCur->pKeyInfo;
+          r.aMem = pX->aMem;
+          r.nField = pX->nMem;
+          pRec = &r;
+        }else{
+          pRec = sqlite3VdbeAllocUnpackedRecord(pCur->pKeyInfo);
+          if( pRec==0 ) return SQLITE_NOMEM_BKPT;
+          sqlite3VdbeRecordUnpack(pCur->pKeyInfo, nData, aData, pRec);
+        }
+      }
+    }else{
+      aData = pX->pData;
+      nData = pX->nData;
+      nZero = pX->nZero;
+      iKey = pX->nKey;
+    }
   }
 
   if( pCur->isDirectWrite ){
