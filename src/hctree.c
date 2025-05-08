@@ -96,6 +96,9 @@ struct HBtree {
   int nJrnlMap;
 
   Pager *pFakePager;
+  BtCursor *pPreformatCsr;
+  HctBuffer preformat;            /* Buffer containing preformat data */
+
   HctMainStats stats;
 };
 
@@ -732,6 +735,7 @@ int sqlite3HctBtreeClose(Btree *pBt){
     sqlite3HctJournalClose(p->pHctJrnl);
     sqlite3HctTreeFree(p->pHctTree);
     sqlite3HctDbClose(p->pHctDb);
+    sqlite3HctBufferFree(&p->preformat);
     sqlite3_free(p->aSchemaOp);
     sqlite3_free(p->pFakePager);
     sqlite3_free(p);
@@ -2965,9 +2969,9 @@ int sqlite3HctBtreeInsert(
   int rc = SQLITE_OK;
   UnpackedRecord r;
   UnpackedRecord *pRec = 0;
-  const u8 *aData;
-  int nData;
-  int nZero;
+  const u8 *aData = 0;
+  int nData = 0;
+  int nZero = 0;
   i64 iKey = 0;
   int bDirectAppend = 0;
 
@@ -2979,6 +2983,29 @@ int sqlite3HctBtreeInsert(
   ){
     bDirectAppend = 1;
   }
+
+  if( flags & BTREE_PREFORMAT ){
+    /* If the PREFORMAT flag is set, copy the data for this entry from 
+    ** cursor HctDatabase.pPreformatCsr - which was populated by the 
+    ** previous call to sqlite3HctBtreeTransferRow().  */
+    BtCursor *pExt = pCur->pBtree->pPreformatCsr;
+    u32 nFetch = 0;
+    assert( pExt );
+    assert( bDirectAppend );
+    if( pCur->pKeyInfo==0 ){
+      iKey = sqlite3BtreeIntegerKey(pExt);
+    }
+    nData = sqlite3BtreePayloadSize(pExt);
+    aData = (const u8*)sqlite3BtreePayloadFetch(pExt, &nFetch);
+    assert( nFetch<=nData );
+    if( nFetch<nData ){
+      HctBuffer *pBuf = &pCur->pBtree->preformat;
+      sqlite3HctBufferGrow(pBuf, nData);
+      rc = sqlite3BtreePayload(pExt, 0, nData, pBuf->aBuf);
+      if( rc!=SQLITE_OK ) return rc;
+      aData = pBuf->aBuf;
+    }
+  }else
 
   if( pX->pKey ){
     aData = pX->pKey;
@@ -3708,8 +3735,9 @@ int sqlite3HctBtreeConnectionCount(Btree *p){
 #endif
 
 int sqlite3HctBtreeTransferRow(BtCursor *p1, BtCursor *p2, i64 iKey){
-  assert( 0 );
-  return SQLITE_LOCKED;
+  HBtCursor *pCsr = (HBtCursor*)p1;
+  pCsr->pBtree->pPreformatCsr = p2;
+  return SQLITE_OK;
 }
 
 int sqlite3HctLockedErr(u32 pgno, const char *zReason){

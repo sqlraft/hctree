@@ -75,6 +75,7 @@
 #include <tcl.h>
 #include <sqlite3.h>
 #include <sqlite3hct.h>
+#include "sqliteInt.h"
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -791,7 +792,9 @@ static void *migration_main(void *pArg){
     }
 
     if( pJob->rc==SQLITE_OK ){
+      pJob->db->mDbFlags |= DBFLAG_Vacuum;
       pJob->rc = sqlite3_exec(pJob->db, pInsert->zInsert, 0, 0, 0);
+      pJob->db->mDbFlags &= ~(u32)(DBFLAG_Vacuum);
     }
     if( pJob->rc==SQLITE_OK ){
       pJob->rc = sqlite3_exec(pJob->db, "COMMIT", 0, 0, 0);

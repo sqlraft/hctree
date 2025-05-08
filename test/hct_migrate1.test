@@ -74,6 +74,48 @@ sqlite3 db2 test.db2
 do_execsql_test -db db2 1.2 {
   PRAGMA integrity_check
 } {ok}
+db2 close
+
+#-------------------------------------------------------------------------
+#
+forcedelete test.db2
+reset_db
+do_execsql_test 2.0 {
+  CREATE TABLE t1(a INTEGER PRIMARY KEY, b TEXT);
+  INSERT INTO t1 VALUES(1, 'one');
+  CREATE INDEX i1 ON t1(b);
+}
+
+migrate test.db test.db2
+db close
+sqlite3 db test.db2
+
+do_execsql_test 2.2 {
+  PRAGMA integrity_check
+} {ok}
+
+#-------------------------------------------------------------------------
+#
+forcedelete test.db2
+reset_db
+do_execsql_test 2.0 {
+  CREATE TABLE t1(a INTEGER PRIMARY KEY, b TEXT);
+  CREATE INDEX i1 ON t1(b);
+  INSERT INTO t1 VALUES(1, hex(randomblob(10000)));
+  INSERT INTO t1 VALUES(2, hex(randomblob(10000)));
+  INSERT INTO t1 VALUES(3, hex(randomblob(10000)));
+  INSERT INTO t1 VALUES(4, hex(randomblob(10000)));
+  INSERT INTO t1 VALUES(5, hex(randomblob(10000)));
+}
+
+migrate test.db test.db2
+db close
+sqlite3 db test.db2
+
+do_execsql_test 2.2 {
+  PRAGMA integrity_check
+} {ok}
+
 
 finish_test
 
