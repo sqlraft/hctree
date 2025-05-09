@@ -159,7 +159,8 @@ proc plan_migration {} {
     #
     if {[llength $lColCollate]>0} {
       # An index or WITHOUT ROWID table.
-      set cols [join $lColCollate { ,}]
+      # set cols [join $lColCollate { ,}]
+      set cols [join $lCol { ,}]
       set pk [join $lColDir { ,}]
       set ct "CREATE TABLE imp$iImp ($cols, PRIMARY KEY($pk)) WITHOUT ROWID;"
       set ct "($cols, PRIMARY KEY($pk)) WITHOUT ROWID;"
@@ -200,7 +201,7 @@ proc plan_migration {} {
     #
     if {$bIntkey} {
       set p "INSERT INTO main.imp$iImp"
-      if {$bPrimaryKey} {
+      if {1 || $bPrimaryKey} {
         set zPrefix "$p SELECT * FROM src.imp$iImp"
       } else {
         set zPrefix "$p (rowid,[join $lCol ,]) SELECT rowid,* FROM src.imp$iImp"

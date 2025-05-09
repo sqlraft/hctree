@@ -96,6 +96,9 @@ struct HBtree {
   int nJrnlMap;
 
   Pager *pFakePager;
+  BtCursor *pPreformatCsr;
+  HctBuffer preformat;            /* Buffer containing preformat data */
+
   HctMainStats stats;
 };
 
@@ -732,6 +735,7 @@ int sqlite3HctBtreeClose(Btree *pBt){
     sqlite3HctJournalClose(p->pHctJrnl);
     sqlite3HctTreeFree(p->pHctTree);
     sqlite3HctDbClose(p->pHctDb);
+    sqlite3HctBufferFree(&p->preformat);
     sqlite3_free(p->aSchemaOp);
     sqlite3_free(p->pFakePager);
     sqlite3_free(p);
@@ -2965,47 +2969,75 @@ int sqlite3HctBtreeInsert(
   int rc = SQLITE_OK;
   UnpackedRecord r;
   UnpackedRecord *pRec = 0;
-  const u8 *aData;
-  int nData;
-  int nZero;
+  const u8 *aData = 0;
+  int nData = 0;
+  int nZero = 0;
   i64 iKey = 0;
   int bDirectAppend = 0;
 
   hctBtreeClearIsLast(pCur->pBtree, pCur);
 
-  if( pCur->isDirectWrite 
-   && seekResult<0
-   && sqlite3HctDbCsrIsLast(pCur->pHctDbCsr)
-  ){
-    bDirectAppend = 1;
-  }
+  if( flags & BTREE_PREFORMAT ){
+    /* If the PREFORMAT flag is set, copy the data for this entry from 
+    ** cursor HctDatabase.pPreformatCsr - which was populated by the 
+    ** previous call to sqlite3HctBtreeTransferRow().  */
+    BtCursor *pExt = pCur->pBtree->pPreformatCsr;
+    u32 nFetch = 0;
 
-  if( pX->pKey ){
-    aData = pX->pKey;
-    nData = pX->nKey;
-    nZero = 0;
-    iKey = 0;
-    if( bDirectAppend==0 ){
-      /* If bDirectAppend is set, then it is already known that this will 
-      ** be an append to the table. So there is no need for an unpacked 
-      ** record.  */
-      if( pX->nMem ){
-        memset(&r, 0, sizeof(r));
-        r.pKeyInfo = pCur->pKeyInfo;
-        r.aMem = pX->aMem;
-        r.nField = pX->nMem;
-        pRec = &r;
-      }else{
-        pRec = sqlite3VdbeAllocUnpackedRecord(pCur->pKeyInfo);
-        if( pRec==0 ) return SQLITE_NOMEM_BKPT;
-        sqlite3VdbeRecordUnpack(pCur->pKeyInfo, nData, aData, pRec);
-      }
+    assert( pExt );
+    assert( pCur->isDirectWrite );
+    assert( seekResult<0 );
+    assert( sqlite3HctDbCsrIsLast(pCur->pHctDbCsr) );
+    bDirectAppend = 1;
+    if( pCur->pKeyInfo==0 ){
+      iKey = sqlite3BtreeIntegerKey(pExt);
+    }
+    nData = sqlite3BtreePayloadSize(pExt);
+    aData = (const u8*)sqlite3BtreePayloadFetch(pExt, &nFetch);
+    assert( nFetch<=nData );
+    if( nFetch<nData ){
+      HctBuffer *pBuf = &pCur->pBtree->preformat;
+      sqlite3HctBufferGrow(pBuf, nData);
+      rc = sqlite3BtreePayload(pExt, 0, nData, pBuf->aBuf);
+      if( rc!=SQLITE_OK ) return rc;
+      aData = pBuf->aBuf;
     }
   }else{
-    aData = pX->pData;
-    nData = pX->nData;
-    nZero = pX->nZero;
-    iKey = pX->nKey;
+
+    if( pCur->isDirectWrite 
+     && seekResult<0
+     && sqlite3HctDbCsrIsLast(pCur->pHctDbCsr)
+    ){
+      bDirectAppend = 1;
+    }
+
+    if( pX->pKey ){
+      aData = pX->pKey;
+      nData = pX->nKey;
+      nZero = 0;
+      iKey = 0;
+      if( bDirectAppend==0 ){
+        /* If bDirectAppend is set, then it is already known that this will 
+        ** be an append to the table. So there is no need for an unpacked 
+        ** record.  */
+        if( pX->nMem ){
+          memset(&r, 0, sizeof(r));
+          r.pKeyInfo = pCur->pKeyInfo;
+          r.aMem = pX->aMem;
+          r.nField = pX->nMem;
+          pRec = &r;
+        }else{
+          pRec = sqlite3VdbeAllocUnpackedRecord(pCur->pKeyInfo);
+          if( pRec==0 ) return SQLITE_NOMEM_BKPT;
+          sqlite3VdbeRecordUnpack(pCur->pKeyInfo, nData, aData, pRec);
+        }
+      }
+    }else{
+      aData = pX->pData;
+      nData = pX->nData;
+      nZero = pX->nZero;
+      iKey = pX->nKey;
+    }
   }
 
   if( pCur->isDirectWrite ){
@@ -3712,8 +3744,9 @@ int sqlite3HctBtreeExclusiveLock(Btree *p){
 }
 
 int sqlite3HctBtreeTransferRow(BtCursor *p1, BtCursor *p2, i64 iKey){
-  assert( 0 );
-  return SQLITE_LOCKED;
+  HBtCursor *pCsr = (HBtCursor*)p1;
+  pCsr->pBtree->pPreformatCsr = p2;
+  return SQLITE_OK;
 }
 
 int sqlite3HctLockedErr(u32 pgno, const char *zReason){
