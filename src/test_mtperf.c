@@ -113,8 +113,8 @@ struct TT_Step {
 ** State of a simple PRNG used for the per-connection and per-pager
 ** pseudo-random number generators.
 */
-typedef struct FastPrng FastPrng;
-struct FastPrng {
+typedef struct MTFastPrng MTFastPrng;
+struct MTFastPrng {
   unsigned int x, y;
 };
 
@@ -122,7 +122,7 @@ struct TT_Thread {
   TT_Test *pTest;
   Tcl_Obj *pName;                 /* Name of thread */
 
-  FastPrng *pPrng;
+  MTFastPrng *pPrng;
   int bDoCheckpoint;
   int bCheckpointer;
 
@@ -157,9 +157,9 @@ struct TT_Test {
 };
 
 /*
-** Generate N bytes of pseudo-randomness using a FastPrng
+** Generate N bytes of pseudo-randomness using a MTFastPrng
 */
-static void ttFastRandomness(FastPrng *pPrng, int N, void *P){
+static void ttFastRandomness(MTFastPrng *pPrng, int N, void *P){
   unsigned char *pOut = (unsigned char*)P;
   while( N-->0 ){
     pPrng->x = ((pPrng->x)>>1) ^ ((1+~((pPrng->x)&1)) & 0xd0000001);
@@ -169,14 +169,14 @@ static void ttFastRandomness(FastPrng *pPrng, int N, void *P){
 }
 
 static void frandomFunc(sqlite3_context *ctx, int nArg, sqlite3_value **aArg){
-  FastPrng *p = (FastPrng*)sqlite3_user_data(ctx);
+  MTFastPrng *p = (MTFastPrng*)sqlite3_user_data(ctx);
   sqlite3_int64 ret;
   ttFastRandomness(p, sizeof(ret), &ret);
   sqlite3_result_int64(ctx, ret);
 }
 
 static void frandomIdFunc(sqlite3_context *ctx, int nArg, sqlite3_value **aArg){
-  FastPrng *p = (FastPrng*)sqlite3_user_data(ctx);
+  MTFastPrng *p = (MTFastPrng*)sqlite3_user_data(ctx);
   int ret;
   ttFastRandomness(p, sizeof(ret), &ret);
   ret = (ret & 0x7FFFFFFF) % sqlite3_value_int(aArg[0]);
@@ -188,7 +188,7 @@ static void frandomBlobFunc(
   int nArg, 
   sqlite3_value **aArg
 ){
-  FastPrng *p = (FastPrng*)sqlite3_user_data(ctx);
+  MTFastPrng *p = (MTFastPrng*)sqlite3_user_data(ctx);
   int nBlob = sqlite3_value_int(aArg[0]);
   unsigned char *aBlob = 0;
 
@@ -236,8 +236,8 @@ static int ttAddThread(TT_Test *p, Tcl_Obj *pName, Tcl_Obj *pSql){
   memset(pNew, 0, sizeof(TT_Thread));
 
   /* Populate TT_Thread.pTest and TT_Thread.pName. */
-  pNew->pPrng = (FastPrng*)ckalloc(sizeof(FastPrng));
-  sqlite3_randomness(sizeof(FastPrng), (void*)pNew->pPrng);
+  pNew->pPrng = (MTFastPrng*)ckalloc(sizeof(MTFastPrng));
+  sqlite3_randomness(sizeof(MTFastPrng), (void*)pNew->pPrng);
   pNew->pPrng->x |= 1;
   pNew->pTest = p;
   pNew->pName = pName;

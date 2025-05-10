@@ -186,4 +186,6 @@ int sqlite3HctIoerr(int rc);
 int sqlite3HctFileLogFileId(HctFile *pFile, int iFile);
 char *sqlite3HctFileLogFileName(HctFile *pFile, int iId);
 
+void sqlite3HctFileVmtouch(HctFile *pFile);
+
 
