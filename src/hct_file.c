@@ -1369,25 +1369,6 @@ HctFile *sqlite3HctFileOpen(int *pRc, const char *zFile, HctConfig *pConfig){
   return pNew;
 }
 
-/*
-** Read a byte from the start of every page in the entire database file.
-** To ensure that the TLB mappings for the mmap()ed database file have
-** been established.
-*/
-void sqlite3HctFileVmtouch(HctFile *pFile){
-  volatile int val = 0;
-  HctMapping *p = pFile->pMapping;
-  int ii;
-  int nBytePerChunk = (p->mapMask+1) * p->szPage;
-  for(ii=0; ii<p->nChunk; ii++){
-    int iOff;
-    const u8 *aData = (const u8*)p->aChunk[ii].pData;
-    for(iOff=0; iOff<nBytePerChunk; iOff+=4096){
-      val += aData[iOff];
-    }
-  }
-}
-
 HctTMapClient *sqlite3HctFileTMapClient(HctFile *pFile){
   return pFile->pTMapClient;
 }
@@ -2264,6 +2245,73 @@ int sqlite3HctFileNFile(HctFile *pFile, int *pbFixed){
   sqlite3_mutex_leave(p->pMutex);
   return iRet;
 }
+
+/*************************************************************************
+** Beginning of multi-threaded "PRAGMA hct_prefault = N" implementation
+*************************************************************************/
+
+typedef struct HctPrefaultThread HctPrefaultThread;
+struct HctPrefaultThread {
+  pthread_t tid;
+  HctMapping *p;                  /* Mapping to touch pages within */
+  int iStart;                     /* First chunk to prefault */
+  int nChunk;                     /* Number of chunks to prefault */
+};
+
+/*
+** This is the main routine for threads launched by sqlite3HctFilePrefault().
+*/
+static void *hctFilePrefaultThread(void *pArg){
+  volatile int val = 0;
+  HctPrefaultThread *pPre = (HctPrefaultThread*)pArg;
+  HctMapping *p = pPre->p;
+  int nBytePerChunk = (p->mapMask+1) * p->szPage;
+  int ii;
+
+  for(ii=pPre->iStart; ii<(pPre->iStart+pPre->nChunk); ii++){
+    int iOff;
+    const u8 *aData = (const u8*)p->aChunk[ii].pData;
+    for(iOff=0; iOff<nBytePerChunk; iOff+=4096){
+      val += aData[iOff];
+      (void)val;
+    }
+  }
+}
+
+/*
+** Use nThread threads to read a byte from the start of every page in the
+** entire database file. To ensure that the page tables for the mmap()ed
+** database file have been established.
+*/
+void sqlite3HctFilePrefault(HctFile *pFile, int nThread){
+  HctMapping *p = pFile->pMapping;
+  HctPrefaultThread *aThread = 0;
+  int ii = 0;
+  int iStart = 0;
+
+  if( nThread>p->nChunk ){
+    nThread = p->nChunk;
+  }
+  aThread = (HctPrefaultThread*)sqlite3HctMalloc(
+      sizeof(HctPrefaultThread) * nThread
+  );
+
+  for(ii=0; ii<nThread; ii++){
+    aThread[ii].iStart = iStart;
+    aThread[ii].nChunk = (p->nChunk - iStart) / (nThread-ii);
+    aThread[ii].p = p;
+    iStart += aThread[ii].nChunk;
+    pthread_create(&aThread[ii].tid, NULL, hctFilePrefaultThread, &aThread[ii]);
+  }
+  assert( iStart==p->nChunk );
+
+  for(ii=0; ii<nThread; ii++){
+    pthread_join(aThread[ii].tid, 0);
+  }
+
+  sqlite3_free(aThread);
+}
+
 
 /*************************************************************************
 ** Beginning of vtab implemetation.
