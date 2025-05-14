@@ -186,6 +186,7 @@ int sqlite3HctIoerr(int rc);
 int sqlite3HctFileLogFileId(HctFile *pFile, int iFile);
 char *sqlite3HctFileLogFileName(HctFile *pFile, int iId);
 
-void sqlite3HctFileVmtouch(HctFile *pFile);
+#define HCT_MAX_NPREFAULT 256
+void sqlite3HctFilePrefault(HctFile *pFile, int nThread);
 
 

@@ -294,6 +294,7 @@ struct HctDatabaseStats {
   i64 nTMapLookup;
   i64 nUpdateInPlace;
   i64 nInternalRetry;
+  i64 nDefragment;
 };
 
 /*
@@ -3367,7 +3368,7 @@ static int hctDbMigrateReinsertKeys(HctDatabase *pDb, HctDbWriter *p);
 static int hctDbInsertFlushWrite(HctDatabase *pDb, HctDbWriter *p){
   int rc = SQLITE_OK;
   int ii;
-  int eType = hctPagetype(p->writepg.aPg[0].aNew);
+  int eType = hctPagetype(p->writepg.aPg[0].aOld);
   HctFilePage root;
   int bUnevict = 0;
 
@@ -3375,10 +3376,13 @@ static int hctDbInsertFlushWrite(HctDatabase *pDb, HctDbWriter *p){
 
   rc = hctDbMigrateReinsertKeys(pDb, p);
 
+  assert( p->writepg.aPg[0].aNew || p->writepg.nPg==1 );
 #ifdef SQLITE_DEBUG
-  for(ii=1; rc==SQLITE_OK && ii<p->writepg.nPg; ii++){
-    u32 iPeer = ((HctDbPageHdr*)p->writepg.aPg[ii-1].aNew)->iPeerPg;
-    assert( p->writepg.aPg[ii].iPg==iPeer );
+  if( p->writepg.aPg[0].aNew ){
+    for(ii=1; rc==SQLITE_OK && ii<p->writepg.nPg; ii++){
+      u32 iPeer = ((HctDbPageHdr*)p->writepg.aPg[ii-1].aNew)->iPeerPg;
+      assert( p->writepg.aPg[ii].iPg==iPeer );
+    }
   }
 #endif
 
@@ -3597,7 +3601,8 @@ static int hctDbTestWriteFpKey(
 
 static int hctDbSetWriteFpKey(HctDatabase *pDb, HctDbWriter *p){
   int rc = SQLITE_OK;
-  HctDbPageHdr *pHdr = (HctDbPageHdr*)p->writepg.aPg[p->writepg.nPg-1].aNew;
+  HctFilePage *pPg = &p->writepg.aPg[p->writepg.nPg-1];
+  HctDbPageHdr *pHdr = (HctDbPageHdr*)(pPg->aNew ? pPg->aNew : pPg->aOld);
 
   p->fp.aKey = 0;
   p->fp.iKey = 0;
@@ -4297,7 +4302,7 @@ typedef struct HctDbInsertOp HctDbInsertOp;
 struct HctDbInsertOp {
   u8 entryFlags;                  /* Flags for page entry added by this call */
   u8 *aEntry;                     /* Buffer containing formatted entry */
-  int nEntry;                     /* Size of aEntry[] */
+  int nEntry;                     /* Size of aEntry[] in bytes */
   int nEntrySize;                 /* Value for page header nSize field */
 
   int iPg;                        /* Index in HctDbWriter.writepg.aPg */
@@ -4679,6 +4684,7 @@ static int hctDbInsertIntkeyNode(
 
   /* If bDel is set, then bClobber must also be set. */
   assert( bDel==0 || bClobber );
+  assert( p->writepg.aPg[iPg].aNew!=0 );
 
   pNode = (HctDbIntkeyNode*)p->writepg.aPg[iPg].aNew;
   if( (pNode->pg.nEntry>=nMax && bClobber==0 && bDel==0 ) ){
@@ -5220,7 +5226,6 @@ static int hctDbDelete(
   }
 
   if( rc==SQLITE_OK && pOp->bFullDel==0 ){
-    // prev.iRangeTid |= iTidOr;
     pOp->aEntry = pDb->aTmp;
     pOp->nEntry = hctDbCellPut(pOp->aEntry, &prev, nLocalSz);
     pOp->entryFlags = prevFlags | HCTDB_HAS_RANGETID | HCTDB_HAS_RANGEOLD;
@@ -5238,6 +5243,55 @@ static int hctDbDelete(
   return rc;
 }
 
+/*
+** This function is called as part of a write operation when the writepg
+** array is empty - that is, when the key will be written to a new page.
+*/
+static int hctDbInsertFindTarget(
+  HctDatabase *pDb,
+  HctDbWriter *p,
+  u32 iRoot,
+  UnpackedRecord *pRec,
+  i64 iKey,
+  HctDbInsertOp *pOp,
+  int *pbClobber
+){
+  int rc = SQLITE_OK;
+
+  assert( p->writepg.nPg==0 );
+  assert( p->writecsr.iRoot==0 );
+  
+  hctDbCsrInit(pDb, iRoot, (pRec ? pRec->pKeyInfo : 0), &p->writecsr);
+  rc = hctDbCsrSeek(
+      &p->writecsr, &p->fp, p->iHeight, 0, pRec, iKey, pbClobber
+  );
+  if( rc==SQLITE_OK ){
+    pOp->iInsert = p->writecsr.iCell;
+    if( *pbClobber==0 ) pOp->iInsert++;
+
+    p->writepg.aPg[0] = p->writecsr.pg;
+    memset(&p->writecsr.pg, 0, sizeof(HctFilePage));
+
+    assert( p->bDoCleanup );
+    p->writepg.nPg = 1;
+    rc = hctDbSetWriteFpKey(pDb, p);
+  }
+
+#if 0
+  if( rc==SQLITE_OK ){
+    rc = sqlite3HctFilePageWrite(&p->writepg.aPg[0]); 
+  }
+  if( rc==SQLITE_OK ){
+    hctMemcpy(p->writepg.aPg[0].aNew, p->writepg.aPg[0].aOld, pDb->pgsz);
+    if( p->fp.iKey==0 ){
+      rc = hctDbSetWriteFpKey(pDb, p);
+    }
+  }
+#endif
+
+  return rc;
+}
+
 static int hctDbInsertFindPosition(
   HctDatabase *pDb,
   HctDbWriter *p,
@@ -5250,35 +5304,7 @@ static int hctDbInsertFindPosition(
   const RecordCompare xCompare = pRec ? sqlite3VdbeFindCompare(pRec) : 0;
   int rc = SQLITE_OK;
 
-  if( p->writepg.nPg==0 ){
-    if( p->writecsr.iRoot!=iRoot ){
-      hctDbCsrInit(pDb, iRoot, 0, &p->writecsr);
-    }else{
-      hctDbCsrReset(&p->writecsr);
-    }
-    if( pRec ){
-      p->writecsr.pKeyInfo = sqlite3KeyInfoRef(pRec->pKeyInfo);
-    }
-    rc = hctDbCsrSeek(
-        &p->writecsr, &p->fp, p->iHeight, xCompare, pRec, iKey, pbClobber
-    );
-    if( rc ) return rc;
-    pOp->iInsert = p->writecsr.iCell;
-    if( *pbClobber==0 ) pOp->iInsert++;
-
-    p->writepg.aPg[0] = p->writecsr.pg;
-    memset(&p->writecsr.pg, 0, sizeof(HctFilePage));
-
-    assert( p->bDoCleanup );
-    p->writepg.nPg = 1;
-    rc = sqlite3HctFilePageWrite(&p->writepg.aPg[0]);
-    if( rc ) return rc;
-    hctMemcpy(p->writepg.aPg[0].aNew, p->writepg.aPg[0].aOld, pDb->pgsz);
-    if( p->fp.iKey==0 ){
-      rc = hctDbSetWriteFpKey(pDb, p);
-    }
-    if( rc ) return rc;
-  }else if( pRec ){
+  if( pRec ){
     HctBuffer buf = {0,0,0};
     for(pOp->iPg=p->writepg.nPg-1; pOp->iPg>0; pOp->iPg--){
       const u8 *aK;
@@ -5325,6 +5351,10 @@ static int hctDbWriteWriteConflict(
 ){
   int rc = SQLITE_OK;
   const u8 *aTarget = p->writepg.aPg[pOp->iPg].aNew;
+
+  if( aTarget==0 ){
+    aTarget = p->writepg.aPg[pOp->iPg].aOld;
+  }
 
   assert( p->iHeight==0 && pDb->eMode==HCT_MODE_NORMAL );
 
@@ -5398,6 +5428,86 @@ static int hctDbWriteWriteConflict(
   return rc;
 }
 
+/*
+** If it is not already, make page (*pPg) writable. This means allocate an
+** pPg->aNew page, and copy the current contents of pPg->aOld to
+** pPg->aNew.
+*/
+static int hctDbDirtyPage(HctDatabase *pDb, HctFilePage *pPg){
+  int rc = SQLITE_OK;
+  if( pPg->aNew==0 ){
+    /* Allocate aNew */
+    rc = sqlite3HctFilePageWrite(pPg);
+    if( rc==SQLITE_OK ){
+      /* Copy aOld to aNew */
+      hctMemcpy(pPg->aNew, pPg->aOld, pDb->pgsz);
+    }
+  }
+  return rc;
+}
+
+static int hctDbDefragment(HctDatabase *pDb, HctFilePage *pPg, int iOmit){
+  int rc = SQLITE_OK;
+
+  pDb->stats.nDefragment++;
+
+  assert( pPg->aNew==0 );
+  rc = sqlite3HctFilePageWrite(pPg);
+  if( rc==SQLITE_OK ){
+    HctDbIndexNode *pNode = (HctDbIndexNode*)pPg->aNew;
+    int nEntry = hctPagenentry(pPg->aOld);
+    int szEntry = 0;
+    int nHdr = 0;
+    int iPtr = pDb->pgsz;
+    int iIn = 0;
+    int iOut = 0;
+    int nFree = 0;
+
+    memcpy(pPg->aNew, pPg->aOld, sizeof(HctDbPageHdr));
+    if( iOmit>=0 ) pNode->pg.nEntry--;
+
+    nHdr = hctDbEntryArrayDim(pPg->aOld, &szEntry);
+
+    for(iIn=0; iIn<nEntry; iIn++){
+      if( iIn!=iOmit ){
+        int nByte = hctDbPageRecordSize(pPg->aOld, pDb->pgsz, iIn);
+        int iOff;
+
+        iPtr -= nByte;
+
+        if( hctPagetype(pNode)==HCT_PAGETYPE_INTKEY ){
+          HctDbIntkeyLeaf *pOld = (HctDbIntkeyLeaf*)pPg->aOld;
+          HctDbIntkeyLeaf *pNew = (HctDbIntkeyLeaf*)pPg->aNew;
+          memcpy(&pNew->aEntry[iOut], &pOld->aEntry[iIn], szEntry);
+          pNew->aEntry[iOut].iOff = iPtr;
+          iOff = pOld->aEntry[iIn].iOff;
+        }else if( hctPageheight(pNode)==0 ){
+          HctDbIndexLeaf *pOld = (HctDbIndexLeaf*)pPg->aOld;
+          HctDbIndexLeaf *pNew = (HctDbIndexLeaf*)pPg->aNew;
+          memcpy(&pNew->aEntry[iOut], &pOld->aEntry[iIn], szEntry);
+          pNew->aEntry[iOut].iOff = iPtr;
+          iOff = pOld->aEntry[iIn].iOff;
+        }else{
+          HctDbIndexNode *pOld = (HctDbIndexNode*)pPg->aOld;
+          HctDbIndexNode *pNew = (HctDbIndexNode*)pPg->aNew;
+          memcpy(&pNew->aEntry[iOut], &pOld->aEntry[iIn], szEntry);
+          pNew->aEntry[iOut].iOff = iPtr;
+          iOff = pOld->aEntry[iIn].iOff;
+        }
+
+        hctMemcpy(&((u8*)pNode)[iPtr], &pPg->aOld[iOff], nByte);
+        iOut++;
+      }
+    }
+
+    nFree = (iPtr - (nHdr + szEntry * pNode->pg.nEntry));
+    pNode->hdr.nFreeGap = pNode->hdr.nFreeBytes = (u16)nFree;
+  }
+
+  assert_page_is_ok(pPg->aNew, pDb->pgsz);
+  return rc;
+}
+
 static int hctDbInsert(
   HctDatabase *pDb,
   HctDbWriter *p,
@@ -5445,7 +5555,8 @@ static int hctDbInsert(
   **               within the page.
   **   bClobber:   True if this write clobbers (or deletes, if bDel) an 
   **               existing entry.
-  **   aTarget:    The aNew[] buffer of the page that will be written.
+  **   aTarget:    Buffer containing data for the page that will be written
+  **               to. This may be an aNew[] buffer, or may be an aOld[].
   **
   ** It also checks if the current key is a write-write conflict. And 
   ** returns early if so.
@@ -5462,9 +5573,23 @@ static int hctDbInsert(
     **
     ** Otherwise, figure out which page in the HctDbWriter.aWritePg[] array the
     ** new entry belongs on.  */
-    rc = hctDbInsertFindPosition(pDb, p, iRoot, pRec, iKey, &op, &bClobber);
+    if( p->writepg.nPg==0 ){
+      rc = hctDbInsertFindTarget(pDb, p, iRoot, pRec, iKey, &op, &bClobber);
+      assert( p->writepg.aPg[0].aNew==0 );
+#if 0
+      if( rc==SQLITE_OK ){
+        rc = hctDbDirtyPage(pDb, &p->writepg.aPg[0]);
+      }
+      aTarget = p->writepg.aPg[0].aNew;
+#else
+      aTarget = p->writepg.aPg[0].aOld;
+#endif
+    }else{
+      hctDbDirtyPage(pDb, &p->writepg.aPg[0]);
+      rc = hctDbInsertFindPosition(pDb, p, iRoot, pRec, iKey, &op, &bClobber);
+      aTarget = p->writepg.aPg[op.iPg].aNew;
+    }
     if( rc ) return rc;
-    aTarget = p->writepg.aPg[op.iPg].aNew;
     assert( aTarget );
 
     /* If this is a write to a leaf page, and not part of a rollback, 
@@ -5523,6 +5648,7 @@ static int hctDbInsert(
   ** different because they used fixed size key/data pairs. All other types
   ** of page use variably sized key/data entries. */
   if( pRec==0 && p->iHeight>0 ){
+    hctDbDirtyPage(pDb, &p->writepg.aPg[op.iPg]);
     return hctDbInsertIntkeyNode(
         pDb, p, op.iPg, op.iInsert, iKey, iChildPg, bClobber, bDel
     );
@@ -5545,16 +5671,21 @@ static int hctDbInsert(
 
   /* Populate the following variables:
   **
-  **   entryFlags
-  **   aEntry
-  **   nEntry
-  **   nEntrySize
+  **   op.entryFlags
+  **   op.aEntry
+  **   op.nEntry
+  **   op.nEntrySize
+  **   op.iOldPg
+  **   op.aOldPg
   **
   ** This block populates the above variables. It also inserts overflow pages.
   */
   op.iIntkey = iKey;
   if( op.bFullDel==0 ){
 
+    /* If this operation is a clobber or a delete - something that will
+    ** create a history pointer, set op.iOldPg to the page number the history
+    ** pointer will point to. Also set op.aOldPg to the image of that page. */
     if( p->iHeight==0 && (bClobber || bDel) ){
       rc = hctDbFindOldPage(pDb, p, pRec, iKey, &op.iOldPg, &op.aOldPg);
       if( rc!=SQLITE_OK ) goto insert_out;
@@ -5563,7 +5694,10 @@ static int hctDbInsert(
 
     if( bDel && p->iHeight==0 ){
       assert( bClobber );
-      rc = hctDbDelete(pDb, p, pRec, &op);
+      rc = hctDbDirtyPage(pDb, &p->writepg.aPg[op.iPg]);
+      if( rc==SQLITE_OK ){
+        rc = hctDbDelete(pDb, p, pRec, &op);
+      }
       aTarget = p->writepg.aPg[op.iPg].aNew;
       assert_page_is_ok(aTarget, pDb->pgsz);
       if( op.bFullDel ) bClobber = 0;
@@ -5640,9 +5774,9 @@ static int hctDbInsert(
 
     if( op.bFullDel==0 ){
       if( nSpace>=op.nEntry ) bUpdateInPlace = 1;
+      nReq = op.nEntry + (bClobber ? 0 : szEntry);
       nFree -= op.nEntry;
       nFree -= szEntry;
-      nReq = op.nEntry + (bClobber ? 0 : szEntry);
     }
 
     /* If (a) this is a clobber operation, and (b) either the first
@@ -5657,9 +5791,19 @@ static int hctDbInsert(
       op.eBalance = BALANCE_REQUIRED;
       bUpdateInPlace = 0;
     }else if( hctDbFreegap(aTarget)<nReq && bUpdateInPlace==0 ){
-      op.eBalance = BALANCE_OPTIONAL;
+      if( nFree>0 && op.iPg==0 && p->writepg.aPg[0].aNew==0 ){
+        rc = hctDbDefragment(pDb, &p->writepg.aPg[0], bClobber?op.iInsert:-1);
+        bClobber = 0;
+        aTarget = p->writepg.aPg[0].aNew;
+        assert( ((HctDbIndexNode*)aTarget)->hdr.nFreeGap>=nReq );
+      }else{
+        op.eBalance = BALANCE_OPTIONAL;
+      }
     }
   }
+
+  rc = hctDbDirtyPage(pDb, &p->writepg.aPg[op.iPg]);
+  aTarget = p->writepg.aPg[op.iPg].aNew;
 
   if( op.eBalance!=BALANCE_NONE ){
     assert( op.bFullDel==0 || op.aEntry==0 );
@@ -7435,6 +7579,10 @@ i64 sqlite3HctDbStats(sqlite3 *db, int iStat, const char **pzStat){
     case 5:
       *pzStat = "internal_retry";
       iVal = pDb->stats.nInternalRetry;
+      break;
+    case 6:
+      *pzStat = "defragment";
+      iVal = pDb->stats.nDefragment;
       break;
     default:
       break;

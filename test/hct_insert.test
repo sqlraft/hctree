@@ -1,0 +1,69 @@
+# 2025 April 18
+#
+# The author disclaims copyright to this source code.  In place of
+# a legal notice, here is a blessing:
+#
+#    May you do good and not evil.
+#    May you find forgiveness for yourself and forgive others.
+#    May you share freely, never taking more than you give.
+#
+#*************************************************************************
+# This file implements regression tests for SQLite library.
+#
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+set testprefix hct_insert
+
+hct_reset_db
+
+do_execsql_test 1.0 {
+  CREATE TABLE t1(a INTEGER PRIMARY KEY, b TEXT);
+  CREATE INDEX i1 ON t1(b);
+
+  WITH s(i) AS (
+    SELECT 1 UNION ALL SELECT i+1 FROM s WHERE i<1000
+  )
+  INSERT INTO t1(b) SELECT hex(randomblob(20)) FROM s;
+}
+
+do_execsql_test 1.1 {
+  BEGIN;
+    INSERT INTO t1(b) VALUES('AAAAAAAAAA');
+    INSERT INTO t1(b) VALUES('zzzzzzzzzz');
+  COMMIT;
+}
+
+#-------------------------------------------------------------------------
+hct_reset_db
+
+do_execsql_test 2.0 {
+  CREATE TABLE t1(a INTEGER PRIMARY KEY, b TEXT);
+
+  WITH s(i) AS (
+    SELECT 1 UNION ALL SELECT i+1 FROM s WHERE i<1000
+  )
+  INSERT INTO t1(b) SELECT hex(randomblob(70)) FROM s;
+}
+
+do_execsql_test 2.1 {
+  UPDATE t1 SET b = hex(randomblob(70));
+}
+
+do_test 1.1 {
+  for {set ii 1} {$ii <= 1000} {incr ii} {
+    db eval {
+      UPDATE t1 SET b = hex(randomblob(70)) WHERE a=$ii;
+    }
+  }
+} {}
+
+do_execsql_test 1.2 {
+  SELECT val FROM hctstats WHERE stat='update_in_place'
+} {1000}
+
+
+
+
+
+finish_test
