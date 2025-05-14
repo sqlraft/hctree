@@ -236,10 +236,6 @@ struct HctDbWriter {
 
   HctDbOverflowArray delOvfl;     /* Overflow chains to free on write */
   HctDbOverflowArray insOvfl;     /* Overflow chains to free on don't-write */
-
-  int nOverflow;
-
-  int nMigrateKey;
 };
 
 /*
@@ -3363,8 +3359,6 @@ static int hctDbFilePageCommit(HctDbWriter *p, HctFilePage *pPg){
   return rc;
 }
 
-static int hctDbMigrateReinsertKeys(HctDatabase *pDb, HctDbWriter *p);
-
 static int hctDbInsertFlushWrite(HctDatabase *pDb, HctDbWriter *p){
   int rc = SQLITE_OK;
   int ii;
@@ -3373,8 +3367,6 @@ static int hctDbInsertFlushWrite(HctDatabase *pDb, HctDbWriter *p){
   int bUnevict = 0;
 
   memset(&root, 0, sizeof(root));
-
-  rc = hctDbMigrateReinsertKeys(pDb, p);
 
   assert( p->writepg.aPg[0].aNew || p->writepg.nPg==1 );
 #ifdef SQLITE_DEBUG
@@ -4909,56 +4901,6 @@ static void hctDbInsertEntry(
   ((HctDbIndexEntry*)aFrom)->iOff = iOff;
 }
 
-
-static int hctDbMigrateReinsertKeys(HctDatabase *pDb, HctDbWriter *p){
-  int rc = SQLITE_OK;
-  if( p->nMigrateKey>0 ){
-    assert( p->iHeight==0 );
-
-    /* Append a page to the write-array */
-    rc = hctDbExtendWriteArray(pDb, p, p->writepg.nPg, 1);
-
-
-    if( rc==SQLITE_OK ){
-      int ii = 0;
-      HctDbInsertOp op;
-      HctDbLeaf *pOld = (HctDbLeaf*)p->writepg.aPg[0].aOld;
-      HctDbLeaf *pNew = (HctDbLeaf*)p->writepg.aPg[p->writepg.nPg-1].aNew;
-
-      /* TODO: Might this not be a part of ExtendWriteArray() ? */
-      pNew->hdr.nFreeBytes = pDb->pgsz - sizeof(HctDbLeaf);
-      pNew->hdr.nFreeGap = pNew->hdr.nFreeBytes;
-
-      /* Loop through the last nMigrateKey on the old page, copying them
-      ** to the new page. */
-      for(ii=0; ii<p->nMigrateKey; ii++){
-        int iOld = (pOld->pg.nEntry - p->nMigrateKey) + ii;
-        HctDbIndexEntry *pOldE = 0;
-        HctDbIndexEntry *pNewE = 0;
-        int nEntry = 0;
-
-        pOldE = hctDbEntryEntry(pOld, iOld);
-        nEntry = hctDbPageRecordSize(pOld, pDb->pgsz, iOld);
-        hctDbInsertEntry(pDb, (u8*)pNew, ii, &((u8*)pOld)[pOldE->iOff], nEntry);
-
-        pNewE = hctDbEntryEntry(pNew, ii);
-        pNewE->nSize = pOldE->nSize;
-        pNewE->flags = pOldE->flags;
-        if( hctPagetype(pOld)==HCT_PAGETYPE_INTKEY ){
-          ((HctDbIntkeyEntry*)pNewE)->iKey = ((HctDbIntkeyEntry*)pOldE)->iKey;
-        }
-      }
-
-      memset(&op, 0, sizeof(op));
-      op.iPg = p->writepg.nPg-1;
-      op.iInsert = -1;
-      op.eBalance = BALANCE_OPTIONAL;
-      rc = hctDbBalance(pDb, p, &op, 0);
-    }
-  }
-
-  return rc;
-}
 
 /*
 ** Parameter aTarget points to a buffer containing an intkey or index

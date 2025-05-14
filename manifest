@@ -1,5 +1,5 @@
-C Add\stest\sfor\s"PRAGMA\shct_npagescan\s=\sN".
-D 2025-05-14T17:42:59.794
+C Remove\ssome\sdead\scode.
+D 2025-05-14T19:46:01.744
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md e108e1e69ae8e8a59e93c455654b8ac9356a11720d3345df2a4743e9590fb20d
@@ -768,7 +768,7 @@ F src/hctJrnlInt.h 468811ef7cd854a8b734497b0ca6b6137b291ea9bba9dc4a91d6dc25a49f4
 F src/hctLogInt.h 44b72c10335f41efe1eb54df524218d4edbb07896a642093bc59badaa3aa7ecc
 F src/hctPManInt.h 3936d01947aace587fd73c51246b7bd5cdbc79833248b839e7d9ffd737ded8b7
 F src/hctTMapInt.h 29e978ca90d3c3c4f5fbe675647627a5518721bad4482aaf77a961ba81a7735d
-F src/hct_database.c 06cf43dcccb54ca8a503a4af0a596115bbb3c38fc6b6966a9ea05a41073faad8
+F src/hct_database.c 9c136b316f15dee2f6c4783fe6f9d76731422448c1a337adce1969c0433a3f06
 F src/hct_file.c c2859f830f3d4354c4c4d7c572b7c175aa9133855b0d6c0aa2a4f63455fb9a2a
 F src/hct_journal.c 91ac0530d6ea417d96fedd0c37f810aaa612489db0e8e6265787edbe0776524b
 F src/hct_journalhash.c 5af4886fd8c126a96c78278f6e62a8e31de9b8e683b167c487b033a87fabb7a3
@@ -2325,8 +2325,8 @@ F tool/version-info.c 3b36468a90faf1bbd59c65fd0eb66522d9f941eedd364fabccd7227350
 F tool/warnings-clang.sh bbf6a1e685e534c92ec2bfba5b1745f34fb6f0bc2a362850723a9ee87c1b31a7
 F tool/warnings.sh 49a486c5069de041aedcbde4de178293e0463ae9918ecad7539eedf0ec77a139
 F tool/win/sqlite.vsix deb315d026cc8400325c5863eef847784a219a2f
-P 442183a9f58141179c89c27e167830421ccc53634062ba78476127a3ded566ac
-R 17df013227eb3b3003af6f739525c4a8
+P c1d8eb7bceec5c09cadf3a9f798c228e75da566a555a427e4c3d2fa90b3a6c67
+R b70f0995ad82644d1061fc4da7750ba1
 U dan
-Z b7b9da591f172012b1e9291386871d32
+Z f954d0046112ec4f36c1d029ff6bc7ba
 # Remove this line to create a well-formed Fossil manifest.
