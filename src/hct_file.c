@@ -2041,20 +2041,21 @@ int sqlite3HctFileRecoverFreelists(
   u64 iSafeTid = hctFilePagemapGet(pMapping, HCT_PAGEMAP_TRANSID_EOF);
   u64 nPg1 = hctFilePagemapGet(pMapping, HCT_PAGEMAP_PHYSICAL_EOF);
   u64 nPg2 = hctFilePagemapGet(pMapping, HCT_PAGEMAP_LOGICAL_EOF);
-  u32 iPg;
-  u32 nPg;
-  u32 iPhysOff = ((HCT_HEADER_PAGESIZE*2)+pServer->szPage-1)/pServer->szPage;
+  u64 iPg;
+  u64 nPg;
+  u64 iPhysOff = ((HCT_HEADER_PAGESIZE*2)+pServer->szPage-1)/pServer->szPage;
 
   int iPhys = 0;
 
   nPg1 = nPg1 & HCT_PAGEMAP_VMASK;
   nPg2 = nPg2 & HCT_PAGEMAP_VMASK;
+  iSafeTid = iSafeTid & HCT_PAGEMAP_VMASK;
 
   /* TODO: Really - page-manager must be empty at this point. Should assert()
   ** that instead of making this call. */
   sqlite3HctPManServerReset(pPManServer);
 
-  nPg = MAX((nPg1 & 0xFFFFFFFF), (nPg2 & 0xFFFFFFFF));
+  nPg = MAX(nPg1, nPg2);
   for(iPg=1; iPg<=nPg; iPg++){
     u64 iVal = hctFilePagemapGetSafe(pMapping, iPg);
 

@@ -1,5 +1,5 @@
-C Add\s"PRAGMA\shct_prefault\s=\sN".
-D 2025-05-14T15:55:39.102
+C Fix\sa\sproblem\spreventing\sfree\spages\sfrom\sbeing\sreused\sin\sa\stimely\sfashion.
+D 2025-05-14T16:06:16.144
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md e108e1e69ae8e8a59e93c455654b8ac9356a11720d3345df2a4743e9590fb20d
@@ -769,7 +769,7 @@ F src/hctLogInt.h 44b72c10335f41efe1eb54df524218d4edbb07896a642093bc59badaa3aa7e
 F src/hctPManInt.h 3936d01947aace587fd73c51246b7bd5cdbc79833248b839e7d9ffd737ded8b7
 F src/hctTMapInt.h 29e978ca90d3c3c4f5fbe675647627a5518721bad4482aaf77a961ba81a7735d
 F src/hct_database.c 06cf43dcccb54ca8a503a4af0a596115bbb3c38fc6b6966a9ea05a41073faad8
-F src/hct_file.c 0c9397819eaba5c1b34ef7093974c964b63238cda61249a7ea2c5decc777d61e
+F src/hct_file.c c2859f830f3d4354c4c4d7c572b7c175aa9133855b0d6c0aa2a4f63455fb9a2a
 F src/hct_journal.c 91ac0530d6ea417d96fedd0c37f810aaa612489db0e8e6265787edbe0776524b
 F src/hct_journalhash.c 5af4886fd8c126a96c78278f6e62a8e31de9b8e683b167c487b033a87fabb7a3
 F src/hct_log.c 41b6bff3f4f9753760fcd8c249b5fc6d1608c8166b81d0e2552132c0c83e59d5
@@ -2325,9 +2325,9 @@ F tool/version-info.c 3b36468a90faf1bbd59c65fd0eb66522d9f941eedd364fabccd7227350
 F tool/warnings-clang.sh bbf6a1e685e534c92ec2bfba5b1745f34fb6f0bc2a362850723a9ee87c1b31a7
 F tool/warnings.sh 49a486c5069de041aedcbde4de178293e0463ae9918ecad7539eedf0ec77a139
 F tool/win/sqlite.vsix deb315d026cc8400325c5863eef847784a219a2f
-P 61279f88405452fc987808d6c8e7b6bf43185e7bef4d0b5ddd301d6173ff95ea
-Q +f1ede8708ee95e1b652c9141d20d3ff4f766c8f1dc7829e339dc2f96782bd770
-R 57c4ee21a5a694e0b3a921e84a24945b
+P a6cc147d30c734d687d3fb6b8d03146fa4f074263cd76116de302063560a224d
+Q +da6f866d0009b1ffcce2f91b63a8f30b8eb358bcb7dd45bb4a0d91b2364eeda3
+R ebbf1a9337f29279ea6e4c5864f43f66
 U dan
-Z ac3f96a61e2ef2443bc466de2b4819e5
+Z 66cc21c2a6e34bf1c69eba133ffbb436
 # Remove this line to create a well-formed Fossil manifest.
