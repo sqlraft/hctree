@@ -1369,6 +1369,25 @@ HctFile *sqlite3HctFileOpen(int *pRc, const char *zFile, HctConfig *pConfig){
   return pNew;
 }
 
+/*
+** Read a byte from the start of every page in the entire database file.
+** To ensure that the TLB mappings for the mmap()ed database file have
+** been established.
+*/
+void sqlite3HctFileVmtouch(HctFile *pFile){
+  volatile int val = 0;
+  HctMapping *p = pFile->pMapping;
+  int ii;
+  int nBytePerChunk = (p->mapMask+1) * p->szPage;
+  for(ii=0; ii<p->nChunk; ii++){
+    int iOff;
+    const u8 *aData = (const u8*)p->aChunk[ii].pData;
+    for(iOff=0; iOff<nBytePerChunk; iOff+=4096){
+      val += aData[iOff];
+    }
+  }
+}
+
 HctTMapClient *sqlite3HctFileTMapClient(HctFile *pFile){
   return pFile->pTMapClient;
 }

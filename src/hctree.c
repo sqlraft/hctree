@@ -3425,6 +3425,10 @@ int sqlite3HctBtreePragma(Btree *pBt, char **aFnctl){
   }else if( 0==sqlite3_stricmp("hct_log", zLeft) ){
     zRet = hctGetLog(&p->config);
     hctFreeLog(&p->config);
+  }else if( 0==sqlite3_stricmp("hct_vmtouch", zLeft) ){
+    HctFile *pFile = sqlite3HctDbFile(p->pHctDb);
+    sqlite3HctFileVmtouch(pFile);
+    zRet = sqlite3HctMprintf("");
   }else{
     rc = SQLITE_NOTFOUND;
   }
