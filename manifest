@@ -1,5 +1,5 @@
-C Fix\sa\sproblem\spreventing\sfree\spages\sfrom\sbeing\sreused\sin\sa\stimely\sfashion.
-D 2025-05-14T16:06:16.144
+C Add\stest\sfor\s"PRAGMA\shct_npagescan\s=\sN".
+D 2025-05-14T17:42:59.794
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md e108e1e69ae8e8a59e93c455654b8ac9356a11720d3345df2a4743e9590fb20d
@@ -1363,7 +1363,7 @@ F test/hct_index.test 8bc7679bfb20ddc37a3b4cb27b52c4cfb6a386d423f7ee692c818c6c62
 F test/hct_index2.test 78343ecbe2eeca8cc527764316d3079d54acd93bfd04ad599645dea02e525d05
 F test/hct_index3.test 4fc0bae5ade0d68185ffc772c7f7ab9034db7700e769cb3f41c58959a148144a
 F test/hct_index4.test 64f811c3b2622ae02bb49757abda9f34b2982fb90becaab2215b4ef39b376a37
-F test/hct_insert.test 9c0b6b77d83ac2afd15bebfd7713849b0a0dd810140d9378853d1978b6bdd066
+F test/hct_insert.test 8ac9ff5e3730bbb4508dad6abaf0eb16fb1e7f9171d70ba5e049c21f6ce194be
 F test/hct_journal1.test 6d0633bc7512064cf7c064a9bd67b8689275aceb5afcf8bf3f13414ebc070f04
 F test/hct_journal2.test fc1f8168062a72e573ece2c4031c21ae63c29c7903ca3afeaa993d32c97c7b2a
 F test/hct_journal3.test 8740ce6e17d6928d730b1b5d0ea0149a83db7dc3b80e91d1749a98d172133623
@@ -2325,9 +2325,8 @@ F tool/version-info.c 3b36468a90faf1bbd59c65fd0eb66522d9f941eedd364fabccd7227350
 F tool/warnings-clang.sh bbf6a1e685e534c92ec2bfba5b1745f34fb6f0bc2a362850723a9ee87c1b31a7
 F tool/warnings.sh 49a486c5069de041aedcbde4de178293e0463ae9918ecad7539eedf0ec77a139
 F tool/win/sqlite.vsix deb315d026cc8400325c5863eef847784a219a2f
-P a6cc147d30c734d687d3fb6b8d03146fa4f074263cd76116de302063560a224d
-Q +da6f866d0009b1ffcce2f91b63a8f30b8eb358bcb7dd45bb4a0d91b2364eeda3
-R ebbf1a9337f29279ea6e4c5864f43f66
+P 442183a9f58141179c89c27e167830421ccc53634062ba78476127a3ded566ac
+R 17df013227eb3b3003af6f739525c4a8
 U dan
-Z 66cc21c2a6e34bf1c69eba133ffbb436
+Z b7b9da591f172012b1e9291386871d32
 # Remove this line to create a well-formed Fossil manifest.

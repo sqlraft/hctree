@@ -50,7 +50,7 @@ do_execsql_test 2.1 {
   UPDATE t1 SET b = hex(randomblob(70));
 }
 
-do_test 1.1 {
+do_test 2.2 {
   for {set ii 1} {$ii <= 1000} {incr ii} {
     db eval {
       UPDATE t1 SET b = hex(randomblob(70)) WHERE a=$ii;
@@ -58,10 +58,73 @@ do_test 1.1 {
   }
 } {}
 
-do_execsql_test 1.2 {
+do_execsql_test 2.3 {
   SELECT val FROM hctstats WHERE stat='update_in_place'
 } {1000}
 
+#-------------------------------------------------------------------------
+hct_reset_db
+
+proc rand {min max} {
+  expr {$min + int(abs(rand() * (1 + $max - $min)))}
+}
+db func rand rand
+proc randtext {n} {
+  set char [list a B c D e F g H i J k L m N o P q R s T u V w X y Z]
+  set ret ""
+  for {set ii 0} {$ii<$n} {incr ii} {
+    append ret [lindex $char [rand 0 [llength $char]]]
+  }
+  set ret
+}
+db func randtext randtext
+
+expr srand(0)
+
+do_execsql_test 3.0 {
+  PRAGMA hct_npagescan = 5;
+  CREATE TABLE t1(a INTEGER PRIMARY KEY, b TEXT);
+  CREATE INDEX i1 ON t1(b);
+
+  WITH s(i) AS (
+    SELECT 1 UNION ALL SELECT i+1 FROM s WHERE i<1000
+  )
+  INSERT INTO t1(b) SELECT randtext(40) FROM s;
+} {5}
+
+do_execsql_test 3.1 {
+  SELECT count(*) FROM hctpgmap;
+  SELECT count(*) FROM hctpgmap WHERE physical_in_use=0;
+} {256 220}
+
+do_test 3.2 {
+  for {set ii 0} {$ii < 50000} {incr ii} {
+    execsql { UPDATE t1 SET b=randtext(40) WHERE a=rand(1, 1000) }
+  }
+} {}
+
+do_execsql_test 3.3 {
+  SELECT count(*) FROM hctpgmap;
+  SELECT count(*) FROM hctpgmap WHERE physical_in_use=0;
+} {256 220}
+
+db close
+sqlite3 db test.db
+db func randtext randtext
+db func rand rand
+
+do_test 3.3 {
+  for {set ii 0} {$ii < 50000} {incr ii} {
+    execsql { UPDATE t1 SET b=randtext(40) WHERE a=rand(1, 1000) }
+  }
+} {}
+
+do_execsql_test 3.1 {
+  SELECT count(*) FROM hctpgmap;
+  SELECT count(*) FROM hctpgmap WHERE physical_in_use=0;
+} {1280 1242}
+
+# execsql_pp { SELECT * FROM hctpgmap; }
 
 
 
