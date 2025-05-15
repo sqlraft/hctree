@@ -287,6 +287,11 @@ struct HctDatabaseStats {
   i64 nBalanceIntkey;
   i64 nBalanceIndex;
   i64 nBalanceSingle;
+
+  i64 nBalanceUnderfull;
+  i64 nBalanceDeleteLeftKey;
+  i64 nBalanceOverfull;
+
   i64 nTMapLookup;
   i64 nUpdateInPlace;
   i64 nInternalRetry;
@@ -4217,7 +4222,7 @@ static void hctDbRemoveTids(
 ){
   if( (p->flags & HCTDB_HAS_TID)==HCTDB_HAS_TID ){
     u64 iTid;
-    memcpy(&iTid, &aPg[p->iOff], sizeof(u64));
+    hctMemcpy(&iTid, &aPg[p->iOff], sizeof(u64));
     if( (iTid & HCT_TID_MASK)<=iSafeTid ){
       p->flags &= ~HCTDB_HAS_TID;
       p->iOff += sizeof(u64);
@@ -4226,7 +4231,7 @@ static void hctDbRemoveTids(
   if( (p->flags & (HCTDB_HAS_TID|HCTDB_HAS_RANGETID))==HCTDB_HAS_RANGETID ){
     u64 iTid;
     assert( p->flags & HCTDB_HAS_RANGEOLD );
-    memcpy(&iTid, &aPg[p->iOff], sizeof(u64));
+    hctMemcpy(&iTid, &aPg[p->iOff], sizeof(u64));
     if( (iTid & HCT_TID_MASK)<=iSafeTid ){
       p->flags &= ~(HCTDB_HAS_RANGETID|HCTDB_HAS_RANGEOLD);
       p->iOff += (sizeof(u64) + sizeof(u32));
@@ -4364,6 +4369,7 @@ static HctBalance *hctDbBalanceSpace(int *pRc, HctDatabase *pDb){
 ** Rebalance routine for pages with variably-sized records - intkey leaves,
 ** index leaves and index nodes.
 */
+__attribute__ ((noinline)) 
 static int hctDbBalance(
   HctDatabase *pDb,
   HctDbWriter *p,
@@ -4931,7 +4937,7 @@ static void hctDbClobberEntry(
   pEntry->nSize = pOp->nEntrySize;
   pEntry->flags = pOp->entryFlags;
 
-  memcpy(&aTarget[pEntry->iOff], pOp->aEntry, pOp->nEntry);
+  hctMemcpy(&aTarget[pEntry->iOff], pOp->aEntry, pOp->nEntry);
   ((HctDbIndexNode*)aTarget)->hdr.nFreeBytes += (nOld - pOp->nEntry);
 
   pDb->stats.nUpdateInPlace++;
@@ -5025,7 +5031,6 @@ static int hctDbDelete(
   u64 iTidValue = pDb->iTid | iTidOr;
   u64 iDelRangeTid = 0;
   int rc = SQLITE_OK;
-  u8 *aNull = 0;
   int prevFlags = 0;
   int nLocalSz = 0;
   u8 *aTarget = p->writepg.aPg[pOp->iPg].aNew;
@@ -5036,10 +5041,11 @@ static int hctDbDelete(
   assert( pOp->bFullDel==0 );
 
   if( pOp->iInsert==0 && !bLeftmost ){
-    /* If deleting the first key on the first page, set the eBalance flag (as 
-    ** deleting a FP key means the parent list must be adjusted) and load peer 
-    ** pages into memory.  */
+    /* If deleting the first key on any page other than the absolute leftmost, 
+    ** set the eBalance flag (as deleting a FP key means the parent list must
+    ** be adjusted) and load peer pages into memory.  */
     pOp->eBalance = BALANCE_REQUIRED;
+    pDb->stats.nBalanceDeleteLeftKey++;
     if( pOp->iPg==0 ){
       rc = hctDbLoadPeers(pDb, p, &pOp->iPg);
       if( rc!=SQLITE_OK ) return rc;
@@ -5181,7 +5187,6 @@ static int hctDbDelete(
   }
 
   assert_page_is_ok(aTarget, pDb->pgsz);
-  if( aNull ) sqlite3_free(aNull);
   return rc;
 }
 
@@ -5388,62 +5393,85 @@ static int hctDbDirtyPage(HctDatabase *pDb, HctFilePage *pPg){
   return rc;
 }
 
+/*
+** Defragment database page pPg.
+*/
+__attribute__ ((noinline)) 
 static int hctDbDefragment(HctDatabase *pDb, HctFilePage *pPg, int iOmit){
   int rc = SQLITE_OK;
+  int szEntry = 0;                /* Size of entry for this page type */
+  int nHdr = 0;                   /* Size of header for this page type */
+  u8 *aOrigEntry = 0;             /* Read original entry array from here */
+  u8 *aOrigCell = 0;              /* Read original cell content from here */
+  int nEntry = 0;                 /* Final number of entries on page */
 
   pDb->stats.nDefragment++;
 
-  assert( pPg->aNew==0 );
-  rc = sqlite3HctFilePageWrite(pPg);
+  nHdr = hctDbEntryArrayDim(pPg->aOld, &szEntry);
+  if( pPg->aNew==0 ){
+    int nCopy;
+    int i1;
+
+    rc = sqlite3HctFilePageWrite(pPg);
+    aOrigCell = pPg->aOld;
+    aOrigEntry = pPg->aNew;
+    nEntry = hctPagenentry(aOrigCell);
+
+    /* Copy the header and all entries up to iOmit. Or, if iOmit<0, 
+    ** copy all entries. */
+    nCopy = (iOmit<0 ? nEntry : iOmit);
+    i1 = nHdr + szEntry*nCopy;
+    hctMemcpy(pPg->aNew, pPg->aOld, i1);
+
+    /* Copy any remaining entries */
+    if( nCopy<nEntry-1 ){
+      assert( iOmit>=0 );
+      hctMemcpy(&pPg->aNew[i1],&pPg->aOld[i1+szEntry],(nEntry-nCopy-1)*szEntry);
+    }
+    if( iOmit>=0 ) nEntry--;
+
+  }else{
+    HctBalance *pBal = hctDbBalanceSpace(&rc, pDb);
+    HctDbIndexNode *pNode = (HctDbIndexNode*)pPg->aNew;
+    int iStart = nHdr + (pNode->pg.nEntry*szEntry) + pNode->hdr.nFreeGap;
+    aOrigEntry = pPg->aNew;
+    aOrigCell = pBal->aPg[0];
+    nEntry = pNode->pg.nEntry;
+
+    hctMemcpy(&aOrigCell[iStart], &pPg->aNew[iStart], pDb->pgsz-iStart);
+    if( iOmit>=0 ){
+      memmove(&aOrigEntry[nHdr+szEntry*iOmit],
+              &aOrigEntry[nHdr+szEntry*(iOmit+1)],
+              (nEntry-iOmit-1)*szEntry
+      );
+      nEntry--;
+    }
+  }
+
   if( rc==SQLITE_OK ){
     HctDbIndexNode *pNode = (HctDbIndexNode*)pPg->aNew;
-    int nEntry = hctPagenentry(pPg->aOld);
-    int szEntry = 0;
-    int nHdr = 0;
     int iPtr = pDb->pgsz;
-    int iIn = 0;
-    int iOut = 0;
+    int iCell = 0;
     int nFree = 0;
 
-    memcpy(pPg->aNew, pPg->aOld, sizeof(HctDbPageHdr));
-    if( iOmit>=0 ) pNode->pg.nEntry--;
+    for(iCell=0; iCell<nEntry; iCell++){
+      HctDbIndexEntry *pEntry = 0;
+      int nByte = hctDbPageRecordSize(aOrigEntry, pDb->pgsz, iCell);
+      int iOff;
 
-    nHdr = hctDbEntryArrayDim(pPg->aOld, &szEntry);
+      iPtr -= nByte;
+      pEntry = (HctDbIndexEntry*)&((u8*)pNode)[nHdr+iCell*szEntry];
+      iOff = pEntry->iOff;
+      pEntry->iOff = iPtr;
 
-    for(iIn=0; iIn<nEntry; iIn++){
-      if( iIn!=iOmit ){
-        int nByte = hctDbPageRecordSize(pPg->aOld, pDb->pgsz, iIn);
-        int iOff;
-
-        iPtr -= nByte;
-
-        if( hctPagetype(pNode)==HCT_PAGETYPE_INTKEY ){
-          HctDbIntkeyLeaf *pOld = (HctDbIntkeyLeaf*)pPg->aOld;
-          HctDbIntkeyLeaf *pNew = (HctDbIntkeyLeaf*)pPg->aNew;
-          memcpy(&pNew->aEntry[iOut], &pOld->aEntry[iIn], szEntry);
-          pNew->aEntry[iOut].iOff = iPtr;
-          iOff = pOld->aEntry[iIn].iOff;
-        }else if( hctPageheight(pNode)==0 ){
-          HctDbIndexLeaf *pOld = (HctDbIndexLeaf*)pPg->aOld;
-          HctDbIndexLeaf *pNew = (HctDbIndexLeaf*)pPg->aNew;
-          memcpy(&pNew->aEntry[iOut], &pOld->aEntry[iIn], szEntry);
-          pNew->aEntry[iOut].iOff = iPtr;
-          iOff = pOld->aEntry[iIn].iOff;
-        }else{
-          HctDbIndexNode *pOld = (HctDbIndexNode*)pPg->aOld;
-          HctDbIndexNode *pNew = (HctDbIndexNode*)pPg->aNew;
-          memcpy(&pNew->aEntry[iOut], &pOld->aEntry[iIn], szEntry);
-          pNew->aEntry[iOut].iOff = iPtr;
-          iOff = pOld->aEntry[iIn].iOff;
-        }
-
-        hctMemcpy(&((u8*)pNode)[iPtr], &pPg->aOld[iOff], nByte);
-        iOut++;
+      if( aOrigCell==pPg->aOld || iPtr!=iOff ){
+        hctMemcpy(&((u8*)pNode)[iPtr], &aOrigCell[iOff], nByte);
       }
     }
 
-    nFree = (iPtr - (nHdr + szEntry * pNode->pg.nEntry));
+    nFree = (iPtr - (nHdr + szEntry * nEntry));
     pNode->hdr.nFreeGap = pNode->hdr.nFreeBytes = (u16)nFree;
+    pNode->pg.nEntry = (u16)nEntry;
   }
 
   assert_page_is_ok(pPg->aNew, pDb->pgsz);
@@ -5731,15 +5759,17 @@ static int hctDbInsert(
     ){
       /* Target page will be underfull following this op. Rebalance! */
       op.eBalance = BALANCE_REQUIRED;
+      pDb->stats.nBalanceUnderfull++;
       bUpdateInPlace = 0;
     }else if( hctDbFreegap(aTarget)<nReq && bUpdateInPlace==0 ){
-      if( nFree>0 && op.iPg==0 && p->writepg.aPg[0].aNew==0 ){
+      if( nFree>0 && op.iPg==0 ){
         rc = hctDbDefragment(pDb, &p->writepg.aPg[0], bClobber?op.iInsert:-1);
         bClobber = 0;
         aTarget = p->writepg.aPg[0].aNew;
         assert( ((HctDbIndexNode*)aTarget)->hdr.nFreeGap>=nReq );
       }else{
         op.eBalance = BALANCE_OPTIONAL;
+        pDb->stats.nBalanceOverfull++;
       }
     }
   }
@@ -6115,13 +6145,13 @@ static int hctDbDirectSplitRoot(HctDatabase *pDb, HctFilePage *pPg){
   if( rc==SQLITE_OK ){
     u8 pgtype = hctPagetype(pPg->aOld);
 
-    memcpy(peer.aNew, pPg->aOld, pDb->pgsz);
+    hctMemcpy(peer.aNew, pPg->aOld, pDb->pgsz);
     hctDbRootPageInit(pgtype==HCT_PAGETYPE_INDEX, 
         hctPageheight(peer.aNew) + 1, peer.iPg, pPg->aOld, pDb->pgsz
     );
 
     rc = sqlite3HctFilePageRelease(pPg);
-    memcpy(pPg, &peer, sizeof(HctFilePage));
+    hctMemcpy(pPg, &peer, sizeof(HctFilePage));
   }
 
   return rc;
@@ -6146,7 +6176,7 @@ static int hctDbDirectInsertAt(
   assert( bStrictAppend==0 || nHeight==0 );
 
   if( bStrictAppend ){
-    memcpy(&pg, &pCsr->pg, sizeof(pg));
+    hctMemcpy(&pg, &pCsr->pg, sizeof(pg));
     memset(&pCsr->pg, 0, sizeof(pg));
     pCsr->iCell = -1;
   }else{
@@ -6216,7 +6246,7 @@ static int hctDbDirectInsertAt(
         goto direct_insert_out;
       }
 
-      memcpy(&pg, &peer, sizeof(HctFilePage));
+      hctMemcpy(&pg, &peer, sizeof(HctFilePage));
       pNode = pPeer;
     }
 
@@ -6271,7 +6301,7 @@ static int hctDbDirectInsertAt(
         sqlite3HctFilePageRelease(&peer);
         goto direct_insert_out;
       }
-      memcpy(&pg, &peer, sizeof(HctFilePage));
+      hctMemcpy(&pg, &peer, sizeof(HctFilePage));
       pPg = pPeer;
     }else{
       rc = sqlite3HctFilePageDirectWrite(&pg);
@@ -7525,6 +7555,18 @@ i64 sqlite3HctDbStats(sqlite3 *db, int iStat, const char **pzStat){
     case 6:
       *pzStat = "defragment";
       iVal = pDb->stats.nDefragment;
+      break;
+    case 7:
+      *pzStat = "balance_deleteleftkey";
+      iVal = pDb->stats.nBalanceDeleteLeftKey;
+      break;
+    case 8:
+      *pzStat = "balance_underfull";
+      iVal = pDb->stats.nBalanceUnderfull;
+      break;
+    case 9:
+      *pzStat = "balance_overfull";
+      iVal = pDb->stats.nBalanceOverfull;
       break;
     default:
       break;
