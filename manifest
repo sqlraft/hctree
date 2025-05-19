@@ -1,5 +1,5 @@
-C Remove\sextra\smemcpy()\scalls\sfrom\stree-balancing\sroutines.
-D 2025-05-19T11:04:49.887
+C Fold\sthe\sbClobber\sflag\sinto\sthe\sHctInsertOp\sstructure.
+D 2025-05-19T11:43:25.183
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md e108e1e69ae8e8a59e93c455654b8ac9356a11720d3345df2a4743e9590fb20d
@@ -768,7 +768,7 @@ F src/hctJrnlInt.h 468811ef7cd854a8b734497b0ca6b6137b291ea9bba9dc4a91d6dc25a49f4
 F src/hctLogInt.h 44b72c10335f41efe1eb54df524218d4edbb07896a642093bc59badaa3aa7ecc
 F src/hctPManInt.h 3936d01947aace587fd73c51246b7bd5cdbc79833248b839e7d9ffd737ded8b7
 F src/hctTMapInt.h 29e978ca90d3c3c4f5fbe675647627a5518721bad4482aaf77a961ba81a7735d
-F src/hct_database.c 26712d7445bc1b49bcb30e7f8f863be78b3e7288d5018e202626115d1202e9be
+F src/hct_database.c 2d84fb94869f66d3b6df3277f0cf623e88cd9f239f744c269b281ed468d4f36d
 F src/hct_file.c cb0a9069ef8e038845a650d3e1accfe670c524bb1b4b0aa418b71e89910e097b
 F src/hct_journal.c 91ac0530d6ea417d96fedd0c37f810aaa612489db0e8e6265787edbe0776524b
 F src/hct_journalhash.c 5af4886fd8c126a96c78278f6e62a8e31de9b8e683b167c487b033a87fabb7a3
@@ -2326,8 +2326,8 @@ F tool/version-info.c 3b36468a90faf1bbd59c65fd0eb66522d9f941eedd364fabccd7227350
 F tool/warnings-clang.sh bbf6a1e685e534c92ec2bfba5b1745f34fb6f0bc2a362850723a9ee87c1b31a7
 F tool/warnings.sh 49a486c5069de041aedcbde4de178293e0463ae9918ecad7539eedf0ec77a139
 F tool/win/sqlite.vsix deb315d026cc8400325c5863eef847784a219a2f
-P 351cf459c0de54fb3ca5e38c5c8533b4683301131a20de73d38a5feea6f9ecf6
-R 61e842067e4b3b826f748feb32b5e8ae
+P 4951846ecd34d651ea907f9d8b32fb770c4b51e7054bc666eafe9c71d60f828a
+R 2d9814e97aafbb6639e0ab9a704b21b3
 U dan
-Z d68e5e539e3e063b5cca80870db5a6dd
+Z 9412382bbb548dd1fe4ec23dbaf7f652
 # Remove this line to create a well-formed Fossil manifest.
