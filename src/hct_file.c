@@ -1798,12 +1798,7 @@ int sqlite3HctFilePageNewPhysical(HctFile *pFile, HctFilePage *pPg){
   return rc;
 }
 
-/*
-** Allocate a new logical page. If parameter iPg is zero, then a new
-** logical page number is allocated. Otherwise, it must be a logical page
-** number obtained by an earlier call to sqlite3HctFileRootPgno().
-*/
-int sqlite3HctFilePageNew(HctFile *pFile, HctFilePage *pPg){
+int sqlite3HctFilePageNewLogical(HctFile *pFile, HctFilePage *pPg){
   int rc = SQLITE_OK;             /* Return code */
   u32 iLPg = hctFileAllocPg(&rc, pFile, 1);
   if( rc==SQLITE_OK ){
@@ -1811,9 +1806,38 @@ int sqlite3HctFilePageNew(HctFile *pFile, HctFilePage *pPg){
     pPg->pFile = pFile;
     pPg->iPg = iLPg;
     hctFilePagemapZeroValue(pFile, iLPg);
+  }
+  return rc;
+}
+
+int sqlite3HctFilePageNewTransfer(
+  HctFile *pFile, 
+  HctFilePage *pPg, 
+  HctFilePage *pFrom
+){
+  int rc = sqlite3HctFilePageNewLogical(pFile, pPg);
+
+  if( rc==SQLITE_OK ){
+    pPg->iNewPg = pFrom->iNewPg;
+    pPg->aNew = pFrom->aNew;
+    pPg->aOld = pFrom->aOld;
+
+    pFrom->aNew = 0;
+    pFrom->iNewPg = 0;
+  }
+  return rc;
+}
+
+/*
+** Allocate a new logical page. If parameter iPg is zero, then a new
+** logical page number is allocated. Otherwise, it must be a logical page
+** number obtained by an earlier call to sqlite3HctFileRootPgno().
+*/
+int sqlite3HctFilePageNew(HctFile *pFile, HctFilePage *pPg){
+  int rc = sqlite3HctFilePageNewLogical(pFile, pPg);
+  if( rc==SQLITE_OK ){
     hctFilePageMakeWritable(&rc, pPg);
   }
-
   return rc;
 }
 
@@ -1868,7 +1892,6 @@ void sqlite3HctFilePageUnwrite(HctFilePage *pPg){
     pPg->iNewPg = 0;
     pPg->aNew = 0;
     if( pPg->iOldPg==0 ){
-      assert( pPg->aOld==0 );
       hctFileFreePg(&rc, pPg->pFile, 0, pPg->iPg, 1);
       pPg->iPg = 0;
     }
@@ -2277,6 +2300,8 @@ static void *hctFilePrefaultThread(void *pArg){
       (void)val;
     }
   }
+
+  return 0;
 }
 
 /*

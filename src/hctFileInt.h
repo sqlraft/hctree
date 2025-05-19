@@ -51,6 +51,13 @@ int sqlite3HctFileRootNew(HctFile *pFile, u32 iRoot, HctFilePage*);
 
 
 int sqlite3HctFilePageNew(HctFile *pFile, HctFilePage *pPg);
+int sqlite3HctFilePageNewTransfer(
+  HctFile *pFile, 
+  HctFilePage *pPg, 
+  HctFilePage *pFrom
+);
+
+int sqlite3HctFilePageNewLogical(HctFile *pFile, HctFilePage *pPg);
 
 /*
 ** Obtain a read-only reference to logical page iPg.

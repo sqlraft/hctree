@@ -95,7 +95,7 @@ do_execsql_test 3.0 {
 do_execsql_test 3.1 {
   SELECT count(*) FROM hctpgmap;
   SELECT count(*) FROM hctpgmap WHERE physical_in_use=0;
-} {256 220}
+} {256 216}
 
 do_test 3.2 {
   for {set ii 0} {$ii < 50000} {incr ii} {
@@ -106,7 +106,7 @@ do_test 3.2 {
 do_execsql_test 3.3 {
   SELECT count(*) FROM hctpgmap;
   SELECT count(*) FROM hctpgmap WHERE physical_in_use=0;
-} {256 221}
+} {256 218}
 
 db close
 sqlite3 db test.db
@@ -119,10 +119,10 @@ do_test 3.3 {
   }
 } {}
 
-do_execsql_test 3.1 {
+do_execsql_test 3.4 {
   SELECT count(*) FROM hctpgmap;
   SELECT count(*) FROM hctpgmap WHERE physical_in_use=0;
-} {1280 1241}
+} {1280 1239}
 
 # execsql_pp { SELECT * FROM hctpgmap; }
 
