@@ -37,30 +37,50 @@ do_execsql_test 1.1 {
 #-------------------------------------------------------------------------
 hct_reset_db
 
+set NROW [expr 1000]
+
 do_execsql_test 2.0 {
   CREATE TABLE t1(a INTEGER PRIMARY KEY, b TEXT);
 
   WITH s(i) AS (
-    SELECT 1 UNION ALL SELECT i+1 FROM s WHERE i<1000
+    SELECT 1 UNION ALL SELECT i+1 FROM s WHERE i<$NROW
   )
   INSERT INTO t1(b) SELECT hex(randomblob(70)) FROM s;
 }
 
+sqlite3 db2 test.db
+do_execsql_test -db db2 2.0.1 {
+  BEGIN;
+    SELECT count(*) FROM t1
+} $NROW
+
 do_execsql_test 2.1 {
-  UPDATE t1 SET b = hex(randomblob(70));
+  UPDATE t1 SET b = hex(randomblob(70))
 }
 
+do_execsql_test -db db2 2.1.1 {
+    SELECT count(*) FROM t1
+  END;
+} $NROW
+db2 close
+
 do_test 2.2 {
-  for {set ii 1} {$ii <= 1000} {incr ii} {
+  for {set ii 1} {$ii <= $NROW} {incr ii} {
     db eval {
       UPDATE t1 SET b = hex(randomblob(70)) WHERE a=$ii;
     }
+
+    set n [db one {
+      SELECT val FROM hctstats WHERE stat='update_in_place'
+    }]
+    if {$n!=$ii} { error "mismatch ii=$ii n=$n" }
   }
 } {}
 
 do_execsql_test 2.3 {
   SELECT val FROM hctstats WHERE stat='update_in_place'
-} {1000}
+} $NROW
+
 
 #-------------------------------------------------------------------------
 hct_reset_db
@@ -113,13 +133,13 @@ sqlite3 db test.db
 db func randtext randtext
 db func rand rand
 
-do_test 3.3 {
+do_test 3.4 {
   for {set ii 0} {$ii < 50000} {incr ii} {
     execsql { UPDATE t1 SET b=randtext(40) WHERE a=rand(1, 1000) }
   }
 } {}
 
-do_execsql_test 3.4 {
+do_execsql_test 3.5 {
   SELECT count(*) FROM hctpgmap;
   SELECT count(*) FROM hctpgmap WHERE physical_in_use=0;
 } {1280 1239}

@@ -2274,6 +2274,8 @@ int sqlite3HctFileNFile(HctFile *pFile, int *pbFixed){
 ** Beginning of multi-threaded "PRAGMA hct_prefault = N" implementation
 *************************************************************************/
 
+#include <pthread.h>
+
 typedef struct HctPrefaultThread HctPrefaultThread;
 struct HctPrefaultThread {
   pthread_t tid;
