@@ -1515,7 +1515,8 @@ STATIC_TCLSQLITE3 ?= 0
 #
 tclsqlite3.deps.1 = sqlite3.o
 tclsqlite3.flags.1 = -static $(tclsqlite3.deps.1)
-tclsqlite3.deps.0 = $(libsqlite3.DLL)
+# tclsqlite3.deps.0 = $(libsqlite3.DLL)
+tclsqlite3.deps.0 = $(libsqlite3.LIB)
 tclsqlite3.flags.0 = $(tclsqlite3.deps.0)
 tclsqlite3$(T.exe):	$(T.tcl.env.sh) tclsqlite-shell.o $(TOP)/src/test_mtperf.c $(TOP)/ext/recover/dbdata.c $(tclsqlite3.deps.$(STATIC_TCLSQLITE3))
 	$(T.link.tcl) -o $@ tclsqlite-shell.o $(TOP)/src/test_mtperf.c $(TOP)/ext/recover/dbdata.c \
