@@ -331,6 +331,7 @@ columnname(A) ::= nm(A) typetoken(Y). {sqlite3AddColumn(pParse,A,Y);}
 // keywords.  Any non-standard keyword can also be an identifier.
 //
 %token_class id  ID|INDEXED.
+
 // And "ids" is an identifier-or-string.
 //
 %token_class ids  ID|STRING.
