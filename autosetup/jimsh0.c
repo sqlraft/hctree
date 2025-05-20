@@ -75,9 +75,6 @@ extern "C" {
 
 #if defined(_WIN32) || defined(WIN32)
 
-#ifndef STDIN_FILENO
-#define STDIN_FILENO 0
-#endif
 #define HAVE_DLOPEN
 void *dlopen(const char *path, int mode);
 int dlclose(void *handle);
@@ -1201,6 +1198,11 @@ int Jim_OpenForRead(const char *filename);
     #define Jim_FileStat _fstat64
     #define Jim_Lseek _lseeki64
     #define O_TEXT _O_TEXT
+    #define O_BINARY _O_BINARY
+    #define Jim_SetMode _setmode
+    #ifndef STDIN_FILENO
+    #define STDIN_FILENO 0
+    #endif
 
 #else
     #if defined(HAVE_STAT64)
@@ -1249,6 +1251,14 @@ int Jim_OpenForRead(const char *filename);
     #endif
 
 #endif
+
+# ifndef MAXPATHLEN
+# ifdef PATH_MAX
+# define MAXPATHLEN PATH_MAX
+# else
+# define MAXPATHLEN JIM_PATH_LEN
+# endif
+# endif
 
 
 int Jim_FileStoreStatData(Jim_Interp *interp, Jim_Obj *varName, const jim_stat_t *sb);
@@ -2084,10 +2094,6 @@ enum wbuftype {
 #define UNIX_SOCKETS 1
 #else
 #define UNIX_SOCKETS 0
-#endif
-
-#ifndef MAXPATHLEN
-#define MAXPATHLEN JIM_PATH_LEN
 #endif
 
 
@@ -2941,22 +2947,22 @@ static int aio_cmd_buffering(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
 
 static int aio_cmd_translation(Jim_Interp *interp, int argc, Jim_Obj *const *argv)
 {
-	enum {OPT_BINARY, OPT_TEXT};
+    enum {OPT_BINARY, OPT_TEXT};
     static const char * const options[] = {
         "binary",
         "text",
         NULL
     };
-	int opt;
+    int opt;
 
-	if (Jim_GetEnum(interp, argv[0], options, &opt, NULL, JIM_ERRMSG) != JIM_OK) {
-		return JIM_ERR;
-	}
-#if defined(_setmode) && defined(O_BINARY)
-	else {
-		AioFile *af = Jim_CmdPrivData(interp);
-		_setmode(af->fh, opt == OPT_BINARY ? O_BINARY : O_TEXT);
-	}
+    if (Jim_GetEnum(interp, argv[0], options, &opt, NULL, JIM_ERRMSG) != JIM_OK) {
+            return JIM_ERR;
+    }
+#if defined(Jim_SetMode)
+    else {
+        AioFile *af = Jim_CmdPrivData(interp);
+        Jim_SetMode(af->fd, opt == OPT_BINARY ? O_BINARY : O_TEXT);
+    }
 #endif
     return JIM_OK;
 }
@@ -4170,14 +4176,6 @@ int Jim_regexpInit(Jim_Interp *interp)
 #define S_ISREG(m) (((m) & S_IFMT) == S_IFREG)
 #define S_ISDIR(m) (((m) & S_IFMT) == S_IFDIR)
 #endif
-
-# ifndef MAXPATHLEN
-# ifdef PATH_MAX
-# define MAXPATHLEN PATH_MAX
-# else
-# define MAXPATHLEN JIM_PATH_LEN
-# endif
-# endif
 
 #if defined(__MINGW32__) || defined(__MSYS__) || defined(_MSC_VER)
 #define ISWINDOWS 1
@@ -9134,7 +9132,7 @@ int Jim_StringEqObj(Jim_Obj *aObjPtr, Jim_Obj *bObjPtr)
         const char *sA = Jim_GetString(aObjPtr, &Alen);
         const char *sB = Jim_GetString(bObjPtr, &Blen);
 
-        return Alen == Blen && memcmp(sA, sB, Alen) == 0;
+        return Alen == Blen && *sA == *sB && memcmp(sA, sB, Alen) == 0;
     }
 }
 
@@ -10244,7 +10242,7 @@ static int JimCommandsHT_KeyCompare(void *privdata, const void *key1, const void
     int len1, len2;
     const char *str1 = Jim_GetStringNoQualifier((Jim_Obj *)key1, &len1);
     const char *str2 = Jim_GetStringNoQualifier((Jim_Obj *)key2, &len2);
-    return len1 == len2 && memcmp(str1, str2, len1) == 0;
+    return len1 == len2 && *str1 == *str2 && memcmp(str1, str2, len1) == 0;
 }
 
 static void JimCommandsHT_ValDestructor(void *interp, void *val)
@@ -13865,6 +13863,13 @@ static int JimExprOpNumUnary(Jim_Interp *interp, struct JimExprNode *node)
         switch (node->type) {
             case JIM_EXPROP_NOT:
                 wC = !bA;
+                break;
+            case JIM_EXPROP_UNARYPLUS:
+            case JIM_EXPROP_UNARYMINUS:
+                rc = JIM_ERR;
+                Jim_SetResultFormatted(interp,
+                    "can't use non-numeric string as operand of \"%s\"",
+                        node->type == JIM_EXPROP_UNARYPLUS ? "+" : "-");
                 break;
             default:
                 abort();
@@ -19870,16 +19875,22 @@ wrongargs:
                     }
                     else if (errorCodeObj) {
                         int len = Jim_ListLength(interp, argv[idx + 1]);
-                        int i;
 
-                        ret = JIM_OK;
+                        if (len > Jim_ListLength(interp, errorCodeObj)) {
 
-                        for (i = 0; i < len; i++) {
-                            Jim_Obj *matchObj = Jim_ListGetIndex(interp, argv[idx + 1], i);
-                            Jim_Obj *objPtr = Jim_ListGetIndex(interp, errorCodeObj, i);
-                            if (Jim_StringCompareObj(interp, matchObj, objPtr, 0) != 0) {
-                                ret = -1;
-                                break;
+                            ret = -1;
+                        }
+                        else {
+                            int i;
+                            ret = JIM_OK;
+
+                            for (i = 0; i < len; i++) {
+                                Jim_Obj *matchObj = Jim_ListGetIndex(interp, argv[idx + 1], i);
+                                Jim_Obj *objPtr = Jim_ListGetIndex(interp, errorCodeObj, i);
+                                if (Jim_StringCompareObj(interp, matchObj, objPtr, 0) != 0) {
+                                    ret = -1;
+                                    break;
+                                }
                             }
                         }
                     }
@@ -20255,7 +20266,7 @@ static int Jim_DictCoreCommand(Jim_Interp *interp, int argc, Jim_Obj *const *arg
         }
 
         case OPT_SET:
-            return Jim_SetDictKeysVector(interp, argv[2], argv + 3, argc - 4, argv[argc - 1], JIM_ERRMSG);
+            return Jim_SetDictKeysVector(interp, argv[2], argv + 3, argc - 4, argv[argc - 1], JIM_ERRMSG | JIM_UNSHARED);
 
         case OPT_EXISTS:{
                 int rc = Jim_DictKeysVector(interp, argv[2], argv + 3, argc - 3, &objPtr, JIM_NONE);
@@ -20267,7 +20278,7 @@ static int Jim_DictCoreCommand(Jim_Interp *interp, int argc, Jim_Obj *const *arg
             }
 
         case OPT_UNSET:
-            if (Jim_SetDictKeysVector(interp, argv[2], argv + 3, argc - 3, NULL, JIM_NONE) != JIM_OK) {
+            if (Jim_SetDictKeysVector(interp, argv[2], argv + 3, argc - 3, NULL, JIM_UNSHARED) != JIM_OK) {
                 return JIM_ERR;
             }
             return JIM_OK;
@@ -24373,10 +24384,6 @@ int Jim_InteractivePrompt(Jim_Interp *interp)
 #include <stdlib.h>
 #include <string.h>
 
-
-#ifdef HAVE_UNISTD_H
-#include <unistd.h>
-#endif
 
 
 extern int Jim_initjimshInit(Jim_Interp *interp);

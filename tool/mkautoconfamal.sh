@@ -25,14 +25,6 @@ VERSION=`cat $TOP/VERSION`
 HASH=`cut -c1-10 $TOP/manifest.uuid`
 DATETIME=`grep '^D' $TOP/manifest | tr -c -d '[0-9]' | cut -c1-12`
 
-# Verify that the version number in the TEA autoconf file is correct.
-# Fail with an error if not.
-#
-if grep $VERSION $TOP/autoconf/tea/configure.ac
-then echo "TEA version number ok"
-else echo "TEA version number mismatch.  Should be $VERSION"; exit 1
-fi
-
 # If this script is given an argument of --snapshot, then generate a
 # snapshot tarball named for the current checkout SHA hash, rather than
 # the version number.
@@ -71,7 +63,7 @@ cp $TOP/main.mk           $TMPSPACE
 cd $TMPSPACE
 
 # Clean up emacs-generated backup files from the target
-rm -f ./autosetup/*~
+rm -f ./autosetup/*~ ./autosetup/teaish/*~
 rm -f ./*~
 
 #if true; then
@@ -91,14 +83,9 @@ cat <<EOF > tea/generic/tclsqlite3.c
 EOF
 cat  $TOP/src/tclsqlite.c           >> tea/generic/tclsqlite3.c
 
-sed "s/AC_INIT(\[sqlite\], .*)/AC_INIT([sqlite], [$VERSION])/" tea/configure.ac > tmp
-mv tmp tea/configure.ac
+find . -type f -name '*~' -exec rm -f \{} \;
+find . -type f -name '#*#' -exec rm -f \{} \;
 
-cd tea
-autoconf
-rm -rf autom4te.cache
-
-cd ../
 ./configure && make dist
 tar xzf sqlite-$VERSION.tar.gz
 mv sqlite-$VERSION $TARBALLNAME
