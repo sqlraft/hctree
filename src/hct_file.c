@@ -1798,12 +1798,7 @@ int sqlite3HctFilePageNewPhysical(HctFile *pFile, HctFilePage *pPg){
   return rc;
 }
 
-/*
-** Allocate a new logical page. If parameter iPg is zero, then a new
-** logical page number is allocated. Otherwise, it must be a logical page
-** number obtained by an earlier call to sqlite3HctFileRootPgno().
-*/
-int sqlite3HctFilePageNew(HctFile *pFile, HctFilePage *pPg){
+int sqlite3HctFilePageNewLogical(HctFile *pFile, HctFilePage *pPg){
   int rc = SQLITE_OK;             /* Return code */
   u32 iLPg = hctFileAllocPg(&rc, pFile, 1);
   if( rc==SQLITE_OK ){
@@ -1811,9 +1806,38 @@ int sqlite3HctFilePageNew(HctFile *pFile, HctFilePage *pPg){
     pPg->pFile = pFile;
     pPg->iPg = iLPg;
     hctFilePagemapZeroValue(pFile, iLPg);
+  }
+  return rc;
+}
+
+int sqlite3HctFilePageNewTransfer(
+  HctFile *pFile, 
+  HctFilePage *pPg, 
+  HctFilePage *pFrom
+){
+  int rc = sqlite3HctFilePageNewLogical(pFile, pPg);
+
+  if( rc==SQLITE_OK ){
+    pPg->iNewPg = pFrom->iNewPg;
+    pPg->aNew = pFrom->aNew;
+    pPg->aOld = pFrom->aOld;
+
+    pFrom->aNew = 0;
+    pFrom->iNewPg = 0;
+  }
+  return rc;
+}
+
+/*
+** Allocate a new logical page. If parameter iPg is zero, then a new
+** logical page number is allocated. Otherwise, it must be a logical page
+** number obtained by an earlier call to sqlite3HctFileRootPgno().
+*/
+int sqlite3HctFilePageNew(HctFile *pFile, HctFilePage *pPg){
+  int rc = sqlite3HctFilePageNewLogical(pFile, pPg);
+  if( rc==SQLITE_OK ){
     hctFilePageMakeWritable(&rc, pPg);
   }
-
   return rc;
 }
 
@@ -1868,7 +1892,6 @@ void sqlite3HctFilePageUnwrite(HctFilePage *pPg){
     pPg->iNewPg = 0;
     pPg->aNew = 0;
     if( pPg->iOldPg==0 ){
-      assert( pPg->aOld==0 );
       hctFileFreePg(&rc, pPg->pFile, 0, pPg->iPg, 1);
       pPg->iPg = 0;
     }
@@ -2251,12 +2274,16 @@ int sqlite3HctFileNFile(HctFile *pFile, int *pbFixed){
 ** Beginning of multi-threaded "PRAGMA hct_prefault = N" implementation
 *************************************************************************/
 
+#include <pthread.h>
+
 typedef struct HctPrefaultThread HctPrefaultThread;
 struct HctPrefaultThread {
   pthread_t tid;
   HctMapping *p;                  /* Mapping to touch pages within */
   int iStart;                     /* First chunk to prefault */
   int nChunk;                     /* Number of chunks to prefault */
+  int bMinorOnly;                 /* Try to avoid causing major page-faults */
+  i64 nPage;                      /* Total pages hit */
 };
 
 /*
@@ -2266,17 +2293,33 @@ static void *hctFilePrefaultThread(void *pArg){
   volatile int val = 0;
   HctPrefaultThread *pPre = (HctPrefaultThread*)pArg;
   HctMapping *p = pPre->p;
+  int pgsz = sysconf(_SC_PAGESIZE);
   int nBytePerChunk = (p->mapMask+1) * p->szPage;
+  int nPagePerChunk = (nBytePerChunk + pgsz -1) / pgsz;
   int ii;
 
+  u8 *aVector = 0;
+
+  if( pPre->bMinorOnly ){
+    aVector = (u8*)sqlite3HctMalloc( nPagePerChunk );
+  }
+
   for(ii=pPre->iStart; ii<(pPre->iStart+pPre->nChunk); ii++){
-    int iOff;
-    const u8 *aData = (const u8*)p->aChunk[ii].pData;
-    for(iOff=0; iOff<nBytePerChunk; iOff+=4096){
-      val += aData[iOff];
-      (void)val;
+    int iPg;
+    u8 *aData = (u8*)p->aChunk[ii].pData;
+    if( aVector ){
+      mincore(aData, nBytePerChunk, aVector);
+    }
+    for(iPg=0; iPg<nPagePerChunk; iPg++){
+      if( aVector==0 || (aVector[iPg] & 0x01) ){
+        val += aData[iPg*pgsz];
+        (void)val;
+        pPre->nPage++;
+      }
     }
   }
+
+  return 0;
 }
 
 /*
@@ -2284,11 +2327,17 @@ static void *hctFilePrefaultThread(void *pArg){
 ** entire database file. To ensure that the page tables for the mmap()ed
 ** database file have been established.
 */
-void sqlite3HctFilePrefault(HctFile *pFile, int nThread){
+void sqlite3HctFilePrefault(
+  HctFile *pFile, 
+  int nThread, 
+  int bMinorOnly,
+  i64 *pnPage
+){
   HctMapping *p = pFile->pMapping;
   HctPrefaultThread *aThread = 0;
   int ii = 0;
   int iStart = 0;
+  i64 nPg = 0;
 
   if( nThread>p->nChunk ){
     nThread = p->nChunk;
@@ -2308,11 +2357,12 @@ void sqlite3HctFilePrefault(HctFile *pFile, int nThread){
 
   for(ii=0; ii<nThread; ii++){
     pthread_join(aThread[ii].tid, 0);
+    nPg += aThread[ii].nPage;
   }
 
   sqlite3_free(aThread);
+  *pnPage = nPg;
 }
-
 
 /*************************************************************************
 ** Beginning of vtab implemetation.

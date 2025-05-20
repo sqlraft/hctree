@@ -3428,14 +3428,20 @@ int sqlite3HctBtreePragma(Btree *pBt, char **aFnctl){
   }else if( 0==sqlite3_stricmp("hct_prefault", zLeft) ){
     HctFile *pFile = sqlite3HctDbFile(p->pHctDb);
     int nThread = 1;
+    int bMinorOnly = 0;
     if( zRight ){
       nThread = sqlite3Atoi(zRight);
+      if( nThread<0 ){
+        nThread = nThread*-1;
+        bMinorOnly = 1;
+      }
     }
     if( nThread<1 || nThread>HCT_MAX_NPREFAULT ){
       rc = SQLITE_RANGE;
     }else{
-      sqlite3HctFilePrefault(pFile, nThread);
-      zRet = sqlite3HctMprintf("");
+      i64 nRes = 0;
+      sqlite3HctFilePrefault(pFile, nThread, bMinorOnly, &nRes);
+      zRet = sqlite3HctMprintf("%lld", nRes);
     }
   }else{
     rc = SQLITE_NOTFOUND;
