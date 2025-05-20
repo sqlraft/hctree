@@ -278,9 +278,9 @@ static VdbeCursor *allocateCursor(
 
   i64 nByte;
   VdbeCursor *pCx = 0;
-  nByte =
-      ROUND8P(sizeof(VdbeCursor)) + 2*sizeof(u32)*nField +
-      (eCurType==CURTYPE_BTREE?sqlite3BtreeCursorSize():0);
+  nByte = SZ_VDBECURSOR(nField);
+  assert( ROUND8(nByte)==nByte );
+  if( eCurType==CURTYPE_BTREE ) nByte += sqlite3BtreeCursorSize();
 
   assert( iCur>=0 && iCur<p->nCursor );
   if( p->apCsr[iCur] ){ /*OPTIMIZATION-IF-FALSE*/
@@ -313,8 +313,8 @@ static VdbeCursor *allocateCursor(
   pCx->nField = nField;
   pCx->aOffset = &pCx->aType[nField];
   if( eCurType==CURTYPE_BTREE ){
-    pCx->uc.pCursor = (BtCursor*)
-        &pMem->z[ROUND8P(sizeof(VdbeCursor))+2*sizeof(u32)*nField];
+    assert( ROUND8(SZ_VDBECURSOR(nField))==SZ_VDBECURSOR(nField) );
+    pCx->uc.pCursor = (BtCursor*)&pMem->z[SZ_VDBECURSOR(nField)];
     sqlite3BtreeCursorZero(pCx->uc.pCursor);
   }
   return pCx;
@@ -1318,7 +1318,7 @@ case OP_Halt: {
       sqlite3VdbeError(p, "%s", pOp->p4.z);
     }
     pcx = (int)(pOp - aOp);
-    sqlite3_log(pOp->p1, "abort at %d in [%s]: %s", pcx, p->zSql, p->zErrMsg);
+    sqlite3_log(pOp->p1, "abort at %d: %s; [%s]", pcx, p->zErrMsg, p->zSql);
   }
   rc = sqlite3VdbeHalt(p);
   assert( rc==SQLITE_BUSY || rc==SQLITE_OK || rc==SQLITE_ERROR );
@@ -2644,7 +2644,7 @@ case OP_BitNot: {             /* same as TK_BITNOT, in1, out2 */
   break;
 }
 
-/* Opcode: Once P1 P2 * * *
+/* Opcode: Once P1 P2 P3 * *
 **
 ** Fall through to the next instruction the first time this opcode is
 ** encountered on each invocation of the byte-code program.  Jump to P2
@@ -2660,6 +2660,12 @@ case OP_BitNot: {             /* same as TK_BITNOT, in1, out2 */
 ** whether or not the jump should be taken.  The bitmask is necessary
 ** because the self-altering code trick does not work for recursive
 ** triggers.
+**
+** The P3 operand is not used directly by this opcode.  However P3 is
+** used by the code generator as follows:  If this opcode is the start
+** of a subroutine and that subroutine uses a Bloom filter, then P3 will
+** be the register that holds that Bloom filter.  See tag-202407032019
+** in the source code for implementation details.
 */
 case OP_Once: {             /* jump */
   u32 iAddr;                /* Address of this instruction */
@@ -3707,6 +3713,7 @@ case OP_MakeRecord: {
       zHdr += sqlite3PutVarint(zHdr, serial_type);
       if( pRec->n ){
         assert( pRec->z!=0 );
+        assert( pRec->z!=(const char*)sqlite3CtypeMap );
         memcpy(zPayload, pRec->z, pRec->n);
         zPayload += pRec->n;
       }
@@ -6109,7 +6116,7 @@ case OP_RowData: {
   /* The OP_RowData opcodes always follow OP_NotExists or
   ** OP_SeekRowid or OP_Rewind/Op_Next with no intervening instructions
   ** that might invalidate the cursor.
-  ** If this where not the case, on of the following assert()s
+  ** If this were not the case, one of the following assert()s
   ** would fail.  Should this ever change (because of changes in the code
   ** generator) then the fix would be to insert a call to
   ** sqlite3VdbeCursorMoveto().
@@ -7763,7 +7770,7 @@ case OP_AggStep: {
   **
   ** Note: We could avoid this by using a regular memory cell from aMem[] for 
   ** the accumulator, instead of allocating one here. */
-  nAlloc = ROUND8P( sizeof(pCtx[0]) + (n-1)*sizeof(sqlite3_value*) );
+  nAlloc = ROUND8P( SZ_CONTEXT(n) );
   pCtx = sqlite3DbMallocRawNN(db, nAlloc + sizeof(Mem));
   if( pCtx==0 ) goto no_mem;
   pCtx->pOut = (Mem*)((u8*)pCtx + nAlloc);
@@ -9229,8 +9236,8 @@ abort_due_to_error:
   p->rc = rc;
   sqlite3SystemError(db, rc);
   testcase( sqlite3GlobalConfig.xLog!=0 );
-  sqlite3_log(rc, "statement aborts at %d: [%s] %s",
-                   (int)(pOp - aOp), p->zSql, p->zErrMsg);
+  sqlite3_log(rc, "statement aborts at %d: %s; [%s]",
+                   (int)(pOp - aOp), p->zErrMsg, p->zSql);
   if( p->eVdbeState==VDBE_RUN_STATE ) sqlite3VdbeHalt(p);
   if( rc==SQLITE_IOERR_NOMEM ) sqlite3OomFault(db);
   if( rc==SQLITE_CORRUPT && db->autoCommit==0 ){

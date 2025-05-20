@@ -202,7 +202,7 @@ static int SQLITE_TCLAPI sqlthread_spawn(
 
   rc = Tcl_CreateThread(&x, tclScriptThread, (void *)pNew, nStack, flags);
   if( rc!=TCL_OK ){
-    Tcl_AppendResult(interp, "Error in Tcl_CreateThread()", 0);
+    Tcl_AppendResult(interp, "Error in Tcl_CreateThread()", NULL);
     ckfree((char *)pNew);
     return TCL_ERROR;
   }
@@ -236,7 +236,7 @@ static int SQLITE_TCLAPI sqlthread_parent(
   UNUSED_PARAMETER(objc);
 
   if( p==0 ){
-    Tcl_AppendResult(interp, "no parent thread", 0);
+    Tcl_AppendResult(interp, "no parent thread", NULL);
     return TCL_ERROR;
   }
 
@@ -288,7 +288,7 @@ static int SQLITE_TCLAPI sqlthread_open(
   sqlite3_busy_handler(db, xBusy, 0);
   
   if( sqlite3TestMakePointerStr(interp, zBuf, db) ) return TCL_ERROR;
-  Tcl_AppendResult(interp, zBuf, 0);
+  Tcl_AppendResult(interp, zBuf, NULL);
 
   return TCL_OK;
 }
@@ -615,13 +615,13 @@ static int SQLITE_TCLAPI blocking_prepare_v2_proc(
   if( rc!=SQLITE_OK ){
     assert( pStmt==0 );
     sqlite3_snprintf(sizeof(zBuf), zBuf, "%s ", (char *)sqlite3ErrName(rc));
-    Tcl_AppendResult(interp, zBuf, sqlite3_errmsg(db), 0);
+    Tcl_AppendResult(interp, zBuf, sqlite3_errmsg(db), NULL);
     return TCL_ERROR;
   }
 
   if( pStmt ){
     if( sqlite3TestMakePointerStr(interp, zBuf, pStmt) ) return TCL_ERROR;
-    Tcl_AppendResult(interp, zBuf, 0);
+    Tcl_AppendResult(interp, zBuf, NULL);
   }
   return TCL_OK;
 }

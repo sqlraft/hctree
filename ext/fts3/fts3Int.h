@@ -14,6 +14,13 @@
 #ifndef _FTSINT_H
 #define _FTSINT_H
 
+#include <assert.h>
+#include <stdlib.h>
+#include <stddef.h>
+#include <stdio.h>
+#include <string.h>
+#include <stdarg.h>
+
 #if !defined(NDEBUG) && !defined(SQLITE_DEBUG) 
 # define NDEBUG 1
 #endif
@@ -201,6 +208,19 @@ typedef sqlite3_int64 i64;        /* 8-byte signed integer */
 #define SMALLEST_INT64 (((i64)-1) - LARGEST_INT64)
 
 #define deliberate_fall_through
+
+/*
+** Macros needed to provide flexible arrays in a portable way
+*/
+#ifndef offsetof
+# define offsetof(STRUCTURE,FIELD) ((size_t)((char*)&((STRUCTURE*)0)->FIELD))
+#endif
+#if defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 199901L)
+# define FLEXARRAY
+#else
+# define FLEXARRAY 1
+#endif
+
 
 #endif /* SQLITE_AMALGAMATION */
 
@@ -431,8 +451,12 @@ struct Fts3Phrase {
   */
   int nToken;                /* Number of tokens in the phrase */
   int iColumn;               /* Index of column this phrase must match */
-  Fts3PhraseToken aToken[1]; /* One entry for each token in the phrase */
+  Fts3PhraseToken aToken[FLEXARRAY]; /* One for each token in the phrase */
 };
+
+/* Size (in bytes) of an Fts3Phrase object large enough to hold N tokens */
+#define SZ_FTS3PHRASE(N) \
+  (offsetof(Fts3Phrase,aToken)+(N)*sizeof(Fts3PhraseToken))
 
 /*
 ** A tree of these objects forms the RHS of a MATCH operator.

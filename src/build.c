@@ -1071,7 +1071,7 @@ int sqlite3TableColumnToIndex(Index *pIdx, int iCol){
   int i;
   i16 iCol16;
   assert( iCol>=(-1) && iCol<=SQLITE_MAX_COLUMN );
-  assert( pIdx->nColumn<=SQLITE_MAX_COLUMN );
+  assert( pIdx->nColumn<=SQLITE_MAX_COLUMN+1 );
   iCol16 = iCol;
   for(i=0; i<pIdx->nColumn; i++){
     if( iCol16==pIdx->aiColumn[i] ){
@@ -2473,7 +2473,7 @@ static void convertToWithoutRowidTable(Parse *pParse, Table *pTab){
         pIdx->aiColumn[j] = pPk->aiColumn[i];
         pIdx->azColl[j] = pPk->azColl[i];
         if( pPk->aSortOrder[i] ){
-          /* See ticket https://www.sqlite.org/src/info/bba7b69f9849b5bf */
+          /* See ticket https://sqlite.org/src/info/bba7b69f9849b5bf */
           pIdx->bAscKeyBug = 1;
         }
         j++;
@@ -3660,7 +3660,7 @@ void sqlite3CreateForeignKey(
   }else{
     nCol = pFromCol->nExpr;
   }
-  nByte = sizeof(*pFKey) + (nCol-1)*sizeof(pFKey->aCol[0]) + pTo->n + 1;
+  nByte = SZ_FKEY(nCol) + pTo->n + 1;
   if( pToCol ){
     for(i=0; i<pToCol->nExpr; i++){
       nByte += sqlite3Strlen30(pToCol->a[i].zEName) + 1;
@@ -3862,7 +3862,7 @@ static void sqlite3RefillIndex(Parse *pParse, Index *pIndex, int memRootPage){
     ** not work for UNIQUE constraint indexes on WITHOUT ROWID tables
     ** with DESC primary keys, since those indexes have there keys in
     ** a different order from the main table.
-    ** See ticket: https://www.sqlite.org/src/info/bba7b69f9849b5bf
+    ** See ticket: https://sqlite.org/src/info/bba7b69f9849b5bf
     */
     sqlite3VdbeAddOp1(v, OP_SeekEnd, iIdx);
   }
@@ -4246,6 +4246,7 @@ void sqlite3CreateIndex(
       assert( j<=0x7fff );
       if( j<0 ){
         j = pTab->iPKey;
+        pIndex->bIdxRowid = 1;
       }else{
         if( pTab->aCol[j].notNull==0 ){
           pIndex->uniqNotNull = 0;
@@ -4719,12 +4720,11 @@ IdList *sqlite3IdListAppend(Parse *pParse, IdList *pList, Token *pToken){
   sqlite3 *db = pParse->db;
   int i;
   if( pList==0 ){
-    pList = sqlite3DbMallocZero(db, sizeof(IdList) );
+    pList = sqlite3DbMallocZero(db, SZ_IDLIST(1));
     if( pList==0 ) return 0;
   }else{
     IdList *pNew;
-    pNew = sqlite3DbRealloc(db, pList,
-                 sizeof(IdList) + pList->nId*sizeof(pList->a));
+    pNew = sqlite3DbRealloc(db, pList, SZ_IDLIST(pList->nId+1));
     if( pNew==0 ){
       sqlite3IdListDelete(db, pList);
       return 0;
@@ -4823,8 +4823,7 @@ SrcList *sqlite3SrcListEnlarge(
       return 0;
     }
     if( nAlloc>SQLITE_MAX_SRCLIST ) nAlloc = SQLITE_MAX_SRCLIST;
-    pNew = sqlite3DbRealloc(db, pSrc,
-               sizeof(*pSrc) + (nAlloc-1)*sizeof(pSrc->a[0]) );
+    pNew = sqlite3DbRealloc(db, pSrc, SZ_SRCLIST(nAlloc));
     if( pNew==0 ){
       assert( db->mallocFailed );
       return 0;
@@ -4899,7 +4898,7 @@ SrcList *sqlite3SrcListAppend(
   assert( pParse->db!=0 );
   db = pParse->db;
   if( pList==0 ){
-    pList = sqlite3DbMallocRawNN(pParse->db, sizeof(SrcList) );
+    pList = sqlite3DbMallocRawNN(pParse->db, SZ_SRCLIST(1));
     if( pList==0 ) return 0;
     pList->nAlloc = 1;
     pList->nSrc = 1;
@@ -5786,10 +5785,9 @@ With *sqlite3WithAdd(
   }
 
   if( pWith ){
-    sqlite3_int64 nByte = sizeof(*pWith) + (sizeof(pWith->a[1]) * pWith->nCte);
-    pNew = sqlite3DbRealloc(db, pWith, nByte);
+    pNew = sqlite3DbRealloc(db, pWith, SZ_WITH(pWith->nCte+1));
   }else{
-    pNew = sqlite3DbMallocZero(db, sizeof(*pWith));
+    pNew = sqlite3DbMallocZero(db, SZ_WITH(1));
   }
   assert( (pNew!=0 && zName!=0) || db->mallocFailed );
 
