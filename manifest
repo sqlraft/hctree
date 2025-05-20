@@ -1,5 +1,5 @@
-C Merge\slatest\schanges\sfrom\strunk\sinto\sthis\sbranch.
-D 2025-05-20T16:42:04.591
+C Speed\sup\ssearches\sof\shct\sindex\spages\sa\sbit.
+D 2025-05-20T18:14:01.252
 F .fossil-settings/binary-glob 61195414528fb3ea9693577e1980230d78a1f8b0a54c78cf1b9b24d0a409ed6a x
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
@@ -44,7 +44,7 @@ F autosetup/cc-db.tcl 6e0ed90146197a5a05b245e649975c07c548e30926b218ca3e1d4dc034
 F autosetup/cc-lib.tcl 493c5935b5dd3bf9bd4eca89b07c8b1b1a9356d61783035144e21795facf7360
 F autosetup/cc-shared.tcl 4f024e94a47f427ba61de1739f6381ef0080210f9fae89112d5c1de1e5460d78
 F autosetup/cc.tcl c0fcc50ca91deff8741e449ddad05bcd08268bc31177e613a6343bbd1fd3e45f
-F autosetup/find_tclconfig.tcl e64886ffe3b982d4df42cd28ed91fe0b5940c2c5785e126c1821baf61bc86a7e w tool/find_tclconfig.tcl
+F autosetup/find_tclconfig.tcl e64886ffe3b982d4df42cd28ed91fe0b5940c2c5785e126c1821baf61bc86a7e
 F autosetup/jimsh0.c 563b966c137a4ce3c9333e5196723b7ac0919140a9d7989eb440463cd855c367
 F autosetup/pkg-config.tcl 4e635bf39022ff65e0d5434339dd41503ea48fc53822c9c5bde88b02d3d952ba
 F autosetup/proj.tcl c4a77735b57f3c016a185bff048212a197b77723f9bea6cfafe396e4b542c666
@@ -730,7 +730,7 @@ F ext/wasm/tests/opfs/sahpool/sahpool-pausing.js f264925cfc82155de38cecb3d204c36
 F ext/wasm/tests/opfs/sahpool/sahpool-worker.js bd25a43fc2ab2d1bafd8f2854ad3943ef673f7c3be03e95ecf1612ff6e8e2a61
 F ext/wasm/wasmfs.make 68999f5bd8c489239592d59a420f8c627c99169bbd6fa16a404751f757b9f702
 F magic.txt 5ade0bc977aa135e79e3faaea894d5671b26107cc91e70783aa7dc83f22f3ba0
-F main.mk 2fe45f96c5137e8aaed06c0146d76660ab77bd0949d4920152beac749e2c22bc
+F main.mk e3b194398567992bc071e44c254920ba3c7b32a0e06bed8798c6f1e0402a7c8e
 F mptest/config01.test 3c6adcbc50b991866855f1977ff172eb6d901271
 F mptest/config02.test 4415dfe36c48785f751e16e32c20b077c28ae504
 F mptest/crash01.test 61e61469e257df0850df4293d7d4d6c2af301421
@@ -774,7 +774,7 @@ F src/hctJrnlInt.h 468811ef7cd854a8b734497b0ca6b6137b291ea9bba9dc4a91d6dc25a49f4
 F src/hctLogInt.h 44b72c10335f41efe1eb54df524218d4edbb07896a642093bc59badaa3aa7ecc
 F src/hctPManInt.h 3936d01947aace587fd73c51246b7bd5cdbc79833248b839e7d9ffd737ded8b7
 F src/hctTMapInt.h 29e978ca90d3c3c4f5fbe675647627a5518721bad4482aaf77a961ba81a7735d
-F src/hct_database.c daa5c7263e72fe310e9dd91124e5ee0c57f560975137f9b909afe0477741d3d5
+F src/hct_database.c 9028fa15b33546c94dfcc09cd3afbf04ee12a560719a0de4b7a49ff0d2756f58
 F src/hct_file.c 3fdd48f3dd58669ca98a1140ae7731eb935876adc4eb2eb8a7993e91be82213f
 F src/hct_journal.c 91ac0530d6ea417d96fedd0c37f810aaa612489db0e8e6265787edbe0776524b
 F src/hct_journalhash.c 5af4886fd8c126a96c78278f6e62a8e31de9b8e683b167c487b033a87fabb7a3
@@ -2324,8 +2324,8 @@ F tool/version-info.c 3b36468a90faf1bbd59c65fd0eb66522d9f941eedd364fabccd7227350
 F tool/warnings-clang.sh bbf6a1e685e534c92ec2bfba5b1745f34fb6f0bc2a362850723a9ee87c1b31a7
 F tool/warnings.sh 1ad0169b022b280bcaaf94a7fa231591be96b514230ab5c98fbf15cd7df842dd
 F tool/win/sqlite.vsix deb315d026cc8400325c5863eef847784a219a2f
-P c63dc852a6de0acac5d184146efbf369bd607ad869146d33ede36d022a435cc5 ba8184d132a935aa1980fbfb61ff308b93d433d559db4968f9014f7653ac9c6e
-R 4e934096227a206bb22d49a2989e6f96
+P eaa1b892af00c5b076ddf45ee2e798cc4bd94067122881d961dfd62973f07f7b
+R 1e79576483721292d4d7bcbb9beb1f69
 U dan
-Z ee676739a78dc9bc2eefa12c056a9b44
+Z d4b8f5e4192b6af04947aa866062525f
 # Remove this line to create a well-formed Fossil manifest.

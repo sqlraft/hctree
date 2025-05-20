@@ -1581,6 +1581,16 @@ static int hctDbIndexSearch(
   int i1 = 0;
   int i2 = ((HctDbPageHdr*)aPg)->nEntry;
 
+  int szHdr;
+  int szEntry;
+  if( hctPageheight(aPg)==0 ){
+    szHdr = sizeof(HctDbIndexLeaf);
+    szEntry = sizeof(HctDbIndexEntry);
+  }else{
+    szHdr = sizeof(HctDbIndexNode);
+    szEntry = sizeof(HctDbIndexNodeEntry);
+  }
+
   if( pRec ) xCompare = find_record_compare(pRec, xCompare);
   memset(&buf, 0, sizeof(buf));
 
@@ -1591,8 +1601,20 @@ static int hctDbIndexSearch(
     int nRec = 0;
     const u8 *aRec = 0;
 
-    rc = hctDbLoadRecord(pDb, &buf, aPg, iTest, &nRec, &aRec);
-    if( rc!=SQLITE_OK ) break;
+    /* Set aRec to point to a buffer nRec bytes in size containing the
+    ** key from the page to test. The following is usually faster than just
+    ** calling hctDbLoadRecord().  */
+    {
+      HctDbIndexEntry *pEntry = (HctDbIndexEntry*)&aPg[szHdr + iTest*szEntry];
+      if( pEntry->flags & HCTDB_HAS_OVFL ){
+        rc = hctDbLoadRecord(pDb, &buf, aPg, iTest, &nRec, &aRec);
+        if( rc!=SQLITE_OK ) break;
+      }else{
+        nRec = pEntry->nSize;
+        aRec = &aPg[ hctDbOffset(pEntry->iOff, pEntry->flags) ];
+      }
+    }
+
     if( nRec==0 ){
       res = -1;
     }else{
