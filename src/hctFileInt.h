@@ -194,6 +194,6 @@ int sqlite3HctFileLogFileId(HctFile *pFile, int iFile);
 char *sqlite3HctFileLogFileName(HctFile *pFile, int iId);
 
 #define HCT_MAX_NPREFAULT 256
-void sqlite3HctFilePrefault(HctFile *pFile, int nThread);
+void sqlite3HctFilePrefault(HctFile *pFile, int nThread, int bMinorOnly, i64*);
 
 

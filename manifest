@@ -1,5 +1,5 @@
-C Remove\sfurther\smemcmp()\sops\sfrom\sdelete\soperations.
-D 2025-05-19T18:59:14.332
+C Changes\sto\s"PRAGMA\shct_prefault"\s-\s(a)\sreturn\sthe\snumber\sof\spages\stouched,\sand\s(b)\sif\sthe\sargument\sis\s-ve,\suse\smincore()\sto\savoid\shitting\spages\sthat\swould\scause\smajor\spages.
+D 2025-05-20T11:40:18.694
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
 F LICENSE.md e108e1e69ae8e8a59e93c455654b8ac9356a11720d3345df2a4743e9590fb20d
@@ -762,14 +762,14 @@ F src/func.c 0712a5b03fdfc8af0cda6d076bfe231b66388d3d5a28b46dc1a94b90d41cac6a
 F src/global.c a19e4b1ca1335f560e9560e590fc13081e21f670643367f99cb9e8f9dc7d615b
 F src/hash.c 9ee4269fb1d6632a6fecfb9479c93a1f29271bddbbaf215dd60420bcb80c7220
 F src/hash.h 3340ab6e1d13e725571d7cee6d3e3135f0779a7d8e76a9ce0a85971fa3953c51
-F src/hctFileInt.h 7a2290bfdcfb0ab4154862a19a0997f8eef2fb42b27fdba0d0cdc5c13fb1047f
+F src/hctFileInt.h 95a0479cf875985c3efa36050a43d0c9371f6e426098279676e61ec0b6d8cb9c
 F src/hctInt.h a1f9f2b411829c34168297f0809c8c4c76aabf8792da26eb9f3bd4f8475f8369
 F src/hctJrnlInt.h 468811ef7cd854a8b734497b0ca6b6137b291ea9bba9dc4a91d6dc25a49f4a51
 F src/hctLogInt.h 44b72c10335f41efe1eb54df524218d4edbb07896a642093bc59badaa3aa7ecc
 F src/hctPManInt.h 3936d01947aace587fd73c51246b7bd5cdbc79833248b839e7d9ffd737ded8b7
 F src/hctTMapInt.h 29e978ca90d3c3c4f5fbe675647627a5518721bad4482aaf77a961ba81a7735d
 F src/hct_database.c daa5c7263e72fe310e9dd91124e5ee0c57f560975137f9b909afe0477741d3d5
-F src/hct_file.c fb884ef57d3a9fee90440aa7b23fab1952ee2103f1dcf0bbdc30cc6c4ce612f2
+F src/hct_file.c 3fdd48f3dd58669ca98a1140ae7731eb935876adc4eb2eb8a7993e91be82213f
 F src/hct_journal.c 91ac0530d6ea417d96fedd0c37f810aaa612489db0e8e6265787edbe0776524b
 F src/hct_journalhash.c 5af4886fd8c126a96c78278f6e62a8e31de9b8e683b167c487b033a87fabb7a3
 F src/hct_log.c 41b6bff3f4f9753760fcd8c249b5fc6d1608c8166b81d0e2552132c0c83e59d5
@@ -778,7 +778,7 @@ F src/hct_record.c 89e030773cdd9d00c1d3a10ce35478a87f6a143ae3c9ce2ec5842c83822a5
 F src/hct_stats.c f3bf6890dd72a942724133a2f76224a22a0adcf1d5ffce422ec056bc28d58b5a
 F src/hct_tmap.c 81ec4247ef597c754b87393120a7c1683b11618ea9edb7a9cacf7addf08f514d
 F src/hct_tree.c bc4ce8b9e86e6d5bf3c162b379eade9360eba3ddda7b91f643158485dd6ea10e
-F src/hctree.c 4d96cdbb4aa6b7fc12e035080e4a2b2f4c89c2562fc807ac76b4544ec6bdca31
+F src/hctree.c 5922ca043d426a0c940b572a95c71d52c0e2f263cf4a3031f7324d6814ee3328
 F src/hwtime.h f9c2dfb84dce7acf95ce6d289e46f5f9d3d1afd328e53da8f8e9008e3b3caae6
 F src/in-operator.md 10cd8f4bcd225a32518407c2fb2484089112fd71
 F src/insert.c d1365fe92a984a62416b5e0f725f9d886d62f3efca20397049502b9d16657eb2
@@ -2326,8 +2326,8 @@ F tool/version-info.c 3b36468a90faf1bbd59c65fd0eb66522d9f941eedd364fabccd7227350
 F tool/warnings-clang.sh bbf6a1e685e534c92ec2bfba5b1745f34fb6f0bc2a362850723a9ee87c1b31a7
 F tool/warnings.sh 49a486c5069de041aedcbde4de178293e0463ae9918ecad7539eedf0ec77a139
 F tool/win/sqlite.vsix deb315d026cc8400325c5863eef847784a219a2f
-P a297945d1b40a67a41c958f44b7299c8ca520e8dcdab611dd3602888da959ba7
-R c32bf16fce72a8240fa400a05818567a
+P 09c1df2f553ab02ba207a624329ecc0e8a173737f1d012eaaf65a98381897e0b
+R 0dfe7872616756ef9df267d6c850eab6
 U dan
-Z 35c70d27e526e5ebc1904502293a15f3
+Z eed38673bb67d58c4ce93715358a18d2
 # Remove this line to create a well-formed Fossil manifest.

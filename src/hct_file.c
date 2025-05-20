@@ -2282,6 +2282,8 @@ struct HctPrefaultThread {
   HctMapping *p;                  /* Mapping to touch pages within */
   int iStart;                     /* First chunk to prefault */
   int nChunk;                     /* Number of chunks to prefault */
+  int bMinorOnly;                 /* Try to avoid causing major page-faults */
+  i64 nPage;                      /* Total pages hit */
 };
 
 /*
@@ -2291,15 +2293,29 @@ static void *hctFilePrefaultThread(void *pArg){
   volatile int val = 0;
   HctPrefaultThread *pPre = (HctPrefaultThread*)pArg;
   HctMapping *p = pPre->p;
+  int pgsz = sysconf(_SC_PAGESIZE);
   int nBytePerChunk = (p->mapMask+1) * p->szPage;
+  int nPagePerChunk = (nBytePerChunk + pgsz -1) / pgsz;
   int ii;
 
+  u8 *aVector = 0;
+
+  if( pPre->bMinorOnly ){
+    aVector = (u8*)sqlite3HctMalloc( nPagePerChunk );
+  }
+
   for(ii=pPre->iStart; ii<(pPre->iStart+pPre->nChunk); ii++){
-    int iOff;
-    const u8 *aData = (const u8*)p->aChunk[ii].pData;
-    for(iOff=0; iOff<nBytePerChunk; iOff+=4096){
-      val += aData[iOff];
-      (void)val;
+    int iPg;
+    u8 *aData = (u8*)p->aChunk[ii].pData;
+    if( aVector ){
+      mincore(aData, nBytePerChunk, aVector);
+    }
+    for(iPg=0; iPg<nPagePerChunk; iPg++){
+      if( aVector==0 || (aVector[iPg] & 0x01) ){
+        val += aData[iPg*pgsz];
+        (void)val;
+        pPre->nPage++;
+      }
     }
   }
 
@@ -2311,11 +2327,17 @@ static void *hctFilePrefaultThread(void *pArg){
 ** entire database file. To ensure that the page tables for the mmap()ed
 ** database file have been established.
 */
-void sqlite3HctFilePrefault(HctFile *pFile, int nThread){
+void sqlite3HctFilePrefault(
+  HctFile *pFile, 
+  int nThread, 
+  int bMinorOnly,
+  i64 *pnPage
+){
   HctMapping *p = pFile->pMapping;
   HctPrefaultThread *aThread = 0;
   int ii = 0;
   int iStart = 0;
+  i64 nPg = 0;
 
   if( nThread>p->nChunk ){
     nThread = p->nChunk;
@@ -2335,9 +2357,11 @@ void sqlite3HctFilePrefault(HctFile *pFile, int nThread){
 
   for(ii=0; ii<nThread; ii++){
     pthread_join(aThread[ii].tid, 0);
+    nPg += aThread[ii].nPage;
   }
 
   sqlite3_free(aThread);
+  *pnPage = nPg;
 }
 
 
