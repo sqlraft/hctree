@@ -1,5 +1,5 @@
-C Speed\sup\ssearches\sof\shct\sindex\spages\sa\sbit.
-D 2025-05-20T18:14:01.252
+C Speed\sup\ssqlite3HctFilePageGet()\sa\sbit.
+D 2025-05-20T18:58:11.279
 F .fossil-settings/binary-glob 61195414528fb3ea9693577e1980230d78a1f8b0a54c78cf1b9b24d0a409ed6a x
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
@@ -775,7 +775,7 @@ F src/hctLogInt.h 44b72c10335f41efe1eb54df524218d4edbb07896a642093bc59badaa3aa7e
 F src/hctPManInt.h 3936d01947aace587fd73c51246b7bd5cdbc79833248b839e7d9ffd737ded8b7
 F src/hctTMapInt.h 29e978ca90d3c3c4f5fbe675647627a5518721bad4482aaf77a961ba81a7735d
 F src/hct_database.c 9028fa15b33546c94dfcc09cd3afbf04ee12a560719a0de4b7a49ff0d2756f58
-F src/hct_file.c 3fdd48f3dd58669ca98a1140ae7731eb935876adc4eb2eb8a7993e91be82213f
+F src/hct_file.c 7e5f8805006412b7fa6c157bff54a0e9c85ffdaab30452b049d5fc631f1429a2
 F src/hct_journal.c 91ac0530d6ea417d96fedd0c37f810aaa612489db0e8e6265787edbe0776524b
 F src/hct_journalhash.c 5af4886fd8c126a96c78278f6e62a8e31de9b8e683b167c487b033a87fabb7a3
 F src/hct_log.c 41b6bff3f4f9753760fcd8c249b5fc6d1608c8166b81d0e2552132c0c83e59d5
@@ -2324,8 +2324,8 @@ F tool/version-info.c 3b36468a90faf1bbd59c65fd0eb66522d9f941eedd364fabccd7227350
 F tool/warnings-clang.sh bbf6a1e685e534c92ec2bfba5b1745f34fb6f0bc2a362850723a9ee87c1b31a7
 F tool/warnings.sh 1ad0169b022b280bcaaf94a7fa231591be96b514230ab5c98fbf15cd7df842dd
 F tool/win/sqlite.vsix deb315d026cc8400325c5863eef847784a219a2f
-P eaa1b892af00c5b076ddf45ee2e798cc4bd94067122881d961dfd62973f07f7b
-R 1e79576483721292d4d7bcbb9beb1f69
+P 4032ad59f0cd83b251a8488565b94dfd5ba3ac65b729804e8f1952b5200360f7
+R b1930effe1c00b48219dc8960f606f85
 U dan
-Z d4b8f5e4192b6af04947aa866062525f
+Z 8bfbb28db2c112d2d9d12023e2e89235
 # Remove this line to create a well-formed Fossil manifest.
