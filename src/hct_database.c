@@ -288,8 +288,11 @@ struct HctBalance {
 */
 typedef struct HctDatabaseStats HctDatabaseStats;
 struct HctDatabaseStats {
-  i64 nBalanceIntkey;
-  i64 nBalanceIndex;
+  i64 nBalanceIntkeyNode;
+  i64 nBalanceIntkeyLeaf;
+  i64 nBalanceIndexNode;
+  i64 nBalanceIndexLeaf;
+
   i64 nBalanceSingle;
 
   i64 nBalanceUnderfull;
@@ -533,9 +536,18 @@ static void hctExtraLogging(
   }
 }
 
-static void hctExtraWriteLogging(const char *zFunc, int iLine, char *zMsg){
-  sqlite3_log(SQLITE_NOTICE, "%s:%d: %s", zFunc, iLine, zMsg);
-  sqlite3_free(zMsg);
+static void hctExtraWriteLogging(
+  const char *zFunc, 
+  int iLine, 
+  HctDatabase *pHctDb,
+  char *zMsg
+){
+  if( pHctDb->pConfig->bHctExtraWriteLogging>1 ){
+    sqlite3HctExtraLogging(pHctDb->pConfig, zFunc, iLine, zMsg);
+  }else{
+    sqlite3_log(SQLITE_NOTICE, "%s:%d: %p: %s", zFunc, iLine, pHctDb, zMsg);
+    sqlite3_free(zMsg);
+  }
 }
 
 #define HCT_EXTRA_LOGGING(pDb, x)                                \
@@ -543,7 +555,10 @@ static void hctExtraWriteLogging(const char *zFunc, int iLine, char *zMsg){
     hctExtraLogging(__func__, __LINE__, pDb, sqlite3_mprintf x); \
   }
 
-#define HCT_EXTRA_WR_LOGGING(x) if( hct_extra_write_logging ) { hctExtraWriteLogging(__func__, __LINE__, sqlite3_mprintf x); }
+#define HCT_EXTRA_WR_LOGGING(pDb, x)                                  \
+  if( pDb->pConfig->bHctExtraWriteLogging ) {                         \
+    hctExtraWriteLogging(__func__, __LINE__, pDb, sqlite3_mprintf x); \
+  }
 
 
 void sqlite3HctBufferGrow(HctBuffer *pBuf, int nSize){
@@ -783,9 +798,9 @@ int sqlite3HctDbStartRead(HctDatabase *pDb, HctJournal *pJrnl){
         pDb->iReqSnapshotId = pDb->iSnapshotId - (HCT_MAX_LEADING_WRITE/2);
       }
 
-      HCT_EXTRA_WR_LOGGING((
-            "%p: starting read with snapshot=%lld, localmintid=%lld", 
-            pDb, pDb->iSnapshotId, pDb->iLocalMinTid
+      HCT_EXTRA_WR_LOGGING(pDb, (
+            "starting read with snapshot=%lld, localmintid=%lld", 
+            pDb->iSnapshotId, pDb->iLocalMinTid
       ));
     }
   }
@@ -3545,7 +3560,7 @@ static int hctDbInsertFlushWrite(HctDatabase *pDb, HctDbWriter *p){
     }
   }
 
-  HCT_EXTRA_WR_LOGGING(("%p: flush done rc=%d", pDb, rc));
+  HCT_EXTRA_WR_LOGGING(pDb, ("flush done rc=%d iHeight=%d", rc, p->iHeight));
 
   /* Clean up the Writer object */
   hctDbWriterCleanup(pDb, p, bUnevict);
@@ -3587,7 +3602,7 @@ int sqlite3HctDbInsertFlush(HctDatabase *pDb, int *pnRetry){
       *pnRetry = pDb->pa.nWriteKey;
       rc = SQLITE_OK;
       pDb->nCasFail++;
-      HCT_EXTRA_WR_LOGGING(("%p: retrying %d ops", pDb, *pnRetry));
+      HCT_EXTRA_WR_LOGGING(pDb, ("retrying %d ops", *pnRetry));
     }else{
       *pnRetry = 0;
     }
@@ -4102,7 +4117,6 @@ static void hctDbIrrevocablyEvictPage(HctDatabase *pDb, HctDbWriter *p){
 */
 static int hctDbLoadPeers(HctDatabase *pDb, HctDbWriter *p, int *piPg){
   int rc = SQLITE_OK;
-  int iPg = *piPg;
 
   if( p->writepg.nPg==1 ){
     HctFilePage *pPage0 = &p->writepg.aPg[0];
@@ -4111,7 +4125,7 @@ static int hctDbLoadPeers(HctDatabase *pDb, HctDbWriter *p, int *piPg){
 
     if( p->writepg.nPg==1 && 0==hctIsLeftmost(aPage0) ){
       HctFilePage *pDiscard = 0;
-      assert( iPg==0 );
+      assert( *piPg==0 );
 
       /* First, evict the page currently in p->writepg.aPg[0]. If we 
       ** successfully evict the page here, then of course no other thread
@@ -4449,6 +4463,54 @@ static int hctDbDirtyWriteArray(
   return rc;
 }
 
+static void hctExtraWriteLoggingBalance1(
+  const char *zFunc,
+  int iLine,
+  HctDatabase *pDb,
+  u8 **aPgCopy,
+  int nIn
+){
+  int ii;
+  char *zMsg = sqlite3HctMprintf("input: ");
+  for(ii=0; ii<nIn; ii++){
+    HctDbIndexNode *pNode = (HctDbIndexNode*)aPgCopy[ii];
+    zMsg = sqlite3HctMprintf("%z (fr=%d)", zMsg, (int)pNode->hdr.nFreeBytes);
+  }
+
+  hctExtraWriteLogging(zFunc, iLine, pDb, zMsg);
+}
+
+#define HCT_EXTRA_WR_LOGGING_BALANCE1(pDb, aPgCopy, nIn) \
+  if( pDb->pConfig->bHctExtraWriteLogging ){                \
+    hctExtraWriteLoggingBalance1(__func__, __LINE__, pDb, aPgCopy, nIn); \
+  }
+
+static void hctExtraWriteLoggingBalance2(
+  const char *zFunc,
+  int iLine,
+  HctDatabase *pDb,
+  HctDbWriter *p,
+  int iLeftPg,
+  int nOut
+){
+  int ii;
+  char *zMsg = sqlite3HctMprintf("output: ");
+  for(ii=iLeftPg; ii<nOut+iLeftPg; ii++){
+    HctFilePage *pPg = &p->writepg.aPg[ii];
+    HctDbIndexNode *pNode = (HctDbIndexNode*)pPg->aNew;
+    zMsg = sqlite3HctMprintf("%z (fr=%d)", zMsg, (int)pNode->hdr.nFreeBytes);
+  }
+
+  hctExtraWriteLogging(zFunc, iLine, pDb, zMsg);
+}
+
+#define HCT_EXTRA_WR_LOGGING_BALANCE2(pDb, p, iLeftPg, nOut) \
+  if( pDb->pConfig->bHctExtraWriteLogging ){                             \
+    hctExtraWriteLoggingBalance2(                                        \
+        __func__, __LINE__, pDb, p, iLeftPg, nOut            \
+    ); \
+  }
+
 /*
 ** Rebalance routine for pages with variably-sized records - intkey leaves,
 ** index leaves and index nodes.
@@ -4474,10 +4536,9 @@ static int hctDbBalance(
 
   u8 *aPgCopy[3];
 
-  int nRem;
-
   int aPgRem[5];
   int aPgFirst[6];
+  int nRemRem = 0;
 
   /* Grab the temporary space used by balance operations.  */
   HctBalance *pBal = 0;
@@ -4571,6 +4632,8 @@ static int hctDbBalance(
       }
     }
 
+    HCT_EXTRA_WR_LOGGING_BALANCE1(pDb, aPgCopy, nIn);
+
     for(ii=(iPg-iLeftPg)-1; ii>=0; ii--){
       int nCell = hctPagenentry(aPgCopy[ii]);
       aSz -= nCell;
@@ -4585,9 +4648,17 @@ static int hctDbBalance(
 
   /* Update stats as required. */
   if( p->writecsr.pKeyInfo==0 ){
-    pDb->stats.nBalanceIntkey++;
+    if( p->iHeight==0 ){
+      pDb->stats.nBalanceIntkeyLeaf++;
+    }else{
+      pDb->stats.nBalanceIntkeyNode++;
+    }
   }else{
-    pDb->stats.nBalanceIndex++;
+    if( p->iHeight==0 ){
+      pDb->stats.nBalanceIndexLeaf++;
+    }else{
+      pDb->stats.nBalanceIndexNode++;
+    }
   }
   if( nIn==1 ){
     pDb->stats.nBalanceSingle++;
@@ -4597,8 +4668,8 @@ static int hctDbBalance(
   ** a mapping heavily biased to the left. */
   aPgFirst[0] = 0;
   if( nOut==0 ){
+    int nRem = pDb->pgsz - sizeof(HctDbIntkeyLeaf);
     assert( sizeof(HctDbIntkeyLeaf)==sizeof(HctDbIndexLeaf) );
-    nRem = pDb->pgsz - sizeof(HctDbIntkeyLeaf);
     nOut = 1;
     for(ii=0; ii<nSz; ii++){
       if( aSz[ii].nByte>nRem ){
@@ -4611,22 +4682,24 @@ static int hctDbBalance(
       nRem -= aSz[ii].nByte;
     }
     aPgRem[nOut-1] = nRem;
+    nRemRem += nRem;
   }
   aPgFirst[nOut] = nSz;
 
   /* Adjust the packing calculated by the previous loop. */
   for(ii=nOut-1; ii>0; ii--){
     /* Try to shift cells from output page (ii-1) to output page (ii). Shift
-    ** cells for as long as (a) there is more free space on page (ii) than on
-    ** page (ii-1), and (b) there is enough free space on page (ii) to fit
-    ** the last cell from page (ii-1).  */
-    while( aPgRem[ii]>aPgRem[ii-1] ){       /* condition (a) */
+    ** cells for as long as moving a cell will not cause page ii to drop
+    ** below nRemTarget bytes of free space.  */
+    int nRemTarget = nRemRem / (ii+1);
+    while( 1 ){
       HctDbCellSz *pLast = &aSz[aPgFirst[ii]-1];
-      if( pLast->nByte>aPgRem[ii] ) break;  /* condition (b) */
+      if( (aPgRem[ii]-pLast->nByte)<nRemTarget ) break;
       aPgRem[ii] -= pLast->nByte;
       aPgRem[ii-1] += pLast->nByte;
       aPgFirst[ii] = (pLast - aSz);
     }
+    nRemRem -= aPgRem[ii];
   }
 
   rc = hctDbDirtyWriteArray(pDb, p, 0);
@@ -4668,6 +4741,8 @@ static int hctDbBalance(
     pLeaf->hdr.nFreeBytes = iOff - (iEntry0 + nNewEntry*szEntry);
     pLeaf->hdr.nFreeGap = iOff - (iEntry0 + nNewEntry*szEntry);
   }
+
+  HCT_EXTRA_WR_LOGGING_BALANCE2(pDb, p, iLeftPg, nOut);
 
   return rc;
 }
@@ -6133,15 +6208,18 @@ static void hctDbDebugRollbackOp(
     zRes = sqlite3HctMprintf("<no-op>");
   }
 
-  hctExtraWriteLogging(zFunc, iLine,
-      sqlite3HctMprintf("%p: rollback of (%s) -> %s" , pDb, zKey, zRes)
+  hctExtraWriteLogging(zFunc, iLine, pDb,
+      sqlite3HctMprintf("rollback of (%s) -> %s" , zKey, zRes)
   );
 
   sqlite3_free(zKey);
   sqlite3_free(zRes);
 }
 
-#define HCT_EXTRA_WR_LOGGING_ROLLBACK(a,b,c,d) if( hct_extra_write_logging ) { hctDbDebugRollbackOp(__func__, __LINE__, a,b,c,d); }
+#define HCT_EXTRA_WR_LOGGING_ROLLBACK(a,b,c,d) \
+  if( a->pConfig->bHctExtraWriteLogging ) { \
+    hctDbDebugRollbackOp(__func__, __LINE__, a,b,c,d);  \
+  }
 
 static void hctDbDebugInsertOp(
   const char *zFunc,
@@ -6167,15 +6245,18 @@ static void hctDbDebugInsertOp(
     zRes = sqlite3HctMprintf("(%z)", zRes);
   }
 
-  hctExtraWriteLogging(zFunc, iLine,
-      sqlite3HctMprintf("%p: insert of (%s) -> %s" , pDb, zKey, zRes)
+  hctExtraWriteLogging(zFunc, iLine, pDb,
+      sqlite3HctMprintf("insert of (%s) -> %s" , zKey, zRes)
   );
 
   sqlite3_free(zKey);
   sqlite3_free(zRes);
 }
 
-#define HCT_EXTRA_WR_LOGGING_INSERT(a,b,c,d,e,f) if( hct_extra_write_logging ) { hctDbDebugInsertOp(__func__, __LINE__, a,b,c,d,e,f); }
+#define HCT_EXTRA_WR_LOGGING_INSERT(a,b,c,d,e,f) \
+  if( a->pConfig->bHctExtraWriteLogging ) { \
+    hctDbDebugInsertOp(__func__, __LINE__, a,b,c,d,e,f); \
+  }
 
 int sqlite3HctDbInsert(
   HctDatabase *pDb,               /* Database to insert into or delete from */
@@ -6629,8 +6710,8 @@ int sqlite3HctDbEndWrite(HctDatabase *p, u64 iCid, int bRollback){
   }
   HctAtomicStore(pEntry, iVal);
 
-  HCT_EXTRA_WR_LOGGING(("%p: mapping %lld to %lld (%s)",
-        p, p->iTid, iVal & HCT_TID_MASK, (bRollback?"ROLLBACK":"COMMITTED")
+  HCT_EXTRA_WR_LOGGING(p, ("mapping %lld to %lld (%s)",
+        p->iTid, iVal & HCT_TID_MASK, (bRollback?"ROLLBACK":"COMMITTED")
   ));
 
   p->iTid = 0;
@@ -6663,8 +6744,8 @@ int sqlite3HctDbEndWrite(HctDatabase *p, u64 iCid, int bRollback){
 */
 void sqlite3HctDbSetTmapForRollback(HctDatabase *p){
   u64 *pEntry = hctDbFindTMapEntry(p->pTmap, p->iTid);
-  HCT_EXTRA_WR_LOGGING(
-      ("%p: mapping %lld to %lld (VALIDATING)", p, p->iTid, p->iSnapshotId)
+  HCT_EXTRA_WR_LOGGING(p,
+      ("mapping %lld to %lld (VALIDATING)", p->iTid, p->iSnapshotId)
   );
   /* Why VALIDATING? See header comment for this function... */
   HctAtomicStore(pEntry, p->iSnapshotId|HCT_TMAP_VALIDATING);
@@ -7724,42 +7805,51 @@ i64 sqlite3HctDbStats(sqlite3 *db, int iStat, const char **pzStat){
 
   switch( iStat ){
     case 0:
-      *pzStat = "balance_intkey";
-      iVal = pDb->stats.nBalanceIntkey;
+      *pzStat = "balance_intkey_leaf";
+      iVal = pDb->stats.nBalanceIntkeyLeaf;
       break;
     case 1:
-      *pzStat = "balance_index";
-      iVal = pDb->stats.nBalanceIndex;
+      *pzStat = "balance_index_leaf";
+      iVal = pDb->stats.nBalanceIndexLeaf;
       break;
     case 2:
+      *pzStat = "balance_intkey_node";
+      iVal = pDb->stats.nBalanceIntkeyNode;
+      break;
+    case 3:
+      *pzStat = "balance_index_node";
+      iVal = pDb->stats.nBalanceIndexNode;
+      break;
+
+    case 4:
       *pzStat = "balance_single";
       iVal = pDb->stats.nBalanceSingle;
       break;
-    case 3:
+    case 5:
       *pzStat = "tmap_lookup";
       iVal = pDb->stats.nTMapLookup;
       break;
-    case 4:
+    case 6:
       *pzStat = "update_in_place";
       iVal = pDb->stats.nUpdateInPlace;
       break;
-    case 5:
+    case 7:
       *pzStat = "internal_retry";
       iVal = pDb->stats.nInternalRetry;
       break;
-    case 6:
+    case 8:
       *pzStat = "defragment";
       iVal = pDb->stats.nDefragment;
       break;
-    case 7:
+    case 9:
       *pzStat = "balance_deleteleftkey";
       iVal = pDb->stats.nBalanceDeleteLeftKey;
       break;
-    case 8:
+    case 10:
       *pzStat = "balance_underfull";
       iVal = pDb->stats.nBalanceUnderfull;
       break;
-    case 9:
+    case 11:
       *pzStat = "balance_overfull";
       iVal = pDb->stats.nBalanceOverfull;
       break;
