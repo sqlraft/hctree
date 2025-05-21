@@ -16,10 +16,6 @@
 #include <string.h>
 #include <assert.h>
 
-int hct_extra_logging = 0;
-
-int hct_extra_write_logging = 0;
-
 typedef struct HctDatabase HctDatabase;
 typedef struct HctDbIndexEntry HctDbIndexEntry;
 typedef struct HctDbIndexLeaf HctDbIndexLeaf;
