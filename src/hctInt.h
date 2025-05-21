@@ -34,6 +34,7 @@ struct HctConfig {
   int bQuiescentIntegrityCheck;   /* PRAGMA hct_quiescent_integrity_check */
   int pgsz;
   int bHctExtraLogging;           /* PRAGMA hct_extra_logging = ? */
+  int bHctExtraWriteLogging;      /* PRAGMA hct_extra_write_logging = ? */
   sqlite3 *db;
 
   int nLogEntry;

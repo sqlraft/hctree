@@ -3422,6 +3422,15 @@ int sqlite3HctBtreePragma(Btree *pBt, char **aFnctl){
       p->config.bHctExtraLogging = iVal;
     }
     zRet = hctDbMPrintf(&rc, "%d", p->config.bHctExtraLogging);
+  }else if( 0==sqlite3_stricmp("hct_extra_write_logging", zLeft) ){
+    int iVal = 0;
+    if( zRight ){
+      iVal = sqlite3Atoi(zRight);
+    }
+    if( iVal>=0 ){
+      p->config.bHctExtraWriteLogging = iVal;
+    }
+    zRet = hctDbMPrintf(&rc, "%d", p->config.bHctExtraLogging);
   }else if( 0==sqlite3_stricmp("hct_log", zLeft) ){
     zRet = hctGetLog(&p->config);
     hctFreeLog(&p->config);
