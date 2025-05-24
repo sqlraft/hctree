@@ -17,6 +17,8 @@ set testprefix hct_insert
 
 hct_reset_db
 
+expr srand(0)
+
 do_execsql_test 1.0 {
   CREATE TABLE t1(a INTEGER PRIMARY KEY, b TEXT);
   CREATE INDEX i1 ON t1(b);
@@ -98,8 +100,6 @@ proc randtext {n} {
   set ret
 }
 db func randtext randtext
-
-expr srand(0)
 
 do_execsql_test 3.0 {
   PRAGMA hct_npagescan = 5;
