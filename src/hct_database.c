@@ -775,10 +775,11 @@ int sqlite3HctDbStartRead(HctDatabase *pDb, HctJournal *pJrnl){
     }
     if( rc==SQLITE_OK ){
       u64 iSnapshot = 0;
+      u64 iPeekTid = sqlite3HctFilePeekTransid(pDb->pFile);
       HctTMapClient *pTMapClient = sqlite3HctFileTMapClient(pDb->pFile);
 
       iSnapshot = sqlite3HctJrnlSnapshot(pJrnl);
-      rc = sqlite3HctTMapBegin(pTMapClient, iSnapshot, &pDb->pTmap);
+      rc = sqlite3HctTMapBegin(pTMapClient, iSnapshot, iPeekTid, &pDb->pTmap);
       assert( rc==SQLITE_OK );  /* todo */
 
       if( iSnapshot==0 ){
@@ -2354,7 +2355,7 @@ static int hctDbFollowRangeOld(
     assert( bMerge==0 );
   }
 
-  HCT_EXTRA_LOGGING(pDb, (
+  HCT_EXTRA_WR_LOGGING(pDb, (
         "%sfollowing, %smerging for history pointer "
         "(iRangeTid=%lld, iFollowTid=%lld, iOldPg=%lld)",
         (bRet ? "" : "not "), (bMerge ? "" : "not "),
@@ -3075,6 +3076,30 @@ void sqlite3HctDbSetSavePhysical(
   pDb->pSavePhysical = pSave;
 }
 
+
+/*
+** This function is used while debugging hctree only. 
+**
+** It returns a string describing the current position of cursor pCsr. It
+** is the responsibility of the caller to eventually free the returned
+** string using sqlite3_free().
+*/
+static char *hctDbCsrDebugPosition(HctDbCsr *pCsr){
+  char *zRet = 0;
+  i64 iPg = 0;
+  int iCell = 0;
+  if( pCsr->nRange==0 ){
+    iCell = pCsr->iCell;
+    iPg = (i64)pCsr->pg.iOldPg;
+  }else{
+    iCell = pCsr->aRange[pCsr->nRange-1].iCell;
+    iPg = (i64)pCsr->aRange[pCsr->nRange-1].pg.iOldPg;
+  }
+
+  zRet = sqlite3HctMprintf("(phys. page %lld, cell %d)", iPg, iCell);
+  return zRet;
+}
+
 int sqlite3HctDbCsrRollbackSeek(
   HctDbCsr *pCsr,                 /* Cursor to seek */
   UnpackedRecord *pRec,           /* Key for index tables */
@@ -3116,11 +3141,18 @@ int sqlite3HctDbCsrRollbackSeek(
     ** to +1 below.  */
     *pOp = -1;
   }
+  HCT_EXTRA_WR_LOGGING(pDb, (
+      "leaf seek to: %z", hctDbCsrDebugPosition(pCsr)
+  ));
 
   if( rc==SQLITE_OK && pCsr->iCell>=0 ){
     int bHistHit = 0;
     rc = hctDbCsrRollbackDescend(pCsr, pRec, iKey, &bHistHit);
     assert( bHistHit==0 || pCsr->nRange>0 );
+    HCT_EXTRA_WR_LOGGING(pDb, (
+       "RollbackDescend lands on: %z (bHistHit=%d)", 
+       hctDbCsrDebugPosition(pCsr), bHistHit
+    ));
     if( bHistHit && pDb->iTid==pCsr->aRange[pCsr->nRange-1].iRangeTid ){
       /* Either case (3) or case (2). */
       *pOp = +1;
@@ -5522,7 +5554,6 @@ static int hctDbWriteWriteConflict(
       if( hctDbTidIsConflict(pDb, iTid) ){
         rc = HCT_SQLITE_BUSY;
       }
-
     }
   }else if( pOp->iInsert>0 ){
     int iCell = 0;
@@ -5553,9 +5584,7 @@ static int hctDbWriteWriteConflict(
           rc = hctDbLeafSearch(pDb, aOld, iKey, pKey, &iCell, &bExact);
           if( rc==SQLITE_OK && bExact ){
             if( bMerge ){
-              HctDbCell cell;
-              hctDbCellGetByIdx(pDb, aOld, iCell, &cell);
-              if( hctDbTidIsVisible(pDb, cell.iTid, 0) ) rc = HCT_SQLITE_BUSY;
+              rc = HCT_SQLITE_BUSY;
             }
             sqlite3HctFilePageRelease(&pg);
             break;
@@ -5808,6 +5837,13 @@ static int hctDbInsert(
     }
     if( rc ) return rc;
     assert( aTarget );
+
+    HCT_EXTRA_WR_LOGGING(pDb, 
+        ("updating page %lld (iOldPg=%lld, iNewPg=%lld)", 
+        p->writepg.aPg[op.iPg].iPg,
+        p->writepg.aPg[op.iPg].iOldPg,
+        p->writepg.aPg[op.iPg].iNewPg
+    ));
 
     /* If this is a write to a leaf page, and not part of a rollback, 
     ** check for a write-write conflict here. */
@@ -6148,29 +6184,6 @@ int sqlite3HctDbJrnlWrite(
   rc = hctDbInsertWithRetry(pDb, iRoot, 0, iKey, 0, nData, aData, pnRetry);
   pDb->eMode = HCT_MODE_NORMAL;
   return rc;
-}
-
-/*
-** This function is used while debugging hctree only. 
-**
-** It returns a string describing the current position of cursor pCsr. It
-** is the responsibility of the caller to eventually free the returned
-** string using sqlite3_free().
-*/
-static char *hctDbCsrDebugPosition(HctDbCsr *pCsr){
-  char *zRet = 0;
-  i64 iPg = 0;
-  int iCell = 0;
-  if( pCsr->nRange ){
-    iCell = pCsr->iCell;
-    iPg = (i64)pCsr->pg.iOldPg;
-  }else{
-    iCell = pCsr->aRange[pCsr->nRange-1].iCell;
-    iPg = (i64)pCsr->aRange[pCsr->nRange-1].pg.iOldPg;
-  }
-
-  zRet = sqlite3HctMprintf("(phys. page %lld, cell %d)", iPg, iCell);
-  return zRet;
 }
 
 static void hctDbDebugRollbackOp(

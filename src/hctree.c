@@ -1326,6 +1326,7 @@ static int hctRecordTid(void *pCtx, const char *zFile){
     }
   }
 
+  close(fd);
   return SQLITE_OK;
 }
 
@@ -1337,9 +1338,10 @@ static int hctAttemptRecovery(HBtree *p){
   if( p->pHctDb && sqlite3HctDbStartRecovery(p->pHctDb, 0) ){
     int eMode = SQLITE_HCT_NORMAL;
     int ii;
-    p->bRecoveryDone = 1;
     HctIntList lRb = {0,0,0};
     HctIntList lZero = {0,0,0};
+
+    p->bRecoveryDone = 1;
 
     /* Find the journal recovery mode - the mode the database was in when
     ** the previous user exited. */

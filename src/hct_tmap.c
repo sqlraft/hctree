@@ -78,6 +78,8 @@ struct HctTMapStats {
   i64 nMutexBlock;
 };
 
+/* How many new tmap pages to allocate at a time. */
+#define TMAP_NPAGE_ALLOC 16
 
 /*
 ** iLockValue:
@@ -204,7 +206,9 @@ static int hctTMapInit(HctTMapServer *p, u64 iFirstTid, u64 iLastTid){
   assert( p->pList==0 );
   assert( (iFirstTid & HCT_TMAP_CID_MASK)==iFirstTid );
 
-  nMap = (iLastTid / HCT_TMAP_PAGESIZE) - (iFirst / HCT_TMAP_PAGESIZE) + 3;
+  nMap = (iLastTid / HCT_TMAP_PAGESIZE) 
+       - (iFirst / HCT_TMAP_PAGESIZE) 
+       + TMAP_NPAGE_ALLOC;
   nByte = sizeof(HctTMapFull) + sizeof(u64*)*nMap;
   pNew = (HctTMapFull*)sqlite3HctMallocRc(&rc, nByte);
   if( pNew ){
@@ -376,9 +380,52 @@ void sqlite3HctTMapClientFree(HctTMapClient *pClient){
 }
 
 
-int sqlite3HctTMapBegin(HctTMapClient *pClient, u64 iSnapshot, HctTMap **ppMap){
+static void hctTMapUpdateSafe(HctTMapClient *pClient){
+  assert( sqlite3_mutex_held(pClient->pServer->pMutex) );
+  if( pClient->pMap!=pClient->pServer->pList ){
+    pClient->pMap->nRef--;
+    if( pClient->pMap->nRef==0 ){
+      hctTMapFreeMap(pClient->pServer, pClient->pMap);
+    }
+    pClient->pMap = pClient->pServer->pList;
+    pClient->pMap->nRef++;
+  }
+}
+
+/*
+** This is called by a reader if it needs to look-up a TID for which its
+** current HctTMap object is not large enough. This function sets output
+** parameter (*ppMap) to point to the latest HctTMap object, which,
+** unless the db is corrupt, is guaranteed to be large enough.
+**
+** SQLITE_OK is returned if successful.
+*/
+int sqlite3HctTMapUpdate(HctTMapClient *pClient, HctTMap **ppMap){
+  ENTER_TMAP_MUTEX(pClient);
+  hctTMapUpdateSafe(pClient);
+  LEAVE_TMAP_MUTEX(pClient);
+  *ppMap = (HctTMap*)pClient->pMap;
+  return SQLITE_OK;
+}
+
+int sqlite3HctTMapBegin(
+  HctTMapClient *pClient, 
+  u64 iSnapshot, 
+  u64 iPeekTid,
+  HctTMap **ppMap
+){
   HctTMapFull *pMap = pClient->pMap;
   u64 iEof = pMap->m.iFirstTid + pMap->m.nMap*HCT_TMAP_PAGESIZE;
+
+  /* If the current mapping does not cover up to TID value iPeekTid, then
+  ** attempt to update the mapping. */
+  if( iEof<iPeekTid ){
+    ENTER_TMAP_MUTEX(pClient);
+    hctTMapUpdateSafe(pClient);
+    LEAVE_TMAP_MUTEX(pClient);
+    pMap = pClient->pMap;
+    iEof = pMap->m.iFirstTid + pMap->m.nMap*HCT_TMAP_PAGESIZE;
+  }
 
   while( 1 ){
     u64 iOrigLockValue = HctAtomicLoad(&pClient->iLockValue);
@@ -414,34 +461,6 @@ int sqlite3HctTMapBegin(HctTMapClient *pClient, u64 iSnapshot, HctTMap **ppMap){
 
 u64 sqlite3HctTMapCommitedTID(HctTMapClient *pClient){
   return (pClient->iLockValue & HCT_TMAP_CID_MASK);
-}
-
-static void hctTMapUpdateSafe(HctTMapClient *pClient){
-  assert( sqlite3_mutex_held(pClient->pServer->pMutex) );
-  if( pClient->pMap!=pClient->pServer->pList ){
-    pClient->pMap->nRef--;
-    if( pClient->pMap->nRef==0 ){
-      hctTMapFreeMap(pClient->pServer, pClient->pMap);
-    }
-    pClient->pMap = pClient->pServer->pList;
-    pClient->pMap->nRef++;
-  }
-}
-
-/*
-** This is called by a reader if it needs to look-up a TID for which its
-** current HctTMap object is not large enough. This function sets output
-** parameter (*ppMap) to point to the latest HctTMap object, which,
-** unless the db is corrupt, is guaranteed to be large enough.
-**
-** SQLITE_OK is returned if successful.
-*/
-int sqlite3HctTMapUpdate(HctTMapClient *pClient, HctTMap **ppMap){
-  ENTER_TMAP_MUTEX(pClient);
-  hctTMapUpdateSafe(pClient);
-  LEAVE_TMAP_MUTEX(pClient);
-  *ppMap = (HctTMap*)pClient->pMap;
-  return SQLITE_OK;
 }
 
 /*
@@ -501,7 +520,7 @@ static int hctTMapNewObject(HctTMapServer *pServer){
   assert( (iFirst & HCT_TMAP_CID_MASK)==iFirst );
 
   nDiscard = (iFirst - pOld->m.iFirstTid) / HCT_TMAP_PAGESIZE;
-  nMap = pOld->m.nMap + 1 - nDiscard;
+  nMap = pOld->m.nMap + TMAP_NPAGE_ALLOC - nDiscard;
   nByte = sizeof(HctTMapFull) + nMap*sizeof(u64*);
   pNew = (HctTMapFull*)sqlite3HctMallocRc(&rc, nByte);
 
@@ -511,12 +530,12 @@ static int hctTMapNewObject(HctTMapServer *pServer){
     pNew->m.nMap = nMap;
     pNew->m.aaMap = (u64**)&pNew[1];
     pNew->nRef = 1;
-    for(ii=0; ii<(nMap-1); ii++){
+    for(ii=0; ii<(nMap-TMAP_NPAGE_ALLOC); ii++){
       pNew->m.aaMap[ii] = pOld->m.aaMap[ii+nDiscard];
     }
-    pNew->m.aaMap[ii] = (u64*)sqlite3HctMallocRc(
-        &rc, sizeof(u64)*HCT_TMAP_PAGESIZE
-    );
+    for(/* noop */; ii<nMap; ii++){
+      pNew->m.aaMap[ii] = (u64*)sqlite3HctMalloc(sizeof(u64)*HCT_TMAP_PAGESIZE);
+    }
 
     pServer->pList->nRef--;
     if( pServer->pList->nRef==0 ){

@@ -104,10 +104,18 @@ proc program {nMs} {
       set iParentJob [dbX one {
         SELECT parentJobID FROM jobs WHERE jobID=$iChildJob
       }]
+
       set parent_state [dbX one {
         SELECT state FROM jobs WHERE jobID=$iParentJob
       }]
+
       if {$parent_state=="FINISHED" || $parent_state==""} {
+        puts "ERROR: child job is $iChildJob, parent ($iParentJob) is $parent_state"
+      set parent_state2 [dbX one {
+        SELECT state FROM jobs WHERE jobID=$iParentJob
+      }]
+      puts "parent state 2: $parent_state2"
+
         dbX eval END
         error "child job is $iChildJob, parent ($iParentJob) is $parent_state"
       }
@@ -176,7 +184,7 @@ set hct_extra_logging 0
       }
 
       # Step 6:
-      catch { dbX eval COMMIT }
+      set rb [catch { dbX eval COMMIT }]
       catch { dbX eval ROLLBACK }
     }
 
@@ -244,15 +252,16 @@ proc execsql_pp {sql {db db}} {
 
 eval [program_util]
 
+set nInitialJob 2
+
 db eval BEGIN
+for {set ii 0} {$ii < $nInitialJob} {incr ii} {
   insert_job db
-  insert_job db
-  insert_job db
-  insert_job db
+}
 db eval COMMIT
 
 set nMs [expr 5000]
-set nThread 2
+set nThread 8
 
 set prg1 [program $nMs]
 for {set ii 0} {$ii<$nThread} {incr ii} {
@@ -273,9 +282,11 @@ for {set ii 0} {$ii<$nThread} {incr ii} {
   } {}
 }
 
-# execsql_pp { SELECT * FROM jobs }
-#show_pagemap
-#show_all_entries
+if { [set_test_counter errors] } {
+  execsql_pp { SELECT * FROM jobs }
+  show_pagemap
+  show_all_entries
+}
 
 
 finish_test
