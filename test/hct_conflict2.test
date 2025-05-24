@@ -120,6 +120,61 @@ do_sql_test db 3.3 {
   SELECT * FROM t1
 } {0 {1 i 2 ii 3 iii 4 iv}}
 
+#--------------------------------------------------------------------------
+hct_reset_db
+do_execsql_test 4.0 {
+  CREATE TABLE t1(a INTEGER PRIMARY KEY, b);
+  INSERT INTO t1 
+  VALUES(5, 'five'), (10, 'ten'), (15, 'fifteen'), (20, 'twenty');
+}
+
+sqlite3 db2 test.db
+
+do_test 4.1 {
+  db eval {
+    BEGIN CONCURRENT;
+      SELECT * FROM t1 WHERE a=5;
+  }
+
+  db2 eval {
+    INSERT INTO t1 VALUES(17, 'seventeen');
+    DELETE FROM t1 WHERE a=17;
+  }
+
+  catchsql {
+      INSERT INTO t1 VALUES(17, 'seventeen+');
+    COMMIT;
+  }
+} {1 {database is locked}}
+
+db2 close
+
+#-------------------------------------------------------------------------
+hct_reset_db
+do_execsql_test 5.0 {
+  CREATE TABLE t1(a INTEGER PRIMARY KEY, b);
+  INSERT INTO t1 
+  VALUES(5, 'five'), (10, 'ten'), (15, 'fifteen'), (20, 'twenty');
+}
+
+sqlite3 db2 test.db
+
+do_test 5.1 {
+  db eval {
+    BEGIN;
+      UPDATE t1 SET b='fifteen+' WHERE a=15;
+  }
+
+  db2 eval {
+    UPDATE t1 SET b='' WHERE a=15;
+    DELETE FROM t1 WHERE a=15;
+  }
+
+  catchsql {
+    COMMIT;
+  }
+} {1 {database is locked}}
+
 finish_test
 
 
