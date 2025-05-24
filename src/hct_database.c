@@ -16,10 +16,6 @@
 #include <string.h>
 #include <assert.h>
 
-int hct_extra_logging = 0;
-
-int hct_extra_write_logging = 0;
-
 typedef struct HctDatabase HctDatabase;
 typedef struct HctDbIndexEntry HctDbIndexEntry;
 typedef struct HctDbIndexLeaf HctDbIndexLeaf;
@@ -4698,25 +4694,31 @@ static int hctDbBalance(
 
   /* Figure out how many output pages will be required. This loop calculates
   ** a mapping heavily biased to the left. */
+  iEntry0 = hctDbEntryArrayDim(aPgCopy[0], &szEntry);
   aPgFirst[0] = 0;
   if( nOut==0 ){
-    int nRem = pDb->pgsz - sizeof(HctDbIntkeyLeaf);
-    assert( sizeof(HctDbIntkeyLeaf)==sizeof(HctDbIndexLeaf) );
+    int nRem = pDb->pgsz - iEntry0;
     nOut = 1;
     for(ii=0; ii<nSz; ii++){
       if( aSz[ii].nByte>nRem ){
         aPgRem[nOut-1] = nRem;
+        nRemRem += nRem;
         aPgFirst[nOut] = ii;
         nOut++;
-        nRem = pDb->pgsz - sizeof(HctDbIntkeyLeaf);
+        nRem = pDb->pgsz - iEntry0;
         assert( nOut<=ArraySize(aPgRem) );
       }
       nRem -= aSz[ii].nByte;
+      assert( nRem>=0 );
     }
     aPgRem[nOut-1] = nRem;
     nRemRem += nRem;
   }
   aPgFirst[nOut] = nSz;
+
+  assert( nOut!=2 || nRemRem==(aPgRem[0]+aPgRem[1]) );
+  assert( nOut!=3 || nRemRem==(aPgRem[0]+aPgRem[1]+aPgRem[2]) );
+  assert( nOut!=4 || nRemRem==(aPgRem[0]+aPgRem[1]+aPgRem[2]+aPgRem[3]) );
 
   /* Adjust the packing calculated by the previous loop. */
   for(ii=nOut-1; ii>0; ii--){
@@ -4732,6 +4734,7 @@ static int hctDbBalance(
       aPgFirst[ii] = (pLast - aSz);
     }
     nRemRem -= aPgRem[ii];
+    assert( aPgRem[ii]>=0 );
   }
 
   rc = hctDbDirtyWriteArray(pDb, p, 0);
@@ -4742,7 +4745,6 @@ static int hctDbBalance(
   }
 
   /* Populate the output pages */
-  iEntry0 = hctDbEntryArrayDim(aPgCopy[0], &szEntry);
   for(ii=0; ii<nOut; ii++){
     int iIdx = ii+iLeftPg;
     u8 *aTarget = p->writepg.aPg[iIdx].aNew;
@@ -4772,6 +4774,8 @@ static int hctDbBalance(
     pLeaf->pg.nEntry = nNewEntry;
     pLeaf->hdr.nFreeBytes = iOff - (iEntry0 + nNewEntry*szEntry);
     pLeaf->hdr.nFreeGap = iOff - (iEntry0 + nNewEntry*szEntry);
+
+    assert( pOp->iPg==iIdx || pLeaf->hdr.nFreeBytes==aPgRem[ii] );
   }
 
   HCT_EXTRA_WR_LOGGING_BALANCE2(pDb, p, iLeftPg, nOut);
