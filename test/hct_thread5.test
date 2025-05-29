@@ -1,0 +1,281 @@
+# 2022 May 27 
+#
+# The author disclaims copyright to this source code.  In place of
+# a legal notice, here is a blessing:
+#
+#    May you do good and not evil.
+#    May you find forgiveness for yourself and forgive others.
+#    May you share freely, never taking more than you give.
+#
+#*************************************************************************
+# This file implements regression tests for SQLite library.
+#
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+set testprefix hct_thread5
+
+# Setup for logging 
+#db close
+#sqlite3_shutdown
+#sqlite_log_to_stdout
+
+expr srand(0)
+
+hct_reset_db
+
+do_execsql_test 1.0 {
+  PRAGMA page_size = 512;
+  CREATE TABLE jobs(
+    jobID       INTEGER NOT NULL PRIMARY KEY,
+    parentJobID INTEGER NOT NULL DEFAULT 0,
+    state TEXT NOT NULL
+  );
+  CREATE INDEX jobs_idx ON jobs(parentJobID, state) WHERE parentJobID!=0;
+}
+
+# Possible text values for jobs.state column
+#
+set lStateVal { FINISHED QUEUED RUNQUEUED RUNNING PAUSED }
+
+# Each thread does:
+#
+#   1. Open transaction.
+#
+#   2. Select at random a child job to work on. Any child job with a state
+#     other than 'FINISHED' can be worked on. If no child job found, 
+#     close transaction and restart at 1.
+#
+#   3. Check parent job is not 'FINISHED'. If it is, this is an error.
+#
+#   4. Set child job state to a randomly selected state.
+#
+#   5. If that state is FINISHED, check if there are any other children of
+#      same parent with state set to anything other than FINISHED. If there
+#      are not, (a) set parent to FINISHED, (b) add a new parent and its 
+#      child jobs. All new jobs entries are set to QUEUED state. jobid values
+#      are assigned randomly.
+#
+#   6. Commit transaction.
+#
+proc program {nMs} {
+  return [string map [list %UTIL% [program_util] %NMS% $nMs] {
+    %UTIL% 
+
+    sqlite3 dbX test.db
+    dbX func rand rand
+
+    proc rand_state {} {
+      set lStateVal { FINISHED QUEUED RUNQUEUED RUNNING PAUSED }
+      lindex $lStateVal [rand 0 4]
+    }
+    dbX func rand_state rand_state
+
+    set id [rand 0 99]
+
+    set end_of_time [expr [clock_milliseconds] + %NMS%]
+    set nFinish 0
+
+    while {[clock_milliseconds]<$end_of_time} {
+
+      if {0==[sqlite3_get_autocommit dbX]} { error autocommit }
+
+      # Step 1: Choose a job to "work" on.
+      unset -nocomplain iChild iParent
+      dbX eval {
+        WITH children(rownum, jobid, parentid, state) AS (
+            SELECT row_number() OVER (), jobid, parentjobid, state 
+            FROM jobs WHERE parentJobId!=0 AND state!='FINISHED'
+        )
+        SELECT jobid AS iChild, parentid AS iParent, state FROM children 
+        LIMIT 1 
+        OFFSET rand( 0, (SELECT count(*) FROM children)-1 );
+      } { }
+      if {[info exists iChild]==0} {
+        error "Could not find a child to work on!!!"
+      }
+
+      # Step 2: Open transaction.
+      dbX eval { BEGIN CONCURRENT }
+
+      # Step 3: Check that our job is still available to work on. If it
+      # is not, close the transaction just opened and jump to the next
+      # iteration of the loop.
+      #
+      set child_ok 0
+      dbX eval {
+        SELECT state IN ('QUEUED', 'RUNQUEUED', 'RUNNING', 'PAUSED')
+          FROM jobs 
+          WHERE jobId=$iChild
+      } {
+        set child_ok 1
+      }
+      if {$child_ok==0} {
+        dbX eval { ROLLBACK }
+        incr O(giveup)
+        continue
+      }
+
+      # Step 4: Check parent is not finished or deleted.
+      set parent_ok 0
+      dbX eval {
+        SELECT 
+          state IN ('QUEUED', 'RUNQUEUED', 'RUNNING', 'PAUSED')
+          FROM jobs 
+          WHERE jobId=$iParent
+      } {
+        set parent_ok 1
+      }
+      if {$parent_ok==0} {
+        error "Parent job is not in expected state!"
+      }
+
+      # Step 5: Update child job.
+      dbX eval {
+        UPDATE jobs SET state='FINISHED' WHERE jobid=$iChild
+      }
+
+      # Step 6: Check if all children of parent are finished.
+      set iUnfinishedChild 0
+      dbX eval {
+        SELECT jobId AS j FROM jobs 
+        WHERE parentJobID!=0 AND parentJobID=$iParent AND 
+          state IN ('QUEUED', 'RUNQUEUED', 'RUNNING', 'PAUSED')
+        LIMIT 1
+      } {
+        set iUnfinishedChild $j
+      }
+
+      # Step 7:
+      if {$iUnfinishedChild==0} {
+        dbX eval {
+          UPDATE jobs SET state = rand_state() WHERE jobID = $iParent
+        }
+        insert_job dbX
+
+        incr nFinish
+        if {0 && ($nFinish % 10)==0} {
+          dbX eval {
+            DELETE FROM jobs WHERE state='FINISHED'
+          }
+        }
+      }
+
+
+      # Step 8:
+      set rb [catch { dbX eval COMMIT }]
+
+      if {$rb==0} {
+        incr O(commit)
+      } else {
+        catch { dbX eval ROLLBACK }
+        incr O(rollback)
+      }
+    }
+
+    puts [array get O]
+   # execsql_pp { SELECT * FROM hctstats } dbX
+    dbX close
+    set nFinish
+  }]
+}
+
+proc program_util {} {
+  return {
+    proc insert_job {db} {
+      set iParent [rand 0 10000000000]
+      $db eval { INSERT INTO jobs VALUES($iParent, 0, 'QUEUED'); }
+      set iParent [$db last_insert_rowid]
+      for {set ii 0} {$ii < 3} {incr ii} {
+        set iChild [rand 0 10000000000]
+        $db eval { INSERT INTO jobs VALUES($iChild, $iParent, 'QUEUED'); }
+      }
+    }
+    
+    proc rand {min max} {
+      expr {$min + int(abs(rand() * (1 + $max - $min)))}
+    }
+proc execsql_pp {sql {db db}} {
+  set nCol 0
+  $db eval $sql A {
+    if {$nCol==0} {
+      set nCol [llength $A(*)]
+      foreach c $A(*) { 
+        set aWidth($c) [string length $c] 
+        lappend data $c
+      }
+    }
+    foreach c $A(*) { 
+      set n [string length $A($c)]
+      if {$n > $aWidth($c)} {
+        set aWidth($c) $n
+      }
+      lappend data $A($c)
+    }
+  }
+  if {$nCol>0} {
+    set nTotal 0
+    foreach e [array names aWidth] { incr nTotal $aWidth($e) }
+    incr nTotal [expr ($nCol-1) * 3]
+    incr nTotal 4
+
+    set fmt ""
+    foreach c $A(*) { 
+      lappend fmt "% -$aWidth($c)s"
+    }
+    set fmt "| [join $fmt { | }] |"
+    
+    puts [string repeat - $nTotal]
+    for {set i 0} {$i < [llength $data]} {incr i $nCol} {
+      set vals [lrange $data $i [expr $i+$nCol-1]]
+      puts [format $fmt {*}$vals]
+      if {$i==0} { puts [string repeat - $nTotal] }
+    }
+    puts [string repeat - $nTotal]
+  }
+}
+  }
+}
+
+eval [program_util]
+
+set nInitialJob 4
+
+db eval BEGIN
+for {set ii 0} {$ii < $nInitialJob} {incr ii} {
+  insert_job db
+}
+db eval COMMIT
+
+set nMs [expr 5000]
+set nThread 8
+
+set prg1 [program $nMs]
+for {set ii 0} {$ii<$nThread} {incr ii} {
+  sqlthread spawn TH($ii) $prg1
+}
+
+do_test "1.1.(running $nThread threads for ${nMs} ms)" {
+  for {set ii 0} {$ii<$nThread} {incr ii} {
+    if {[info exists TH($ii)]==0} { vwait TH($ii) }
+  }
+} {}
+
+for {set ii 0} {$ii<$nThread} {incr ii} {
+  do_test 1.2.$ii { 
+    set res $TH($ii)
+    if {[string is integer -strict $::res]} { set res "" }
+    set res
+  } {}
+}
+
+
+#execsql_pp { SELECT * FROM jobs }
+if { [set_test_counter errors] } {
+#  show_pagemap
+#  show_all_entries
+}
+
+
+finish_test
+
