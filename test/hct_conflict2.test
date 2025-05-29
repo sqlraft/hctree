@@ -175,6 +175,194 @@ do_test 5.1 {
   }
 } {1 {database is locked}}
 
+#-------------------------------------------------------------------------
+hct_reset_db
+do_execsql_test 6.0 {
+  PRAGMA page_size = 512;
+  CREATE TABLE jobs(
+    jobID       INTEGER NOT NULL PRIMARY KEY,
+    parentJobID INTEGER NOT NULL DEFAULT 0,
+    state TEXT NOT NULL
+  );
+  CREATE INDEX jobs_idx ON jobs(parentJobID, state) WHERE parentJobID!=0;
+
+  INSERT INTO jobs VALUES
+      (1, 0, 'QUEUED'),
+       (2, 1, 'QUEUED'),
+       (3, 1, 'QUEUED'),
+       (4, 1, 'QUEUED'),
+      (5, 0, 'QUEUED'),
+       (6, 5, 'QUEUED'),
+       (7, 5, 'FINISHED'),
+       (8, 5, 'QUEUED'),
+      (9, 0, 'QUEUED'),
+       (10, 9, 'QUEUED'),
+       (11, 9, 'QUEUED'),
+       (12, 9, 'QUEUED');
+}
+
+sqlite3 db2 test.db
+
+do_execsql_test -db db 6.1 {
+  BEGIN CONCURRENT;
+    UPDATE jobs SET state = 'FINISHED' WHERE jobId=6;
+    SELECT jobId FROM jobs 
+      WHERE parentJobID!=0 AND parentJobID=5 AND 
+      state IN ('QUEUED', 'RUNQUEUED', 'RUNNING', 'PAUSED')
+      LIMIT 1
+} {8}
+
+do_execsql_test -db db2 6.2 {
+  BEGIN CONCURRENT;
+    UPDATE jobs SET state = 'FINISHED' WHERE jobId=8;
+    SELECT jobId FROM jobs 
+      WHERE parentJobID!=0 AND parentJobID=5 AND 
+      state IN ('QUEUED', 'RUNQUEUED', 'RUNNING', 'PAUSED')
+      LIMIT 1
+} {6}
+
+do_execsql_test -db db  6.3 { COMMIT }
+do_test 6.4 {
+  catchsql COMMIT db2
+} {1 {database is locked}}
+catch { db2 eval ROLLBACK }
+
+do_execsql_test 6.4 {
+  DELETE FROM jobs;
+  INSERT INTO jobs VALUES
+      (1, 0, 'QUEUED'),
+       (2, 1, 'QUEUED'),
+       (3, 1, 'QUEUED'),
+       (4, 1, 'QUEUED'),
+      (5, 0, 'QUEUED'),
+       (860, 5, 'QUEUED'),
+       (7, 5, 'FINISHED'),
+       (900, 5, 'QUEUED'),
+      (9, 0, 'QUEUED'),
+       (862, 9, 'QUEUED'),
+       (863, 9, 'QUEUED'),
+       (864, 9, 'QUEUED');
+}
+
+do_execsql_test -db db 6.5 {
+  BEGIN CONCURRENT;
+    UPDATE jobs SET state = 'FINISHED' WHERE jobId=860;
+    SELECT jobId FROM jobs 
+      WHERE parentJobID!=0 AND parentJobID=5 AND 
+      state IN ('QUEUED', 'RUNQUEUED', 'RUNNING', 'PAUSED')
+      LIMIT 1
+} {900}
+
+do_execsql_test -db db2 6.6 {
+  BEGIN CONCURRENT;
+    UPDATE jobs SET state = 'FINISHED' WHERE jobId=900;
+    SELECT jobId FROM jobs 
+      WHERE parentJobID!=0 AND parentJobID=5 AND 
+      state IN ('QUEUED', 'RUNQUEUED', 'RUNNING', 'PAUSED')
+      LIMIT 1
+} {860}
+
+do_execsql_test -db db  6.7 { COMMIT }
+do_test 6.8 {
+  catchsql COMMIT db2
+} {1 {database is locked}}
+db2 eval ROLLBACK
+
+do_execsql_test 6.9 {
+  DELETE FROM jobs;
+  INSERT INTO jobs VALUES
+     (134695745, 0, 'QUEUED'),
+       (677689728, 134695745, 'QUEUED'),
+       (3831388500, 134695745, 'QUEUED'),
+       (4146526905, 134695745, 'QUEUED');
+}
+
+do_execsql_test -db db 6.9.1 {
+  UPDATE jobs SET state='FINISHED' WHERE jobid=677689728;
+  BEGIN CONCURRENT;
+    UPDATE jobs SET state='FINISHED' WHERE jobid=4146526905;
+    SELECT jobId FROM jobs 
+      WHERE parentJobID!=0 AND parentJobID=134695745 AND 
+      state = 'QUEUED'
+      LIMIT 1
+} {3831388500}
+
+do_execsql_test -db db2 6.9.2 {
+  BEGIN CONCURRENT;
+    UPDATE jobs SET state='FINISHED' WHERE jobid=3831388500;
+    SELECT jobId FROM jobs 
+      WHERE parentJobID!=0 AND parentJobID=134695745 AND 
+      state = 'QUEUED'
+      LIMIT 1
+} {4146526905}
+
+do_execsql_test -db db 6.9.3 {
+  COMMIT
+}
+
+do_test 6.9.4 {
+  catchsql COMMIT db2
+} {1 {database is locked}}
+catchsql ROLLBACK db2
+
+do_execsql_test 6.9.5 {
+  SELECT * FROM jobs
+} {
+  134695745 0 QUEUED 
+  677689728 134695745 FINISHED 
+  3831388500 134695745 QUEUED
+  4146526905 134695745 FINISHED
+}
+
+
+#----------------
+
+do_execsql_test 6.10 {
+  DELETE FROM jobs;
+  INSERT INTO jobs VALUES
+     (134695745, 0, 'QUEUED'),
+       (677689728, 134695745, 'QUEUED'),
+       (3831388500, 134695745, 'QUEUED'),
+       (4146526905, 134695745, 'QUEUED');
+}
+
+do_execsql_test -db db 6.10.1 {
+  UPDATE jobs SET state='FINISHED' WHERE jobid=677689728;
+  BEGIN CONCURRENT;
+    UPDATE jobs SET state='FINISHED' WHERE jobid=3831388500;
+    SELECT jobId FROM jobs 
+      WHERE parentJobID!=0 AND parentJobID=134695745 AND 
+      state = 'QUEUED'
+      LIMIT 1
+} {4146526905}
+
+do_execsql_test -db db2 6.10.2 {
+  BEGIN CONCURRENT;
+    UPDATE jobs SET state='FINISHED' WHERE jobid=4146526905;
+    SELECT jobId FROM jobs 
+      WHERE parentJobID!=0 AND parentJobID=134695745 AND 
+      state = 'QUEUED'
+      LIMIT 1
+} {3831388500}
+
+do_execsql_test -db db 6.10.3 {
+  COMMIT
+}
+
+do_test 6.10.4 {
+  catchsql COMMIT db2
+} {1 {database is locked}}
+catchsql ROLLBACK db2
+
+do_execsql_test 6.9.5 {
+  SELECT * FROM jobs
+} {
+  134695745  0 QUEUED 
+  677689728  134695745 FINISHED 
+  3831388500 134695745 FINISHED
+  4146526905 134695745 QUEUED
+}
+
 finish_test
 
 
