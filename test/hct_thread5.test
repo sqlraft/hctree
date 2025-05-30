@@ -40,23 +40,25 @@ set lStateVal { FINISHED QUEUED RUNQUEUED RUNNING PAUSED }
 
 # Each thread does:
 #
-#   1. Open transaction.
+#   1. Select at random a child job to work on. Any child job with a state
+#      other than 'FINISHED' can be worked on. If no child job can be
+#      found, it is an error.
 #
-#   2. Select at random a child job to work on. Any child job with a state
-#     other than 'FINISHED' can be worked on. If no child job found, 
-#     close transaction and restart at 1.
+#   2. Open a transaction with BEGIN CONCURRENT.
 #
-#   3. Check parent job is not 'FINISHED'. If it is, this is an error.
+#   3. Check that the child job is still available to work on.
 #
-#   4. Set child job state to a randomly selected state.
+#   4. Check parent job is not 'FINISHED' or missing. If it is, this is an
+#      error.
 #
-#   5. If that state is FINISHED, check if there are any other children of
-#      same parent with state set to anything other than FINISHED. If there
-#      are not, (a) set parent to FINISHED, (b) add a new parent and its 
-#      child jobs. All new jobs entries are set to QUEUED state. jobid values
-#      are assigned randomly.
+#   5. Set child job state to a randomly selected state.
 #
-#   6. Commit transaction.
+#   6. check if there are any children of the parent with state set to
+#      anything other than FINISHED. If there are not, (a) set parent to 
+#      FINISHED, (b) add a new parent and its child jobs. All new jobs 
+#      entries are set to QUEUED state. jobid values are assigned randomly.
+#
+#   7. Commit transaction.
 #
 proc program {nMs} {
   return [string map [list %UTIL% [program_util] %NMS% $nMs] {
@@ -132,10 +134,12 @@ proc program {nMs} {
 
       # Step 5: Update child job.
       dbX eval {
-        UPDATE jobs SET state='FINISHED' WHERE jobid=$iChild
+        UPDATE jobs SET state=rand_state() WHERE jobid=$iChild
       }
 
-      # Step 6: Check if all children of parent are finished.
+      # Step 6: Check if all children of parent are finished. If so,
+      # set parent to FINISHED and add a new parent + child jobs.
+      # 
       set iUnfinishedChild 0
       dbX eval {
         SELECT jobId AS j FROM jobs 
@@ -145,20 +149,11 @@ proc program {nMs} {
       } {
         set iUnfinishedChild $j
       }
-
-      # Step 7:
       if {$iUnfinishedChild==0} {
         dbX eval {
-          UPDATE jobs SET state = rand_state() WHERE jobID = $iParent
+          UPDATE jobs SET state = 'FINISHED' WHERE jobID = $iParent
         }
         insert_job dbX
-
-        incr nFinish
-        if {0 && ($nFinish % 10)==0} {
-          dbX eval {
-            DELETE FROM jobs WHERE state='FINISHED'
-          }
-        }
       }
 
 
@@ -167,16 +162,50 @@ proc program {nMs} {
 
       if {$rb==0} {
         incr O(commit)
+        if {$iUnfinishedChild==0} { incr nFinish }
       } else {
         catch { dbX eval ROLLBACK }
         incr O(rollback)
       }
+
+      if {$nFinish>0} {
+        # Select a parent to finish.
+        dbX eval {
+          SELECT jobid AS parent FROM jobs 
+          WHERE parentjobid=0 AND state='FINISHED'
+          LIMIT 1
+        } { }
+        set lChild [dbX eval {
+          SELECT jobid FROM jobs WHERE parentJobID=$parent
+        }]
+        lappend lChild $parent
+
+        dbX eval "BEGIN CONCURRENT"
+
+        set bOk 0
+        dbX eval {SELECT 1 FROM jobs WHERE jobid=$parent} {
+          set bOk 1
+        }
+
+        if {$bOk} {
+          foreach j $lChild {
+            dbX eval {DELETE FROM jobs WHERE jobid=$j}
+          }
+
+          set rb [catch {dbX eval COMMIT}]
+          if {$rb==0} {
+            incr nFinish -1
+          }
+        }
+        catch { dbX eval ROLLBACK }
+      }
     }
 
-    puts [array get O]
-   # execsql_pp { SELECT * FROM hctstats } dbX
+    #puts [array get O]
+    #puts "nFinish=$nFinish"
+    #execsql_pp { SELECT * FROM hctstats } dbX
+
     dbX close
-    set nFinish
   }]
 }
 
@@ -239,7 +268,7 @@ proc execsql_pp {sql {db db}} {
 
 eval [program_util]
 
-set nInitialJob 4
+set nInitialJob 8
 
 db eval BEGIN
 for {set ii 0} {$ii < $nInitialJob} {incr ii} {

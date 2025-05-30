@@ -1,5 +1,5 @@
-C Fix\ssome\sproblems\swith\svalidation\sallowing\ssome\sconflicting\stransactions\sto\scommit.
-D 2025-05-29T18:35:21.083
+C Updates\sto\stest\scase\shct_thread5.test.
+D 2025-05-30T15:19:34.751
 F .fossil-settings/binary-glob 61195414528fb3ea9693577e1980230d78a1f8b0a54c78cf1b9b24d0a409ed6a x
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
@@ -1407,7 +1407,7 @@ F test/hct_thread1.test 7059d1ba2657e49738d60c59a3f806252da39b89a1547480175b7249
 F test/hct_thread2.test f7948b22d96811f237a979366712941c751b411aeee32547ab58e66a83a4b25d
 F test/hct_thread3.test 7507f3bdf0b1cecab6aed65e6fd341b0a1ff9e9b500eb8e0a1b81415f1bbcbb1
 F test/hct_thread4.test 458a7b86b82f07bbed65ae1f0bdd4cfabbfb205e964e5e372f6aa6fd1230dba4
-F test/hct_thread5.test dc951b705eb9d34a496b0be9598d87c8db86eef87dbfb762ad9fac6f4a3aab02
+F test/hct_thread5.test 3f8c70ab8f792ae9a36ada7603f24971238c964fab7d224fb9efd1673a270a86
 F test/hct_tmap1.test 9f1b0ffde0bf55bc89e115f08b301c7547cefcec43e31d3bae1e2b73c7fd112c
 F test/hct_update1.test 37cb8df3311ad092b157955dfdde91e9a55e0a6ec1d858ba9b0f0d327c516cad
 F test/hct_update2.test 9b9fd0080b4c07d2226a189d1355c90be6e798785155455e8fc903b5bd085f9d
@@ -2325,8 +2325,8 @@ F tool/version-info.c 3b36468a90faf1bbd59c65fd0eb66522d9f941eedd364fabccd7227350
 F tool/warnings-clang.sh bbf6a1e685e534c92ec2bfba5b1745f34fb6f0bc2a362850723a9ee87c1b31a7
 F tool/warnings.sh 1ad0169b022b280bcaaf94a7fa231591be96b514230ab5c98fbf15cd7df842dd
 F tool/win/sqlite.vsix deb315d026cc8400325c5863eef847784a219a2f
-P 3a2e32d8601688083398721d4b1cc6713bf886fc7531bfa6b66c8b0128e9d6f0
-R 93df4647a4c0b489ec919dd5b91dd335
+P 9973037cf835c084e2a0d53d2543751860181d6684c3b47be1ef34f38c8f529b
+R 5de909d9e88241e7292087c79f6198d5
 U dan
-Z ae4d5e13ddbfd2b1a94fc8978529ed26
+Z 5d4f902ab092617c3140e5aba4a7baa6
 # Remove this line to create a well-formed Fossil manifest.
