@@ -940,6 +940,7 @@ HDR = \
    pragma.h \
    sqlite3.h  \
    $(TOP)/src/sqlite3ext.h \
+   $(TOP)/src/sqlite3hct.h \
    $(TOP)/src/sqliteInt.h  \
    $(TOP)/src/sqliteLimit.h \
    $(TOP)/src/vdbe.h \
