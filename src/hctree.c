@@ -519,7 +519,8 @@ static int hctRecoverOneLog(HBtree *p, HctLogReader *pRdr){
       }
 
       if( pRdr->nKey ){
-        sqlite3VdbeRecordUnpack(csr.pKeyInfo, pRdr->nKey, pRdr->aKey, csr.pRec);
+        assert( csr.pRec->pKeyInfo==csr.pKeyInfo);
+        sqlite3VdbeRecordUnpack(pRdr->nKey, pRdr->aKey, csr.pRec);
       }
       rc = sqlite3HctDbCsrRollbackSeek(csr.pCsr, csr.pRec, pRdr->iKey, &op);
 
@@ -1129,7 +1130,8 @@ static int hctScanOneToSavePages(HctFreelistCtx *p, HctLogReader *pRdr){
     if( rc==SQLITE_OK ){
       int dy = 0;               /* Dummy var for CsrRollbackSeek() */
       if( pRdr->nKey ){
-        sqlite3VdbeRecordUnpack(csr.pKeyInfo,pRdr->nKey,pRdr->aKey,csr.pRec);
+        assert( csr.pRec->pKeyInfo==csr.pKeyInfo );
+        sqlite3VdbeRecordUnpack(pRdr->nKey, pRdr->aKey, csr.pRec);
       }
       rc = sqlite3HctDbCsrRollbackSeek(csr.pCsr, csr.pRec, pRdr->iKey, &dy);
     }
@@ -1614,7 +1616,8 @@ static int btreeFlushOneToDisk(void *pCtx, u32 iRoot, KeyInfo *pKeyInfo){
       sqlite3HctTreeCsrKey(pCsr, &iKey);
       sqlite3HctTreeCsrData(pCsr, &nData, &aData);
       bDel = sqlite3HctTreeCsrIsDelete(pCsr);
-      if( pRec ) sqlite3VdbeRecordUnpack(pKeyInfo, nData, aData, pRec);
+      assert( pRec==0 || pRec->pKeyInfo==pKeyInfo );
+      if( pRec ) sqlite3VdbeRecordUnpack(nData, aData, pRec);
       rc = sqlite3HctDbInsert(pDb, iRoot, pRec, iKey, bDel,nData,aData,&nRetry);
       p->nRollbackOp += (iRollbackDir * (1 - nRetry));
       if( rc ) break;
@@ -3031,7 +3034,8 @@ int sqlite3HctBtreeInsert(
         }else{
           pRec = sqlite3VdbeAllocUnpackedRecord(pCur->pKeyInfo);
           if( pRec==0 ) return SQLITE_NOMEM_BKPT;
-          sqlite3VdbeRecordUnpack(pCur->pKeyInfo, nData, aData, pRec);
+          assert( pCur->pKeyInfo==pRec->pKeyInfo );
+          sqlite3VdbeRecordUnpack(nData, aData, pRec);
         }
       }
     }else{
@@ -3126,7 +3130,8 @@ int sqlite3HctBtreeDelete(BtCursor *pCursor, u8 flags){
     if( pRec==0 ){
       rc = SQLITE_NOMEM_BKPT;
     }else{
-      sqlite3VdbeRecordUnpack(pCur->pKeyInfo, nKey, aKey, pRec);
+      assert( pCur->pKeyInfo==pRec->pKeyInfo );
+      sqlite3VdbeRecordUnpack(nKey, aKey, pRec);
       rc = sqlite3HctTreeDeleteKey(pCur->pHctTreeCsr, pRec, 0, nKey, aKey);
       sqlite3DbFree(pCur->pBtree->config.db, pRec);
     }
@@ -3238,7 +3243,8 @@ int sqlite3HctBtreeClearTable(Btree *pBt, int iTable, i64 *pnChange){
             const u8 *aData = 0;
             u32 nData = 0;
             aData = (const u8*)sqlite3HctBtreePayloadFetch(pCsr, &nData);
-            sqlite3VdbeRecordUnpack(pKeyInfo, nData, aData, pRec);
+            assert( pKeyInfo==pRec->pKeyInfo );
+            sqlite3VdbeRecordUnpack(nData, aData, pRec);
             rc = sqlite3HctTreeDeleteKey(pTreeCsr, pRec, 0, nData, aData);
           }else{
             i64 iKey = sqlite3HctBtreeIntegerKey((BtCursor*)pCsr);
