@@ -481,7 +481,7 @@ static int hctTreeCsrSeekPacked(
   assert( pKeyInfo );
   pRec = sqlite3VdbeAllocUnpackedRecord(pKeyInfo);
   if( pRec ){
-    sqlite3VdbeRecordUnpack(pKeyInfo, nKey, aKey, pRec);
+    sqlite3VdbeRecordUnpack(nKey, aKey, pRec);
     rc = hctTreeCsrSeekUnpacked(pCsr, pRec, pRes);
     sqlite3DbFree(pKeyInfo->db, pRec);
   }else{
@@ -543,7 +543,7 @@ static int treeInsertNode(
     if( pFree==0 ){
       return SQLITE_NOMEM;
     }
-    sqlite3VdbeRecordUnpack(pRoot->pKeyInfo, pNew->nData, pNew->aData, pFree);
+    sqlite3VdbeRecordUnpack(pNew->nData, pNew->aData, pFree);
     pKey = pFree;
   }
 
@@ -1029,7 +1029,7 @@ int sqlite3HctTreeRollbackTo(HctTree *pTree, int iStmt){
           pStop = pNode;
           break;
         }
-        sqlite3VdbeRecordUnpack(pKeyInfo, pNode->nData, pNode->aData, pRec);
+        sqlite3VdbeRecordUnpack(pNode->nData, pNode->aData, pRec);
       }
 
       if( pNode->pClobber ){

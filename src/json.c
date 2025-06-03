@@ -1285,8 +1285,10 @@ static int jsonBlobChangePayloadSize(
     nExtra = 1;
   }else if( szType==13 ){
     nExtra = 2;
-  }else{
+  }else if( szType==14 ){
     nExtra = 4;
+  }else{
+    nExtra = 8;
   }
   if( szPayload<=11 ){
     nNeeded = 0;
@@ -4850,18 +4852,20 @@ static void jsonObjectStep(
   UNUSED_PARAMETER(argc);
   pStr = (JsonString*)sqlite3_aggregate_context(ctx, sizeof(*pStr));
   if( pStr ){
+    z = (const char*)sqlite3_value_text(argv[0]);
+    n = sqlite3Strlen30(z);
     if( pStr->zBuf==0 ){
       jsonStringInit(pStr, ctx);
       jsonAppendChar(pStr, '{');
-    }else if( pStr->nUsed>1 ){
+    }else if( pStr->nUsed>1 && z!=0 ){
       jsonAppendChar(pStr, ',');
     }
     pStr->pCtx = ctx;
-    z = (const char*)sqlite3_value_text(argv[0]);
-    n = sqlite3Strlen30(z);
-    jsonAppendString(pStr, z, n);
-    jsonAppendChar(pStr, ':');
-    jsonAppendSqlValue(pStr, argv[1]);
+    if( z!=0 ){
+      jsonAppendString(pStr, z, n);
+      jsonAppendChar(pStr, ':');
+      jsonAppendSqlValue(pStr, argv[1]);
+    }
   }
 }
 static void jsonObjectCompute(sqlite3_context *ctx, int isFinal){

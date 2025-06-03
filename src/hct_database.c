@@ -1537,7 +1537,8 @@ static void hctDbGetKey(
         }
         pKey->pKey = hctDbAllocateUnpacked(&rc, pKeyInfo);
         if( rc==SQLITE_OK ){
-          sqlite3VdbeRecordUnpack(pKeyInfo, nRec, aRec, pKey->pKey);
+          assert( pKeyInfo==pKey->pKey->pKeyInfo );
+          sqlite3VdbeRecordUnpack(nRec, aRec, pKey->pKey);
         }
         if( rc==SQLITE_OK ){
           sqlite3HctDbRecordTrim(pKey->pKey);
@@ -3259,7 +3260,7 @@ static void assert_writer_is_ok(HctDatabase *pDb, HctDbWriter *p){
       }
       if( rc==SQLITE_OK ){
         int bGe = 555;
-        sqlite3VdbeRecordUnpack(p->writecsr.pKeyInfo, nData, aData, pRec);
+        sqlite3VdbeRecordUnpack(nData, aData, pRec);
         rc = hctDbCompareFPKey(pDb, pRec, a2, &bGe);
         assert( rc!=SQLITE_OK || bGe==0 );
       }
@@ -3403,7 +3404,7 @@ static int hctdbWriterSortFPKeys(
         UnpackedRecord *pRec = p->writecsr.pRec;
         rc = hctDbLoadRecord(pDb, &p->writecsr.rec, aW, 0, &nFP, &aFP);
         if( rc!=SQLITE_OK ) break;
-        sqlite3VdbeRecordUnpack(p->writecsr.pKeyInfo, nFP, aFP, pRec);
+        sqlite3VdbeRecordUnpack(nFP, aFP, pRec);
         rc = hctDbCompareFPKey(pDb, pRec, aD, &bDiscard);
         if( rc!=SQLITE_OK ) break;
       }
@@ -3569,7 +3570,7 @@ static int hctDbInsertFlushWrite(HctDatabase *pDb, HctDbWriter *p){
             rc = hctDbLoadRecord(pDb, &buf, pPg->aOld, 0, &nFP, &aFP);
             if( rc!=SQLITE_OK ) break;
             pRec = p->writecsr.pRec;
-            sqlite3VdbeRecordUnpack(p->writecsr.pKeyInfo, nFP, aFP, pRec);
+            sqlite3VdbeRecordUnpack(nFP, aFP, pRec);
             sqlite3HctDbRecordTrim(pRec);
           }
 
@@ -4023,7 +4024,7 @@ int sqlite3HctDbCsrLoadAndDecode(HctDbCsr *pCsr, UnpackedRecord **ppRec){
 
   if( rc==SQLITE_OK ){
     *ppRec = pCsr->pRec;
-    sqlite3VdbeRecordUnpack(pCsr->pKeyInfo, nData, aData, pCsr->pRec);
+    sqlite3VdbeRecordUnpack(nData, aData, pCsr->pRec);
     assert( pCsr->pRec->nField>0 );
   }
 
@@ -4062,7 +4063,7 @@ static int hctDbFindLhsPeer(
     }
     if( rc==SQLITE_OK ){
       pRec = p->writecsr.pRec;
-      sqlite3VdbeRecordUnpack(p->writecsr.pKeyInfo, nData, aData, pRec);
+      sqlite3VdbeRecordUnpack(nData, aData, pRec);
       sqlite3HctDbRecordTrim(pRec);
       pRec->default_rc = 1;
       rc = hctDbCsrSeek(&csr, 0, p->iHeight, 0, pRec, 0, 0);
@@ -7420,7 +7421,7 @@ static void hctDbRecordUnpack(
   UnpackedRecord *pRec
 ){
   pRec->nField = pKeyInfo->nKeyField+1;
-  sqlite3VdbeRecordUnpack(pKeyInfo, n, a, pRec);
+  sqlite3VdbeRecordUnpack(n, a, pRec);
 }
 
 static int hctDbValidateIndex(HctDatabase *pDb, HctDbCsr *pCsr){
