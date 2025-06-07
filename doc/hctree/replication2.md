@@ -1,7 +1,17 @@
 Hctree Leader/Follower Replication
 ==================================
 
-Overview
+<ol>
+  <li> [Overview](#overview)
+  <li> [The hct\_journal Table](#table)
+  <li> [Database Modes](#modes)
+  <li> [Leader Mode](#leader_mode)
+  <li> [Follower Mode](#follower_mode)
+  <li> [Local Transactions](#local)
+</ol>
+
+<a name=overview></a>
+1.\ Overview
 ========
 
 This page describes Hctree features to support leader/follower replication -
@@ -31,7 +41,8 @@ cluster, the application layer may compare the contents of its hct\_journal
 table with that of an existing node and request the missing transactions in
 order to synchronize the local database with the system.
 
-The hct\_journal Table
+<a name=table></a>
+2.\ The hct\_journal Table
 ======================
 
 The columns of the hct\_journal table are as follows:
@@ -110,7 +121,8 @@ contents of the hct\_journal table may be *non-contiguous*.
   *  An hct\_journal table is said to be *non-contiguous* if there are one
      or more missing entries - if the cid's are non-contiguous.
 
-Database Modes
+<a name=modes></a>
+3.\ Database Modes
 ===============
 
 A database may be one of three modes:
@@ -166,7 +178,8 @@ sqlite3_hct_journal_follower_commit() APIs, respectively. Attempting to write to
 database any other way is an error. Similarly, using either of the
 aforementioned functions while in NORMAL mode is an error.
 
-Leader Mode
+<a name=leader_mode></a>
+4.\ Leader Mode
 ===========
 
 When in leader mode, transactions are still begun using the usual "BEGIN"
@@ -228,7 +241,8 @@ entries are inserted in all the gaps in order to make it contiguous. A "zero"
 entry is one where the "query" column is empty and the "snapshot" column is
 set to 0.
 
-Follower Mode
+<a name=follower_mode></a>
+5.\ Follower Mode
 =============
 
 When in follower mode, transactions are still begun using the usual "BEGIN"
@@ -314,7 +328,7 @@ are rolled back and the entries removed from hct\_journal. Ensuring that
 the hct\_journal table is always contiguous following startup.
 
 <a name=local></a>
-Local Transactions
+6.\ Local Transactions
 ==================
 
 Local transactions are transactions executed in LEADER or FOLLOWER mode that

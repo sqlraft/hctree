@@ -1,5 +1,5 @@
-C Updates\sto\sreplication2.md.
-D 2025-06-07T19:02:40.792
+C Remove\sold\sreferences\sto\sreplication.md\sin\sfavour\sof\sreplication2.md.
+D 2025-06-07T19:32:41.447
 F .fossil-settings/binary-glob 61195414528fb3ea9693577e1980230d78a1f8b0a54c78cf1b9b24d0a409ed6a x
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
@@ -62,12 +62,12 @@ F doc/hctree/design.wiki 4199137de3d95d13cd7abf3c72b64f64ef433227651153e4ebd65c3
 F doc/hctree/fileformat.wiki 75d2923c1ab4953cafc50a6829ea6e857334b76a64b4a910a17a04710b73cccd
 F doc/hctree/hct_migrate.wiki 35227317dd0350002f921f6fb7cef916f134109eb4f3ade6030980a4d208c2bb
 F doc/hctree/hctree_bedrock.md c4280b0fcf7aff496087633a160d821f1d71ef6bff30781286d26fd66af6d476
-F doc/hctree/index.html 63cdbc4f98d0247279cb5ff580e4939c1fae661be16f3fd7bd2e18d26a4e9bcd
+F doc/hctree/index.html 3465aa77ed7003dd8743cb48f9ccae478fa9bed60c1e79714677c13d1b8d0cfe
 F doc/hctree/mkthreadtest.tcl 58b1c401b35dcabd978f5a9663376a5beee441bdd9d1e49536772dbd68086876
 F doc/hctree/pagetest.c 4d5f3aee508e32ff08dfd81b0c79f9ebfad04590f4d9283bd5df7e08674f9112
 F doc/hctree/perftest1.tcl f886f47adfd660a6e0648c8272227a037a209a4abdc5b6451a87224249beff1b
-F doc/hctree/replication.md 45c7df44a05c9843d70e4cf8bccf001548c1b7e13080491666fee5800caeb5a9
-F doc/hctree/replication2.md d3a8b21955ded4905478af67cf09b7a48181f5cb6a0fa6c9763b196ba769a106
+F doc/hctree/replication.md 99e88edc3404fc4b85b637dbbb32a037e404069ecd3c03d288588dddbffbc3ea
+F doc/hctree/replication2.md 45f3d0c181641d4c221faa36d7a1011278791d867b6f64d541f6a1dfa9b2b497
 F doc/hctree/slides.html 763e1e5b40201595f0924a589c8e6e9a7ca3ca593ed0045d372e66e12ece7aef
 F doc/hctree/slides.wiki 4151889c5485fecd8a71d5d0089645998a2db5ebc3360b570f763e59effed60c
 F doc/hctree/testing.wiki 398878d3636512df24cdd4650e87423163ecc9bc371d40e5876237a42f8b59e1
@@ -2327,8 +2327,8 @@ F tool/version-info.c 3b36468a90faf1bbd59c65fd0eb66522d9f941eedd364fabccd7227350
 F tool/warnings-clang.sh bbf6a1e685e534c92ec2bfba5b1745f34fb6f0bc2a362850723a9ee87c1b31a7
 F tool/warnings.sh 1ad0169b022b280bcaaf94a7fa231591be96b514230ab5c98fbf15cd7df842dd
 F tool/win/sqlite.vsix deb315d026cc8400325c5863eef847784a219a2f
-P 8278f37ca0c7d7441270e4219d2df6e085d7b949821dcbc51ed475c4fa98fd04
-R 1f9e54bf5413cf44756e2b63afc190fe
+P dc0189f7dc00d46a239622860e9f2267eab00124e683612223bcf43f95226f4b
+R 05202b97f34390087e6a8f010bc42c11
 U dan
-Z e836ad046157f133b32b769bfb25a7e1
+Z 487b86c20e6867497d067f6a0a0dbf65
 # Remove this line to create a well-formed Fossil manifest.
