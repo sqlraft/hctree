@@ -1,5 +1,5 @@
-C Merge\strunk\schanges\sinto\sthis\sbranch.
-D 2025-06-03T15:38:32.937
+C Updates\sto\sreplication2.md.
+D 2025-06-07T19:02:40.792
 F .fossil-settings/binary-glob 61195414528fb3ea9693577e1980230d78a1f8b0a54c78cf1b9b24d0a409ed6a x
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
@@ -67,7 +67,7 @@ F doc/hctree/mkthreadtest.tcl 58b1c401b35dcabd978f5a9663376a5beee441bdd9d1e49536
 F doc/hctree/pagetest.c 4d5f3aee508e32ff08dfd81b0c79f9ebfad04590f4d9283bd5df7e08674f9112
 F doc/hctree/perftest1.tcl f886f47adfd660a6e0648c8272227a037a209a4abdc5b6451a87224249beff1b
 F doc/hctree/replication.md 45c7df44a05c9843d70e4cf8bccf001548c1b7e13080491666fee5800caeb5a9
-F doc/hctree/replication2.md 382e8076e1a0b333178372a9962d07de5eacd1e66459adcb911d60724c14fedb
+F doc/hctree/replication2.md d3a8b21955ded4905478af67cf09b7a48181f5cb6a0fa6c9763b196ba769a106
 F doc/hctree/slides.html 763e1e5b40201595f0924a589c8e6e9a7ca3ca593ed0045d372e66e12ece7aef
 F doc/hctree/slides.wiki 4151889c5485fecd8a71d5d0089645998a2db5ebc3360b570f763e59effed60c
 F doc/hctree/testing.wiki 398878d3636512df24cdd4650e87423163ecc9bc371d40e5876237a42f8b59e1
@@ -831,7 +831,7 @@ F src/shell.c.in 1da613953db4c8d50e3a4a66fa7d69b4c95edb3628941d732637d3c35ea0dce
 F src/sqlite.h.in bb99cc7170fc761e377676cdfffcdc8caa3ccd40f7189b57ccc6b3fc135d8ffa
 F src/sqlite3.rc 015537e6ac1eec6c7050e17b616c2ffe6f70fca241835a84a4f0d5937383c479
 F src/sqlite3ext.h 0bfd049bb2088cc44c2ad54f2079d1c6e43091a4e1ce8868779b75f6c1484f1e
-F src/sqlite3hct.h 3831e25f7173cac51bdb9b6dbe705b404fc02ff1e01005ee3ef957aee18af7a3
+F src/sqlite3hct.h e127d5dd4a667c41bdf8eaf6b837184c9cc66f699c3cda294fde24a371a62101
 F src/sqliteInt.h 210f7b6c831bcd72b0f2178a2628283e9ffef12fceaf704c280af994a8cf683d
 F src/sqliteLimit.h 6d817c28a8f19af95e6f4921933b7fbbca48a962bce0eb0ec81e8bb3ef38e68b
 F src/status.c 0e72e4f6be6ccfde2488eb63210297e75f569f3ce9920f6c3d77590ec6ce5ffd
@@ -2327,8 +2327,8 @@ F tool/version-info.c 3b36468a90faf1bbd59c65fd0eb66522d9f941eedd364fabccd7227350
 F tool/warnings-clang.sh bbf6a1e685e534c92ec2bfba5b1745f34fb6f0bc2a362850723a9ee87c1b31a7
 F tool/warnings.sh 1ad0169b022b280bcaaf94a7fa231591be96b514230ab5c98fbf15cd7df842dd
 F tool/win/sqlite.vsix deb315d026cc8400325c5863eef847784a219a2f
-P 18e551859e4cebf4777b1e76484aa6c1914d09530857c4414cd8a430d31d7285 ea1754f7d8a770477a1b19b606b27724fdc0b733e51fef32c1ef834f972c3cc5
-R a4a00afeb00dc55ce29e67250cfd8a2a
+P 8278f37ca0c7d7441270e4219d2df6e085d7b949821dcbc51ed475c4fa98fd04
+R 1f9e54bf5413cf44756e2b63afc190fe
 U dan
-Z c2bf803012d86bbf894c91e53cba7f62
+Z e836ad046157f133b32b769bfb25a7e1
 # Remove this line to create a well-formed Fossil manifest.
