@@ -308,6 +308,8 @@ struct HctDatabaseStats {
   i64 nUpdateInPlace;
   i64 nInternalRetry;
   i64 nDefragment;
+
+  i64 nDescendInWriteWrite;
 };
 
 /*
@@ -5555,6 +5557,7 @@ static int hctDbWriteWriteConflict(
 ){
   int rc = SQLITE_OK;
   const u8 *aTarget = p->writepg.aPg[pOp->iPg].aNew;
+  int nDescend = 0;
 
   if( aTarget==0 ){
     aTarget = p->writepg.aPg[pOp->iPg].aOld;
@@ -5587,7 +5590,7 @@ static int hctDbWriteWriteConflict(
     while( hctDbFollowRangeOld(pDb, &ptr, &bMerge) ){
       HctFilePage pg;
       const u8 *aOld = 0;
-
+      nDescend++;
       if( ptr.iOld==pDb->pa.fanpg.iNewPg ){
         aOld = pDb->pa.fanpg.aNew;
         memset(&pg, 0, sizeof(pg));
@@ -5627,6 +5630,10 @@ static int hctDbWriteWriteConflict(
     }
   }
 
+  pDb->stats.nDescendInWriteWrite += nDescend;
+  HCT_EXTRA_WR_LOGGING(pDb, 
+      ("write-write conflict detection: nDescend=%d rc=%d", nDescend, rc)
+  );
   return rc;
 }
 
@@ -7913,6 +7920,10 @@ i64 sqlite3HctDbStats(sqlite3 *db, int iStat, const char **pzStat){
     case 11:
       *pzStat = "balance_overfull";
       iVal = pDb->stats.nBalanceOverfull;
+      break;
+    case 12:
+      *pzStat = "descend_in_writewrite";
+      iVal = pDb->stats.nDescendInWriteWrite;
       break;
     default:
       break;

@@ -1,5 +1,5 @@
-C Minor\schanges:\sRe-enable\sappend-mode\sin\sinserts.\sDo\snot\slog\sa\smessage\sfor\severy\sHCT_SQLITE_BUSY\sreturn\svalue.
-D 2025-06-13T10:46:18.743
+C Add\sa\scounter\sfor\sthe\snumber\sof\sold-pointers\sfollowed\swhile\slooking\sfor\swrite-write\sconflicts.
+D 2025-06-13T15:41:17.961
 F .fossil-settings/binary-glob 61195414528fb3ea9693577e1980230d78a1f8b0a54c78cf1b9b24d0a409ed6a x
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
@@ -773,7 +773,7 @@ F src/hctJrnlInt.h 468811ef7cd854a8b734497b0ca6b6137b291ea9bba9dc4a91d6dc25a49f4
 F src/hctLogInt.h 44b72c10335f41efe1eb54df524218d4edbb07896a642093bc59badaa3aa7ecc
 F src/hctPManInt.h 3936d01947aace587fd73c51246b7bd5cdbc79833248b839e7d9ffd737ded8b7
 F src/hctTMapInt.h e58c9aa6f9decd43bbd069a26cb74d6482da4592c911e7f8352ddd1fc410d991
-F src/hct_database.c cea7f2b7e6063f2199fb5ecaae906405d35c0b15f593f7a72ddb8ee1ae68782a
+F src/hct_database.c 4d0c5e68961275dd5bdd1a7c7f6c438f3717eebf4e824d054e12221e8d54fca4
 F src/hct_file.c 7e5f8805006412b7fa6c157bff54a0e9c85ffdaab30452b049d5fc631f1429a2
 F src/hct_journal.c 91ac0530d6ea417d96fedd0c37f810aaa612489db0e8e6265787edbe0776524b
 F src/hct_journalhash.c 5af4886fd8c126a96c78278f6e62a8e31de9b8e683b167c487b033a87fabb7a3
@@ -2327,8 +2327,8 @@ F tool/version-info.c 3b36468a90faf1bbd59c65fd0eb66522d9f941eedd364fabccd7227350
 F tool/warnings-clang.sh bbf6a1e685e534c92ec2bfba5b1745f34fb6f0bc2a362850723a9ee87c1b31a7
 F tool/warnings.sh 1ad0169b022b280bcaaf94a7fa231591be96b514230ab5c98fbf15cd7df842dd
 F tool/win/sqlite.vsix deb315d026cc8400325c5863eef847784a219a2f
-P 06a8554ea43494d3be7ced0022f516175bd1eab4e3f7245967a3ae5c6dffba98
-R 2fc9fe6dc35954f311e00b43b6e8393c
+P bd4299aec7e1405935e52761bb43b8371b1e4c53d355c4205780515c2997eb4c
+R 424108c43ded7f1c0049f1085efc7047
 U dan
-Z 2f8875e0e93b53c4850ac804d0d6c3ba
+Z 00e376574adb94000af8e967af222076
 # Remove this line to create a well-formed Fossil manifest.
