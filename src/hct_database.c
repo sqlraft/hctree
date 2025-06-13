@@ -588,7 +588,7 @@ static void hctBufferSet(HctBuffer *pBuf, const u8 *aData, int nData){
 
 #if 0 || defined(SQLITE_DEBUG)
 static int hctSqliteBusy(const char *zFile, int iLine){
-  sqlite3_log(SQLITE_WARNING, "HCT_SQLITE_BUSY at %s:%d", zFile, iLine);
+  sqlite3_log(SQLITE_BUSY_SNAPSHOT, "HCT_SQLITE_BUSY at %s:%d", zFile, iLine);
   return SQLITE_BUSY_SNAPSHOT;
 }
 # define HCT_SQLITE_BUSY hctSqliteBusy(__FILE__, __LINE__)
@@ -5365,6 +5365,8 @@ static int hctDbDelete(
   **   2) The left-hand-cell does not have a range-pointer. Or else
   **      has a range-pointer so old it can be overwritten with impunity.
   **
+  **      Or else the left-hand-cell is present on page pOp->iOldPg.
+  **
   **   3) The left-hand-cell has a range-pointer to a fan-page that was
   **      created by the current HctDbWriter batch, and that fan-page
   **      is not already full.
@@ -5378,7 +5380,12 @@ static int hctDbDelete(
     pOp->iInsert = (pOp->nClobber==0 ? -1 : pOp->iInsert+1);
     assert( pOp->nClobber==0 || pOp->nClobber==1 );
   }
-  else if( prev.iRangeTid==0 || (prev.iRangeTid & HCT_TID_MASK)<=iSafeTid ){
+  else if( (prev.iRangeTid & HCT_TID_MASK)<=iSafeTid 
+    || (p->discardpg.nPg==0
+      && pDb->iTid>=(prev.iRangeTid & HCT_TID_MASK)
+      && pOp->iOldPg==p->writepg.aPg[0].iOldPg
+    )
+  ){
     /* Possibility (2) */
     prev.iRangeTid = iTidValue;
     prev.iRangeOld = pOp->iOldPg;
@@ -5585,11 +5592,13 @@ static int hctDbWriteWriteConflict(
     int bMerge = 0;
     HctRangePtr ptr;
 
+
     iCell = (pOp->iInsert - 1);
     hctDbGetRange(aTarget, iCell, &ptr);
     while( hctDbFollowRangeOld(pDb, &ptr, &bMerge) ){
       HctFilePage pg;
       const u8 *aOld = 0;
+
       nDescend++;
       if( ptr.iOld==pDb->pa.fanpg.iNewPg ){
         aOld = pDb->pa.fanpg.aNew;
@@ -5609,6 +5618,9 @@ static int hctDbWriteWriteConflict(
           rc = hctDbLeafSearch(pDb, aOld, iKey, pKey, &iCell, &bExact);
           if( rc==SQLITE_OK && bExact ){
             if( bMerge ){
+              /* If bMerge is true, then the connection could not see the
+              ** delete operation that removed this entry. It is therefore
+              ** a write-write conflict. Return HCT_SQLITE_BUSY.  */
               rc = HCT_SQLITE_BUSY;
             }
             sqlite3HctFilePageRelease(&pg);

@@ -363,6 +363,25 @@ do_execsql_test 6.9.5 {
   4146526905 134695745 QUEUED
 }
 
+#--------------------------------------------------------------------------
+hct_reset_db
+do_execsql_test 7.0 {
+  CREATE TABLE t1(a INTEGER PRIMARY KEY, b TEXT);
+  INSERT INTO t1 VALUES(1, 'one'), (5, 'five'), (10, 'ten'), (15, 'fifteen');
+}
+
+sqlite3 db2 test.db
+do_execsql_test 7.1 {
+  BEGIN CONCURRENT;
+    UPDATE t1 SET b='five2' WHERE a=5;
+}
+do_execsql_test -db db2 7.2 {
+    UPDATE t1 SET b='five3' WHERE a=5;
+    DELETE FROM t1 WHERE a=5;
+}
+do_catchsql_test 7.3 {
+  COMMIT;
+} {1 {database is locked}}
+
+
 finish_test
-
-
