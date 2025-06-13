@@ -584,7 +584,7 @@ static void hctBufferSet(HctBuffer *pBuf, const u8 *aData, int nData){
 }
 
 
-#if 1 || defined(SQLITE_DEBUG)
+#if 0 || defined(SQLITE_DEBUG)
 static int hctSqliteBusy(const char *zFile, int iLine){
   sqlite3_log(SQLITE_WARNING, "HCT_SQLITE_BUSY at %s:%d", zFile, iLine);
   return SQLITE_BUSY_SNAPSHOT;
@@ -4623,18 +4623,16 @@ static int hctDbBalance(
 
   if( nOut==0 ){
 
-    // TODO: Re-enable this. Or establish that it is not helpful.
-#if 0
-    HctDbPageHdr *pHdr = (HctDbPageHdr*)p->writepg.aPg[iPg].aNew;
+    HctDbPageHdr *pHdr = (HctDbPageHdr*)aPgCopy[0];
     if( p->iHeight==0 
-     && bClobber==0 && pOp->nEntry>0 
+     && pOp->nClobber==0 && pOp->nEntry>0 
      && pHdr->iPeerPg==0 && pHdr->nEntry==iIns 
     ){
       p->bAppend = 1;
+      hctDbDirtyPage(pDb, &p->writepg.aPg[iPg]);
       rc = hctDbBalanceAppend(pDb, p, pOp);
       return rc;
     }
-#endif
 
     /* If the HctDbWriter.writepg.aPg[] array still contains a single page, 
     ** load some peer pages into it. */
@@ -6090,11 +6088,11 @@ static int hctDbInsert(
     }
   }
 
-// TEMPORARY!!!
-if( op.eBalance==BALANCE_NONE || p->bAppend ){
-  rc = hctDbDirtyPage(pDb, &p->writepg.aPg[op.iPg]);
-  aTarget = p->writepg.aPg[op.iPg].aNew;
-}
+  // TEMPORARY (?)
+  if( op.eBalance==BALANCE_NONE || p->bAppend ){
+    rc = hctDbDirtyPage(pDb, &p->writepg.aPg[op.iPg]);
+    aTarget = p->writepg.aPg[op.iPg].aNew;
+  }
 
   if( op.eBalance!=BALANCE_NONE ){
     assert( op.bFullDel==0 || op.aEntry==0 );
