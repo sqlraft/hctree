@@ -5887,9 +5887,22 @@ static int hctDbInsert(
     ));
 
     /* If this is a write to a leaf page, and not part of a rollback, 
-    ** check for a write-write conflict here. */
-    if( 0==p->iHeight 
-     && pDb->eMode==HCT_MODE_NORMAL
+    ** check for a write-write conflict here. 
+    **
+    ** Write-write conflict detection is required if the following are 
+    ** all true:
+    **
+    **   (a) this is a leaf node
+    **   (b) connection is in normal, not rollback mode.
+    **   (c) this is an IPK table, or else a UNIQUE or PRIMARY KEY index.
+    **
+    ** The caller ensures that all writes to trees that require write-write
+    ** conflict detection within a transaction occur before all writes to 
+    ** trees that do not.
+    */
+    if( 0==p->iHeight                               /* (a) */
+     && pDb->eMode==HCT_MODE_NORMAL                 /* (b) */
+     && (pRec==0 || pRec->pKeyInfo->nUniqField>0)   /* (c) */
      && (rc=hctDbWriteWriteConflict(pDb, p, &op, pRec, iKey))!=SQLITE_OK
     ){
       return rc;
