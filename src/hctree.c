@@ -1712,7 +1712,7 @@ static int btreeFlushData(HBtree *p, int bRollback){
     FlushOneCtx ctx;
     ctx.p = p;
     ctx.bRollback = bRollback;
-    rc = sqlite3HctTreeForeach(p->pHctTree, 0, (void*)&ctx,btreeFlushOneToDisk);
+    rc = sqlite3HctTreeForeach(p->pHctTree, (void*)&ctx, btreeFlushOneToDisk);
   }
   if( bRollback ) sqlite3HctDbRollbackMode(p->pHctDb, 0);
   return rc;
@@ -1723,7 +1723,7 @@ static int btreeWriteLog(HBtree *p){
 
   rc = sqlite3HctLogBegin(p->pHctLog);
   if( rc==SQLITE_OK ){
-    rc = sqlite3HctTreeForeach(p->pHctTree, 0, (void*)p, btreeLogOneToDisk);
+    rc = sqlite3HctTreeForeach(p->pHctTree, (void*)p, btreeLogOneToDisk);
   }
 
   return rc;
@@ -3064,29 +3064,6 @@ int sqlite3HctBtreeInsert(
 
   if( pRec && pRec!=&r ){
     sqlite3DbFree(pCur->pKeyInfo->db, pRec);
-  }
-  return rc;
-}
-
-int sqlite3HctSchemaOp(Btree *pBt, const char *zSql){
-  int rc = SQLITE_OK;
-  HBtree *const p = (HBtree*)pBt;
-  if( p->pHctJrnl && 0 ){
-    HctTreeCsr *pCsr = 0;
-
-    rc = sqlite3HctTreeCsrOpen(p->pHctTree, HCT_TREE_SCHEMAOP_ROOT, &pCsr);
-    if( rc==SQLITE_OK ){
-      int nSql = sqlite3Strlen30(zSql);
-      i64 iRowid = 1;
-      sqlite3HctTreeCsrLast(pCsr);
-      if( sqlite3HctTreeCsrEof(pCsr)==0 ){
-        sqlite3HctTreeCsrKey(pCsr, &iRowid);
-        iRowid++;
-      }
-
-      rc = sqlite3HctTreeInsert(pCsr, 0, iRowid, nSql, (const u8*)zSql, 0);
-      sqlite3HctTreeCsrClose(pCsr);
-    }
   }
   return rc;
 }
