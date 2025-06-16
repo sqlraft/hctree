@@ -1,5 +1,5 @@
-C Ensure\shctree\swrites\sUNIQUE\sand\sPRIMARY\sKEY\strees\sbefore\sany\sothers.\sThis\sway,\sit\scan\sskip\swrite/write\sconflict\sdetection\son\snon-UNIQUE,\snon-PK\sindexes\s(since\sany\sconflcit\swould\shave\soccurred\son\sthe\sPK\sobject\sanyway).
-D 2025-06-14T15:30:35.276
+C Minor\stweaks\sto\sfileformat\sdocument.
+D 2025-06-16T10:56:04.192
 F .fossil-settings/binary-glob 61195414528fb3ea9693577e1980230d78a1f8b0a54c78cf1b9b24d0a409ed6a x
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
@@ -59,7 +59,7 @@ F doc/F2FS.txt c1d4a0ae9711cfe0e1d8b019d154f1c29e0d3abfe820787ba1e9ed7691160fcd
 F doc/compile-for-unix.md c9dce1ddd4bf0d25efccc5c63eb047e78c01ce06a6ff29c73e0a8af4a0f4adbc
 F doc/compile-for-windows.md 5141661e783c9ca9e3fd30e813345898712f5c311d71316f183db87038fa28a6
 F doc/hctree/design.wiki 4199137de3d95d13cd7abf3c72b64f64ef433227651153e4ebd65c3517ac7fe6
-F doc/hctree/fileformat.wiki 75d2923c1ab4953cafc50a6829ea6e857334b76a64b4a910a17a04710b73cccd
+F doc/hctree/fileformat.wiki cdddbc8370ea06bf58e605bcfbe477bb53198c58ef9e24fb6b3d38638660358c
 F doc/hctree/hct_migrate.wiki 35227317dd0350002f921f6fb7cef916f134109eb4f3ade6030980a4d208c2bb
 F doc/hctree/hctree_bedrock.md c4280b0fcf7aff496087633a160d821f1d71ef6bff30781286d26fd66af6d476
 F doc/hctree/index.html 3465aa77ed7003dd8743cb48f9ccae478fa9bed60c1e79714677c13d1b8d0cfe
@@ -2327,8 +2327,8 @@ F tool/version-info.c 3b36468a90faf1bbd59c65fd0eb66522d9f941eedd364fabccd7227350
 F tool/warnings-clang.sh bbf6a1e685e534c92ec2bfba5b1745f34fb6f0bc2a362850723a9ee87c1b31a7
 F tool/warnings.sh 1ad0169b022b280bcaaf94a7fa231591be96b514230ab5c98fbf15cd7df842dd
 F tool/win/sqlite.vsix deb315d026cc8400325c5863eef847784a219a2f
-P f5bda309dd8495757ef150fc2c3b8a424a4ad259d32df330f963fe49b04fa47c
-R 1f7ab4209287e9deff9677c101bbcaae
+P 5f2f6c947cf8db2b90ccd4c5e9f2e99b93991999e467033e09dba4448ebbf89b
+R 678c1d92e848c5c9c6eaf267273a1ac9
 U dan
-Z 2aeb3aa9db74c89ebd576266d36433de
+Z 4e1778ea88837ea706de0bf80282f394
 # Remove this line to create a well-formed Fossil manifest.
