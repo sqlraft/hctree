@@ -234,8 +234,6 @@ int sqlite3HctDbStartRecovery(HctDatabase *pDb, int iStage);
 int sqlite3HctDbFinishRecovery(HctDatabase *db, int iStage, int rc);
 void sqlite3HctDbRecoverTid(HctDatabase *db, u64 iTid);
 
-i64 sqlite3HctDbNCasFail(HctDatabase*);
-
 char *sqlite3HctDbIntegrityCheck(HctDatabase*, u32 *aRoot,Mem*,int nRoot, int*);
 i64 sqlite3HctDbStats(sqlite3 *db, int iStat, const char **pzStat);
 

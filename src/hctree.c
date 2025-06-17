@@ -697,7 +697,7 @@ void sqlite3HctExtraLogging(
 
 static char *hctGetLog(HctConfig *pConfig){
   int ii;
-  char *zRet = 0;
+  char *zRet = sqlite3HctMprintf("");
   for(ii=0; ii<pConfig->nLogEntry; ii++){
     HctConfigLogEntry *p = &pConfig->aLogEntry[ii];
     zRet = sqlite3HctMprintf("%z%s:%d %s\n", zRet, p->zFunc, p->iLine, p->zMsg);
@@ -3366,9 +3366,6 @@ int sqlite3HctBtreePragma(Btree *pBt, char **aFnctl){
       p->config.nPageSet = iVal;
     }
     zRet = hctDbMPrintf(&rc, "%d", p->config.nPageSet);
-  }
-  else if( 0==sqlite3_stricmp("hct_ncasfail", zLeft) ){
-    zRet = hctDbMPrintf(&rc, "%lld", sqlite3HctDbNCasFail(p->pHctDb));
   }
   else if( p->pHctDb && 0==sqlite3_stricmp("hct_npagescan", zLeft) ){
     int iVal = 0;

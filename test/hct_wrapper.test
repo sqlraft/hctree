@@ -26,7 +26,7 @@ proc open_check {uri} {
   }
 
   set ret stock
-  dbtest eval { PRAGMA hct_ncasfail } { set ret hct }
+  dbtest eval { PRAGMA hct_log } { set ret hct }
   dbtest close
 
   set ret

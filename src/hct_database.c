@@ -323,28 +323,24 @@ struct HctDatabaseStats {
 **   assume that the transactions associated with this and all smaller TID
 **   values have been fully committed or rolled back. No pointers associated
 **   with such values need be followed.
-**
-** bCannotCommit:
-**   This is set to true once it is known that the current transaction
-**   cannot be committed. Something has already been seen that guarantees
-**   an attempt to commit will be a conflict.
 */
 struct HctDatabase {
   HctFile *pFile;
   HctConfig *pConfig;
-  i64 nCasFail;                   /* Number cas-collisions so far */
   int pgsz;                       /* Page size in bytes */
 
   u8 *aTmp;                       /* Temp buffer pgsz bytes in size */
   HctBalance *pBalance;           /* Space for hctDbBalance() */
 
   HctDbCsr *pScannerList;
-  int bCannotCommit;
 
+  /* These three are set at the start of each read transaction */
   HctTMap *pTmap;                 /* Transaction map (non-NULL if trans open) */
   u64 iSnapshotId;                /* Snapshot id for reading */
+  u64 iLocalMinTid;               /* All trans with lower tids are done */
+
   u64 iReqSnapshotId;             /* Required snapshot to replicate trans. */
-  u64 iLocalMinTid;
+
   HctDbWriter pa;
   HctDbCsr rbackcsr;              /* Used to find old values during rollback */
   u64 iTid;                       /* Transaction id for writing */
@@ -3587,7 +3583,6 @@ static int hctDbInsertFlushWrite(HctDatabase *pDb, HctDbWriter *p){
         if( rc==SQLITE_LOCKED ){
           assert( iOrig>=wr.nWriteKey );
           iOrig -= wr.nWriteKey;
-          pDb->nCasFail++;
           pDb->stats.nInternalRetry++;
         }
         hctDbWriterCleanup(pDb, &wr, (rc!=SQLITE_OK));
@@ -3630,10 +3625,6 @@ void sqlite3HctDbRollbackMode(HctDatabase *pDb, int eRollback){
   }
 }
 
-i64 sqlite3HctDbNCasFail(HctDatabase *pDb){
-  return pDb->nCasFail;
-}
-
 #if 0
 static HctDbIntkeyEntry *hctDbIntkeyEntry(u8 *aPg, int iCell){
   return iCell<0 ? 0 : (&((HctDbIntkeyLeaf*)aPg)->aEntry[iCell]);
@@ -3647,7 +3638,6 @@ int sqlite3HctDbInsertFlush(HctDatabase *pDb, int *pnRetry){
     if( rc==SQLITE_LOCKED ){
       *pnRetry = pDb->pa.nWriteKey;
       rc = SQLITE_OK;
-      pDb->nCasFail++;
       HCT_EXTRA_WR_LOGGING(pDb, ("retrying %d ops", *pnRetry));
     }else{
       *pnRetry = 0;
@@ -6277,7 +6267,6 @@ static int hctDbInsertWithRetry(
   if( rc==SQLITE_LOCKED || (rc&0xFF)==SQLITE_BUSY ){
     if( rc==SQLITE_LOCKED ){
       rc = SQLITE_OK;
-      pDb->nCasFail++;
     }
     *pnRetry = pDb->pa.nWriteKey;
     pDb->pa.nWriteKey = 0;
