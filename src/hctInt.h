@@ -247,7 +247,7 @@ void sqlite3HctDbSetSavePhysical(
   void *pSave
 );
 
-char *sqlite3HctDbRecordToText(sqlite3 *db, const u8 *aRec, int nRec);
+char *sqlite3HctDbRecordToText(const u8 *aRec, int nRec);
 char *sqlite3HctDbUnpackedToText(UnpackedRecord *pRec);
 
 void sqlite3HctDbTransIsConcurrent(HctDatabase *pDb, int bConcurrent);

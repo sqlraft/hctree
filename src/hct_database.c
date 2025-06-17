@@ -586,7 +586,7 @@ static void hctBufferSet(HctBuffer *pBuf, const u8 *aData, int nData){
 }
 
 
-#if 0 || defined(SQLITE_DEBUG)
+#if 0 && defined(SQLITE_DEBUG)
 static int hctSqliteBusy(const char *zFile, int iLine){
   sqlite3_log(SQLITE_BUSY_SNAPSHOT, "HCT_SQLITE_BUSY at %s:%d", zFile, iLine);
   return SQLITE_BUSY_SNAPSHOT;
@@ -2883,15 +2883,15 @@ static char *hctDbCsrDebugCsrPos(HctDbCsr *pCsr){
         int nData = 0;
         const u8 *aData = 0;
         sqlite3HctDbCsrData(pCsr, &nData, &aData);
-        zKey = sqlite3HctDbRecordToText(0, aData, nData);
+        zKey = sqlite3HctDbRecordToText(aData, nData);
       }else{
         i64 iKey = 0;
         sqlite3HctDbCsrKey(pCsr, &iKey);
-        zKey = sqlite3_mprintf("%lld", iKey);
+        zKey = sqlite3_mprintf("[%lld]", iKey);
       }
     }
 
-    zMsg = sqlite3_mprintf("%scell %d, phys. page %lld, key (%s)",
+    zMsg = sqlite3_mprintf("%scell %d, phys. page %lld, key %s",
         bRange ? "(range cursor) " : "", iCell, iPg, zKey
     );
     sqlite3_free(zKey);
@@ -5555,6 +5555,66 @@ static int hctDbInsertFindPosition(
   return rc;
 }
 
+static char *hctDbKeyToText(
+  UnpackedRecord *pKey,
+  i64 iKey
+){
+  char *zRet = 0;
+  if( pKey ){
+    zRet = sqlite3HctDbUnpackedToText(pKey);
+  }else{
+    zRet = sqlite3HctMprintf("[%lld]", iKey);
+  }
+  return zRet;
+}
+
+static char *hctDbCsrKeyToText(HctDbCsr *pCsr){
+  char *zRet = 0;
+  if( pCsr->pKeyInfo ){
+    int nData = 0;
+    const u8 *aData = 0;
+    sqlite3HctDbCsrData(pCsr, &nData, &aData);
+    zRet = sqlite3HctDbRecordToText(aData, nData);
+  }else{
+    int iCell = 0;
+    const u8 *aPg = hctDbCsrPageAndCell(pCsr, &iCell);
+    zRet = sqlite3HctMprintf("[%lld]", hctDbGetIntkey(aPg, iCell));
+  }
+  return zRet;
+}
+
+/*
+** Write a "write/write conflict" message to sqlite3_log().
+*/
+static void hctDbLogWriteConflict(
+  u64 iRoot,                      /* Root page of tree of conflict */
+  i64 iTid,                       /* TID value of conflicting transaction */
+  UnpackedRecord *pKey,           /* Key value, if this is an index tree */
+  i64 iKey,                       /* Key value, if this is an IPK tree */
+  int bAlreadyRemoved             /* True if conflicting op was a delete */
+){
+  char *zKey = hctDbKeyToText(pKey, iKey);
+  sqlite3_log(SQLITE_BUSY_SNAPSHOT, 
+      "write/write conflict on root=%lld, key=%s, conflicting=(%lld)%s",
+      (i64)iRoot, zKey, iTid, (bAlreadyRemoved ? " (deleted)" : "")
+  );
+  sqlite3_free(zKey);
+}
+
+/*
+** Write a "read/write conflict" message to sqlite3_log().
+*/
+static void hctDbLogReadConflict(HctDbCsr *pCsr){
+  char *zKey = hctDbCsrKeyToText(pCsr);
+  sqlite3_log(SQLITE_BUSY_SNAPSHOT, 
+      "read/write conflict on root=%lld, key=%s, conflicting=(%lld)%s",
+      (i64)pCsr->iRoot, zKey, 
+      pCsr->nRange==0?hctDbCsrTid(pCsr):pCsr->aRange[pCsr->nRange-1].iRangeTid,
+      (pCsr->nRange>0 ? " (deleted)" : "")
+  );
+  sqlite3_free(zKey);
+}
+
 static int hctDbWriteWriteConflict(
   HctDatabase *pDb, 
   HctDbWriter *p,
@@ -5584,6 +5644,7 @@ static int hctDbWriteWriteConflict(
       u64 iTid;
       hctMemcpy(&iTid, &aTarget[pE->iOff], sizeof(u64));
       if( hctDbTidIsConflict(pDb, iTid) ){
+        hctDbLogWriteConflict(p->writecsr.iRoot, iTid, pKey, iKey, 0);
         rc = HCT_SQLITE_BUSY;
       }
     }
@@ -5621,6 +5682,9 @@ static int hctDbWriteWriteConflict(
               /* If bMerge is true, then the connection could not see the
               ** delete operation that removed this entry. It is therefore
               ** a write-write conflict. Return HCT_SQLITE_BUSY.  */
+              hctDbLogWriteConflict(
+                  p->writecsr.iRoot, hctDbGetTid(aOld, iCell), pKey, iKey, 1
+              );
               rc = HCT_SQLITE_BUSY;
             }
             sqlite3HctFilePageRelease(&pg);
@@ -6265,8 +6329,8 @@ static void hctDbDebugRollbackOp(
     i64 iTid = (i64)hctDbCsrTid(&pDb->rbackcsr);
 
     sqlite3HctDbCsrData(&pDb->rbackcsr, &nData, &aData);
-    zRes = sqlite3HctDbRecordToText(0, aData, nData);
-    zRes = sqlite3HctMprintf("(%z) from %z (tid=%lld)", zRes, zPos, iTid);
+    zRes = sqlite3HctDbRecordToText(aData, nData);
+    zRes = sqlite3HctMprintf("%z from %z (tid=%lld)", zRes, zPos, iTid);
   }else{
     zRes = sqlite3HctMprintf("<no-op>");
   }
@@ -6304,8 +6368,7 @@ static void hctDbDebugInsertOp(
   if( bDel ){
     zRes = sqlite3HctMprintf("<delete>");
   }else{
-    zRes = sqlite3HctDbRecordToText(0, aData, nData);
-    zRes = sqlite3HctMprintf("(%z)", zRes);
+    zRes = sqlite3HctDbRecordToText(aData, nData);
   }
 
   hctExtraWriteLogging(zFunc, iLine, pDb,
@@ -7370,6 +7433,10 @@ static int hctDbValidateEntry(HctDatabase *pDb, HctDbCsr *pCsr){
     }
   }
 
+  if( rc ){
+    hctDbLogReadConflict(pCsr);
+  }
+
   HCT_EXTRA_LOGGING(pDb, 
       ("Validating %z... rc=%d", hctDbCsrDebugCsrPos(pCsr), rc)
   );
@@ -7466,11 +7533,11 @@ static int hctDbValidateIndex(HctDatabase *pDb, HctDbCsr *pCsr){
     UnpackedRecord *pRec = pCsr->pRec;
 
     HCT_EXTRA_WR_LOGGING(pDb, 
-        ("HctCsrIndexOp: root=%lld %lld/%lld (%z) -> (%z)",
+        ("HctCsrIndexOp: root=%lld %lld/%lld %z -> %z",
          (i64)pCsr->iRoot,
          pOp->iLogical, pOp->iPhysical,
-         sqlite3HctDbRecordToText(0, pOp->pFirst, pOp->nFirst),
-         sqlite3HctDbRecordToText(0, pOp->pLast, pOp->nLast)
+         sqlite3HctDbRecordToText(pOp->pFirst, pOp->nFirst),
+         sqlite3HctDbRecordToText(pOp->pLast, pOp->nLast)
     ));
 
     if( pOp->iLogical ){
@@ -7583,11 +7650,12 @@ sqlite3HctDbValidate(
   if( iCid!=pDb->iSnapshotId+1 ){
     if( hctDbIsConcurrent(pDb) ){
       pDb->eMode = HCT_MODE_VALIDATE;
-      if( hctDbValidateMeta(pDb) ){
-        rc = HCT_SQLITE_BUSY;
-      }else{
+      rc = hctDbValidateMeta(pDb);
+      if( rc==SQLITE_OK ){
         for(pCsr=pDb->pScannerList; pCsr; pCsr=pCsr->pNextScanner){
           if( pCsr->nRangeMaxVisit>0 ){
+            /* TODO: We could do this part of the test before writing keys
+            ** to the database at all.  */
             rc = HCT_SQLITE_BUSY;
           }else if( pCsr->pKeyInfo==0 ){
             rc = hctDbValidateIntkey(pDb, pCsr);
@@ -8115,7 +8183,7 @@ char *sqlite3HctDbUnpackedToText(UnpackedRecord *pRec){
   return zRet;
 }
 
-char *sqlite3HctDbRecordToText(sqlite3 *db, const u8 *aRec, int nRec){
+char *sqlite3HctDbRecordToText(const u8 *aRec, int nRec){
   char *zRet = 0;
   const char *zSep = "";
   const u8 *pEndHdr;              /* Points to one byte past record header */
@@ -8124,7 +8192,7 @@ char *sqlite3HctDbRecordToText(sqlite3 *db, const u8 *aRec, int nRec){
   u64 nHdr;                       /* Bytes in record header */
 
   if( nRec==0 ){
-    return sqlite3_mprintf("");
+    return sqlite3HctMprintf("()");
   }
 
   pHdr = aRec + sqlite3GetVarint(aRec, &nHdr);
@@ -8210,8 +8278,7 @@ char *sqlite3HctDbRecordToText(sqlite3 *db, const u8 *aRec, int nRec){
     zSep = ",";
   }
 
-/* printf("%s\n", zRet); */
-  return zRet;
+  return sqlite3HctMprintf("(%z)", zRet);
 }
 
 /*
@@ -8233,7 +8300,6 @@ static int hctdbLoadPage(
   };
   int rc = SQLITE_OK;
   HctDbPageHdr *pHdr = (HctDbPageHdr*)aPg;
-  sqlite3 *db = ((hctdb_vtab*)pCur->base.pVtab)->db;
   int eType;
 
   assert( 0==sqlite3_stricmp("intkey", azType[HCT_PAGETYPE_INTKEY]) );
@@ -8256,13 +8322,13 @@ static int hctdbLoadPage(
   if( eType==HCT_PAGETYPE_INTKEY ){
     if( pHdr->nHeight==0 ){
       HctDbIntkeyLeaf *pLeaf = (HctDbIntkeyLeaf*)aPg;
-      char *zFpKey = sqlite3_mprintf("%lld", pLeaf->aEntry[0].iKey);
+      char *zFpKey = sqlite3_mprintf("[%lld]", pLeaf->aEntry[0].iKey);
       if( zFpKey==0 ) rc = SQLITE_NOMEM_BKPT;
       pCur->zFpKey = zFpKey;
       pCur->nFree = (int)pLeaf->hdr.nFreeBytes;
     }else{
       HctDbIntkeyNode *pNode = (HctDbIntkeyNode*)aPg;
-      char *zFpKey = sqlite3_mprintf("%lld", pNode->aEntry[0].iKey);
+      char *zFpKey = sqlite3_mprintf("[%lld]", pNode->aEntry[0].iKey);
       if( zFpKey==0 ) rc = SQLITE_NOMEM_BKPT;
       pCur->zFpKey = zFpKey;
       pCur->nFree = (
@@ -8277,7 +8343,7 @@ static int hctdbLoadPage(
 
     rc = hctDbLoadRecord(pCur->pDb, &buf, aPg, 0, &nRec, &aRec);
     if( rc==SQLITE_OK ){
-      char *zFpKey = sqlite3HctDbRecordToText(db, aRec, nRec);
+      char *zFpKey = sqlite3HctDbRecordToText(aRec, nRec);
       if( zFpKey==0 ) rc = SQLITE_NOMEM_BKPT;
       pCur->zFpKey = zFpKey;
     }
@@ -8661,7 +8727,6 @@ static int hctentryColumn(
       break;
     case 10: /* record */
       if( pIntkey || pIndex || pIndexNode ){
-        sqlite3 *db = sqlite3_context_db_handle(ctx);
         u8 *aPg = pCur->pg.aOld;
         char *zRec;
         int sz;
@@ -8670,7 +8735,7 @@ static int hctentryColumn(
 
         hctDbLoadRecord(pCur->pDb, &buf, aPg, pCur->iEntry, &sz, &aRec);
 
-        zRec = sqlite3HctDbRecordToText(db, aRec, sz);
+        zRec = sqlite3HctDbRecordToText(aRec, sz);
         if( zRec ){
           sqlite3_result_text(ctx, zRec, -1, SQLITE_TRANSIENT);
           sqlite3_free(zRec);
@@ -8885,12 +8950,12 @@ static int hctvalidNext(sqlite3_vtab_cursor *cur){
     }else{
       if( pIndexOp->pFirst ){
         pCsr->zFirst = sqlite3HctDbRecordToText(
-            pTab->db, pIndexOp->pFirst, pIndexOp->nFirst
+            pIndexOp->pFirst, pIndexOp->nFirst
         );
       }
       if( pIndexOp->pLast ){
         pCsr->zLast = sqlite3HctDbRecordToText(
-            pTab->db, pIndexOp->pLast, pIndexOp->nLast
+            pIndexOp->pLast, pIndexOp->nLast
         );
       }
       if( pIndexOp->iLogical ){
