@@ -80,6 +80,12 @@ int sqlite3_hct_journal_follower_commit(
 */
 int sqlite3_hct_journal_snapshot(sqlite3 *db, sqlite3_int64 *piCid);
 
+/*
+** Commit a local transaction in either FOLLOWER or LEADER mode. See
+** documentation for caveats regarding local transactions.
+*/
+int sqlite3_hct_journal_local_commit(sqlite3 *db);
+
 #ifdef __cplusplus
 }
 #endif

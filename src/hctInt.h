@@ -67,8 +67,6 @@ struct HctConfig {
 # define SQLITE_LOCKED_ERR(x,y) SQLITE_LOCKED
 #endif
 
-#define HCT_TREE_SCHEMAOP_ROOT 3
-
 /* 
 ** Growable buffer type used for various things.
 */
@@ -162,15 +160,9 @@ int sqlite3HctTreeCsrIsEmpty(HctTreeCsr *pCsr);
 /* 
 ** Iterate through non-empty tables/indexes within an HctTree structure. Used
 ** when flushing contents to disk.  
-**
-** If parameter bSchemaOp is false, then no callback is issued for the table
-** with root page number HCT_TREE_SCHEMAOP_ROOT. If bSchemaOp is non-zero,
-** then HCT_TREE_SCHEMAOP_ROOT is treated like any other table.
 */
-
 int sqlite3HctTreeForeach(
   HctTree *pTree,
-  int bSchemOp,
   void *pCtx,
   int (*x)(void *, u32, KeyInfo*)
 );
@@ -242,8 +234,6 @@ int sqlite3HctDbStartRecovery(HctDatabase *pDb, int iStage);
 int sqlite3HctDbFinishRecovery(HctDatabase *db, int iStage, int rc);
 void sqlite3HctDbRecoverTid(HctDatabase *db, u64 iTid);
 
-i64 sqlite3HctDbNCasFail(HctDatabase*);
-
 char *sqlite3HctDbIntegrityCheck(HctDatabase*, u32 *aRoot,Mem*,int nRoot, int*);
 i64 sqlite3HctDbStats(sqlite3 *db, int iStat, const char **pzStat);
 
@@ -255,7 +245,7 @@ void sqlite3HctDbSetSavePhysical(
   void *pSave
 );
 
-char *sqlite3HctDbRecordToText(sqlite3 *db, const u8 *aRec, int nRec);
+char *sqlite3HctDbRecordToText(const u8 *aRec, int nRec);
 char *sqlite3HctDbUnpackedToText(UnpackedRecord *pRec);
 
 void sqlite3HctDbTransIsConcurrent(HctDatabase *pDb, int bConcurrent);

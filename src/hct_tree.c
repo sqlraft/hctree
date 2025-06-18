@@ -1371,17 +1371,26 @@ int sqlite3HctTreeCsrIsEmpty(HctTreeCsr *pCsr){
 
 int sqlite3HctTreeForeach(
   HctTree *pTree,
-  int bSchemaOp,
   void *pCtx,
   int (*x)(void *, u32, KeyInfo*)
 ){
-  int i;
   int rc = SQLITE_OK;
-  for(i=0; rc==SQLITE_OK && i<pTree->nRootHash; i++){
-    HctTreeRoot *p;
-    for(p=pTree->apRootHash[i]; rc==SQLITE_OK && p; p=p->pHashNext){
-      if( p->pNode && (bSchemaOp || p->iRoot!=HCT_TREE_SCHEMAOP_ROOT) ){
-        rc = x(pCtx, p->iRoot, p->pKeyInfo);
+  int iRound;
+
+  /* Round 0 picks up IPK tables, and UNIQUE or PRIMARY indexes. Round 1 
+  ** picks up other indexes. Round 0 objects are the ones that require
+  ** write/write conflict detection. Write/write conflict detection is
+  ** skipped for round 1 objects. */
+  for(iRound=0; iRound<2; iRound++){
+    int i;
+    for(i=0; rc==SQLITE_OK && i<pTree->nRootHash; i++){
+      HctTreeRoot *p;
+      for(p=pTree->apRootHash[i]; rc==SQLITE_OK && p; p=p->pHashNext){
+        /* bWWC is true for objects that need write/write conflict detection */
+        int bWWC = (p->pKeyInfo==0 || p->pKeyInfo->nUniqField>0);
+        if( p->pNode && bWWC==(iRound==0) ){
+          rc = x(pCtx, p->iRoot, p->pKeyInfo);
+        }
       }
     }
   }

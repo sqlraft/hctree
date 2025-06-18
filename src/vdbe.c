@@ -4241,11 +4241,6 @@ case OP_SetCookie: {
     *(u32*)&pDb->pSchema->schema_cookie = *(u32*)&pOp->p3 - pOp->p5;
     db->mDbFlags |= DBFLAG_SchemaChange;
     sqlite3FkClearTriggerCache(db, pOp->p1);
-#ifdef SQLITE_ENABLE_HCT
-    if( sqlite3IsHct(pDb->pBt) ){
-      rc = sqlite3HctSchemaOp(pDb->pBt, p->zSql);
-    }
-#endif
   }else if( pOp->p2==BTREE_FILE_FORMAT ){
     /* Record changes in the file format */
     pDb->pSchema->file_format = pOp->p3;

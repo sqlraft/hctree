@@ -868,8 +868,10 @@ static void usage(const char *zPrg){
 }
 
 static void log_callback(void *pArg, int iErrCode, const char *zMsg){
-  printf("(%d) %s\n", iErrCode, zMsg);
-  fflush(stdout);
+  if( iErrCode!=SQLITE_BUSY_SNAPSHOT ){
+    printf("(%d) %s\n", iErrCode, zMsg);
+    fflush(stdout);
+  }
 }
 
 int main(int argc, char **argv){

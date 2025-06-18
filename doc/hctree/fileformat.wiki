@@ -182,11 +182,11 @@ box "free space"             wid 1.5
 box "record area"            wid 3.0
 
 text "8 bytes" at PGHDR - (0, 0.2)
-text "24 bytes" at LEHDR - (0, 0.2)
+text "16 bytes" at LEHDR - (0, 0.2)
 text "nEntry x 8 bytes" at ARRAY - (0, 0.2)
 </verbatim></center>
 
-Index leaf pages have a 24 byte leaf header immediately following the page
+Index leaf pages have a 16 byte leaf header immediately following the page
 header. See the <a href=#intkey_leaf>intkey leaf page format</a> section for
 details.
 

@@ -23,7 +23,16 @@ Leader/Follower Replication Details
   pre {
     margin: 2em
   }
+  .notice {
+    color: red;
+    font-size: 2em;
+  }
 </style>
+
+<div class=notice>
+This page is now historical. The new leader/follower replication API is
+<a href=replication2.md>described here</a>.
+</div>
 
 This page builds on the [speculations here](hctree_bedrock.md).
 
