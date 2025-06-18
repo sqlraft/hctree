@@ -1,5 +1,5 @@
-C Merge\schanges\sfrom\sbranch\s"hctree"\sinto\sthis\sbranch.
-D 2025-06-18T18:13:01.928
+C Improve\slog\smessages\semitted\son\swrite/write\sand\sread/write\sconflicts.
+D 2025-06-18T18:29:54.643
 F .fossil-settings/binary-glob 61195414528fb3ea9693577e1980230d78a1f8b0a54c78cf1b9b24d0a409ed6a x
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
@@ -781,7 +781,7 @@ F src/hctJrnlInt.h 468811ef7cd854a8b734497b0ca6b6137b291ea9bba9dc4a91d6dc25a49f4
 F src/hctLogInt.h 44b72c10335f41efe1eb54df524218d4edbb07896a642093bc59badaa3aa7ecc
 F src/hctPManInt.h 3936d01947aace587fd73c51246b7bd5cdbc79833248b839e7d9ffd737ded8b7
 F src/hctTMapInt.h e58c9aa6f9decd43bbd069a26cb74d6482da4592c911e7f8352ddd1fc410d991
-F src/hct_database.c cf629c5aad31c9974ea3ff0181d390a1998f474d54f4c6d108671f3c1e3aace1
+F src/hct_database.c 16ee5047aec8c74c0b15567289736e51af5b462a82e1cf1c856379df2fa16487
 F src/hct_file.c 7e5f8805006412b7fa6c157bff54a0e9c85ffdaab30452b049d5fc631f1429a2
 F src/hct_journal.c 91ac0530d6ea417d96fedd0c37f810aaa612489db0e8e6265787edbe0776524b
 F src/hct_journalhash.c 5af4886fd8c126a96c78278f6e62a8e31de9b8e683b167c487b033a87fabb7a3
@@ -2364,8 +2364,8 @@ F tool/version-info.c 3b36468a90faf1bbd59c65fd0eb66522d9f941eedd364fabccd7227350
 F tool/warnings-clang.sh bbf6a1e685e534c92ec2bfba5b1745f34fb6f0bc2a362850723a9ee87c1b31a7
 F tool/warnings.sh 1ad0169b022b280bcaaf94a7fa231591be96b514230ab5c98fbf15cd7df842dd
 F tool/win/sqlite.vsix deb315d026cc8400325c5863eef847784a219a2f
-P c1e511b4215e7ce3f28a0720afd8e70b0d9b0318a8f1d0cc88c3c9c8853f3af0 c4d3e4c46bc35ef32eac1c31a4ba15c50739b5e4c15cf497bd8b49fc80b51297
-R a700b1fbad68f0f6c9a6e39f78eb79b9
+P 0f2efe490a112a23fc64328969b277d65e6d4546445683dddfada2201a8635c8
+R a3aab18de0e3c4a87cf638663b5d4b47
 U dan
-Z fbb217d4a4e3e50be38d3eb46965dad4
+Z d8a16215d109b5802bd02a04dd1ee59a
 # Remove this line to create a well-formed Fossil manifest.
