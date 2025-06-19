@@ -1,5 +1,5 @@
-C Remove\sold\s"PRAGMA\shct_ncasfail"\sinterface.
-D 2025-06-17T16:50:32.574
+C Add\stest\scases\sto\shct_index3.test.
+D 2025-06-19T16:56:08.192
 F .fossil-settings/binary-glob 61195414528fb3ea9693577e1980230d78a1f8b0a54c78cf1b9b24d0a409ed6a x
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
@@ -1366,7 +1366,7 @@ F test/hct_hst1.test 00892878bb403619ba4a9e58e1aa8320b85f43d760b86226b12467f0e47
 F test/hct_hst2.test 3cc73ce70f9d5d2750cbd7e815190487eb62116fbdab39739f6e95bcbdc797ed
 F test/hct_index.test 8bc7679bfb20ddc37a3b4cb27b52c4cfb6a386d423f7ee692c818c6c62cad62c
 F test/hct_index2.test 78343ecbe2eeca8cc527764316d3079d54acd93bfd04ad599645dea02e525d05
-F test/hct_index3.test 4fc0bae5ade0d68185ffc772c7f7ab9034db7700e769cb3f41c58959a148144a
+F test/hct_index3.test c43c104490d8c677a2a67c0766edd9a09cf68f107911e7a4b996435fda720120
 F test/hct_index4.test 64f811c3b2622ae02bb49757abda9f34b2982fb90becaab2215b4ef39b376a37
 F test/hct_insert.test a8196969b1c28f61f3cb04e4bb688cf99f6829f02af4ed679c5ff4b3ae75af37
 F test/hct_insert2.test b2b1cc6b1d773ab13e77b36d02266694ebc67e33e8d3c27660121505e1397fb5
@@ -2327,8 +2327,8 @@ F tool/version-info.c 3b36468a90faf1bbd59c65fd0eb66522d9f941eedd364fabccd7227350
 F tool/warnings-clang.sh bbf6a1e685e534c92ec2bfba5b1745f34fb6f0bc2a362850723a9ee87c1b31a7
 F tool/warnings.sh 1ad0169b022b280bcaaf94a7fa231591be96b514230ab5c98fbf15cd7df842dd
 F tool/win/sqlite.vsix deb315d026cc8400325c5863eef847784a219a2f
-P 449504b1c8bfd5a77f1156749d1f19bebcf9f19d516bab96b523d843011d36e8
-R a9f456b9bc7eba5c8bf52b36c40ac8c1
+P c4d3e4c46bc35ef32eac1c31a4ba15c50739b5e4c15cf497bd8b49fc80b51297
+R e9193b4829839b1716a7abe4ac8fd86c
 U dan
-Z a001b4cd1a4f8c34bf5dc7991de8bce1
+Z 0c0ad53ef7faa3b5b64bc164355f538a
 # Remove this line to create a well-formed Fossil manifest.
