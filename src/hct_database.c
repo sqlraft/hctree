@@ -159,6 +159,13 @@ struct HctDbCsr {
 #define HCT_TID_ROLLBACK_OVERRIDE (((u64)0x01) << 56)
 
 
+typedef struct HctDbSPageArray HctDbSPageArray;
+struct HctDbSPageArray {
+  int nPg;
+  int nAlloc;
+  HctFilePage *aPg;
+};
+
 struct HctDbPageArray {
   int nPg;
   HctFilePage *aPg;
@@ -333,6 +340,7 @@ struct HctDatabase {
   HctBalance *pBalance;           /* Space for hctDbBalance() */
 
   HctDbCsr *pScannerList;
+  HctDbSPageArray rbarray;        /* Page rollback array */
 
   /* These three are set at the start of each read transaction */
   HctTMap *pTmap;                 /* Transaction map (non-NULL if trans open) */
@@ -711,6 +719,7 @@ void sqlite3HctDbClose(HctDatabase *p){
     sqlite3HctFileClose(p->pFile);
     p->pFile = 0;
     sqlite3_free(p->pBalance);
+    sqlite3_free(p->rbarray.aPg);
     sqlite3_free(p);
   }
 }
@@ -766,7 +775,6 @@ void sqlite3HctDbRootPageInit(
   hctDbRootPageInit(bIndex, 0, 0, aPage, szPage);
 }
 
-
 /*
 ** Open a read transaction, if one is not already open.
 */
@@ -776,6 +784,7 @@ int sqlite3HctDbStartRead(HctDatabase *pDb, HctJournal *pJrnl){
   assert( (pDb->iSnapshotId==0)==(pDb->pTmap==0) );
   assert( pDb->iSnapshotId!=0 || hctDbIsConcurrent(pDb)==0 );
   if( pDb->iSnapshotId==0 && SQLITE_OK==(rc=sqlite3HctFileNewDb(pDb->pFile)) ){
+    assert( pDb->rbarray.nPg==0 );
     if( pDb->aTmp==0 ){
       pDb->pgsz = sqlite3HctFilePgsz(pDb->pFile);
       pDb->aTmp = (u8*)sqlite3HctMallocRc(&rc, pDb->pgsz);
@@ -3449,12 +3458,30 @@ static int hctDbFilePageEvict(HctDbWriter *p, HctFilePage *pPg){
   return rc;
 }
 
-static int hctDbFilePageCommit(HctDbWriter *p, HctFilePage *pPg){
-  int rc = sqlite3HctFilePageCommit(pPg);
+static int hctDbFilePageCommit(
+  HctDbWriter *p, 
+  HctFilePage *pPg, 
+  int bPhaseOne
+){
+  int rc = bPhaseOne ?
+      sqlite3HctFilePageCommitPhaseOne(pPg) 
+    : sqlite3HctFilePageCommit(pPg);
   if( rc==SQLITE_LOCKED && sqlite3HctFilePageIsEvicted(pPg->pFile, pPg->iPg) ){
     p->iEvictLockedPgno = pPg->iPg;
   }
   return rc;
+}
+
+static void hctDbAddToRbarray(HctDatabase *pDb, HctFilePage *pPg){
+  HctDbSPageArray *p = &pDb->rbarray;
+  if( p->nAlloc<=p->nPg ){
+    int nNew = p->nAlloc ? p->nAlloc*2 : 32;
+    p->aPg = (HctFilePage*)sqlite3HctRealloc(p->aPg, nNew*sizeof(HctFilePage));
+    p->nAlloc = nNew;
+  }
+  memcpy(&p->aPg[p->nPg], pPg, sizeof(HctFilePage));
+  p->nPg++;
+  memset(pPg, 0, sizeof(HctFilePage));
 }
 
 static int hctDbInsertFlushWrite(HctDatabase *pDb, HctDbWriter *p){
@@ -3497,17 +3524,38 @@ static int hctDbInsertFlushWrite(HctDatabase *pDb, HctDbWriter *p){
     rc = sqlite3HctFilePageRelease(&p->fanpg);
   }
 
-  /* Loop through the set of pages to write out. They must be
-  ** written in reverse order - so that page aWritePg[0] is written
-  ** last. */
-  assert( p->writepg.nPg>0 );
-  for(ii=p->writepg.nPg-1; rc==SQLITE_OK && ii>=0; ii--){
-    rc = hctDbFilePageCommit(p, &p->writepg.aPg[ii]);
+  /* See if we can add an entry to HctDatabase.rbarray. This may be added if:
+  **
+  **     (a) not currently doing rollback or initialization,
+  **     (b) there is only one page being written,
+  **     (c) no pages were deleted,
+  **     (d) this is a leaf page, and
+  **     (e) no overflow pages were written or freed.
+  */
+  if( pDb->eMode==HCT_MODE_NORMAL                         /* (a) */
+   && p->writepg.nPg==1                                   /* (b) */
+   && p->writepg.aPg[0].aNew
+   && p->discardpg.nPg==0                                 /* (c) */
+   && p->iHeight==0                                       /* (d) */
+   && p->insOvfl.nEntry==0 && p->delOvfl.nEntry==0        /* (e) */
+  ){
+    HctFilePage *pPg = &p->writepg.aPg[0];
+    rc = hctDbFilePageCommit(p, pPg, 1);
+    if( rc==SQLITE_OK ){
+      hctDbAddToRbarray(pDb, pPg);
+    }
+  }else{
+    /* Otherwise, loop through the set of pages to write out. They must be
+    ** written in reverse order - so that page aWritePg[0] is written last. */
+    assert( p->writepg.nPg>0 );
+    for(ii=p->writepg.nPg-1; rc==SQLITE_OK && ii>=0; ii--){
+      rc = hctDbFilePageCommit(p, &p->writepg.aPg[ii], 0);
+    }
   }
 
   /* If there is one, write the new root page to disk */
   if( rc==SQLITE_OK && root.iPg ){
-    rc = hctDbFilePageCommit(p, &root);
+    rc = hctDbFilePageCommit(p, &root, 0);
     sqlite3HctFilePageRelease(&root);
   }
 
@@ -3651,8 +3699,8 @@ int sqlite3HctDbInsertFlush(HctDatabase *pDb, int *pnRetry){
     fflush(stdout);
   }
 #endif
-    pDb->pa.nWriteKey = 0;
   }
+  pDb->pa.nWriteKey = 0;
   return rc;
 }
 
@@ -5917,14 +5965,7 @@ static int hctDbInsert(
     if( p->writepg.nPg==0 ){
       rc = hctDbInsertFindTarget(pDb, p, iRoot, pRec, iKey, &op);
       assert( p->writepg.aPg[0].aNew==0 );
-#if 0
-      if( rc==SQLITE_OK ){
-        rc = hctDbDirtyPage(pDb, &p->writepg.aPg[0]);
-      }
-      aTarget = p->writepg.aPg[0].aNew;
-#else
       aTarget = p->writepg.aPg[0].aOld;
-#endif
     }else{
       hctDbDirtyPage(pDb, &p->writepg.aPg[0]);
       rc = hctDbInsertFindPosition(pDb, p, iRoot, pRec, iKey, &op);
@@ -6858,13 +6899,30 @@ int sqlite3HctDbEndWrite(HctDatabase *p, u64 iCid, int bRollback){
 ** HCT_TID_ROLLBACK_OVERRIDE keys are written - causing a client to 
 ** incorrectly assume a rolled back key was committed..
 */
-void sqlite3HctDbSetTmapForRollback(HctDatabase *p){
-  u64 *pEntry = hctDbFindTMapEntry(p->pTmap, p->iTid);
-  HCT_EXTRA_WR_LOGGING(p,
-      ("mapping %lld to %lld (VALIDATING)", p->iTid, p->iSnapshotId)
+void sqlite3HctDbStartRollback(HctDatabase *pDb){
+  int ii;
+  u64 *pEntry = hctDbFindTMapEntry(pDb->pTmap, pDb->iTid);
+  HCT_EXTRA_WR_LOGGING(pDb,
+      ("mapping %lld to %lld (VALIDATING)", pDb->iTid, pDb->iSnapshotId)
   );
   /* Why VALIDATING? See header comment for this function... */
-  HctAtomicStore(pEntry, p->iSnapshotId|HCT_TMAP_VALIDATING);
+  HctAtomicStore(pEntry, pDb->iSnapshotId|HCT_TMAP_VALIDATING);
+
+  /* Do any page rollbacks that are possible. */
+#if 1
+  for(ii=0; ii<pDb->rbarray.nPg; ii++){
+    sqlite3HctFilePageRollback(&pDb->rbarray.aPg[ii]);
+  }
+  pDb->rbarray.nPg = 0;
+#endif
+}
+
+void sqlite3HctDbDiscardRollbackData(HctDatabase *pDb){
+  int ii;
+  for(ii=0; ii<pDb->rbarray.nPg; ii++){
+    sqlite3HctFilePageCommitPhaseTwo(&pDb->rbarray.aPg[ii]);
+  }
+  pDb->rbarray.nPg = 0;
 }
 
 static void hctDbFreeCsrList(HctDbCsr *pList){

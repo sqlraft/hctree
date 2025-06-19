@@ -1845,10 +1845,11 @@ static int btreeFlushToDisk(HBtree *p){
   assert( rc!=SQLITE_BUSY );
   if( rc==SQLITE_BUSY_SNAPSHOT ){
     rcok = SQLITE_BUSY_SNAPSHOT;
-    sqlite3HctDbSetTmapForRollback(p->pHctDb);
+    sqlite3HctDbStartRollback(p->pHctDb);
     rc = btreeFlushData(p, 1);
     if( rc==SQLITE_DONE ) rc = SQLITE_OK;
   }
+  sqlite3HctDbDiscardRollbackData(p->pHctDb);
 
   /* Do any DROP TABLE commands */
   for(i=0; rc==SQLITE_OK && i<p->nSchemaOp; i++){

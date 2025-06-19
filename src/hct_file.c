@@ -1683,7 +1683,7 @@ void hctFileFreePg(
 }
 
 
-static int hctFilePageFlush(HctFilePage *pPg){
+int sqlite3HctFilePageCommit(HctFilePage *pPg){
   int rc = SQLITE_OK;
   if( pPg->aNew ){
     u32 iOld = pPg->iOldPg;
@@ -1732,9 +1732,54 @@ static int hctFilePageFlush(HctFilePage *pPg){
   return rc;
 }
 
-int sqlite3HctFilePageCommit(HctFilePage *pPg){
-  assert( pPg->iPg );
-  return hctFilePageFlush(pPg);
+int sqlite3HctFilePageCommitPhaseOne(HctFilePage *pPg){
+  HctFile *pFile = pPg->pFile;
+  int rc = SQLITE_OK;
+
+  assert( pPg->aNew && pPg->iOldPg );
+  assert( pPg->bCommitPhaseOne==0 );
+
+  if( pFile->pServer->bReadOnlyMap ){
+    rc = hctPageWriteToDisk(pPg->pFile->pServer, pPg->iNewPg, pPg->aNew);
+  }
+
+  if( rc==SQLITE_OK ){
+    int r = hctFilePagemapSetLogical(pFile, pPg->iPg, pPg->iOldPg, pPg->iNewPg);
+    if( r==0 ){
+      rc = SQLITE_LOCKED_ERR(pPg->iPg, "flush");
+    }else{
+      pPg->bCommitPhaseOne = 1;
+      if( pFile->pServer->bReadOnlyMap ){
+        sqlite3_free(pPg->aNew);
+      }
+      pPg->aNew = 0;
+    }
+  }
+
+  return rc;
+}
+
+void sqlite3HctFilePageCommitPhaseTwo(HctFilePage *pPg){
+  int rc = SQLITE_OK;
+  u64 iTid = pPg->pFile->iCurrentTid;
+  assert( pPg->bCommitPhaseOne && pPg->iOldPg && pPg->iNewPg );
+  hctFileFreePg(&rc, pPg->pFile, iTid, pPg->iOldPg, 0);
+  hctFileClearFlag(pPg->pFile, pPg->iOldPg, HCT_PMF_PHYSICAL_IN_USE);
+}
+
+void sqlite3HctFilePageRollback(HctFilePage *pPg){
+  HctFile *pFile = pPg->pFile;
+  int rc = SQLITE_OK;
+  int r = hctFilePagemapSetLogical(pFile, pPg->iPg, pPg->iNewPg, pPg->iOldPg);
+  if( r==0 ){
+    /* Failed to rollback. Commit instead. */
+    sqlite3HctFilePageCommitPhaseTwo(pPg);
+  }else{
+    /* Successfully rolled back to the old page. Free the new page. */
+    u64 iTid = pFile->iCurrentTid;
+    hctFileFreePg(&rc, pFile, iTid, pPg->iNewPg, 0);
+    hctFileClearFlag(pFile, pPg->iNewPg, HCT_PMF_PHYSICAL_IN_USE);
+  }
 }
 
 int sqlite3HctFilePageEvict(HctFilePage *pPg, int bIrrevocable){
@@ -1785,7 +1830,7 @@ int sqlite3HctFilePageRelease(HctFilePage *pPg){
   int rc = SQLITE_OK;
   if( pPg->iPg ){
     if( pPg->aNew!=pPg->aOld ){
-      rc = hctFilePageFlush(pPg);
+      rc = sqlite3HctFilePageCommit(pPg);
     }
   }else if( pPg->aNew && pPg->pFile->pServer->bReadOnlyMap ){
     rc = hctPageWriteToDisk(pPg->pFile->pServer, pPg->iNewPg, pPg->aNew);

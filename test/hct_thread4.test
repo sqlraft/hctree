@@ -25,8 +25,8 @@ expr srand(0)
 
 hct_reset_db
 
-set nRow [expr 50]
-set nMs [expr 5 * 1000]
+set nRow [expr 10]
+set nMs [expr 1 * 5000]
 set nThread 16
 
 do_execsql_test 1.0 {
@@ -81,8 +81,8 @@ proc program {nMs iId} {
 
       # Step 2:
       dbX eval { UPDATE tbl SET b=rand(1, %NROW%) WHERE a=rand(1, %NROW%) }
-      dbX eval { UPDATE tbl SET b=rand(1, %NROW%) WHERE a=rand(1, %NROW%) }
-      dbX eval { UPDATE tbl SET b=rand(1, %NROW%) WHERE a=rand(1, %NROW%) }
+      #dbX eval { UPDATE tbl SET b=rand(1, %NROW%) WHERE a=rand(1, %NROW%) }
+      #dbX eval { UPDATE tbl SET b=rand(1, %NROW%) WHERE a=rand(1, %NROW%) }
 
       # Step 3:
       set lData1 [dbX eval {SELECT a, b FROM tbl ORDER BY a ASC}]
@@ -110,9 +110,9 @@ set data [dbX eval {
         SELECT a, b FROM tbl ORDER BY a ASC
 }]
 }]
-puts "data==lData1: [expr {$data==$lData1}]"
-puts "data:   $data"
-puts "lData1: $lData1"
+puts "%ID%: data==lData1: [expr {$data==$lData1}]"
+puts "%ID%: data:   $data"
+puts "%ID%: lData1: $lData1"
 
         error "inconsistent results (lData1): {$lData1}"
       }
@@ -120,17 +120,22 @@ puts "lData1: $lData1"
         error "inconsistent results (lData2): {$lData1} {$lData2}"
       }
       if {$lData1!=[lsort -integer -stride 2 $lData3]} {
-dbX eval {PRAGMA hct_extra_logging = 1}
+
+dbX eval {PRAGMA hct_extra_logging = 2}
 puts [time {
 set data [dbX eval { SELECT a, b FROM tbl ORDER BY b ASC}]
 }]
 dbX eval {PRAGMA hct_extra_logging = 0}
 
-puts "data==lData3: [expr {$data==$lData3}]"
-puts "data  : $data"
-puts "lData3: $lData3"
-puts "sorted: [lsort -integer -stride 2 $lData3]"
-puts "lData1: $lData1"
+puts "%ID%: data==lData3: [expr {$data==$lData3}]"
+puts "%ID%: data  : $data"
+puts "%ID%: lData3: $lData3"
+puts "%ID%: sorted: [lsort -integer -stride 2 $lData3]"
+puts "%ID%: lData1: $lData1"
+
+foreach line [split [dbX one {PRAGMA hct_log}] "\n"] {
+  puts "%ID%: log: $line"
+}
 
         error "inconsistent results (lData3): {$lData1} {$lData3}"
       }

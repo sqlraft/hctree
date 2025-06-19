@@ -39,6 +39,7 @@ struct HctFilePage {
   u32 iPg;                        /* logical page number */
   u32 iNewPg;                     /* New physical page number */
   u32 iOldPg;                     /* Original physical page number */
+  u8 bCommitPhaseOne;             /* True if this has been CommitPhaseOne()d */
   HctFile *pFile;
 };
 
@@ -93,6 +94,10 @@ void sqlite3HctFilePageUnwrite(HctFilePage *pPg);
 ** pPg->aNew is NULL).
 */
 int sqlite3HctFilePageCommit(HctFilePage *pPg);
+
+int sqlite3HctFilePageCommitPhaseOne(HctFilePage *pPg);
+void sqlite3HctFilePageCommitPhaseTwo(HctFilePage *pPg);
+void sqlite3HctFilePageRollback(HctFilePage *pPg);
 
 /*
 ** Evict the page from the data structure - i.e. set the LOGICAL_EVICTED
