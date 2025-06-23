@@ -85,7 +85,7 @@ struct HctDbRangeCsr {
   u64 iRangeTid;                  /* The range TID that was followed here */
 
   int eRange;                     /* HCT_RANGE_* constant */
-  int iCell;
+  int iCell;                      /* Current cell within page */
   HctFilePage pg;
 };
 
@@ -2310,6 +2310,26 @@ static u8 hctDbCellToFlags(HctDbCell *pCell){
   return flags;
 }
 
+/*
+** Structure to encapsulate a pointer to a history page. Most history 
+** pointers are found on intkey and index leaf pages. They consist of
+** the range-tid and old physical page number. In this case
+** iRangeTid==iFollowTid.
+**
+** The exception is the first pointer on a history fan page. In this
+** case iFollowTid and iRangeTid may be different. As follows:
+**
+** iRangeTid:
+**   The TID of the transaction that deleted the values that are
+**   present on the old physical page.
+**
+** iFollowTid:
+**   The largest TID value used as the range-tid for this or any history
+**   pointer on the relevant region of the old page, recursively. Even if
+**   changes made by iRangeTid are visible to the current transaction (and
+**   therefore keys on the old page should not be merged into the results),
+**   the pointer may need to be followed based on this value.
+*/
 typedef struct HctRangePtr HctRangePtr;
 struct HctRangePtr {
   u64 iRangeTid;
@@ -2329,11 +2349,11 @@ struct HctRangePtr {
 ** to follow other pointers on the indicated page, (*pbMerge) is set to
 ** false. This happens when iRangeTid is included in the transaction, but
 ** there exists one or more transactions with TID values smaller than 
-** iRangeTid that are not.
+** iFollowTid that are not.
 */
 static int hctDbFollowRangeOld(
   HctDatabase *pDb, 
-  HctRangePtr *pPtr, 
+  HctRangePtr *pPtr,
   int *pbMerge
 ){
   int bRet = 0;
