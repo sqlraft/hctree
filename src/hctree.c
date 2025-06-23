@@ -1987,21 +1987,26 @@ int sqlite3HctBtreeCommitPhaseTwo(Btree *pBt, int bCleanup){
       return SQLITE_ERROR;
     }
 
-    if( p->pCsrList ){
-      /* Cannot commit with open cursors in hctree */
-      return SQLITE_LOCKED;
-    }
+    rc = sqlite3HctDbPreValidate(p->pHctDb);
+    if( rc==SQLITE_OK ){
 
-    sqlite3HctTreeRelease(p->pHctTree, 0);
-    if( p->pHctDb ){
-      rc = btreeFlushToDisk(p);
-      sqlite3HctTreeClear(p->pHctTree);
-      if( rc!=SQLITE_OK ){
-        hctreeRollbackSchema(p, 0);
+      if( p->pCsrList ){
+        /* Cannot commit with open cursors in hctree */
+        return SQLITE_LOCKED;
       }
-      p->nSchemaOp = 0;
+
+      sqlite3HctTreeRelease(p->pHctTree, 0);
+      if( p->pHctDb ){
+        rc = btreeFlushToDisk(p);
+        sqlite3HctTreeClear(p->pHctTree);
+        if( rc!=SQLITE_OK ){
+          hctreeRollbackSchema(p, 0);
+        }
+        p->nSchemaOp = 0;
+      }
+      p->eTrans = SQLITE_TXN_READ;
+
     }
-    p->eTrans = SQLITE_TXN_READ;
   }
 
   if( rc==SQLITE_OK ){

@@ -110,16 +110,6 @@ struct HctDbRangeCsr {
 **
 ** eDir:
 **   One of BTREE_DIR_NONE, BTREE_DIR_FORWARD or BTREE_DIR_REVERSE.
-**
-** nRangeMaxVisit:
-**   This is set to the maximum value taken by HctDbCsr.nRange when a row
-**   is returned to the upper layer - at the end of sqlite3HctDbCsrSeek(),
-**   First() or Last(), and at the end of Next() and Prev().
-**
-**   This is used as part of validating BEGIN CONCURRENT commits. If the
-**   transaction used a cursor that visited a key on a history page (i.e.
-**   if it returned an nRange>0 key to the caller) then validation must
-**   fail.
 */ 
 struct HctDbCsr {
   HctDatabase *pDb;               /* Database that owns this cursor */
@@ -143,7 +133,6 @@ struct HctDbCsr {
 
   int nRange;
   int nRangeAlloc;
-  int nRangeMaxVisit;
   HctDbRangeCsr *aRange;
 };
 
@@ -333,6 +322,7 @@ struct HctDatabase {
   HctBalance *pBalance;           /* Space for hctDbBalance() */
 
   HctDbCsr *pScannerList;
+  u64 iRootCannotCommit;
 
   /* These three are set at the start of each read transaction */
   HctTMap *pTmap;                 /* Transaction map (non-NULL if trans open) */
@@ -3007,6 +2997,13 @@ static int hctDbCsrSeekAndDescend(
   return rc;
 }
 
+/*
+** If the cursor is currently pointing to a history entry, set the 
+** HctDatabase.iRootCannotCommit variable.
+*/
+#define hctDbSetCannotCommit(pCsr) {                                     \
+  if( (pCsr)->nRange>0 ) (pCsr)->pDb->iRootCannotCommit = pCsr->iRoot;   \
+}
 
 /*
 ** An integer is written into *pRes which is the result of
@@ -3048,7 +3045,7 @@ int sqlite3HctDbCsrSeek(
   }
   if( rc==SQLITE_OK ){
     rc = hctDbCsrScanStart(pCsr, pRec, iKey);
-    pCsr->nRangeMaxVisit = MAX(pCsr->nRangeMaxVisit, pCsr->nRange);
+    hctDbSetCannotCommit(pCsr);
   }
 
   /* The main cursor now points to the largest entry less than or equal 
@@ -6898,9 +6895,9 @@ static void hctDbFreeCsrList(HctDbCsr *pList){
 
 int sqlite3HctDbEndRead(HctDatabase *pDb){
   HctTMapClient *pTMapClient = sqlite3HctFileTMapClient(pDb->pFile);
-  // assert( (pDb->iSnapshotId==0)==(pDb->pTmap==0) );
   hctDbFreeCsrList(pDb->pScannerList);
   pDb->pScannerList = 0;
+  pDb->iRootCannotCommit = 0;
   if( pDb->pTmap ){
     sqlite3HctTMapEnd(pTMapClient, pDb->iSnapshotId);
     pDb->pTmap = 0;
@@ -7371,7 +7368,7 @@ int sqlite3HctDbCsrNext(HctDbCsr *pCsr){
 
   HCT_EXTRA_LOGGING_CSRPOS(pCsr);
 
-  pCsr->nRangeMaxVisit = MAX(pCsr->nRangeMaxVisit, pCsr->nRange);
+  hctDbSetCannotCommit(pCsr);
   return rc;
 }
 
@@ -7385,7 +7382,7 @@ int sqlite3HctDbCsrPrev(HctDbCsr *pCsr){
 
   HCT_EXTRA_LOGGING_CSRPOS(pCsr);
 
-  pCsr->nRangeMaxVisit = MAX(pCsr->nRangeMaxVisit, pCsr->nRange);
+  hctDbSetCannotCommit(pCsr);
   return rc;
 }
 
@@ -7629,6 +7626,24 @@ void sqlite3HctDbTMapScan(HctDatabase *pDb){
   }
 }
 
+/*
+** This function is called by hctree.c as part of committing a transaction
+** before anything has been written to the database file. It returns
+** SQLITE_BUSY if a read/write conflict was detecting while preparing (running
+** the SQL for) the transaction.
+*/
+int sqlite3HctDbPreValidate(HctDatabase *pDb){
+  int rc = SQLITE_OK;
+  if( pDb->iRootCannotCommit ){
+    sqlite3_log(SQLITE_BUSY_SNAPSHOT, 
+        "read/write conflict (root=%lld) detected while preparing transaction",
+        (i64)pDb->iRootCannotCommit
+    );
+    rc = HCT_SQLITE_BUSY;
+  }
+  return rc;
+}
+
 int 
 __attribute__ ((noinline)) 
 sqlite3HctDbValidate(
@@ -7662,11 +7677,7 @@ sqlite3HctDbValidate(
       rc = hctDbValidateMeta(pDb);
       if( rc==SQLITE_OK ){
         for(pCsr=pDb->pScannerList; pCsr; pCsr=pCsr->pNextScanner){
-          if( pCsr->nRangeMaxVisit>0 ){
-            /* TODO: We could do this part of the test before writing keys
-            ** to the database at all.  */
-            rc = HCT_SQLITE_BUSY;
-          }else if( pCsr->pKeyInfo==0 ){
+          if( pCsr->pKeyInfo==0 ){
             rc = hctDbValidateIntkey(pDb, pCsr);
           }else{
             rc = hctDbValidateIndex(pDb, pCsr);
@@ -8910,7 +8921,6 @@ static int hctvalidClose(sqlite3_vtab_cursor *cur){
 }
 static int hctvalidNext(sqlite3_vtab_cursor *cur){
   hctvalid_cursor *pCsr = (hctvalid_cursor*)cur;
-  hctvalid_vtab *pTab = (hctvalid_vtab*)(pCsr->base.pVtab);
   int ii;
   HctDbCsr *pDbCsr = 0;
   HctCsrIntkeyOp *pIntkeyOp = 0;
