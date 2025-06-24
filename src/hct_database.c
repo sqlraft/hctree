@@ -7426,8 +7426,17 @@ static int hctDbValidateEntry(HctDatabase *pDb, HctDbCsr *pCsr){
     /* If the current entry is on a history page, it is not valid (as
     ** it has already been deleted). Later: unless of course it was this
     ** transaction that deleted it!  */
-    if( pCsr->aRange[pCsr->nRange-1].iRangeTid!=pDb->iTid ){
-      rc = HCT_SQLITE_BUSY;
+    HctDbRangeCsr *pRange = &pCsr->aRange[pCsr->nRange-1];
+    if( pRange->iRangeTid!=pDb->iTid ){
+      /* An exception - the null entries that may be added to the leftmost
+      ** leaf page of tables. These never clash with anything. They are
+      ** identfied by their TID value - LARGEST_TID.  */
+      int iOff = hctDbCellOffset(pRange->pg.aOld, pRange->iCell, &flags);
+      if( (flags & HCTDB_HAS_TID)==0 
+       || hctGetU64(&pRange->pg.aOld[iOff])!=LARGEST_TID
+      ){
+        rc = HCT_SQLITE_BUSY;
+      }
     }
   }else{
     int iOff = hctDbCellOffset(pCsr->pg.aOld, pCsr->iCell, &flags);
