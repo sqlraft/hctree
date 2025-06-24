@@ -382,6 +382,29 @@ do_execsql_test -db db2 7.2 {
 do_catchsql_test 7.3 {
   COMMIT;
 } {1 {database is locked}}
+db2 close
+
+#--------------------------------------------------------------------------
+db close
+#sqlite3_shutdown
+#sqlite_log_to_stdout
+hct_reset_db
+do_execsql_test 8.0 {
+  CREATE TABLE t1(a INTEGER PRIMARY KEY, b TEXT);
+  INSERT INTO t1 VALUES(1, 'one'), (5, 'five'), (10, 'ten'), (15, 'fifteen');
+}
+sqlite3 db2 test.db
+do_execsql_test 8.1 {
+  BEGIN CONCURRENT;
+    UPDATE t1 SET b='fifteen2' WHERE a=15;
+}
+do_execsql_test -db db2 8.2 {
+  UPDATE t1 SET b='five2' WHERE a=5;
+}
+do_catchsql_test 8.3 {
+    SELECT * FROM t1;
+  COMMIT;
+} {1 {database is locked}}
 
 
 finish_test

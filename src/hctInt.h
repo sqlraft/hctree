@@ -205,6 +205,7 @@ int sqlite3HctDbStartWrite(HctDatabase*, u64*);
 int sqlite3HctDbEndWrite(HctDatabase*, u64, int);
 int sqlite3HctDbEndRead(HctDatabase*);
 int sqlite3HctDbValidate(sqlite3*, HctDatabase*, u64 *piCid);
+int sqlite3HctDbPreValidate(HctDatabase *);
 
 void sqlite3HctDbSetTmapForRollback(HctDatabase *pDb);
 
