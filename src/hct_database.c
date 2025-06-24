@@ -8944,19 +8944,21 @@ static int hctvalidNext(sqlite3_vtab_cursor *cur){
   pCsr->rootpgno = 0;
   pCsr->iEntry++;
   pDbCsr = pCsr->pDb->pScannerList;
-  pIntkeyOp = pDbCsr->intkey.pOpList;
-  pIndexOp = pDbCsr->index.pOpList;
-  ii = 0;
-  if( pIntkeyOp==0 && pIndexOp==0 ) ii--;
-  for(/*noop*/; pDbCsr && ii<pCsr->iEntry; ii++){
-    if( pIntkeyOp ) pIntkeyOp = pIntkeyOp->pNextOp;
-    if( pIndexOp ) pIndexOp = pIndexOp->pNextOp;
-    if( pIntkeyOp==0 && pIndexOp==0 ){
-      pDbCsr = pDbCsr->pNextScanner;
-      if( pDbCsr ){
-        pIntkeyOp = pDbCsr->intkey.pOpList;
-        pIndexOp = pDbCsr->index.pOpList;
-        if( pIntkeyOp==0 && pIndexOp==0 ) ii--;
+  if( pDbCsr ){
+    pIntkeyOp = pDbCsr->intkey.pOpList;
+    pIndexOp = pDbCsr->index.pOpList;
+    ii = 0;
+    if( pIntkeyOp==0 && pIndexOp==0 ) ii--;
+    for(/*noop*/; pDbCsr && ii<pCsr->iEntry; ii++){
+      if( pIntkeyOp ) pIntkeyOp = pIntkeyOp->pNextOp;
+      if( pIndexOp ) pIndexOp = pIndexOp->pNextOp;
+      if( pIntkeyOp==0 && pIndexOp==0 ){
+        pDbCsr = pDbCsr->pNextScanner;
+        if( pDbCsr ){
+          pIntkeyOp = pDbCsr->intkey.pOpList;
+          pIndexOp = pDbCsr->index.pOpList;
+          if( pIntkeyOp==0 && pIndexOp==0 ) ii--;
+        }
       }
     }
   }
