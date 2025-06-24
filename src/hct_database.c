@@ -5598,12 +5598,14 @@ static void hctDbLogWriteConflict(
   i64 iTid,                       /* TID value of conflicting transaction */
   UnpackedRecord *pKey,           /* Key value, if this is an index tree */
   i64 iKey,                       /* Key value, if this is an IPK tree */
-  int bAlreadyRemoved             /* True if conflicting op was a delete */
+  int bAlreadyRemoved,            /* True if conflicting op was a delete */
+  i64 iMyTid
 ){
   char *zKey = hctDbKeyToText(pKey, iKey);
   sqlite3_log(SQLITE_BUSY_SNAPSHOT, 
-      "write/write conflict on root=%lld, key=%s, conflicting=(%lld)%s",
-      (i64)iRoot, zKey, iTid, (bAlreadyRemoved ? " (deleted)" : "")
+      "write/write conflict on root=%lld, key=%s, conflicting=(%lld)%s"
+      " (mytid=%lld)",
+      (i64)iRoot, zKey, iTid, (bAlreadyRemoved ? " (deleted)" : ""), iMyTid
   );
   sqlite3_free(zKey);
 }
@@ -5614,10 +5616,11 @@ static void hctDbLogWriteConflict(
 static void hctDbLogReadConflict(HctDbCsr *pCsr){
   char *zKey = hctDbCsrKeyToText(pCsr);
   sqlite3_log(SQLITE_BUSY_SNAPSHOT, 
-      "read/write conflict on root=%lld, key=%s, conflicting=(%lld)%s",
+      "read/write conflict on root=%lld, key=%s, conflicting=(%lld)%s"
+      " (mytid=%lld)",
       (i64)pCsr->iRoot, zKey, 
       pCsr->nRange==0?hctDbCsrTid(pCsr):pCsr->aRange[pCsr->nRange-1].iRangeTid,
-      (pCsr->nRange>0 ? " (deleted)" : "")
+      (pCsr->nRange>0 ? " (deleted)" : ""), pCsr->pDb->iTid
   );
   sqlite3_free(zKey);
 }
@@ -5651,7 +5654,9 @@ static int hctDbWriteWriteConflict(
       u64 iTid;
       hctMemcpy(&iTid, &aTarget[pE->iOff], sizeof(u64));
       if( hctDbTidIsConflict(pDb, iTid) ){
-        hctDbLogWriteConflict(p->writecsr.iRoot, iTid, pKey, iKey, 0);
+        hctDbLogWriteConflict(
+            p->writecsr.iRoot, iTid, pKey, iKey, 0, (i64)pDb->iTid
+        );
         rc = HCT_SQLITE_BUSY;
       }
     }
@@ -5689,8 +5694,8 @@ static int hctDbWriteWriteConflict(
               /* If bMerge is true, then the connection could not see the
               ** delete operation that removed this entry. It is therefore
               ** a write-write conflict. Return HCT_SQLITE_BUSY.  */
-              hctDbLogWriteConflict(
-                  p->writecsr.iRoot, hctDbGetTid(aOld, iCell), pKey, iKey, 1
+              hctDbLogWriteConflict(p->writecsr.iRoot, 
+                  hctDbGetTid(aOld, iCell), pKey, iKey, 1, (i64)pDb->iTid
               );
               rc = HCT_SQLITE_BUSY;
             }
