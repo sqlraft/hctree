@@ -7558,7 +7558,7 @@ static int hctDbValidateIndex(HctDatabase *pDb, HctDbCsr *pCsr){
     if( pOp->iLogical ){
       /* If the physical page associated with the logical page containing
       ** the current key has not changed, and the logical page has not been
-      ** evicted, then the current key itself may not have been modified.
+      ** evicted, then the current key itself must not have been modified.
       ** Jump to the next iteration of the loop in this case. */
       int bEvict = 0;
       u32 iPhys = sqlite3HctFilePageMapping(pDb->pFile, pOp->iLogical, &bEvict);
@@ -7580,6 +7580,7 @@ static int hctDbValidateIndex(HctDatabase *pDb, HctDbCsr *pCsr){
     }
     if( pOp->pLast && pOp->pLast!=pOp->pFirst ){
       hctDbRecordUnpack(pCsr->pKeyInfo, pOp->nLast, pOp->pLast, pRec);
+      pRec->default_rc = 0;
     }else{
       pRec = 0;
     }
@@ -7602,7 +7603,7 @@ static int hctDbValidateIndex(HctDatabase *pDb, HctDbCsr *pCsr){
           if( res>0 ) break;
         }
         rc = hctDbValidateEntry(pDb, pCsr);
-        if( res==0 || rc!=SQLITE_OK ) break;
+        if( rc!=SQLITE_OK ) break;
         rc = hctDbCsrNext(pCsr);
         if( rc!=SQLITE_OK ) break;
       }
