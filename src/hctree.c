@@ -1447,6 +1447,7 @@ static int hctBtreeGetMeta(HBtree *p, int idx, u32 *pMeta){
 
         rc = sqlite3HctBtreeCursor((Btree*)p, 2, 0, 0, pCsr);
         if( rc==SQLITE_OK ){
+          sqlite3HctDbCsrNoscan(csr.pHctDbCsr, 1);
           rc = sqlite3HctBtreeTableMoveto(pCsr, 0, 0, &res);
         }
         /* assert( rc==SQLITE_OK ); */

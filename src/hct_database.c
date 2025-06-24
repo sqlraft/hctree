@@ -6998,7 +6998,7 @@ void sqlite3HctDbCsrClose(HctDbCsr *pCsr){
     HctDatabase *pDb = pCsr->pDb;
     hctDbCsrScanFinish(pCsr);
     hctDbCsrReset(pCsr);
-    if( hctDbIsConcurrent(pDb) && pDb->iTid==0 ){
+    if( hctDbIsConcurrent(pDb) && pDb->iTid==0 && pCsr->bNoscan==0 ){
       pCsr->pNextScanner = pDb->pScannerList;
       pDb->pScannerList = pCsr;
     }else{
@@ -7418,6 +7418,124 @@ int sqlite3HctDbCsrData(HctDbCsr *pCsr, int *pnData, const u8 **paData){
   return hctDbLoadRecord(pCsr->pDb, &pCsr->rec, pPg, iCell, pnData, paData);
 }
 
+
+#ifndef HCT_VALIDATE_TIMERS
+# define HCT_VALIDATE_TIMERS 1
+#endif
+
+#ifdef HCT_VALIDATE_TIMERS
+
+#if 0
+# define HCT_VALIDATE_THRESHOLD -1
+# define HCT_VALIDATE_CSR_THRESHOLD -1
+# define HCT_VALIDATE_OP_THRESHOLD -1
+#else
+# define HCT_VALIDATE_THRESHOLD     2000
+# define HCT_VALIDATE_CSR_THRESHOLD  500
+# define HCT_VALIDATE_OP_THRESHOLD    20
+#endif
+
+#include <sys/time.h>
+
+/*
+** Return the number of ms since the epoch.
+*/
+static i64 hctDbGetMs(){
+  struct timeval tv;
+  gettimeofday(&tv, 0);
+  return ((i64)tv.tv_sec * 1000 + (i64)tv.tv_usec / 1000);
+}
+
+/*
+** This function is only included in HCT_VALIDATE_TIMERS debugging builds.
+** It is called when validating a single transaction has taken longer than
+** HCT_VALIDATE_THRESHOLD ms. It logs a message using sqlite3_log().
+*/ 
+static void hctDbValidateWarning(HctDatabase *pDb, i64 nMs){
+  int nIntkey = 0;
+  int nIntkeyLookup = 0;
+  int nIndex = 0;
+  HctDbCsr *pCsr = 0;
+
+  for(pCsr=pDb->pScannerList; pCsr; pCsr=pCsr->pNextScanner){
+    if( pCsr->pKeyInfo ){
+      HctCsrIndexOp *pOp;
+      for(pOp=pCsr->index.pOpList; pOp; pOp=pOp->pNextOp) nIndex++;
+    }else{
+      HctCsrIntkeyOp *pOp;
+      for(pOp=pCsr->intkey.pOpList; pOp; pOp=pOp->pNextOp){
+        nIntkey++;
+        if( pOp->iFirst==pOp->iLast ) nIntkeyLookup++;
+      }
+    }
+  }
+
+  sqlite3_log(SQLITE_WARNING, 
+    "slow validation: %lldms (%d intkey ops (incl. %d lookups), %d index ops)", 
+    nMs, nIntkey, nIntkeyLookup, nIndex
+  );
+}
+
+static void hctDbValidateCsrWarning(HctDatabase *pDb, i64 nMs, HctDbCsr *pCsr){
+  const char *zType = "intkey";
+  int nOp = 0;
+  int nLookup = 0;
+
+  if( pCsr->pKeyInfo ){
+    HctCsrIndexOp *pOp;
+    for(pOp=pCsr->index.pOpList; pOp; pOp=pOp->pNextOp) nOp++;
+    zType = "index";
+  }else{
+    HctCsrIntkeyOp *pOp;
+    for(pOp=pCsr->intkey.pOpList; pOp; pOp=pOp->pNextOp){
+      nOp++;
+      if( pOp->iFirst==pOp->iLast ) nLookup++;
+    }
+  }
+
+  sqlite3_log(SQLITE_WARNING, 
+      "slow validation cursor: %lldms root=%lld "
+      "(%d %s ops (incl intkey %d lookups))",
+      nMs, (i64)pCsr->iRoot, nOp, zType, nLookup
+  );
+}
+
+static void hctDbValidateOpWarning(
+  HctDatabase *pDb, 
+  i64 nMs, 
+  i64 iRoot,
+  int nStep,
+  HctCsrIntkeyOp *pIntkey,
+  HctCsrIndexOp *pIndex
+){
+  char *zFirst = 0;
+  char *zLast = 0;
+  assert( pIntkey==0 || pIndex==0 );
+
+  if( pIntkey ){
+    if( pIntkey->iFirst==SMALLEST_INT64 ){
+      zFirst = sqlite3HctMprintf("[]");
+    }else{
+      zFirst = sqlite3HctMprintf("[%lld]", pIntkey->iFirst);
+    }
+    if( pIntkey->iLast==LARGEST_INT64 ){
+      zLast = sqlite3HctMprintf("[]");
+    }else{
+      zLast = sqlite3HctMprintf("[%lld]", pIntkey->iLast);
+    }
+  }else{
+    zFirst = sqlite3HctDbRecordToText(pIndex->pFirst, pIndex->nFirst);
+    zLast = sqlite3HctDbRecordToText(pIndex->pLast, pIndex->nLast);
+  }
+
+  sqlite3_log(SQLITE_WARNING, 
+      "slow validation op: %lldms root=%lld nstep=%d first=%z last=%z",
+      nMs, iRoot, nStep, zFirst, zLast
+  );
+}
+
+#endif /* HCT_VALIDATE_TIMERS */
+
 static int hctDbValidateEntry(HctDatabase *pDb, HctDbCsr *pCsr){
   int rc = SQLITE_OK;
   u8 flags;
@@ -7463,9 +7581,17 @@ static int hctDbValidateIntkey(HctDatabase *pDb, HctDbCsr *pCsr){
   HctCsrIntkeyOp *pOpList = pCsr->intkey.pOpList;
   HctCsrIntkeyOp *pOp;
 
+#ifdef HCT_VALIDATE_TIMERS
+  i64 nMs = hctDbGetMs();
+#endif
+
   pCsr->intkey.pOpList = 0;
   assert( pCsr->intkey.pCurrentOp==0 );
   for(pOp=pOpList; pOp && rc==SQLITE_OK; pOp=pOp->pNextOp){
+#ifdef HCT_VALIDATE_TIMERS
+    i64 nMsOp = hctDbGetMs();
+#endif
+    int nStep = 0;
     int bDum = 0;
     assert( pOp->iFirst<=pOp->iLast );
 
@@ -7512,6 +7638,7 @@ static int hctDbValidateIntkey(HctDatabase *pDb, HctDbCsr *pCsr){
 
     while( rc==SQLITE_OK && !sqlite3HctDbCsrEof(pCsr) ){
       i64 iKey = 0;
+      nStep++;
       sqlite3HctDbCsrKey(pCsr, &iKey);
       if( iKey>=pOp->iFirst && iKey<=pOp->iLast ){
         rc = hctDbValidateEntry(pDb, pCsr);
@@ -7519,10 +7646,23 @@ static int hctDbValidateIntkey(HctDatabase *pDb, HctDbCsr *pCsr){
       if( rc!=SQLITE_OK || iKey>=pOp->iLast ) break;
       rc = hctDbCsrNext(pCsr);
     }
+#ifdef HCT_VALIDATE_TIMERS
+    nMsOp = hctDbGetMs() - nMsOp;
+    if( nMsOp>HCT_VALIDATE_OP_THRESHOLD ){
+      hctDbValidateOpWarning(pDb, nMsOp, (i64)pCsr->iRoot, nStep, pOp, 0);
+    }
+#endif
     hctDbCsrReset(pCsr);
   }
   assert( pCsr->intkey.pOpList==0 && pCsr->intkey.pCurrentOp==0 );
   pCsr->intkey.pOpList = pOpList;
+
+#ifdef HCT_VALIDATE_TIMERS
+  nMs = hctDbGetMs() - nMs;
+  if( nMs>HCT_VALIDATE_CSR_THRESHOLD ){
+    hctDbValidateCsrWarning(pDb, nMs, pCsr);
+  }
+#endif
 
   return rc;
 }
@@ -7541,10 +7681,18 @@ static int hctDbValidateIndex(HctDatabase *pDb, HctDbCsr *pCsr){
   HctCsrIndexOp *pOpList = pCsr->index.pOpList;
   HctCsrIndexOp *pOp;
 
+#ifdef HCT_VALIDATE_TIMERS
+  i64 nMs = hctDbGetMs();
+#endif
+
   pCsr->index.pOpList = 0;
   assert( pCsr->index.pCurrentOp==0 );
   rc = hctDbCsrAllocateUnpacked(pCsr);
   for(pOp=pOpList; pOp && rc==SQLITE_OK; pOp=pOp->pNextOp){
+    int nStep = 0;
+#ifdef HCT_VALIDATE_TIMERS
+    i64 nMsOp = hctDbGetMs();
+#endif
     UnpackedRecord *pRec = pCsr->pRec;
 
     HCT_EXTRA_WR_LOGGING(pDb, 
@@ -7592,6 +7740,7 @@ static int hctDbValidateIndex(HctDatabase *pDb, HctDbCsr *pCsr){
     }else{
       while( !sqlite3HctDbCsrEof(pCsr) ){
         int res = -1;
+        nStep++;
         if( pRec ){
           const u8 *aKey = 0;
           int nKey = 0;
@@ -7608,10 +7757,25 @@ static int hctDbValidateIndex(HctDatabase *pDb, HctDbCsr *pCsr){
         if( rc!=SQLITE_OK ) break;
       }
     }
+
+#ifdef HCT_VALIDATE_TIMERS
+    nMsOp = hctDbGetMs() - nMsOp;
+    if( nMsOp>HCT_VALIDATE_OP_THRESHOLD ){
+      hctDbValidateOpWarning(pDb, nMsOp, (i64)pCsr->iRoot, nStep, 0, pOp);
+    }
+#endif
   }
 
   assert( pCsr->index.pOpList==0 && pCsr->index.pCurrentOp==0 );
   pCsr->index.pOpList = pOpList;
+
+#ifdef HCT_VALIDATE_TIMERS
+  nMs = hctDbGetMs() - nMs;
+  if( nMs>HCT_VALIDATE_CSR_THRESHOLD ){
+    hctDbValidateCsrWarning(pDb, nMs, pCsr);
+  }
+#endif
+
   return rc;
 }
 
@@ -7683,6 +7847,9 @@ sqlite3HctDbValidate(
   ** case we can skip validation entirely. */
   if( iCid!=pDb->iSnapshotId+1 ){
     if( hctDbIsConcurrent(pDb) ){
+#ifdef HCT_VALIDATE_TIMERS
+      i64 nMs = hctDbGetMs();
+#endif
       pDb->eMode = HCT_MODE_VALIDATE;
       rc = hctDbValidateMeta(pDb);
       if( rc==SQLITE_OK ){
@@ -7696,6 +7863,14 @@ sqlite3HctDbValidate(
         }
       }
       pDb->eMode = HCT_MODE_NORMAL;
+
+#ifdef HCT_VALIDATE_TIMERS
+      nMs = hctDbGetMs() - nMs;
+      if( nMs>=HCT_VALIDATE_THRESHOLD ){
+        hctDbValidateWarning(pDb, nMs);
+      }
+#endif
+
     }else{
       assert( pDb->pScannerList==0 );
       rc = HCT_SQLITE_BUSY;
