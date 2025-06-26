@@ -7064,7 +7064,6 @@ int sqlite3HctDbCsrLast(HctDbCsr *pCsr){
   HctFile *pFile = pCsr->pDb->pFile;
   u32 iPg = pCsr->iRoot;
   HctDbPageHdr *pPg = 0;
-  HctFilePage pg;
 
   rc = hctDbCsrScanFinish(pCsr);
   if( rc==SQLITE_OK ){
@@ -7075,22 +7074,38 @@ int sqlite3HctDbCsrLast(HctDbCsr *pCsr){
 
   /* Find the last page in the leaf page list. */
   while( 1 ){
-    rc = sqlite3HctFilePageGet(pFile, iPg, &pg);
+    rc = sqlite3HctFilePageGet(pFile, iPg, &pCsr->pg);
     if( rc!=SQLITE_OK ) break;
 
-    pPg = (HctDbPageHdr*)pg.aOld;
+    pPg = (HctDbPageHdr*)pCsr->pg.aOld;
     if( pPg->iPeerPg ){
       iPg = pPg->iPeerPg;
     }else if( pPg->nHeight==0 ){
       break;
-    }else if( hctPagetype(pPg)==HCT_PAGETYPE_INTKEY ){
-      HctDbIntkeyNode *pNode = (HctDbIntkeyNode*)pPg;
-      iPg = pNode->aEntry[pPg->nEntry-1].iChildPg;
     }else{
-      HctDbIndexNode *pNode = (HctDbIndexNode*)pPg;
-      iPg = pNode->aEntry[pPg->nEntry-1].iChildPg;
+      pCsr->iCell = pPg->nEntry-1;
+
+      /* Follow the rightmost pointer within this linked-list of pages that
+      ** does not point to an EVICTED page.  */
+      while( 1 ){
+        if( hctPagetype(pPg)==HCT_PAGETYPE_INTKEY ){
+          HctDbIntkeyNode *pNode = (HctDbIntkeyNode*)pPg;
+          iPg = pNode->aEntry[pCsr->iCell].iChildPg;
+        }else{
+          HctDbIndexNode *pNode = (HctDbIndexNode*)pPg;
+          iPg = pNode->aEntry[pCsr->iCell].iChildPg;
+        }
+        if( sqlite3HctFilePageIsEvicted(pFile, iPg)==0 ) break;
+        pCsr->iCell--;
+        if( pCsr->iCell<0 ){
+          rc = hctDbCsrGoLeft(pCsr, 0);
+          if( rc!=SQLITE_OK ) break;
+        }
+      }
     }
-    sqlite3HctFilePageRelease(&pg);
+
+    if( rc!=SQLITE_OK ) break;
+    sqlite3HctFilePageRelease(&pCsr->pg);
   }
 
   /* Set the cursor to point to one position past the last entry on the
@@ -7098,7 +7113,6 @@ int sqlite3HctDbCsrLast(HctDbCsr *pCsr){
   ** the first entry visible to the current transaction.  */
   if( rc==SQLITE_OK ){
     assert( pPg->nHeight==0 && pPg->iPeerPg==0 );
-    hctMemcpy(&pCsr->pg, &pg, sizeof(pg));
     if( pPg->nEntry==0 ){
       pCsr->iCell = -1;
     }else{

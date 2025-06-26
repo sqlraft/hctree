@@ -135,6 +135,24 @@ puts "lData1: $lData1"
         error "inconsistent results (lData3): {$lData1} {$lData3}"
       }
       if {$lData1!=[lsort -integer -stride 2 $lData4]} {
+
+dbX eval {PRAGMA hct_extra_logging = 2}
+puts [time {
+set data [dbX eval { SELECT a, b FROM tbl ORDER BY b DESC}]
+}]
+dbX eval {PRAGMA hct_extra_logging = 0}
+
+foreach ln [split [dbX eval {PRAGMA hct_log}] "\n"] {
+  puts "log: %ID%: $ln"
+}
+
+puts "%ID%: data==lData4: [expr {$data==$lData4}]"
+puts "%ID%: data  : $data"
+puts "%ID%: lData4: $lData4"
+puts "%ID%: sorted: [lsort -integer -stride 2 $lData4]"
+puts "%ID%: lData1: $lData1"
+
+after 1000
         error "inconsistent results (lData4): {$lData1} {$lData4}"
       }
 
@@ -215,9 +233,12 @@ for {set ii 0} {$ii<$nThread} {incr ii} {
 }
 
 #execsql_pp { SELECT * FROM tbl }
-#execsql_pp { SELECT * FROM hcttmap }
-#show_pagemap
-#show_all_entries
+if {[set_test_counter errors]>0} {
+  execsql_pp { SELECT * FROM hcttmap }
+  show_pagemap
+  show_all_entries
+  puts "Running in directory [pwd]"
+}
 
 finish_test
 
