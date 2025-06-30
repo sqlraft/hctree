@@ -2701,6 +2701,10 @@ static int hctDbCurrentIsVisible(HctDbCsr *pCsr){
 ** Or, if the key is not present in the page, set output variable (*piPos)
 ** to the index of the SMALLEST KEY THAT IS LARGER THAN IKEY/PKEY, and
 ** set (*pbExact) to false.
+**
+** If all of the keys on the page are smaller than the queried key, set
+** (*piPos) to the number of keys in the page (i.e. so that it points
+** past the last key).
 */
 static int hctDbLeafSearch(
   HctDatabase *pDb,
@@ -7150,9 +7154,9 @@ static int hctDbCsrNext(HctDbCsr *pCsr){
             hctDbCsrAscendRange(pCsr);
           }else{
 
-            if( p->eRange==HCT_RANGE_FAN 
-             || hctDbKeyIsNull(pCsr->pKeyInfo, &p->lowkey)
-            ){
+            if( p->eRange==HCT_RANGE_FAN ){
+              p->iCell = -1;
+            }else if( hctDbKeyIsNull(pCsr->pKeyInfo, &p->lowkey) ){
               p->iCell = -1;
             }else{
               int bExact = 0;
@@ -7160,8 +7164,18 @@ static int hctDbCsrNext(HctDbCsr *pCsr){
                   p->lowkey.iKey, p->lowkey.pKey, &p->iCell, &bExact
               );
 
-              if( bExact==0 ) p->iCell--;
-              if( p->iCell>=0 ) p->iCell--;
+              /* At this point p->iCell is the smallest key on the page that
+              ** is larger than p->lowkey. It needs to be set so that the
+              ** first key on this page processed is less than or equal to 
+              ** p->lowkey (assuming such a key exists - if p->lowkey is 
+              ** smaller than all keys on this page, the first key processed
+              ** should be key 0.  */
+              if( bExact ){
+                p->iCell--;
+              }else{
+                p->iCell--;
+                if( p->iCell>=0 ) p->iCell--;
+              }
             }
 
             HCT_EXTRA_LOGGING_NEWRANGECSR(pCsr);
