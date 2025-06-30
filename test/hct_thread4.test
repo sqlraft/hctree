@@ -120,17 +120,20 @@ puts "lData1: $lData1"
         error "inconsistent results (lData2): {$lData1} {$lData2}"
       }
       if {$lData1!=[lsort -integer -stride 2 $lData3]} {
-dbX eval {PRAGMA hct_extra_logging = 1}
+dbX eval {PRAGMA hct_extra_logging = 2}
 puts [time {
 set data [dbX eval { SELECT a, b FROM tbl ORDER BY b ASC}]
 }]
 dbX eval {PRAGMA hct_extra_logging = 0}
+foreach ln [split [dbX eval {PRAGMA hct_log}] "\n"] {
+  puts "log: %ID%: $ln"
+}
 
-puts "data==lData3: [expr {$data==$lData3}]"
-puts "data  : $data"
-puts "lData3: $lData3"
-puts "sorted: [lsort -integer -stride 2 $lData3]"
-puts "lData1: $lData1"
+puts "%ID%: data==lData3: [expr {$data==$lData3}]"
+puts "%ID%: data  : $data"
+puts "%ID%: lData3: $lData3"
+puts "%ID%: sorted: [lsort -integer -stride 2 $lData3]"
+puts "%ID%: lData1: $lData1"
 
         error "inconsistent results (lData3): {$lData1} {$lData3}"
       }
@@ -157,11 +160,11 @@ after 1000
       }
 
       if {$lData5!=[lsort -integer -stride 2 $lData6]} {
-puts "lData5: $lData5"
-puts "sorted: [lsort -integer -stride 2 $lData6]"
-puts "lData6: $lData6"
-puts "sorted: [lsort -integer -stride 2 -index 1 $lData5]"
-dbX eval {PRAGMA hct_extra_logging = 1}
+puts "%ID%: lData5: $lData5"
+puts "%ID%: sorted: [lsort -integer -stride 2 $lData6]"
+puts "%ID%: lData6: $lData6"
+puts "%ID%: sorted: [lsort -integer -stride 2 -index 1 $lData5]"
+dbX eval {PRAGMA hct_extra_logging = 2}
 puts [time {
 set data [dbX eval {
         SELECT a, b FROM tbl WHERE b>(%NROW%)/5 AND b<(%NROW%)*4/5 
@@ -174,12 +177,16 @@ set data2 [dbX eval {
 }]
 }]
 dbX eval {PRAGMA hct_extra_logging = 0}
-puts "data==lData6: [expr {$data==$lData6}]"
-puts "data2==lData5: [expr {$data2==$lData5}]"
+foreach ln [split [dbX eval {PRAGMA hct_log}] "\n"] {
+  puts "log: %ID%: $ln"
+}
+puts "%ID%: data==lData6: [expr {$data==$lData6}]"
+puts "%ID%: data2==lData5: [expr {$data2==$lData5}]"
 
-puts "data: $data"
-puts "data2: $data2"
+puts "%ID%: data: $data"
+puts "%ID%: data2: $data2"
 
+after 1000
         error "inconsistent results (lData6): {$lData5} {$lData6}"
       }
       if {$lData5!=[lsort -integer -stride 2 $lData7]} {
