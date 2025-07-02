@@ -1,5 +1,5 @@
-C Speed\sup\sforward\siteration\sthrough\strees\sin\svery\sdirty\ssnapshots.
-D 2025-06-30T19:19:08.568
+C Speed\sup\sreverse\siteration\sthrough\svery\sdirty\stree\sstructures.
+D 2025-07-02T18:50:31.082
 F .fossil-settings/binary-glob 61195414528fb3ea9693577e1980230d78a1f8b0a54c78cf1b9b24d0a409ed6a x
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
@@ -773,7 +773,7 @@ F src/hctJrnlInt.h 468811ef7cd854a8b734497b0ca6b6137b291ea9bba9dc4a91d6dc25a49f4
 F src/hctLogInt.h 44b72c10335f41efe1eb54df524218d4edbb07896a642093bc59badaa3aa7ecc
 F src/hctPManInt.h 3936d01947aace587fd73c51246b7bd5cdbc79833248b839e7d9ffd737ded8b7
 F src/hctTMapInt.h e58c9aa6f9decd43bbd069a26cb74d6482da4592c911e7f8352ddd1fc410d991
-F src/hct_database.c e8a17fedb25f2bae273f27c5d1542a0aef46e8205404c18e8b872f6031620500
+F src/hct_database.c f215dceea954f9fb666bc42813c592bc434fbe3341d72ac14c9c17ef1878400d
 F src/hct_file.c 7e5f8805006412b7fa6c157bff54a0e9c85ffdaab30452b049d5fc631f1429a2
 F src/hct_journal.c 91ac0530d6ea417d96fedd0c37f810aaa612489db0e8e6265787edbe0776524b
 F src/hct_journalhash.c 5af4886fd8c126a96c78278f6e62a8e31de9b8e683b167c487b033a87fabb7a3
@@ -2328,8 +2328,8 @@ F tool/version-info.c 3b36468a90faf1bbd59c65fd0eb66522d9f941eedd364fabccd7227350
 F tool/warnings-clang.sh bbf6a1e685e534c92ec2bfba5b1745f34fb6f0bc2a362850723a9ee87c1b31a7
 F tool/warnings.sh 1ad0169b022b280bcaaf94a7fa231591be96b514230ab5c98fbf15cd7df842dd
 F tool/win/sqlite.vsix deb315d026cc8400325c5863eef847784a219a2f
-P 64c65a8c5d445c9f07d33f51ec703d329512063f98a3a5b0cde9711471c1c14c
-R 3bbdfb7d054c715b526ea260eebf87f2
+P cdd07b26c14acb388fc2a92dad2b31755c712cd4f5267d6c8b7337019a892ef4
+R 46094ff3967bcf6e75e67627fe117226
 U dan
-Z 599c2c77e8c5c2005802eb4867f5f758
+Z 76380f76b438b97c4936b2d710940c41
 # Remove this line to create a well-formed Fossil manifest.

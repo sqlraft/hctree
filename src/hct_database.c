@@ -7310,25 +7310,31 @@ static int hctDbCsrNext(HctDbCsr *pCsr){
 
 static int hctDbCsrGoLeft(HctDbCsr *pCsr, int bFullSeek){
   int rc = SQLITE_OK;
+  u8 *aPg = (pCsr->nRange?pCsr->aRange[pCsr->nRange-1].pg.aOld:pCsr->pg.aOld);
 
-  assert( pCsr->nRange==0 );
-  if( hctIsLeftmost(pCsr->pg.aOld)==0 ){
+  assert( pCsr->nRange==0 || bFullSeek==1 );
+  if( hctIsLeftmost(aPg) ){
+    hctDbCsrReset(pCsr);
+  }else{
     HctDbKey k;
 
     memset(&k, 0, sizeof(k));
-    hctDbGetKey(&rc, pCsr->pDb, pCsr->pKeyInfo, 1, pCsr->pg.aOld, 0, &k);
+    hctDbGetKey(&rc, pCsr->pDb, pCsr->pKeyInfo, 1, aPg, 0, &k);
     hctDbDecrementKey(&k);
 
     if( rc==SQLITE_OK ){
-      int res = 0;
       if( bFullSeek ){
+        int bExact = 0;
+        hctDbCsrReset(pCsr);
+        rc = hctDbCsrSeekAndDescend(pCsr, k.pKey, k.iKey, 0, &bExact);
+        assert( bExact==0 || k.pKey==0 );
         assert( pCsr->eDir==BTREE_DIR_REVERSE );
-        rc = sqlite3HctDbCsrSeek(pCsr, k.pKey, k.iKey, &res);
       }else{
+        int res = 0;
         int nHeight = ((HctDbPageHdr*)pCsr->pg.aOld)->nHeight;
-        hctDbCsrSeek(pCsr, 0, nHeight, 0, k.pKey, k.iKey, &res);
+        rc = hctDbCsrSeek(pCsr, 0, nHeight, 0, k.pKey, k.iKey, &res);
+        assert( rc!=SQLITE_OK || res<0 || res==0 );
       }
-      assert( rc!=SQLITE_OK || res<0 || res==0 );
     }
 
     hctDbFreeKeyContents(&k);
@@ -7379,36 +7385,58 @@ static int hctDbCsrPrev(HctDbCsr *pCsr){
       int bMerge = 0;
 
       hctDbCsrGetRange(pCsr, &ptr);
-      if( hctDbFollowRangeOld(pDb, &ptr, &bMerge) ){
-        do {
-          hctDbCsrDescendRange(&rc, pCsr, ptr.iRangeTid, ptr.iOld, bMerge);
-          memset(&ptr, 0, sizeof(ptr));
+      while( hctDbFollowRangeOld(pDb, &ptr, &bMerge) ){
+        hctDbCsrDescendRange(&rc, pCsr, ptr.iRangeTid, ptr.iOld, bMerge);
+        memset(&ptr, 0, sizeof(ptr));
 
-          if( rc==SQLITE_OK ){
-            HctDbRangeCsr *p = &pCsr->aRange[pCsr->nRange-1];
-            if( hctDbCheckForOverlap(pCsr->pKeyInfo, &p->lowkey, &p->highkey) ){
-              HCT_EXTRA_LOGGING_NO_NEWRANGECSR(pCsr);
-              hctDbCsrAscendRange(pCsr);
+        if( rc==SQLITE_OK ){
+          HctDbRangeCsr *p = &pCsr->aRange[pCsr->nRange-1];
+          if( hctDbCheckForOverlap(pCsr->pKeyInfo, &p->lowkey, &p->highkey) ){
+            HCT_EXTRA_LOGGING_NO_NEWRANGECSR(pCsr);
+            hctDbCsrAscendRange(pCsr);
+          }else{
+            if( p->eRange==HCT_RANGE_FAN 
+             || hctDbKeyIsNull(pCsr->pKeyInfo, &p->highkey)
+            ){
+              p->iCell = ((HctDbPageHdr*)p->pg.aOld)->nEntry-1;
             }else{
-              if( p->eRange==HCT_RANGE_FAN 
-               || hctDbKeyIsNull(pCsr->pKeyInfo, &p->highkey)
-              ){
-                p->iCell = ((HctDbPageHdr*)p->pg.aOld)->nEntry-1;
-              }else{
-                int bExact;
-                hctDbLeafSearch(pDb, p->pg.aOld, 
-                    p->highkey.iKey, p->highkey.pKey, &p->iCell, &bExact
-                );
-                p->iCell--;
-              }
-
-              if( p->iCell>=0 ){
-                hctDbCsrGetRange(pCsr, &ptr);
-              }
-              HCT_EXTRA_LOGGING_NEWRANGECSR(pCsr);
+              int bExact;
+              hctDbLeafSearch(pDb, p->pg.aOld, 
+                  p->highkey.iKey, p->highkey.pKey, &p->iCell, &bExact
+              );
+              p->iCell--;
             }
+           
+            if( (p->iRangeTid & HCT_TID_MASK)>=pDb->iLocalMaxTid 
+             && p->eRange!=HCT_RANGE_FAN
+             && pDb->eMode==HCT_MODE_NORMAL
+             && p->iCell>0
+             && pCsr->eDir==BTREE_DIR_REVERSE
+            ){
+              HctDbKey *pL = &p->lowkey;
+              if( hctDbCompareCellKey(&rc,pDb,p->pg.aOld,p->iCell,pL,1)>=0 ){
+                hctDbFreeKeyContents(pL);
+                pL->pKey = 0;
+                pL->iKey = SMALLEST_INT64;
+                p->bDoNotAscend = 1;
+                assert( pDb->iTid==0 );
+
+                /* There is a chance that this range-cursor was created with
+                ** HCT_RANGE_FOLLOW. This can occur if transaction p->iRangeTid
+                ** was ROLLBACKed. In that case the TID might be far in the
+                ** future but the snapshot included in this connections
+                ** transaction. And so hctDbFollowRangeOld() decides on
+                ** HCT_RANGE_FOLLOW. No matter, just change it to MERGE here. */
+                p->eRange = HCT_RANGE_MERGE;
+              }
+            }
+
+            if( p->iCell>=0 ){
+              hctDbCsrGetRange(pCsr, &ptr);
+            }
+            HCT_EXTRA_LOGGING_NEWRANGECSR(pCsr);
           }
-        }while( hctDbFollowRangeOld(pDb, &ptr, &bMerge) );
+        }
       }
 
       while( pCsr->nRange>0 ){
@@ -7423,8 +7451,16 @@ static int hctDbCsrPrev(HctDbCsr *pCsr){
           p->iCell--;
           break;
         }
-        HCT_EXTRA_LOGGING(pDb, ("range cursor %d at EOF", pCsr->nRange-1));
-        hctDbCsrAscendRange(pCsr);
+        HCT_EXTRA_LOGGING(pDb, (
+              "range cursor %d at EOF (phys page %lld) bDoNotAscend=%d", 
+              pCsr->nRange-1, (i64)p->pg.iOldPg, p->bDoNotAscend
+        ));
+        if( p->bDoNotAscend ){
+          rc = hctDbCsrGoLeft(pCsr, 1);
+          if( rc ) break;
+        }else{
+          hctDbCsrAscendRange(pCsr);
+        }
       }
     }while( pCsr->nRange );
   }
