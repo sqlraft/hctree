@@ -7143,6 +7143,26 @@ int sqlite3HctDbCsrLast(HctDbCsr *pCsr){
   return rc;
 }
 
+/*
+** Collapse the range cursor array associated with cursor pCsr.
+**
+** To collapse the array means to replace it with an array consisting of a
+** single element - a copy of the last element of the original array.
+*/
+static void hctDbCsrCollapseRangeCursors(HctDbCsr *pCsr){
+  if( pCsr->nRange>1 ){
+    HctDbRangeCsr *pOrig = &pCsr->aRange[pCsr->nRange-1];
+    HCT_EXTRA_LOGGING(pCsr->pDb, (
+        "collapsing range-cursors - range-cursor %d becomes 0", pCsr->nRange-1
+    ));
+    pCsr->nRange--;
+    while( pCsr->nRange>0 ){
+      hctDbCsrAscendRange(pCsr);
+    }
+    pCsr->nRange = 1;
+    memcpy(&pCsr->aRange[0], pOrig, sizeof(HctDbRangeCsr));
+  }
+}
 
 static int hctDbCsrGotoPeer(HctDbCsr *pCsr, int iCell){
   HctDbRangeCsr *pRange = 0;
@@ -7150,7 +7170,11 @@ static int hctDbCsrGotoPeer(HctDbCsr *pCsr, int iCell){
   u32 iPeerPg = 0;
   int rc = SQLITE_OK;
 
+  assert( iCell==0 || iCell==-1 );
+
   if( pCsr->nRange ){
+    /* The peer page needs to be loaded into the current HctDbRangeCsr object 
+    ** because it might still need the HctDbRangeCsr.lowkey variable. */
     pRange = &pCsr->aRange[pCsr->nRange-1];
     pPg = &pRange->pg;
     pRange->iCell = iCell;
@@ -7244,6 +7268,8 @@ static int hctDbCsrNext(HctDbCsr *pCsr){
               ** transaction. And so hctDbFollowRangeOld() decides on
               ** HCT_RANGE_FOLLOW. No matter, just change it to MERGE here.  */
               p->eRange = HCT_RANGE_MERGE;
+
+              hctDbCsrCollapseRangeCursors(pCsr);
             }
 
             HCT_EXTRA_LOGGING_NEWRANGECSR(pCsr);
@@ -7428,6 +7454,7 @@ static int hctDbCsrPrev(HctDbCsr *pCsr){
                 ** transaction. And so hctDbFollowRangeOld() decides on
                 ** HCT_RANGE_FOLLOW. No matter, just change it to MERGE here. */
                 p->eRange = HCT_RANGE_MERGE;
+                hctDbCsrCollapseRangeCursors(pCsr);
               }
             }
 
@@ -7449,6 +7476,10 @@ static int hctDbCsrPrev(HctDbCsr *pCsr){
             return SQLITE_OK;
           }
           p->iCell--;
+          HCT_EXTRA_LOGGING(pDb, (
+                "moved range cursor (%d) to: %z",
+                pCsr->nRange-1, hctDbCsrDebugCsrPos(pCsr)
+          ));
           break;
         }
         HCT_EXTRA_LOGGING(pDb, (
