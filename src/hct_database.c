@@ -39,6 +39,10 @@ typedef struct HctCsrIndexOp HctCsrIndexOp;
 
 typedef struct HctDbPageArray HctDbPageArray;
 
+#ifndef HCT_VALIDATE_TIMERS
+# define HCT_VALIDATE_TIMERS 1
+#endif
+
 struct HctCsrIntkeyOp {
   HctCsrIntkeyOp *pNextOp;
   i64 iFirst;
@@ -46,6 +50,10 @@ struct HctCsrIntkeyOp {
 
   u32 iLogical;
   u32 iPhysical;
+
+#ifdef HCT_VALIDATE_TIMERS
+  i64 nUsOp;
+#endif
 };
 
 struct HctCsrIndexOp {
@@ -57,6 +65,10 @@ struct HctCsrIndexOp {
 
   u32 iLogical;
   u32 iPhysical;
+
+#ifdef HCT_VALIDATE_TIMERS
+  i64 nUsOp;
+#endif
 };
 
 struct CsrIntkey {
@@ -304,6 +316,10 @@ struct HctDatabaseStats {
 };
 
 /*
+** pPrevScannerList:
+**   Linked list of cursors used by previous transaction. We keep this
+**   hanging around only for the "hctvalid" virtual table.
+**
 ** pScannerList:
 **   Linked list of cursors used by the current transaction. If this turns
 **   out to be a write transaction, this list is used to detect read/write
@@ -328,6 +344,7 @@ struct HctDatabase {
   u8 *aTmp;                       /* Temp buffer pgsz bytes in size */
   HctBalance *pBalance;           /* Space for hctDbBalance() */
 
+  HctDbCsr *pPrevScannerList;
   HctDbCsr *pScannerList;
   u64 iRootCannotCommit;
 
@@ -701,10 +718,14 @@ int sqlite3HctDbPagesize(HctDatabase *pDb){
 }
 
 
+static void hctDbFreeCsrList(HctDbCsr *pList);
+
 void sqlite3HctDbClose(HctDatabase *p){
   if( p ){
     assert( p->rbackcsr.pKeyInfo==0 );
     assert( p->rbackcsr.pRec==0 );
+    assert( p->pScannerList==0 );
+    hctDbFreeCsrList(p->pPrevScannerList);
     sqlite3_free(p->aTmp);
     sqlite3HctFileClose(p->pFile);
     p->pFile = 0;
@@ -6917,8 +6938,11 @@ static void hctDbFreeCsrList(HctDbCsr *pList){
 
 int sqlite3HctDbEndRead(HctDatabase *pDb){
   HctTMapClient *pTMapClient = sqlite3HctFileTMapClient(pDb->pFile);
-  hctDbFreeCsrList(pDb->pScannerList);
-  pDb->pScannerList = 0;
+  if( pDb->pScannerList || pDb->bConcurrent ){
+    hctDbFreeCsrList(pDb->pPrevScannerList);
+    pDb->pPrevScannerList = pDb->pScannerList;
+    pDb->pScannerList = 0;
+  }
   pDb->iRootCannotCommit = 0;
   if( pDb->pTmap ){
     sqlite3HctTMapEnd(pTMapClient, pDb->iSnapshotId);
@@ -7578,10 +7602,6 @@ int sqlite3HctDbCsrData(HctDbCsr *pCsr, int *pnData, const u8 **paData){
 }
 
 
-#ifndef HCT_VALIDATE_TIMERS
-# define HCT_VALIDATE_TIMERS 1
-#endif
-
 #ifdef HCT_VALIDATE_TIMERS
 
 #if 0
@@ -7589,9 +7609,9 @@ int sqlite3HctDbCsrData(HctDbCsr *pCsr, int *pnData, const u8 **paData){
 # define HCT_VALIDATE_CSR_THRESHOLD -1
 # define HCT_VALIDATE_OP_THRESHOLD -1
 #else
-# define HCT_VALIDATE_THRESHOLD     2000
-# define HCT_VALIDATE_CSR_THRESHOLD  500
-# define HCT_VALIDATE_OP_THRESHOLD    20
+# define HCT_VALIDATE_THRESHOLD     2000*1000
+# define HCT_VALIDATE_CSR_THRESHOLD  500*1000
+# define HCT_VALIDATE_OP_THRESHOLD    20*1000
 #endif
 
 #include <sys/time.h>
@@ -7599,10 +7619,10 @@ int sqlite3HctDbCsrData(HctDbCsr *pCsr, int *pnData, const u8 **paData){
 /*
 ** Return the number of ms since the epoch.
 */
-static i64 hctDbGetMs(){
+static i64 hctDbGetUs(){
   struct timeval tv;
   gettimeofday(&tv, 0);
-  return ((i64)tv.tv_sec * 1000 + (i64)tv.tv_usec / 1000);
+  return ((i64)tv.tv_sec * 1000000 + (i64)tv.tv_usec);
 }
 
 /*
@@ -7610,7 +7630,7 @@ static i64 hctDbGetMs(){
 ** It is called when validating a single transaction has taken longer than
 ** HCT_VALIDATE_THRESHOLD ms. It logs a message using sqlite3_log().
 */ 
-static void hctDbValidateWarning(HctDatabase *pDb, i64 nMs){
+static void hctDbValidateWarning(HctDatabase *pDb, i64 nUs){
   int nIntkey = 0;
   int nIntkeyLookup = 0;
   int nIndex = 0;
@@ -7630,12 +7650,12 @@ static void hctDbValidateWarning(HctDatabase *pDb, i64 nMs){
   }
 
   sqlite3_log(SQLITE_WARNING, 
-    "slow validation: %lldms (%d intkey ops (incl. %d lookups), %d index ops)", 
-    nMs, nIntkey, nIntkeyLookup, nIndex
+    "slow validation: %lldus (%d intkey ops (incl. %d lookups), %d index ops)", 
+    nUs, nIntkey, nIntkeyLookup, nIndex
   );
 }
 
-static void hctDbValidateCsrWarning(HctDatabase *pDb, i64 nMs, HctDbCsr *pCsr){
+static void hctDbValidateCsrWarning(HctDatabase *pDb, i64 nUs, HctDbCsr *pCsr){
   const char *zType = "intkey";
   int nOp = 0;
   int nLookup = 0;
@@ -7653,9 +7673,9 @@ static void hctDbValidateCsrWarning(HctDatabase *pDb, i64 nMs, HctDbCsr *pCsr){
   }
 
   sqlite3_log(SQLITE_WARNING, 
-      "slow validation cursor: %lldms root=%lld "
+      "slow validation cursor: %lldus root=%lld "
       "(%d %s ops (incl intkey %d lookups))",
-      nMs, (i64)pCsr->iRoot, nOp, zType, nLookup
+      nUs, (i64)pCsr->iRoot, nOp, zType, nLookup
   );
 }
 
@@ -7741,14 +7761,14 @@ static int hctDbValidateIntkey(HctDatabase *pDb, HctDbCsr *pCsr){
   HctCsrIntkeyOp *pOp;
 
 #ifdef HCT_VALIDATE_TIMERS
-  i64 nMs = hctDbGetMs();
+  i64 nUs = hctDbGetUs();
 #endif
 
   pCsr->intkey.pOpList = 0;
   assert( pCsr->intkey.pCurrentOp==0 );
   for(pOp=pOpList; pOp && rc==SQLITE_OK; pOp=pOp->pNextOp){
 #ifdef HCT_VALIDATE_TIMERS
-    i64 nMsOp = hctDbGetMs();
+    i64 nUsOp = hctDbGetUs();
 #endif
     int nStep = 0;
     int bDum = 0;
@@ -7806,9 +7826,9 @@ static int hctDbValidateIntkey(HctDatabase *pDb, HctDbCsr *pCsr){
       rc = hctDbCsrNext(pCsr);
     }
 #ifdef HCT_VALIDATE_TIMERS
-    nMsOp = hctDbGetMs() - nMsOp;
-    if( nMsOp>HCT_VALIDATE_OP_THRESHOLD ){
-      hctDbValidateOpWarning(pDb, nMsOp, (i64)pCsr->iRoot, nStep, pOp, 0);
+    pOp->nUsOp = nUsOp = hctDbGetUs() - nUsOp;
+    if( nUsOp>HCT_VALIDATE_OP_THRESHOLD ){
+      hctDbValidateOpWarning(pDb, nUsOp, (i64)pCsr->iRoot, nStep, pOp, 0);
     }
 #endif
     hctDbCsrReset(pCsr);
@@ -7817,9 +7837,9 @@ static int hctDbValidateIntkey(HctDatabase *pDb, HctDbCsr *pCsr){
   pCsr->intkey.pOpList = pOpList;
 
 #ifdef HCT_VALIDATE_TIMERS
-  nMs = hctDbGetMs() - nMs;
-  if( nMs>HCT_VALIDATE_CSR_THRESHOLD ){
-    hctDbValidateCsrWarning(pDb, nMs, pCsr);
+  nUs = hctDbGetUs() - nUs;
+  if( nUs>HCT_VALIDATE_CSR_THRESHOLD ){
+    hctDbValidateCsrWarning(pDb, nUs, pCsr);
   }
 #endif
 
@@ -7841,7 +7861,7 @@ static int hctDbValidateIndex(HctDatabase *pDb, HctDbCsr *pCsr){
   HctCsrIndexOp *pOp;
 
 #ifdef HCT_VALIDATE_TIMERS
-  i64 nMs = hctDbGetMs();
+  i64 nUs = hctDbGetUs();
 #endif
 
   pCsr->index.pOpList = 0;
@@ -7850,7 +7870,7 @@ static int hctDbValidateIndex(HctDatabase *pDb, HctDbCsr *pCsr){
   for(pOp=pOpList; pOp && rc==SQLITE_OK; pOp=pOp->pNextOp){
     int nStep = 0;
 #ifdef HCT_VALIDATE_TIMERS
-    i64 nMsOp = hctDbGetMs();
+    i64 nUsOp = hctDbGetUs();
 #endif
     UnpackedRecord *pRec = pCsr->pRec;
 
@@ -7918,9 +7938,9 @@ static int hctDbValidateIndex(HctDatabase *pDb, HctDbCsr *pCsr){
     }
 
 #ifdef HCT_VALIDATE_TIMERS
-    nMsOp = hctDbGetMs() - nMsOp;
-    if( nMsOp>HCT_VALIDATE_OP_THRESHOLD ){
-      hctDbValidateOpWarning(pDb, nMsOp, (i64)pCsr->iRoot, nStep, 0, pOp);
+    pOp->nUsOp = nUsOp = hctDbGetUs() - nUsOp;
+    if( nUsOp>HCT_VALIDATE_OP_THRESHOLD ){
+      hctDbValidateOpWarning(pDb, nUsOp, (i64)pCsr->iRoot, nStep, 0, pOp);
     }
 #endif
   }
@@ -7929,9 +7949,9 @@ static int hctDbValidateIndex(HctDatabase *pDb, HctDbCsr *pCsr){
   pCsr->index.pOpList = pOpList;
 
 #ifdef HCT_VALIDATE_TIMERS
-  nMs = hctDbGetMs() - nMs;
-  if( nMs>HCT_VALIDATE_CSR_THRESHOLD ){
-    hctDbValidateCsrWarning(pDb, nMs, pCsr);
+  nUs = hctDbGetUs() - nUs;
+  if( nUs>HCT_VALIDATE_CSR_THRESHOLD ){
+    hctDbValidateCsrWarning(pDb, nUs, pCsr);
   }
 #endif
 
@@ -8007,7 +8027,7 @@ sqlite3HctDbValidate(
   if( iCid!=pDb->iSnapshotId+1 ){
     if( hctDbIsConcurrent(pDb) ){
 #ifdef HCT_VALIDATE_TIMERS
-      i64 nMs = hctDbGetMs();
+      i64 nUs = hctDbGetUs();
 #endif
       pDb->eMode = HCT_MODE_VALIDATE;
       rc = hctDbValidateMeta(pDb);
@@ -8024,9 +8044,9 @@ sqlite3HctDbValidate(
       pDb->eMode = HCT_MODE_NORMAL;
 
 #ifdef HCT_VALIDATE_TIMERS
-      nMs = hctDbGetMs() - nMs;
-      if( nMs>=HCT_VALIDATE_THRESHOLD ){
-        hctDbValidateWarning(pDb, nMs);
+      nUs = hctDbGetUs() - nUs;
+      if( nUs>=HCT_VALIDATE_THRESHOLD ){
+        hctDbValidateWarning(pDb, nUs);
       }
 #endif
 
@@ -9214,6 +9234,7 @@ struct hctvalid_cursor {
   char *zFirst;
   char *zLast;
   char *zPglist;
+  i64 nUsOp;
 };
 static int hctvalidConnect(
   sqlite3 *db,
@@ -9227,7 +9248,7 @@ static int hctvalidConnect(
 
   *ppVtab = 0;
   rc = sqlite3_declare_vtab(db,
-      "CREATE TABLE x(rootpgno, first, last, pglist)"
+      "CREATE TABLE x(rootpgno, first, last, pglist, us)"
   );
 
   if( rc==SQLITE_OK ){
@@ -9277,8 +9298,12 @@ static int hctvalidNext(sqlite3_vtab_cursor *cur){
   pCsr->zLast = 0;
   pCsr->zPglist = 0;
   pCsr->rootpgno = 0;
+  pCsr->nUsOp = 0;
   pCsr->iEntry++;
   pDbCsr = pCsr->pDb->pScannerList;
+  if( pDbCsr==0 ){
+    pDbCsr = pCsr->pDb->pPrevScannerList;
+  }
   if( pDbCsr ){
     pIntkeyOp = pDbCsr->intkey.pOpList;
     pIndexOp = pDbCsr->index.pOpList;
@@ -9312,6 +9337,9 @@ static int hctvalidNext(sqlite3_vtab_cursor *cur){
             "%lld/%lld", pIntkeyOp->iLogical, pIntkeyOp->iPhysical
         );
       }
+#ifdef HCT_VALIDATE_TIMERS
+      pCsr->nUsOp = pIntkeyOp->nUsOp;
+#endif
     }else{
       if( pIndexOp->pFirst ){
         pCsr->zFirst = sqlite3HctDbRecordToText(
@@ -9328,6 +9356,9 @@ static int hctvalidNext(sqlite3_vtab_cursor *cur){
             "%lld/%lld", pIndexOp->iLogical, pIndexOp->iPhysical
         );
       }
+#ifdef HCT_VALIDATE_TIMERS
+      pCsr->nUsOp = pIndexOp->nUsOp;
+#endif
     }
   }
 
@@ -9367,6 +9398,11 @@ static int hctvalidColumn(
       break;
     case 3:
       sqlite3_result_text(ctx, pCsr->zPglist, -1, SQLITE_TRANSIENT);
+      break;
+    case 4:
+#ifdef HCT_VALIDATE_TIMERS
+      sqlite3_result_int64(ctx, pCsr->nUsOp);
+#endif
       break;
   }
   return SQLITE_OK;
