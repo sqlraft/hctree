@@ -35,7 +35,7 @@ db func rand rand
 
 
 set nRow [expr 100]
-set nTrans 200
+set nTrans 2000
 
 set lQuery [list                         \
   "SELECT a, b FROM tbl ORDER BY a"      \
@@ -79,6 +79,7 @@ for {set ii 0} {$ii < $nTrans} {incr ii} {
   }
 }
 
+puts [time {
 for {set ii 0} {$ii < $nTrans} {incr ii} {
   set cmd "db_$ii"
 
@@ -91,7 +92,7 @@ for {set ii 0} {$ii < $nTrans} {incr ii} {
   $cmd close
   unset R($cmd)
 }
-
+}]
 
 set lCmd [list]
 for {set ii 0} {$ii < 2000} {incr ii} {

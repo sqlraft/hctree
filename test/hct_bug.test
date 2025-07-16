@@ -1,0 +1,46 @@
+# 2020 October 8
+#
+# The author disclaims copyright to this source code.  In place of
+# a legal notice, here is a blessing:
+#
+#    May you do good and not evil.
+#    May you find forgiveness for yourself and forgive others.
+#    May you share freely, never taking more than you give.
+#
+#*************************************************************************
+# This file implements regression tests for SQLite library.
+#
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+set testprefix hct_bug
+
+
+#-------------------------------------------------------------------------
+#  1.*: It is currently impossible to insert two NULL values into a UNIQUE
+#       index concurrently - this returns an SQLITE_BUSY error. It should
+#       not.
+#
+
+hct_reset_db
+sqlite3 db2 test.db
+
+do_execsql_test 1.0 {
+  CREATE TABLE t1(a INT PRIMARY KEY, b);
+}
+do_execsql_test 1.1 {
+  BEGIN CONCURRENT;
+    INSERT INTO t1(rowid, a, b) VALUES(350, NULL, 'null1');
+}
+do_execsql_test -db db2 1.2 {
+  INSERT INTO t1(rowid, a, b) VALUES(349, NULL, 'null2');
+}
+do_execsql_test 1.3 {
+  COMMIT
+}
+catchsql ROLLBACK 
+
+# execsql_pp { SELECT * FROM hctvalid } 
+
+finish_test
+

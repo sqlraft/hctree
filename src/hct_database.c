@@ -7445,10 +7445,12 @@ static int hctDbCsrPrev(HctDbCsr *pCsr){
             HCT_EXTRA_LOGGING_NO_NEWRANGECSR(pCsr);
             hctDbCsrAscendRange(pCsr);
           }else{
-            if( p->eRange==HCT_RANGE_FAN 
-             || hctDbKeyIsNull(pCsr->pKeyInfo, &p->highkey)
-            ){
+            if( hctDbKeyIsNull(pCsr->pKeyInfo, &p->highkey) ){
               p->iCell = ((HctDbPageHdr*)p->pg.aOld)->nEntry-1;
+            }else if( p->eRange==HCT_RANGE_FAN ){
+              p->iCell = hctDbFanSearch(
+                  &rc, pDb, p->pg.aOld, p->highkey.pKey, p->highkey.iKey
+              );
             }else{
               int bExact;
               hctDbLeafSearch(pDb, p->pg.aOld, 

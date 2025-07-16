@@ -93,7 +93,7 @@ foreach {tn type} {
 }
 
 
-set maxi64 0x7fffffffffffffff
+set maxi64 [expr 0x7fffffffffffffff]
 
 foreach {tn wo pk} {
   3 ""              "PRIMARY KEY"
@@ -122,14 +122,6 @@ foreach {tn wo pk} {
 
   c1 $tn.1.11 "SELECT * FROM t1 ORDER BY 1" {1 one 3 three 5 five 7 six}
 
-  if {$wo==""} {
-    c1 $tn.1.12 "BEGIN CONCURRENT"
-    c1 $tn.1.13   "INSERT INTO t1(rowid, a, b) VALUES(350, NULL, 'null1')"
-    c2 $tn.1.14       "BEGIN CONCURRENT"
-    c2 $tn.1.15         "INSERT INTO t1(rowid, a, b) VALUES(349, NULL, 'null2')"
-    c2 $tn.1.16       "COMMIT"
-    c1 $tn.1.17 "COMMIT"
-  } 
 }
 
 catch {db2 close}
