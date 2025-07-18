@@ -1260,6 +1260,17 @@ static int hctMapMerge(HctJrnlMap *aB, HctJrnlMap *aA, int n1, int n2){
     }
   }
 
+#ifdef SQLITE_DEBUG
+  /* If assert() is enabled, run through the output array and assert()
+  ** that it is now in sorted order.  */
+  {
+    int ii;
+    for(ii=1; ii<out; ii++){
+      assert( aB[ii].iTid>aB[ii-1].iTid );
+    }
+  }
+#endif
+
   return out;
 }
 
@@ -1272,7 +1283,7 @@ static void hctMapSplitMerge(HctJrnlMap *aB, int nElem, HctJrnlMap *aA){
     int iMid = nElem/2;
     hctMapSplitMerge(aA, iMid, aB);
     hctMapSplitMerge(&aA[iMid], nElem-iMid, &aB[iMid]);
-    hctMapMerge(aB, aA, iMid, nElem-iMid);
+    hctMapMerge(aB, aA, iMid, nElem);
   }
 }
 
@@ -1988,7 +1999,9 @@ int sqlite3HctBtreeCommitPhaseTwo(Btree *pBt, int bCleanup){
       return SQLITE_ERROR;
     }
 
-    rc = sqlite3HctDbPreValidate(p->pHctDb);
+    if( sqlite3HctJrnlMode(p->pHctJrnl)!=SQLITE_HCT_FOLLOWER ){
+      rc = sqlite3HctDbPreValidate(p->pHctDb);
+    }
     if( rc==SQLITE_OK ){
 
       if( p->pCsrList ){

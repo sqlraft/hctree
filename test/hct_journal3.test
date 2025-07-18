@@ -49,9 +49,13 @@ do_execsql_test 1.1 {
 
 do_test 1.2 {
   db eval {SELECT cid, query, snapshot FROM hct_journal} {
-    hct_write_follower
+    db2 eval BEGIN
+    db2 eval $query
+    sqlite3_hct_journal_follower_commit db2 $query $cid $snapshot
   }
-} {}
+
+  db2 one { SELECT count(*) FROM t1 }
+} {10000}
 
 finish_test
 

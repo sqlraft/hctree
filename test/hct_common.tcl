@@ -100,7 +100,7 @@ proc hct_db_contents {db} {
   set ret [list]
   $db eval {
     SELECT name FROM sqlite_schema 
-    WHERE name NOT LIKE 'sqlite%' AND type='table'
+    WHERE name NOT LIKE 'sqlite%' AND type='table' AND name!='hct_journal'
   } {
     lappend ret "table $name"
     lappend ret {*}[$db eval "SELECT * FROM $name"]
