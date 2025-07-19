@@ -1511,11 +1511,11 @@ void sqlite3HctDbRecordTrim(UnpackedRecord *pRec){
 
 
 /*
-** This function returns the current snapshot-id. It may only be called
-** when a read transaction is active.
+** This function returns the current snapshot-id. Or zero if there is no
+** open read transaction.
 */
 i64 sqlite3HctDbSnapshotId(HctDatabase *pDb){
-  assert( pDb->iSnapshotId>0 );
+  assert( pDb->iSnapshotId>=0 );
   return pDb->iSnapshotId;
 }
 

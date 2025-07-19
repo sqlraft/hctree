@@ -780,6 +780,10 @@ int sqlite3_hct_journal_follower_commit(
     hctJournalSetDbError(db, SQLITE_ERROR, "not a FOLLOWER mode db");
     return SQLITE_ERROR;  
   }
+  if( sqlite3HctDbSnapshotId(pJrnl->pDb)<iSnapshot ){
+    hctJournalSetDbError(db, SQLITE_BUSY_SNAPSHOT, "snapshot too old");
+    return SQLITE_BUSY_SNAPSHOT;  
+  }
 
   assert( pJrnl->iJrnlCid==0 );
   assert( pJrnl->iJrnlSnapshot==0 );
