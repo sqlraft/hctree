@@ -264,7 +264,16 @@ static u8 hctJrnlIntHdr(int nSize){
 }
 
 /*
-** Compose an SQLite record suitable for the sqlite_hct_journal table.
+** Compose an SQLite record suitable for the sqlite_hct_journal table. The
+** record consists of 4 fields, as follows:
+**
+**   cid:      integer value - parameter iCid.
+**   query:    blob value - parameters pData and nData.
+**   snapshot: integer value - parameter iSnapshot.
+**   logptr:   blob value - parameters pPtr and nPtr.
+**
+** Both iCid and iSnapshot are used exactly as they are - this function 
+** does *not* divide them by HCT_CID_INCREMENT. 
 */
 static u8 *hctJrnlComposeRecord(
   u64 iCid,
@@ -373,6 +382,10 @@ static int hctJrnlWriteRecord(
   return rc;
 }
 
+/*
+** This is called when committing a transaction to write the entry into
+** the hct_journal table.
+*/
 int sqlite3HctJrnlLog(
   HctJournal *pJrnl, 
   u64 iCid, 
@@ -383,6 +396,12 @@ int sqlite3HctJrnlLog(
 ){
   int rc = rcin;
   if( pJrnl->pJrnlData ){
+    assert( (iCid % HCT_CID_INCREMENT)==0 );
+
+    /* Scale the cid and snapshot values */
+    iCid = iCid / HCT_CID_INCREMENT;
+    iSnapshot = iSnapshot / HCT_CID_INCREMENT;
+
     if( rcin==SQLITE_OK ){
       HctJrnlServer *pServer = pJrnl->pServer;
       if( pServer->eMode==SQLITE_HCT_FOLLOWER ){
@@ -607,8 +626,8 @@ int sqlite3_hct_journal_setmode(sqlite3 *db, int eMode){
     i64 iCidMax = 0;
     u64 *aCommit = 0;
 
-
     rc = hctDbExecForInt(db, "SELECT max(cid) FROM hct_journal", &iCidMax);
+    iCidMax = iCidMax * HCT_CID_INCREMENT;
     aCommit = (u64*)sqlite3HctMallocRc(&rc, HCT_MAX_LEADING_WRITE*sizeof(u64));
 
     if( rc==SQLITE_OK ){
@@ -649,18 +668,16 @@ int sqlite3_hct_journal_setmode(sqlite3 *db, int eMode){
 
       /* Check that the journal is contiguous. Set rc to SQLITE_ERROR and 
       ** leave an error message in the db handle if it is not. */
-      for(iTest=pServer->iSnapshot+1; 
-          iTest<pServer->iSnapshot+pServer->nCommit;
-          iTest++
-      ){
-        u64 iVal = HctAtomicLoad(&pServer->aCommit[iTest % pServer->nCommit]);
-        if( iVal==iTest ){
+      for(iTest=1; iTest<=pServer->nCommit; iTest++){
+        u64 iScaled = iTest + (pServer->iSnapshot / HCT_CID_INCREMENT);
+        u64 iVal = HctAtomicLoad(&pServer->aCommit[iScaled % pServer->nCommit]);
+        if( iVal==iScaled ){
           if( bSeenMiss ){
             rc = SQLITE_ERROR;
             hctJournalSetDbError(db, rc, "non-contiguous journal table");
             break;
           }
-          iSnap = iTest;
+          iSnap = (iScaled * HCT_CID_INCREMENT);
         }else{
           bSeenMiss = 1;
         }
@@ -712,16 +729,22 @@ u64 sqlite3HctJrnlSnapshot(HctJournal *pJrnl){
     if( pServer->eMode==SQLITE_HCT_FOLLOWER ){
       u64 iTest = 0;
 
+      /* Read the current server snapshot. This is an unscaled value, so
+      ** divide by HCT_CID_INCREMENT to get the external CID value.  */
       u64 iSnap = HctAtomicLoad(&pServer->iSnapshot);
-      iRet = iSnap;
+      iRet = (iSnap / HCT_CID_INCREMENT);
+
       for(iTest=iRet+1; 1; iTest++){
         u64 iVal = HctAtomicLoad(&pServer->aCommit[iTest % pServer->nCommit]);
         if( iVal!=iTest ) break;
         iRet = iTest;
       }
 
+      /* Scale the value for external use. */
+      iRet = iRet * HCT_CID_INCREMENT;
+
       /* Update HctJrnlServer.iSnapshot if required and if possible */
-      if( iRet>=iSnap+16 ){
+      if( iRet>=iSnap+(16 * HCT_CID_INCREMENT) ){
         (void)HctCASBool(&pServer->iSnapshot, iSnap, iRet);
       }
     }
@@ -780,7 +803,12 @@ int sqlite3_hct_journal_follower_commit(
     hctJournalSetDbError(db, SQLITE_ERROR, "not a FOLLOWER mode db");
     return SQLITE_ERROR;  
   }
-  if( sqlite3HctDbSnapshotId(pJrnl->pDb)<iSnapshot ){
+
+  /* Check if the transaction was prepared against a snapshot new enough
+  ** for the transaction. Parameter iSnapshot is scaled, but the return
+  ** value of sqlite3HctDbSnapshotId() is not, so multiply iSnapshot by
+  ** HCT_CID_INCREMENT before doing the comparison.  */
+  if( sqlite3HctDbSnapshotId(pJrnl->pDb)<(iSnapshot*HCT_CID_INCREMENT) ){
     hctJournalSetDbError(db, SQLITE_BUSY_SNAPSHOT, "snapshot too old");
     return SQLITE_BUSY_SNAPSHOT;  
   }
@@ -859,7 +887,7 @@ int sqlite3HctJrnlCommitOk(HctJournal *pJrnl){
 
 u64 sqlite3HctJrnlFollowerModeCid(HctJournal *pJrnl){
   assert( (pJrnl->iJrnlCid!=0)==(pJrnl->pServer->eMode==SQLITE_HCT_FOLLOWER) );
-  return pJrnl->iJrnlCid;
+  return pJrnl->iJrnlCid * HCT_CID_INCREMENT;
 }
 
 void sqlite3HctJrnlSetRoot(HctJournal *pJrnl, Schema *pSchema){

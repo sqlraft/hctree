@@ -8010,11 +8010,12 @@ sqlite3HctDbValidate(
   u64 *pEntry = hctDbFindTMapEntry(pDb->pTmap, pDb->iTid);
   u64 iCid = *piCid;
   int rc = SQLITE_OK;
+  int bValidate = 1;
 
   assert( *pEntry==0 );
   if( iCid==0 ){
     HctAtomicStore(pEntry, HCT_TMAP_VALIDATING);
-    iCid = sqlite3HctFileAllocateCID(pDb->pFile, 1);
+    iCid = sqlite3HctFileAllocateCID(pDb->pFile, pDb->iSnapshotId, &bValidate);
   }
   HctAtomicStore(pEntry, HCT_TMAP_VALIDATING | iCid);
 
@@ -8026,7 +8027,7 @@ sqlite3HctDbValidate(
   /* If iCid is one more than pDb->iSnapshotId, then this transaction is
   ** being applied against the snapshot that it was run against. In this
   ** case we can skip validation entirely. */
-  if( iCid!=pDb->iSnapshotId+1 ){
+  if( bValidate ){
     if( hctDbIsConcurrent(pDb) ){
 #ifdef HCT_VALIDATE_TIMERS
       i64 nUs = hctDbGetUs();

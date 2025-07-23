@@ -1932,9 +1932,27 @@ u64 sqlite3HctFileAllocateTransid(HctFile *pFile){
   pFile->iCurrentTid = (iVal & HCT_TID_MASK);
   return pFile->iCurrentTid;
 }
-u64 sqlite3HctFileAllocateCID(HctFile *pFile, int nWrite){
-  assert( nWrite>0 );
-  return hctFileAtomicIncr(pFile, &pFile->pServer->iCommitId, nWrite);
+
+/*
+** Allocate and return a new CID value. The CID will be used to commit a
+** transaction prepared against snapshot iSnapshot. If this means that
+** no validation is required, set output parameter (*pbValidate) to 0.
+** Or, if validation will be required, set (*pbValidate) to 1.
+*/
+u64 sqlite3HctFileAllocateCID(HctFile *pFile, i64 iSnapshot, int *pbValidate){
+  u64 *piCID = &pFile->pServer->iCommitId;
+  u64 iRet = 0;
+
+  while( 1 ){
+    u64 iOld = *piCID;
+    iRet = ((iOld + HCT_CID_INCREMENT) / HCT_CID_INCREMENT) * HCT_CID_INCREMENT;
+    if( hctBoolCompareAndSwap64(piCID, iOld, iRet) ){
+      *pbValidate = (iOld!=iSnapshot);
+      break;
+    }
+  }
+
+  return iRet;
 }
 
 void sqlite3HctFileSetCID(HctFile *pFile, u64 iVal){

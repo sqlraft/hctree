@@ -15,6 +15,8 @@
 typedef struct HctFileServer HctFileServer;
 typedef struct HctFile HctFile;
 
+#define HCT_CID_INCREMENT 16
+
 HctFile *sqlite3HctFileOpen(
   int *pRc,
   const char *zFile, 
@@ -121,7 +123,7 @@ int sqlite3HctFilePageGetPhysical(HctFile *pFile, u32 iPg, HctFilePage *pPg);
 int sqlite3HctFilePageNewPhysical(HctFile *pFile, HctFilePage *pPg);
 
 u64 sqlite3HctFileAllocateTransid(HctFile *pFile);
-u64 sqlite3HctFileAllocateCID(HctFile *pFile, int);
+u64 sqlite3HctFileAllocateCID(HctFile *pFile, i64 iSnapshot, int *pbValidate);
 u64 sqlite3HctFileGetSnapshotid(HctFile *pFile);
 
 u64 sqlite3HctFilePeekTransid(HctFile *pFile);
