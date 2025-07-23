@@ -1,0 +1,79 @@
+# 2022 November 16
+#
+# The author disclaims copyright to this source code.  In place of
+# a legal notice, here is a blessing:
+#
+#    May you do good and not evil.
+#    May you find forgiveness for yourself and forgive others.
+#    May you share freely, never taking more than you give.
+#
+#*************************************************************************
+# This file implements regression tests for SQLite library.
+#
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+set testprefix hct_index5
+
+# Setup for logging 
+db close
+sqlite3_shutdown
+#sqlite_log_to_stdout
+autoinstall_test_functions
+
+expr srand(0)
+#set hct_extra_write_logging 1
+
+hct_reset_db
+
+proc rand {min max} {
+  expr {$min + int(abs(rand() * (1 + $max - $min)))}
+}
+db func rand rand
+
+set nRow [expr 10]
+set nTrans 60000
+set nDelay  1000
+
+do_execsql_test 1.0 {
+  CREATE TABLE t1(a INTEGER PRIMARY KEY, b TEXT);
+  CREATE INDEX t1b ON t1(b);
+  WITH s(i) AS (
+    SELECT 1 UNION ALL SELECT i+1 FROM s WHERE i<$nRow
+  )
+  INSERT INTO t1 SELECT NULL, randstr(30,30) FROM s;
+}
+
+proc start_transaction {cnx} {
+  $cnx eval { BEGIN CONCURRENT }
+  set rowid [rand 1 $::nRow]
+  $cnx eval {
+    UPDATE t1 SET b = randstr(30,30) WHERE a=$rowid
+  }
+}
+
+proc commit_transaction {cnx} {
+  set before [$cnx one {SELECT val FROM hctstats WHERE stat='descend_in_writewrite'}]
+  set rc [catch { $cnx eval COMMIT }]
+  if {$rc} {
+    $cnx eval ROLLBACK
+  }
+  set after [$cnx one {SELECT val FROM hctstats WHERE stat='descend_in_writewrite'}]
+  puts "descend_in_writewrite == [expr $after - $before]"
+}
+
+sqlite3 db2 test.db
+
+do_test 1.1 {
+  start_transaction db
+
+  for {set ii 0} {$ii < 2000} {incr ii} {
+    start_transaction db2
+puts [time { commit_transaction db2 }]
+  }
+
+puts [time { commit_transaction db }]
+} {}
+
+finish_test
+

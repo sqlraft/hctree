@@ -1,0 +1,81 @@
+# 2023 December 18
+#
+# The author disclaims copyright to this source code.  In place of
+# a legal notice, here is a blessing:
+#
+#    May you do good and not evil.
+#    May you find forgiveness for yourself and forgive others.
+#    May you share freely, never taking more than you give.
+#
+#*************************************************************************
+#
+# 
+
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+set testprefix hct_journal_schema
+
+hct_reset_db
+catch_hct_journal_init db
+sqlite3_hct_journal_setmode db LEADER
+
+do_execsql_test 1.0 {
+  BEGIN;
+    CREATE TABLE t1(b TEXT, a INTEGER PRIMARY KEY);
+    CREATE TABLE t2(b TEXT, a INTEGER PRIMARY KEY);
+    CREATE TRIGGER AFTER INSERT ON t1 BEGIN
+      INSERT INTO t2 VALUES(new.b, NULL);
+    END;
+  END;
+}
+
+do_execsql_test 1.1 {
+  INSERT INTO t1 VALUES('one', 1);
+  INSERT INTO t1 VALUES('two', 2);
+} {}
+
+
+forcedelete test.db2
+sqlite3 db2 file:test.db2?hctree=1 -uri 1
+catch_hct_journal_init db2
+
+do_test 1.2 {
+  db eval { SELECT cid, schema, data, schemacid FROM sqlite_hct_journal } {
+    sqlite3_hct_journal_write db2 $cid $schema $data $schemacid
+  }
+} {}
+
+do_execsql_test -db db2 1.3 {
+  SELECT a, b FROM t2;
+} {
+  1 one 2 two
+}
+
+sqlite3_hct_journal_setmode db FOLLOWER
+sqlite3_hct_journal_setmode db2 LEADER
+
+do_execsql_test -db db2 1.4 {
+  INSERT INTO t1 VALUES('three', 3);
+}
+
+do_execsql_test -db db2 1.5 { SELECT a, b FROM t1 } { 1 one 2 two 3 three }
+do_execsql_test -db db2 1.6 { SELECT a, b FROM t2 } { 1 one 2 two 3 three }
+
+do_test 1.7 {
+  db2 eval { 
+    SELECT cid, schema, data, schemacid,
+    hct_journal_entry(data) as d
+    FROM sqlite_hct_journal 
+    ORDER BY cid DESC LIMIT 1
+  } {
+    sqlite3_hct_journal_write db $cid $schema $data $schemacid
+  }
+} {}
+
+do_execsql_test 1.8 { SELECT a, b FROM t1 } { 1 one 2 two 3 three }
+do_execsql_test 1.9 { SELECT a, b FROM t2 } { 1 one 2 two 3 three }
+
+
+finish_test
+
