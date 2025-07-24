@@ -79,3 +79,8 @@ int sqlite3HctJrnlZeroEntries(HctJournal *pJrnl, int nEntry, i64 *aEntry);
 
 int sqlite3HctJrnlRecoveryMode(sqlite3 *db, HctJournal *pJrnl, int *peMode);
 
+/*
+** True if currently inside a call to sqlite3_hct_journal_local_commit()
+*/
+int sqlite3HctJrnlIsLocalCommit(HctJournal *pJrnl);
+

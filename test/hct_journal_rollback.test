@@ -46,6 +46,18 @@ proc hct_write_follower {db cid snapshot query} {
   return ""
 }
 
+# Run a follower test:
+#
+#   1) Open a new, empty database - handle db2.
+#
+#   2) For each cid in argument $lCid, use hct_journal_follower_commit() 
+#      to write the transaction to db2.
+#
+#   3) Check that the result of "SELECT * FROM t1" is equal to argument $res.
+#
+#   4) Copy the files of db2 to a new location and open the new db. Check
+#      that the result of "SELECT * FROM t1" is still equal to $res.
+#
 proc do_ft_test {tn lCid res} {
   hct_delete_db test.db2
   sqlite3 db2 file:test.db2?hctree=1 -uri 1
@@ -62,6 +74,19 @@ proc do_ft_test {tn lCid res} {
   db2 close
   sqlite3 db2 test.db3
   uplevel [list do_execsql_test -db db2 $tn.2 {SELECT * FROM t1} $res]
+
+  # Check that non-contiguous entries have been removed from the 
+  # hct_journal table.
+  array set A [list]
+  foreach cid $lCid { set A($cid) 1 }
+  for {set ii 1} {1} {incr ii} {
+    lappend lRecover $ii
+    if {[info exists A([expr $ii+1])]==0} break
+  }
+  uplevel [list \
+      do_execsql_test -db db2 $tn.3 {SELECT cid FROM hct_journal} $lRecover
+  ]
+
   db2 close
 }
 
@@ -88,7 +113,7 @@ hct_reset_db
 catch_hct_journal_init db
 sqlite3_hct_journal_setmode db LEADER
 
-do_test 1.0 {
+do_test 3.0 {
   foreach sql [split [string trim {
     CREATE TABLE t1(a PRIMARY KEY, b TEXT) WITHOUT ROWID;
     INSERT INTO t1 VALUES(1, 'one');   
@@ -112,7 +137,7 @@ do_test 1.0 {
   }
 } {}
 
-execsql_pp { SELECT cid, snapshot, query FROM hct_journal; }
+# execsql_pp { SELECT cid, snapshot, query FROM hct_journal; }
 
 do_ft_test 3.1 {2 14 13 12 5 4 3 6 7 10} {
   1 one
@@ -142,6 +167,33 @@ do_test 3.3 {
     }
   } msg] $msg
 } {1 rc=SQLITE_BUSY_SNAPSHOT}
+
+hct_copy_db test.db test.db2
+sqlite3 db2 test.db2
+
+do_execsql_test -db db2 3.4.1 {
+  DELETE FROM hct_journal WHERE cid IN (8, 10, 12, 13);
+  SELECT cid FROM hct_journal;
+} {
+  1 2 3 4 5 6 7 9 11 14
+}
+do_execsql_test -db db2 3.4.2 {
+  SELECT cid, snapshot, query FROM hct_journal WHERE cid IN (8, 10, 12, 13);
+} {
+}
+
+db2 close
+sqlite3 db2 test.db2
+do_execsql_test -db db2 3.4.3 {
+  SELECT cid, snapshot, query FROM hct_journal WHERE cid IN (8, 10, 12, 13);
+} {
+  8 0 {}
+  10 0 {}
+  12 0 {}
+  13 0 {}
+}
+
+
 
 finish_test
 

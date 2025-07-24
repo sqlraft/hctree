@@ -123,7 +123,7 @@ int sqlite3HctFilePageGetPhysical(HctFile *pFile, u32 iPg, HctFilePage *pPg);
 int sqlite3HctFilePageNewPhysical(HctFile *pFile, HctFilePage *pPg);
 
 u64 sqlite3HctFileAllocateTransid(HctFile *pFile);
-u64 sqlite3HctFileAllocateCID(HctFile *pFile, i64 iSnapshot, int *pbValidate);
+u64 sqlite3HctFileAllocateCID(HctFile *pFile, i64, int, int *pbValidate);
 u64 sqlite3HctFileGetSnapshotid(HctFile *pFile);
 
 u64 sqlite3HctFilePeekTransid(HctFile *pFile);

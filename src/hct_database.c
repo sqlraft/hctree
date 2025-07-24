@@ -8004,7 +8004,8 @@ __attribute__ ((noinline))
 sqlite3HctDbValidate(
   sqlite3 *db, 
   HctDatabase *pDb, 
-  u64 *piCid
+  u64 *piCid,
+  int bLocal                      /* True for a local-only transcation */
 ){
   HctDbCsr *pCsr = 0;
   u64 *pEntry = hctDbFindTMapEntry(pDb->pTmap, pDb->iTid);
@@ -8015,7 +8016,10 @@ sqlite3HctDbValidate(
   assert( *pEntry==0 );
   if( iCid==0 ){
     HctAtomicStore(pEntry, HCT_TMAP_VALIDATING);
-    iCid = sqlite3HctFileAllocateCID(pDb->pFile, pDb->iSnapshotId, &bValidate);
+    iCid = sqlite3HctFileAllocateCID(
+        pDb->pFile, pDb->iSnapshotId, bLocal, &bValidate
+    );
+    if( iCid==0 ) return HCT_SQLITE_BUSY;
   }
   HctAtomicStore(pEntry, HCT_TMAP_VALIDATING | iCid);
 

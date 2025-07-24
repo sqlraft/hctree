@@ -228,6 +228,34 @@ static int test_hct_journal_follower_commit(
 }
 
 /*
+** tclcmd: sqlite3_hct_journal_local_commit DB
+*/
+static int test_hct_journal_local_commit(
+  ClientData clientData,          /* Unused */
+  Tcl_Interp *interp,             /* The TCL interpreter */
+  int objc,                       /* Number of arguments */
+  Tcl_Obj *CONST objv[]           /* Command arguments */
+){
+  sqlite3 *db = 0;
+  int rc = TCL_OK;
+  Tcl_Obj *pRet = 0;
+
+  if( objc!=2 ){
+    Tcl_WrongNumArgs(interp, 1, objv, "DB");
+    return TCL_ERROR;
+  }
+  rc = getDbPointer(interp, Tcl_GetString(objv[1]), &db);
+  if( rc!=TCL_OK ) return rc;
+
+  rc = sqlite3_hct_journal_local_commit(db);
+
+  pRet = Tcl_NewStringObj(sqlite3ErrName(rc),-1);
+  Tcl_SetObjResult(interp, pRet);
+
+  return TCL_OK;
+}
+
+/*
 ** Register commands with the TCL interpreter.
 */
 int SqliteHctTest_Init(Tcl_Interp *interp){
@@ -241,6 +269,7 @@ int SqliteHctTest_Init(Tcl_Interp *interp){
     { "sqlite3_hct_journal_snapshot",        test_hct_journal_snapshot },
     { "sqlite3_hct_journal_leader_commit",   test_hct_journal_leader_commit },
     { "sqlite3_hct_journal_follower_commit", test_hct_journal_follower_commit },
+    { "sqlite3_hct_journal_local_commit",    test_hct_journal_local_commit },
   };
   int ii = 0;
 
@@ -250,5 +279,4 @@ int SqliteHctTest_Init(Tcl_Interp *interp){
 
   return TCL_OK;
 }
-
 

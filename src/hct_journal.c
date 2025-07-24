@@ -75,25 +75,22 @@ struct HctJrnlServer {
 /*
 ** There is one instance of this structure for each database handle (HBtree*)
 ** open on a replication-enabled hctree database.
-**
-** eInWrite:
-**   Set to true while the database connection is in a call to
-**   sqlite3_hct_journal_write().
 */
 struct HctJournal {
   HctDatabase *pDb;
   HctJrnlServer *pServer;
 
-  int bInJrnlCommit;
+  int eJrnlCommit;
+
   const u8 *pJrnlData;
   int nJrnlData;
   i64 iJrnlCid;
   i64 iJrnlSnapshot;
 };
 
-#define HCT_JOURNAL_NONE          0
-#define HCT_JOURNAL_INWRITE       1
-#define HCT_JOURNAL_INROLLBACK    2
+#define HCT_JOURNAL_COMMIT_FOLLOWER 1
+#define HCT_JOURNAL_COMMIT_LEADER   2
+#define HCT_JOURNAL_COMMIT_LOCAL    3
 
 static void hctJournalSetDbError(
   sqlite3 *db,                    /* Database on which to set error */
@@ -788,98 +785,8 @@ void sqlite3HctJournalServerFree(void *pJrnlPtr){
   hctJrnlDelServer(pJrnlPtr);
 }
 
-int sqlite3_hct_journal_follower_commit(
-  sqlite3 *db,                    /* Commit transaction for this db handle */
-  const unsigned char *aData,     /* Data to write to "query" column */
-  int nData,                      /* Size of aData[] in bytes */
-  sqlite3_int64 iCid,             /* CID of committed transaction */
-  sqlite3_int64 iSnapshot         /* Value for hct_journal.snapshot field */
-){
-  HctJournal *pJrnl = sqlite3HctJrnlFind(db);
-  int rc = SQLITE_OK;
-
-  /* Check the db really is in FOLLOWER mode */
-  if( pJrnl->pServer->eMode!=SQLITE_HCT_FOLLOWER ){
-    hctJournalSetDbError(db, SQLITE_ERROR, "not a FOLLOWER mode db");
-    return SQLITE_ERROR;  
-  }
-
-  /* Check if the transaction was prepared against a snapshot new enough
-  ** for the transaction. Parameter iSnapshot is scaled, but the return
-  ** value of sqlite3HctDbSnapshotId() is not, so multiply iSnapshot by
-  ** HCT_CID_INCREMENT before doing the comparison.  */
-  if( sqlite3HctDbSnapshotId(pJrnl->pDb)<(iSnapshot*HCT_CID_INCREMENT) ){
-    hctJournalSetDbError(db, SQLITE_BUSY_SNAPSHOT, "snapshot too old");
-    return SQLITE_BUSY_SNAPSHOT;  
-  }
-
-  assert( pJrnl->iJrnlCid==0 );
-  assert( pJrnl->iJrnlSnapshot==0 );
-  assert( pJrnl->nJrnlData==0 );
-  assert( pJrnl->pJrnlData==0 );
-  assert( pJrnl->bInJrnlCommit==0 );
-
-  pJrnl->pJrnlData = aData;
-  pJrnl->nJrnlData = nData;
-  pJrnl->iJrnlCid = iCid;
-  pJrnl->iJrnlSnapshot = iSnapshot;
-
-  pJrnl->bInJrnlCommit = 1;
-  rc = sqlite3_exec(db, "COMMIT", 0, 0, 0);
-  pJrnl->bInJrnlCommit = 0;
-
-  pJrnl->pJrnlData = 0;
-  pJrnl->nJrnlData = 0;
-  pJrnl->iJrnlCid = 0;
-  pJrnl->iJrnlSnapshot = 0;
-
-  return rc;
-}
-
-/*
-** Commit a leader transaction.
-*/
-int sqlite3_hct_journal_leader_commit(
-  sqlite3 *db,                    /* Commit transaction for this db handle */
-  const unsigned char *aData,     /* Data to write to "query" column */
-  int nData,                      /* Size of aData[] in bytes */
-  sqlite3_int64 *piCid,           /* OUT: CID of committed transaction */
-  sqlite3_int64 *piSnapshot       /* OUT: Min. snapshot to recreate */
-){
-  HctJournal *pJrnl = sqlite3HctJrnlFind(db);
-  int rc = SQLITE_OK;
-
-  /* Check the db really is in LEADER mode */
-  if( pJrnl->pServer->eMode!=SQLITE_HCT_LEADER ){
-    hctJournalSetDbError(db, SQLITE_ERROR, "not a LEADER mode db");
-    return SQLITE_ERROR;  
-  }
-
-  assert( pJrnl->iJrnlCid==0 );
-  assert( pJrnl->iJrnlSnapshot==0 );
-  assert( pJrnl->nJrnlData==0 );
-  assert( pJrnl->pJrnlData==0 );
-
-  pJrnl->pJrnlData = aData;
-  pJrnl->nJrnlData = nData;
-
-  pJrnl->bInJrnlCommit = 1;
-  rc = sqlite3_exec(db, "COMMIT", 0, 0, 0);
-  pJrnl->bInJrnlCommit = 0;
-
-  *piCid = pJrnl->iJrnlCid;
-  *piSnapshot = pJrnl->iJrnlSnapshot;
-
-  pJrnl->pJrnlData = 0;
-  pJrnl->nJrnlData = 0;
-  pJrnl->iJrnlCid = 0;
-  pJrnl->iJrnlSnapshot = 0;
-
-  return rc;
-}
-
 int sqlite3HctJrnlCommitOk(HctJournal *pJrnl){
-  if( pJrnl->pServer->eMode!=SQLITE_HCT_NORMAL && pJrnl->bInJrnlCommit==0 ){
+  if( pJrnl->pServer->eMode!=SQLITE_HCT_NORMAL && pJrnl->eJrnlCommit==0 ){
     return 0;
   }
   return 1;
@@ -1013,6 +920,116 @@ int sqlite3HctJrnlZeroEntries(HctJournal *pJrnl, int nEntry, i64 *aEntry){
   for(ii=0; rc==SQLITE_OK && ii<nEntry; ii++){
     rc = hctJrnlWriteRecord(pJrnl, 1, aEntry[ii], 0, 0, 0, 0, 0);
   }
+
+  return rc;
+}
+
+/*
+** Return true if currently inside a call to sqlite3_hct_journal_local_commit()
+*/
+int sqlite3HctJrnlIsLocalCommit(HctJournal *pJrnl){
+  return (pJrnl->eJrnlCommit==HCT_JOURNAL_COMMIT_LOCAL);
+}
+
+/*
+** Commit a leader transaction.
+*/
+int sqlite3_hct_journal_leader_commit(
+  sqlite3 *db,                    /* Commit transaction for this db handle */
+  const unsigned char *aData,     /* Data to write to "query" column */
+  int nData,                      /* Size of aData[] in bytes */
+  sqlite3_int64 *piCid,           /* OUT: CID of committed transaction */
+  sqlite3_int64 *piSnapshot       /* OUT: Min. snapshot to recreate */
+){
+  HctJournal *pJrnl = sqlite3HctJrnlFind(db);
+  int rc = SQLITE_OK;
+
+  /* Check the db really is in LEADER mode */
+  if( pJrnl->pServer->eMode!=SQLITE_HCT_LEADER ){
+    hctJournalSetDbError(db, SQLITE_ERROR, "not a LEADER mode db");
+    return SQLITE_ERROR;  
+  }
+
+  assert( pJrnl->iJrnlCid==0 );
+  assert( pJrnl->iJrnlSnapshot==0 );
+  assert( pJrnl->nJrnlData==0 );
+  assert( pJrnl->pJrnlData==0 );
+
+  pJrnl->pJrnlData = aData;
+  pJrnl->nJrnlData = nData;
+
+  pJrnl->eJrnlCommit = HCT_JOURNAL_COMMIT_LEADER;
+  rc = sqlite3_exec(db, "COMMIT", 0, 0, 0);
+  pJrnl->eJrnlCommit = 0;
+
+  *piCid = pJrnl->iJrnlCid;
+  *piSnapshot = pJrnl->iJrnlSnapshot;
+
+  pJrnl->pJrnlData = 0;
+  pJrnl->nJrnlData = 0;
+  pJrnl->iJrnlCid = 0;
+  pJrnl->iJrnlSnapshot = 0;
+
+  return rc;
+}
+
+
+int sqlite3_hct_journal_follower_commit(
+  sqlite3 *db,                    /* Commit transaction for this db handle */
+  const unsigned char *aData,     /* Data to write to "query" column */
+  int nData,                      /* Size of aData[] in bytes */
+  sqlite3_int64 iCid,             /* CID of committed transaction */
+  sqlite3_int64 iSnapshot         /* Value for hct_journal.snapshot field */
+){
+  HctJournal *pJrnl = sqlite3HctJrnlFind(db);
+  int rc = SQLITE_OK;
+
+  /* Check the db really is in FOLLOWER mode */
+  if( pJrnl->pServer->eMode!=SQLITE_HCT_FOLLOWER ){
+    hctJournalSetDbError(db, SQLITE_ERROR, "not a FOLLOWER mode db");
+    return SQLITE_ERROR;  
+  }
+
+  /* Check if the transaction was prepared against a snapshot new enough
+  ** for the transaction. Parameter iSnapshot is scaled, but the return
+  ** value of sqlite3HctDbSnapshotId() is not, so multiply iSnapshot by
+  ** HCT_CID_INCREMENT before doing the comparison.  */
+  if( sqlite3HctDbSnapshotId(pJrnl->pDb)<(iSnapshot*HCT_CID_INCREMENT) ){
+    hctJournalSetDbError(db, SQLITE_BUSY_SNAPSHOT, "snapshot too old");
+    return SQLITE_BUSY_SNAPSHOT;  
+  }
+
+  assert( pJrnl->iJrnlCid==0 );
+  assert( pJrnl->iJrnlSnapshot==0 );
+  assert( pJrnl->nJrnlData==0 );
+  assert( pJrnl->pJrnlData==0 );
+  assert( pJrnl->eJrnlCommit==0 );
+
+  pJrnl->pJrnlData = aData;
+  pJrnl->nJrnlData = nData;
+  pJrnl->iJrnlCid = iCid;
+  pJrnl->iJrnlSnapshot = iSnapshot;
+
+  pJrnl->eJrnlCommit = HCT_JOURNAL_COMMIT_FOLLOWER;
+  rc = sqlite3_exec(db, "COMMIT", 0, 0, 0);
+  pJrnl->eJrnlCommit = 0;
+
+  pJrnl->pJrnlData = 0;
+  pJrnl->nJrnlData = 0;
+  pJrnl->iJrnlCid = 0;
+  pJrnl->iJrnlSnapshot = 0;
+
+  return rc;
+}
+
+
+int sqlite3_hct_journal_local_commit(sqlite3 *db){
+  HctJournal *pJrnl = sqlite3HctJrnlFind(db);
+  int rc = SQLITE_OK;
+
+  pJrnl->eJrnlCommit = HCT_JOURNAL_COMMIT_LOCAL;
+  rc = sqlite3_exec(db, "COMMIT", 0, 0, 0);
+  pJrnl->eJrnlCommit = 0;
 
   return rc;
 }

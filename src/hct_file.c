@@ -1939,13 +1939,27 @@ u64 sqlite3HctFileAllocateTransid(HctFile *pFile){
 ** no validation is required, set output parameter (*pbValidate) to 0.
 ** Or, if validation will be required, set (*pbValidate) to 1.
 */
-u64 sqlite3HctFileAllocateCID(HctFile *pFile, i64 iSnapshot, int *pbValidate){
+u64 sqlite3HctFileAllocateCID(
+  HctFile *pFile, 
+  i64 iSnapshot, 
+  int bLocal, 
+  int *pbValidate
+){
   u64 *piCID = &pFile->pServer->iCommitId;
   u64 iRet = 0;
 
   while( 1 ){
     u64 iOld = *piCID;
-    iRet = ((iOld + HCT_CID_INCREMENT) / HCT_CID_INCREMENT) * HCT_CID_INCREMENT;
+    if( bLocal ){
+      iRet = iOld+1;
+      if( (iRet % HCT_CID_INCREMENT)==0 ){
+        iRet = 0;
+        break;
+      }
+    }else{
+      iRet = ((iOld+HCT_CID_INCREMENT) / HCT_CID_INCREMENT) * HCT_CID_INCREMENT;
+    }
+
     if( hctBoolCompareAndSwap64(piCID, iOld, iRet) ){
       *pbValidate = (iOld!=iSnapshot);
       break;
