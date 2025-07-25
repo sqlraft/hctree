@@ -20,12 +20,14 @@ hct_reset_db
 catch_hct_journal_init db
 sqlite3_hct_journal_setmode db LEADER
 
-do_execsql_test 1.0 {
-  CREATE TABLE t1(a INTEGER PRIMARY KEY, b);
-  CREATE INDEX t1b ON t1(b);
-}
+do_test 1.0 {
+  hct_write_leader db {
+    CREATE TABLE t1(a INTEGER PRIMARY KEY, b);
+    CREATE INDEX t1b ON t1(b);
+  }
+} {SQLITE_OK 2 1}
 do_test 1.1 {
-  set tm0 [time {db eval {
+  set tm0 [time {hct_write_leader db {
     WITH s(i) AS (
       SELECT 1 UNION ALL SELECT i+1 FROM s WHERE i<10000
     )
