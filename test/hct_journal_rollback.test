@@ -38,14 +38,6 @@ do_test 1.0 {
 
 # execsql_pp { SELECT cid, snapshot, query FROM hct_journal; }
 
-proc hct_write_follower {db cid snapshot query} {
-  $db eval BEGIN
-  $db eval $query
-  set rc [sqlite3_hct_journal_follower_commit $db $query $cid $snapshot]
-  if {$rc!="SQLITE_OK"} { error "rc=$rc" }
-  return ""
-}
-
 # Run a follower test:
 #
 #   1) Open a new, empty database - handle db2.
@@ -192,8 +184,7 @@ do_execsql_test -db db2 3.4.3 {
   12 0 {}
   13 0 {}
 }
-
-
+db2 close
 
 finish_test
 

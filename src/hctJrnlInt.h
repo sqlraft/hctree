@@ -53,7 +53,7 @@ void sqlite3HctJournalSchemaVersion(HctJournal *pJrnl, u32 *pSchemaVersion);
 
 int sqlite3HctJrnlCommitOk(HctJournal *pJrnl);
 
-u64 sqlite3HctJrnlFollowerModeCid(HctJournal *pJrnl);
+int sqlite3HctJrnlFollowerModeCid(HctJournal *pJrnl, u64 *piCid);
 
 void sqlite3HctJrnlSetRoot(HctJournal *pJrnl, Schema *pSchema);
 

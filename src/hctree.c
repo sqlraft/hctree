@@ -1825,8 +1825,8 @@ static int btreeFlushToDisk(HBtree *p){
     ** object. Also if in FOLLOWER mode, there is no validation step. 
     **
     ** Otherwise, if not in FOLLOWER mode - validate the transaction.  */
-    iCid = sqlite3HctJrnlFollowerModeCid(p->pHctJrnl);
-    if( iCid==0 ){
+    rc = sqlite3HctJrnlFollowerModeCid(p->pHctJrnl, &iCid);
+    if( rc==SQLITE_OK && iCid==0 ){
       rc = sqlite3HctDbValidate(p->config.db, p->pHctDb, &iCid,
           sqlite3HctJrnlIsLocalCommit(p->pHctJrnl)
       );

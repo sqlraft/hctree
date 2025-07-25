@@ -56,6 +56,26 @@ proc hct_write_leader {db sql} {
   sqlite3_hct_journal_leader_commit $db $sql
 }
 
+proc hct_write_follower {db cid snapshot query} {
+  $db eval BEGIN
+  $db eval $query
+  set rc [sqlite3_hct_journal_follower_commit $db $query $cid $snapshot]
+  if {$rc!="SQLITE_OK"} { error "rc=$rc" }
+  return ""
+}
+
+proc hct_write_local {db sql} {
+  $db eval "BEGIN CONCURRENT"
+  $db eval $sql
+  set rc [sqlite3_hct_journal_local_commit $db]
+  if {$rc!="SQLITE_OK"} { 
+    set err "rc=$rc errmsg=[sqlite3_errmsg $db]" 
+    $db eval ROLLBACK
+    error $err
+  }
+  return ""
+}
+
 proc test_dbs_match {tn sql} {
   uplevel [list do_execsql_test $tn $sql [db2 eval $sql]]
 }

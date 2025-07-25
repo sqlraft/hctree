@@ -739,6 +739,7 @@ u64 sqlite3HctJrnlSnapshot(HctJournal *pJrnl){
 
       /* Scale the value for external use. */
       iRet = iRet * HCT_CID_INCREMENT;
+      if( iRet<iSnap ) iRet = iSnap;
 
       /* Update HctJrnlServer.iSnapshot if required and if possible */
       if( iRet>=iSnap+(16 * HCT_CID_INCREMENT) ){
@@ -792,9 +793,29 @@ int sqlite3HctJrnlCommitOk(HctJournal *pJrnl){
   return 1;
 }
 
-u64 sqlite3HctJrnlFollowerModeCid(HctJournal *pJrnl){
+int sqlite3HctJrnlFollowerModeCid(HctJournal *pJrnl, u64 *piCid){
+  if( pJrnl->eJrnlCommit==HCT_JOURNAL_COMMIT_LOCAL
+   && pJrnl->pServer->eMode==SQLITE_HCT_FOLLOWER
+  ){
+    u64 *piSnapshot = &pJrnl->pServer->iSnapshot;
+
+    while( 1 ){
+      u64 iOld = HctAtomicLoad(piSnapshot);
+      u64 iSnap = 0;
+      iSnap = sqlite3HctJrnlSnapshot(pJrnl);
+      if( ((iSnap+1) % HCT_CID_INCREMENT)==0 ){
+        return SQLITE_BUSY_SNAPSHOT;
+      }
+      if( HctCASBool(piSnapshot, iOld, iSnap+1) ){
+        *piCid = iSnap+1;
+        return SQLITE_OK;
+      }
+    }
+
+  }
   assert( (pJrnl->iJrnlCid!=0)==(pJrnl->pServer->eMode==SQLITE_HCT_FOLLOWER) );
-  return pJrnl->iJrnlCid * HCT_CID_INCREMENT;
+  *piCid = (pJrnl->iJrnlCid * HCT_CID_INCREMENT);
+  return SQLITE_OK;
 }
 
 void sqlite3HctJrnlSetRoot(HctJournal *pJrnl, Schema *pSchema){
@@ -1026,6 +1047,12 @@ int sqlite3_hct_journal_follower_commit(
 int sqlite3_hct_journal_local_commit(sqlite3 *db){
   HctJournal *pJrnl = sqlite3HctJrnlFind(db);
   int rc = SQLITE_OK;
+
+  /* Check the db really is in FOLLOWER or LEADER mode */
+  if( pJrnl->pServer->eMode==SQLITE_HCT_NORMAL ){
+    hctJournalSetDbError(db, SQLITE_ERROR, "not a FOLLOWER or LEADER mode db");
+    return SQLITE_ERROR;  
+  }
 
   pJrnl->eJrnlCommit = HCT_JOURNAL_COMMIT_LOCAL;
   rc = sqlite3_exec(db, "COMMIT", 0, 0, 0);
