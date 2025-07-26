@@ -1098,7 +1098,7 @@ static int hctCacheJrnlMap(
    || (p->nJrnlMap>=1024 && (p->nJrnlMap & (p->nJrnlMap-1))==0) ){
     int nNew = p->nJrnlMap ? p->nJrnlMap*2 : 1024;
     HctJrnlMap *aNew = 0;
-    aNew = (HctJrnlMap*)sqlite3Realloc(p->aJrnlLog, nNew*sizeof(HctJrnlMap));
+    aNew = (HctJrnlMap*)sqlite3Realloc(p->aJrnlMap, nNew*sizeof(HctJrnlMap));
     if( !aNew ) return SQLITE_NOMEM_BKPT;
     p->aJrnlMap = aNew;
   }
@@ -1249,6 +1249,16 @@ static int hctMapMerge(HctJrnlMap *aB, HctJrnlMap *aA, int n1, int n2){
   int i1 = 0;
   int i2 = n1;
   int out;
+
+#ifdef SQLITE_DEBUG
+  /* If assert() is enabled, run through the input arrays and assert()
+  ** that they are in sorted order.  */
+  {
+    int ii;
+    for(ii=1; ii<n1; ii++){ assert( aA[ii].iTid>aA[ii-1].iTid ); }
+    for(ii=n1+1; ii<n2; ii++){ assert( aA[ii].iTid>aA[ii-1].iTid ); }
+  }
+#endif
 
   for(out=0; i1<n1 || i2<n2; out++){
     if( i1<n1 && (i2>=n2 || aA[i1].iTid<aA[i2].iTid) ){

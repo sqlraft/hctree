@@ -15,11 +15,6 @@ set testdir [file dirname $argv0]
 source $testdir/tester.tcl
 set testprefix hct_thread4
 
-# Setup for logging 
-db close
-#sqlite3_shutdown
-#sqlite_log_to_stdout
-
 expr srand(0)
 #set hct_extra_write_logging 1
 

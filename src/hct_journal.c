@@ -761,7 +761,7 @@ int sqlite3_hct_journal_snapshot(sqlite3 *db, sqlite3_int64 *piCid){
 
   rc = hctJrnlFind(db, &pJrnl);
   if( rc==SQLITE_OK ){
-    *piCid = (i64)sqlite3HctJrnlSnapshot(pJrnl);
+    *piCid = (i64)sqlite3HctJrnlSnapshot(pJrnl) / HCT_CID_INCREMENT;
   }else{
     *piCid = 0;
   }

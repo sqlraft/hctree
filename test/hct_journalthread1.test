@@ -14,57 +14,151 @@
 set testdir [file dirname $argv0]
 source $testdir/tester.tcl
 source $testdir/hct_common.tcl
-set testprefix hct_thread1
+set testprefix hct_journalthread1
+
+# Setup for logging 
+#db close
+#sqlite3_shutdown
+#sqlite_log_to_stdout
+
+#-------------------------------------------------------------------------
+#
+# 1. Create a database table and populate it with 100 rows:
+#
+#         CREATE TABLE t1(i INTEGER PRIMARY KEY, a, b);
+# 
+# 2. Create nThread threads, each running BEGIN CONCURRENT transactions
+#    as fast as possible. Each transaction modifies a single row in 
+#    table t1.
+#
+# 3. While this is going on, the database is in LEADER mode. Each thread
+#    also has a connection to a second database in FOLLOWER mode. After
+#    each COMMIT, the transaction is also written to the follower db
+#    using sqlite3_hct_journal_follower_commit().
+#
+# 4. If a thread writes a transaction with CID value divisible by
+#    (nJournalRow/4) as part of step (2), it uses a local transactions 
+#    on both follower and leader databases to remove all but the most 
+#    recent nJournalRow rows from the hct_journal table. 
+#
+# 4. Do steps (2)/(3) for nMs milliseconds.
+#
+# 5. Test that the contents of the two databases are identical.
+#
+
+set nThread         8
+set nMs          5000
+set nJournalRow  2000
+set nRow          100
 
 hct_reset_db
+
+# Initialize and populate the main database.
 catch_hct_journal_init db
 sqlite3_hct_journal_setmode db LEADER
-
-do_execsql_test 1.0 { 
-  CREATE TABLE t1(i INTEGER PRIMARY KEY, a, b);
-  WITH s(i) AS (
-    SELECT 1 UNION ALL SELECT i+1 FROM s WHERE i<100
-  )
-  INSERT INTO t1 SELECT i, NULL, NULL FROM s;
-}
-
-hct_copy_db test.db test.db2
-sqlite_thread_test T test.db
-
-T configure -follower test.db2
-T configure -nsecond 2
-T configure -jtruncate 256
-
-for {set tt 1} {$tt <= 20} {incr tt} {
-  T thread w$tt {
-    BEGIN CONCURRENT;
-      UPDATE t1 SET a = hex(frandomblob(16)), b = hex(frandomblob(16)) 
-        WHERE i = 1+frandomid(100);
-    COMMIT;
+do_test 1.0 { 
+  hct_write_leader db {
+    CREATE TABLE t1(i INTEGER PRIMARY KEY, a, b);
+    WITH s(i) AS (
+        SELECT 1 UNION ALL SELECT i+1 FROM s WHERE i<$nRow
+    )
+    INSERT INTO t1 SELECT i, NULL, NULL FROM s;
   }
+} {SQLITE_OK 2 1}
+
+# Initialize the follower database. And open a connection to it so that it
+# can be set to FOLLOWER mode. 
+hct_copy_db test.db test.db2
+sqlite3 db2 test.db2
+sqlite3_hct_journal_setmode db2 FOLLOWER
+
+# Return a Tcl program for each thread to run.
+#
+proc program {nMs nRow nJournalRow iId} {
+  return [string map [list \
+    %MS% $nMs %ROW% $nRow %JRNLROW% $nJournalRow %ID% $iId
+  ] {
+
+    # Open connection to leader database (dbL) and follower database (dbF).
+    sqlite3 dbL test.db
+    sqlite3 dbF test.db2
+
+    proc rand {min max} {
+      expr {$min + int(abs(rand() * (1 + $max - $min)))}
+    }
+    proc randhex {nByte} {
+      set ret ""
+      for {set ii 0} {$ii<$nByte} {incr ii} {
+        append ret [format %.2x [expr abs(int(rand() * 256))]]
+      }
+      return $ret
+    }
+
+    set end_of_time [expr [clock_milliseconds] + %MS%]
+    while {[clock_milliseconds]<$end_of_time} {
+      set id [rand 1 %ROW%]
+      set blob1 [randhex 16]
+      set blob2 [randhex 16]
+
+      set sql "UPDATE t1 SET a='$blob1', b='$blob2' WHERE i=$id;"
+      dbL eval {BEGIN CONCURRENT}
+      dbL eval $sql
+      set lRet [sqlite3_hct_journal_leader_commit dbL $sql]
+
+      foreach {rc cid snapshot} $lRet {}
+      if {$rc!="SQLITE_OK"} { dbL eval ROLLBACK }
+
+      if {$cid>0} {
+        if {$rc!="SQLITE_OK"} { set sql "" }
+
+        while {$snapshot>[sqlite3_hct_journal_snapshot dbF]} { after 1 }
+
+        dbF eval BEGIN
+        dbF eval $sql
+        set rc [sqlite3_hct_journal_follower_commit dbF $sql $cid $snapshot]
+        if {$rc!="SQLITE_OK"} {
+          error "rc=$rc, err=[sqlite3_errmsg dbF]"
+        }
+
+        if {($cid % (%JRNLROW% / 4))==0} {
+          dbL eval "BEGIN CONCURRENT"
+          dbL eval "DELETE FROM hct_journal WHERE cid<($cid - %JRNLROW%)"
+          set rc [sqlite3_hct_journal_local_commit dbL]
+          if {$rc!="SQLITE_OK"} { dbL eval ROLLBACK }
+
+          dbF eval "BEGIN CONCURRENT"
+          dbF eval "DELETE FROM hct_journal WHERE cid<($cid - %JRNLROW%)"
+          set rc [sqlite3_hct_journal_local_commit dbF]
+          if {$rc!="SQLITE_OK"} { dbF eval ROLLBACK }
+        }
+      }
+    }
+
+    dbL close
+    dbF close
+
+  }]
 }
 
-do_test 1.1 {
-  T run
+
+for {set tt 1} {$tt <= $nThread} {incr tt} {
+  set prg [program $nMs $nRow $nJournalRow $tt]
+  sqlthread spawn TH($tt) $prg
+}
+
+do_test "1.1.(running $nThread threads for ${nMs} ms)" {
+  for {set ii 1} {$ii<=$nThread} {incr ii} {
+    if {[info exists TH($ii)]==0} { vwait TH($ii) }
+  }
 } {}
 
-puts [T result]
-sqlite3 db2 test.db2
-
 test_dbs_match 1.2 "SELECT * FROM t1 ORDER BY i"
-test_dbs_match 1.3 "SELECT cid FROM sqlite_hct_journal"
+test_dbs_match 1.3 "SELECT max(cid) FROM hct_journal"
 
-if 0 {
-  execsql_pp {
-    SELECT cid, schema, hct_journal_entry(data), schemacid FROM sqlite_hct_journal
-  }
-  execsql_pp {
-    SELECT cid, schema, hct_journal_entry(data), schemacid FROM sqlite_hct_journal
-  } db2
-}
+# execsql_pp { SELECT cid, snapshot FROM hct_journal }
 
-T destroy
 db close
+db2 close
 
 finish_test
 
