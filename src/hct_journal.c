@@ -98,19 +98,17 @@ static void hctJournalSetDbError(
   const char *zFormat, ...        /* Printf() error string and arguments */
 ){
   char *zErr = 0;
+  va_list ap;
+
+  assert( zFormat );
   sqlite3_mutex_enter( sqlite3_db_mutex(db) );
-  if( zFormat ){
-    va_list ap;
-    va_start(ap, zFormat);
-    zErr = sqlite3_vmprintf(zFormat, ap);
-    va_end(ap);
-  }
-  if( zErr ){
-    sqlite3ErrorWithMsg(db, rc, "%s", zErr);
-    sqlite3_free(zErr);
-  }else{
-    sqlite3ErrorWithMsg(db, rc, 0, 0);
-  }
+
+  va_start(ap, zFormat);
+  zErr = sqlite3HctVmprintf(zFormat, ap);
+  sqlite3ErrorWithMsg(db, rc, "%s", zErr);
+  sqlite3_free(zErr);
+  va_end(ap);
+
   sqlite3_mutex_leave( sqlite3_db_mutex(db) );
 }
 
@@ -143,7 +141,9 @@ int sqlite3_hct_journal_init(sqlite3 *db){
   /* HBtree *p = (HBtree*)db->aDb[0].pBt; */
   int rc = SQLITE_OK;
 
-  /* Test that there is not already an open transaction on this database. */
+  /* Test that there is not already an open transaction on this database. 
+  ** Return early if there is. Do not simply set rc and fall through, as
+  ** code at the bottom of this function might ROLLBACK the transaction. */
   if( sqlite3_get_autocommit(db)==0 ){
     hctJournalSetDbError(db, SQLITE_ERROR, "open transaction on database");
     return SQLITE_ERROR;
@@ -152,7 +152,7 @@ int sqlite3_hct_journal_init(sqlite3 *db){
   /* Test that the main db really is an hct database. Leave rc set to 
   ** something other than SQLITE_OK and an error message in the database
   ** handle if it is not. */
-  if( rc==SQLITE_OK ){
+  {
     i64 nDbFile = 0;
     rc = hctDbExecForInt(db, "PRAGMA hct_ndbfile", &nDbFile);
     if( rc==SQLITE_OK && nDbFile==0 ){
@@ -173,7 +173,7 @@ int sqlite3_hct_journal_init(sqlite3 *db){
   if( rc==SQLITE_OK ){
     i64 iMax;
     rc = hctDbExecForInt(db, "SELECT max(cid) FROM hct_journal", &iMax);
-    if( iMax==0 ){
+    if( rc==SQLITE_OK && iMax==0 ){
       rc = sqlite3_exec(db,
           "INSERT INTO hct_journal VALUES(1, '', 0, NULL)", 0, 0, 0
       );
@@ -207,25 +207,6 @@ int sqlite3_hct_journal_init(sqlite3 *db){
 }
 
 /*
-** Register a custom validation callback with the database handle.
-*/
-int sqlite3_hct_journal_hook(
-  sqlite3 *db,
-  void *pArg,
-  int(*xValidate)(
-    void *pCopyOfArg,
-    sqlite3_int64 iCid,
-    const char *zSchema,
-    const void *pData, int nData,
-    sqlite3_int64 iSchemaCid
-  )
-){
-  db->xValidate = xValidate;
-  db->pValidateArg = pArg;
-  return SQLITE_OK;
-}
-
-/*
 ** Value iVal is to be stored as an integer in an SQLite record. This 
 ** function returns the number of bytes that it will use for storage.
 */
@@ -255,9 +236,9 @@ static void hctJrnlIntPut(u8 *a, u64 iVal, int nByte){
 ** header for an nSize byte integer field.
 */
 static u8 hctJrnlIntHdr(int nSize){
-  if( nSize==8 ) return 6;
-  if( nSize==6 ) return 5;
-  return nSize;
+  u8 aRet[9] = { 0xFF, 1, 2, 3, 4, 0xFF, 5, 0xFF, 6 };
+  assert( nSize>=1 && nSize<=8 && nSize!=5 && nSize!=7 );
+  return aRet[nSize];
 }
 
 /*
@@ -283,6 +264,8 @@ static u8 *hctJrnlComposeRecord(
   int nRec = 0;
   int nHdr = 0;
   int nBody = 0;
+  u8 *pHdr = 0;
+  u8 *pBody = 0;
   int nSnapshotByte = 0;
 
   nSnapshotByte = hctJrnlIntSize(iSnapshot);
@@ -300,38 +283,33 @@ static u8 *hctJrnlComposeRecord(
        + nPtr;                                 /* "logptr" - BLOB */
 
   nRec = nBody+nHdr;
-  pRec = (u8*)sqlite3_malloc(nRec);
-  if( pRec ){
-    u8 *pHdr = pRec;
-    u8 *pBody = &pRec[nHdr];
+  pHdr = pRec = (u8*)sqlite3HctMalloc(nRec);
+  pBody = &pRec[nHdr];
 
-    *pHdr++ = (u8)nHdr;           /* size-of-header varint */
-    *pHdr++ = 0x00;               /* "cid" - NULL */
+  *pHdr++ = (u8)nHdr;           /* size-of-header varint */
+  *pHdr++ = 0x00;               /* "cid" - NULL */
 
-    /* "query" field - BLOB */
-    pHdr += sqlite3PutVarint(pHdr, (nData*2) + 12);
-    if( nData>0 ){
-      memcpy(pBody, pData, nData);
-      pBody += nData;
-    }
-
-    /* "snapshot" field - INTEGER */
-    *pHdr++ = hctJrnlIntHdr(nSnapshotByte);
-    hctJrnlIntPut(pBody, iSnapshot, nSnapshotByte);
-    pBody += nSnapshotByte;
-
-    /* "logptr" field - BLOB or NULL */
-    pHdr += sqlite3PutVarint(pHdr, (nPtr ? ((nPtr*2) + 12): 0));
-    if( nPtr>0 ){
-      memcpy(pBody, aPtr, nPtr);
-      pBody += nPtr;
-    }
-
-    assert( pHdr==&pRec[nHdr] );
-    assert( pBody==&pRec[nRec] );
-  }else{
-    nRec = 0;
+  /* "query" field - BLOB */
+  pHdr += sqlite3PutVarint(pHdr, (nData*2) + 12);
+  if( nData>0 ){
+    memcpy(pBody, pData, nData);
+    pBody += nData;
   }
+
+  /* "snapshot" field - INTEGER */
+  *pHdr++ = hctJrnlIntHdr(nSnapshotByte);
+  hctJrnlIntPut(pBody, iSnapshot, nSnapshotByte);
+  pBody += nSnapshotByte;
+
+  /* "logptr" field - BLOB or NULL */
+  pHdr += sqlite3PutVarint(pHdr, (nPtr ? ((nPtr*2) + 12): 0));
+  if( nPtr>0 ){
+    memcpy(pBody, aPtr, nPtr);
+    pBody += nPtr;
+  }
+
+  assert( pHdr==&pRec[nHdr] );
+  assert( pBody==&pRec[nRec] );
 
   *pnRec = nRec;
   return pRec;
@@ -346,36 +324,31 @@ static int hctJrnlWriteRecord(
   u64 iSnapshot,
   int nPtr, const u8 *aPtr
 ){
+  HctDatabase *pDb = pJrnl->pDb;
+  const u32 iR = (u32)pJrnl->pServer->iJrnlRoot;
+  int nRetry = 0;
   int rc = SQLITE_OK;
   u8 *pRec = 0;
   int nRec = 0;
 
   pRec = hctJrnlComposeRecord(iCid, pData, nData, iSnapshot, nPtr, aPtr, &nRec);
 
-  if( pRec==0 ){
-    rc = SQLITE_NOMEM_BKPT;
-  }else{
-    HctDatabase *pDb = pJrnl->pDb;
-    int nRetry = 0;
-    u32 iR = (u32)pJrnl->pServer->iJrnlRoot;
-    do {
-      
-      nRetry = 0;
-      if( bNotid==0 ){
-        rc = sqlite3HctDbInsert(pDb, iR, 0, iCid, 0, nRec, pRec, &nRetry);
-      }else{
-        rc = sqlite3HctDbJrnlWrite(pDb, iR, iCid, nRec, pRec, &nRetry);
-      }
+  do {
+    nRetry = 0;
+    if( bNotid==0 ){
+      rc = sqlite3HctDbInsert(pDb, iR, 0, iCid, 0, nRec, pRec, &nRetry);
+    }else{
+      rc = sqlite3HctDbJrnlWrite(pDb, iR, iCid, nRec, pRec, &nRetry);
+    }
+    if( rc!=SQLITE_OK ) break;
+    assert( nRetry==0 || nRetry==1 );
+    if( nRetry==0 ){
+      rc = sqlite3HctDbInsertFlush(pDb, &nRetry);
       if( rc!=SQLITE_OK ) break;
-      assert( nRetry==0 || nRetry==1 );
-      if( nRetry==0 ){
-        rc = sqlite3HctDbInsertFlush(pDb, &nRetry);
-        if( rc!=SQLITE_OK ) break;
-      }
-    }while( nRetry );
-  }
-  sqlite3_free(pRec);
+    }
+  }while( nRetry );
 
+  sqlite3_free(pRec);
   return rc;
 }
 
@@ -464,17 +437,15 @@ int sqlite3HctJournalNew(
   HctDatabase *pDb, 
   HctJournal **pp
 ){
+  HctFile *pFile = sqlite3HctDbFile(pDb);
   int rc = SQLITE_OK;
   HctJournal *pNew;
 
   assert( *pp==0 );
-  pNew = sqlite3HctMallocRc(&rc, sizeof(HctJournal));
-  if( pNew ){
-    HctFile *pFile = sqlite3HctDbFile(pDb);
-    pNew->pDb = pDb;
-    pNew->pServer = (HctJrnlServer*)sqlite3HctFileGetJrnlPtr(pFile);
-    *pp = pNew;
-  }
+  pNew = (HctJournal*)sqlite3HctMalloc(sizeof(HctJournal));
+  pNew->pDb = pDb;
+  pNew->pServer = (HctJrnlServer*)sqlite3HctFileGetJrnlPtr(pFile);
+  *pp = pNew;
 
   hctJrnlTryToFreeLog(pNew);
 
@@ -519,38 +490,6 @@ int sqlite3HctJrnlRollbackEntry(HctJournal *pJrnl, i64 iCid){
 
   return rc;
 }
-
-/*
-** Find the HctJournal object associated with the "main" database of the
-** connection passed as the only argument. If successful, set (*ppJrnl)
-** to point to said object and return SQLITE_OK. Or, if the database is
-** not a replication-enabled db, set (*ppJrnl) to NULL and return SQLITE_OK.
-** Or, if an error occurs, return an SQLite error code. The final value
-** of (*ppJrnl) is undefined in this case.
-*/
-static int hctJrnlFind(sqlite3 *db, HctJournal **ppJrnl){
-  int rc = SQLITE_OK;
-  HctJournal *pJrnl = sqlite3HctJrnlFind(db);
-
-  if( pJrnl==0 ){
-    /* If the journal was not found, it might be because the database is
-    ** not yet initialized. Run a query to ensure it is, then try to retrieve
-    ** the journal object again.  */
-    rc = sqlite3_exec(db, "SELECT 1 FROM sqlite_schema LIMIT 1", 0, 0, 0);
-    if( rc==SQLITE_OK ){
-      pJrnl = sqlite3HctJrnlFind(db);
-    }
-  }
-
-  if( rc==SQLITE_OK && pJrnl==0 ){
-    hctJournalSetDbError(db, SQLITE_ERROR, "not a journaled hct database");
-    rc = SQLITE_ERROR;
-  }
-
-  *ppJrnl = pJrnl;
-  return rc;
-}
-
 
 /*
 ** Return the current journal mode - SQLITE_HCT_JOURNAL_MODE_FOLLOWER or
@@ -627,15 +566,17 @@ int sqlite3_hct_journal_setmode(sqlite3 *db, int eMode){
     iCidMax = iCidMax * HCT_CID_INCREMENT;
     aCommit = (u64*)sqlite3HctMallocRc(&rc, HCT_MAX_LEADING_WRITE*sizeof(u64));
 
+#if 0
     if( rc==SQLITE_OK ){
       rc = hctDbExecForInt(db, 
           "SELECT rootpage FROM sqlite_schema WHERE name = 'hct_journal'", 
           &pServer->iJrnlRoot
       );
     }
+#endif
 
     /* Populate a new transaction-map. */
-    if( rc==SQLITE_OK ){
+    {
       HctTMapClient *pTClient = sqlite3HctFileTMapClient(pFile);
       i64 iLastTid = sqlite3HctFilePeekTransid(pFile);
       i64 iFirstTid = MAX(1, (iLastTid+1 - HCT_MAX_LEADING_WRITE));
@@ -756,15 +697,16 @@ u64 sqlite3HctJrnlSnapshot(HctJournal *pJrnl){
 ** error code if something goes wrong.
 */
 int sqlite3_hct_journal_snapshot(sqlite3 *db, sqlite3_int64 *piCid){
+  HctJournal *pJrnl = sqlite3HctJrnlFind(db);
   int rc = SQLITE_OK;
-  HctJournal *pJrnl = 0;
 
-  rc = hctJrnlFind(db, &pJrnl);
-  if( rc==SQLITE_OK ){
+  if( pJrnl->pServer->eMode==SQLITE_HCT_FOLLOWER ){
     *piCid = (i64)sqlite3HctJrnlSnapshot(pJrnl) / HCT_CID_INCREMENT;
   }else{
-    *piCid = 0;
+    rc = SQLITE_ERROR;
+    hctJournalSetDbError(db, SQLITE_ERROR, "not a FOLLOWER mode db");
   }
+
   return rc;
 }
 

@@ -322,7 +322,8 @@ void *sqlite3HctMallocRc(int *pRc, i64 nByte);
 
 void *sqlite3HctMalloc(i64 nByte);
 void *sqlite3HctRealloc(void*, i64 nByte);
-char *sqlite3HctMprintf(char *zFmt, ...);
+char *sqlite3HctMprintf(const char *zFmt, ...);
+char *sqlite3HctVmprintf(const char *zFmt, va_list ap);
 
 /*************************************************************************
 ** hctree.c:

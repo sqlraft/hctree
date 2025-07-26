@@ -146,7 +146,7 @@ static int test_hct_journal_snapshot(
   }else{
     const char *zErr = sqlite3_errmsg(db);
     Tcl_ResetResult(interp);
-    Tcl_AppendResult(interp, sqlite3ErrName(rc), " ", zErr, (char*)0);
+    Tcl_AppendResult(interp, sqlite3ErrName(rc), " - ", zErr, (char*)0);
     rc = TCL_ERROR;
   }
   return rc;
