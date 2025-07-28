@@ -475,12 +475,6 @@ int sqlite3ReadSchema(Parse *pParse){
   assert( sqlite3_mutex_held(db->mutex) );
   if( !db->init.busy ){
     rc = sqlite3Init(db, &pParse->zErrMsg);
-    if( rc!=SQLITE_OK ){
-      pParse->rc = rc;
-      pParse->nErr++;
-    }else if( db->noSharedCache ){
-      db->mDbFlags |= DBFLAG_SchemaKnownOk;
-    }
 #ifdef SQLITE_ENABLE_HCT
     {
       int iDb;
@@ -489,6 +483,12 @@ int sqlite3ReadSchema(Parse *pParse){
       }
     }
 #endif
+    if( rc!=SQLITE_OK ){
+      pParse->rc = rc;
+      pParse->nErr++;
+    }else if( db->noSharedCache ){
+      db->mDbFlags |= DBFLAG_SchemaKnownOk;
+    }
   }
   return rc;
 }

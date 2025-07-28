@@ -143,6 +143,45 @@ do_test 4.2 {
   sqlite3_hct_journal_setmode db LEADER
 } {SQLITE_AUTH}
 
+#-------------------------------------------------------------------------
+hct_reset_db
+catch_hct_journal_init db
+sqlite3_hct_journal_setmode db LEADER
+do_test 5.0 {
+  hct_write_leader db { CREATE TABLE t1(a INTEGER PRIMARY KEY, b) }
+  hct_write_leader db { INSERT INTO t1 VALUES(1, 'one') }
+  hct_write_leader db { INSERT INTO t1 VALUES(2, 'two') }
+  hct_write_leader db { INSERT INTO t1 VALUES(3, 'three') }
+  hct_write_leader db { INSERT INTO t1 VALUES(5, 'five') }
+  hct_write_leader db { INSERT INTO t1 VALUES(7, 'seven') }
+} {SQLITE_OK 7 2}
+
+proc myauth {a b c d e} {
+  if {$::myauth_deny>0} {
+    incr ::myauth_deny -1
+    if {$::myauth_deny==0} { 
+      return "SQLITE_DENY" 
+    }
+  }
+  return "SQLITE_OK"
+}
+
+
+set ::myauth_deny 0
+for {set ii 1} {$::myauth_deny==0} {incr ii} {
+  db close
+  sqlite3 db test.db
+  db auth myauth
+
+  set ::myauth_deny $ii
+  set res [catchsql { SELECT sum(a) FROM t1 }]
+  if {$::myauth_deny>0} {
+    do_test 5.1.$ii.a { set res } {0 18}
+  } else {
+    do_test 5.1.$ii.b { lindex $res 0 } {1}
+  }
+}
+
 
 finish_test
 
