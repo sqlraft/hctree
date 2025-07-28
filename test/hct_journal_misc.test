@@ -182,6 +182,80 @@ for {set ii 1} {$::myauth_deny==0} {incr ii} {
   }
 }
 
+#-------------------------------------------------------------------------
+hct_reset_db
+catch_hct_journal_init db
+sqlite3_hct_journal_setmode db LEADER
+do_test 6.0 {
+  hct_write_leader db { CREATE TABLE t1(a INTEGER PRIMARY KEY, b) }
+  hct_write_leader db { INSERT INTO t1 VALUES(1, 'one') }
+  hct_write_leader db { INSERT INTO t1 VALUES(2, 'two') }
+  hct_write_leader db { INSERT INTO t1 VALUES(3, 'three') }
+  hct_write_leader db { INSERT INTO t1 VALUES(5, 'five') }
+  hct_write_leader db { INSERT INTO t1 VALUES(7, 'seven') }
+} {SQLITE_OK 7 2}
+
+execsql_pp {
+  SELECT cid, snapshot, query FROM hct_journal
+}
+
+forcedelete test.db2
+sqlite3 db2 file:test.db2?hctree=1 -uri 1
+catch_hct_journal_init db2
+sqlite3_hct_journal_setmode db2 FOLLOWER
+do_test 6.1 {
+  db eval {
+      SELECT cid, snapshot, query 
+      FROM hct_journal 
+      WHERE cid IN (2, 4, 5, 6, 7) 
+      ORDER BY 1
+  } {
+    db2 eval BEGIN 
+    db2 eval $query 
+    sqlite3_hct_journal_follower_commit db2 $query $cid $snapshot
+  }
+} {}
+
+do_execsql_test -db db2 6.2 {
+  SELECT * FROM t1
+}
+
+db2 close
+
+proc truncate_file_to {filename size} {
+  # Read full contents of the file as binary
+  set f [open $filename "rb"]
+  fconfigure $f -translation binary
+  set data [read $f]
+  close $f
+
+  # Delete the file
+  file delete $filename
+
+  # Get only the first $size bytes (handle case if file is shorter)
+  set truncatedData [string range $data 0 [expr {$size - 1}]]
+
+  # Recreate and write truncated data
+  set f [open $filename "wb"]
+  fconfigure $f -translation binary
+  puts -nonewline $f $truncatedData
+  close $f
+}
+
+do_test 6.3 {
+  foreach log [glob test.db2-log-*] {
+    truncate_file_to $log 16
+  }
+} {}
+
+sqlite3 db2 test.db2
+do_test 6.4.1 {
+  catchsql { SELECT * FROM t1 } db2
+} {1 {disk I/O error}}
+do_test 6.4.2 {
+  catchsql { SELECT * FROM t1 } db2
+} {1 {disk I/O error}}
+
 
 finish_test
 

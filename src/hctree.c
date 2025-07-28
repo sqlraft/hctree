@@ -1069,9 +1069,9 @@ static int hctCacheJrnlLog(
   if( (p->nJrnlLog & (p->nJrnlLog-1))==0 ){
     int nNew = p->nJrnlLog ? p->nJrnlLog*2 : 1;
     HctJrnlLog *aNew = 0;
-    aNew = (HctJrnlLog*)sqlite3Realloc(p->aJrnlLog, nNew*sizeof(HctJrnlLog));
-    if( !aNew ) return SQLITE_NOMEM_BKPT;
+    aNew = (HctJrnlLog*)sqlite3HctRealloc(p->aJrnlLog, nNew*sizeof(HctJrnlLog));
     p->aJrnlLog = aNew;
+    memset(&aNew[p->nJrnlLog], 0, sizeof(HctJrnlLog)*(nNew-p->nJrnlLog));
   }
   pLog = &p->aJrnlLog[p->nJrnlLog++];
   pLog->iCid = iCid;
