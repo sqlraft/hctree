@@ -156,6 +156,9 @@ int sqlite3HctFileRecoverFreelists(
   int nPhys, i64 *aPhys           /* Sorted array of phys. pages to preserve */
 );
 
+/*
+** Find all log files on disk.
+*/
 int sqlite3HctFileFindLogs(HctFile*, void*, int(*)(void*, const char*));
 
 u32 sqlite3HctFilePageMapping(HctFile *pFile, u32 iLogical, int *pbEvicted);

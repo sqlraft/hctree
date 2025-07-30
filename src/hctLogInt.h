@@ -38,7 +38,7 @@ void sqlite3HctLogSetCid(HctLog *pLog, u64 iCid);
 /*
 ** This function is used to obtain a 16-byte blob value that describes
 ** the current live transaction. This is stored in the hct_journal table
-** in follower mode. The blob contains:
+** in FOLLOWER mode. The blob contains:
 **
 **     + 8-byte TID value,
 **     + 4-byte value identifying the log file on disk,

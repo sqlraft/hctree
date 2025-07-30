@@ -1079,7 +1079,6 @@ static int hctCacheJrnlLog(
   rc = sqlite3HctLogLoadData(
       p->pHctLog, nData, aData, &pLog->iTid, &pLog->nLogData, &pLog->aLogData
   );
-  assert( rc==SQLITE_OK );
 
   return rc;
 }
@@ -1325,34 +1324,6 @@ static int hctUnlinkLog(void *pCtx, const char *zFile){
   return ((unlink(zFile)==0) ? SQLITE_OK : SQLITE_IOERR_DELETE);
 }
 
-/*
-** This is an sqlite3HctFileFindLogs() callback. The context argument is
-** actually a pointer to an object of type HctIntList. This callback reads
-** the first 8 bytes from each log file, and if it is a valid TID, adds
-** it to the pCtx list.
-*/
-static int hctRecordTid(void *pCtx, const char *zFile){
-  HctIntList *p = (HctIntList*)pCtx;
-  int fd = 0;
-  struct stat sStat;
-
-  fd = open(zFile, O_RDONLY);
-  if( fd<0 ) return SQLITE_CANTOPEN_BKPT;
-
-  memset(&sStat, 0, sizeof(sStat));
-  fstat(fd, &sStat);
-  if( sStat.st_size>=sizeof(i64) ){
-    i64 iTid;
-    read(fd, &iTid, sizeof(iTid));
-    if( iTid!=0 && hctIntListAppend(p, iTid)!=SQLITE_OK ){
-      return SQLITE_NOMEM;
-    }
-  }
-
-  close(fd);
-  return SQLITE_OK;
-}
-
 static int hctAttemptRecovery(HBtree *p){
   int rc = SQLITE_OK;
   HctFile *pFile = sqlite3HctDbFile(p->pHctDb);
@@ -1361,7 +1332,6 @@ static int hctAttemptRecovery(HBtree *p){
   if( p->pHctDb && sqlite3HctDbStartRecovery(p->pHctDb, 0) ){
     int eMode = SQLITE_HCT_NORMAL;
     int ii;
-    HctIntList lRb = {0,0,0};
     HctIntList lZero = {0,0,0};
 
     p->bRecoveryDone = 1;
@@ -1370,20 +1340,15 @@ static int hctAttemptRecovery(HBtree *p){
     ** the previous user exited. */
     rc = sqlite3HctJrnlRecoveryMode(p->config.db, p->pHctJrnl, &eMode);
 
-    /* Find the list of TIDs that will be rolled back due to live journals
-    ** in the file-system. We need this list before analyzing the current
-    ** hct_journal table. */
-    if( rc==SQLITE_OK ){
-      rc = sqlite3HctFileFindLogs(pFile, &lRb, hctRecordTid);
-    }
-    hctIntListSort(&rc, &lRb);
-
     /* Find any non-contiguous journal entries written in follower mode.
-    ** Store these in an in-memory cache at HBtree.aJrnlLog[]. */
+    ** Store these in an in-memory cache at HBtree.aJrnlLog[]. Note
+    ** that the sqlite3HctJrnlFindLogs() function does not invoke callbacks
+    ** for entries that will be removed by log file rollback, because
+    ** the tmap entries for such transactions have already been set to
+    ** HCT_TID_ROLLBACK.  */
     if( rc==SQLITE_OK ){
       rc = sqlite3HctJrnlFindLogs(
           p->config.db, p->pHctJrnl, 
-          lRb.nInt, lRb.aInt,
           (void*)p, hctCacheJrnlLog, hctCacheJrnlMap
       );
       if( eMode==SQLITE_HCT_LEADER ){
@@ -1431,7 +1396,6 @@ static int hctAttemptRecovery(HBtree *p){
     p->nJrnlLog = 0;
     p->nJrnlMap = 0;
 
-    hctIntListZero(&lRb);
     hctIntListZero(&lZero);
   }
 

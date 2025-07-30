@@ -66,7 +66,6 @@ int sqlite3HctJrnlMode(HctJournal *pJrnl);
 int sqlite3HctJrnlFindLogs(
     sqlite3 *db, 
     HctJournal*, 
-    int nDel, i64 *aDel,
     void*, 
     int(*)(void*,i64,int,const u8*),
     int (*xMap)(void*, i64, i64)

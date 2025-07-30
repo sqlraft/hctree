@@ -2160,6 +2160,17 @@ int sqlite3HctFileRecoverFreelists(
   return rc;
 }
 
+/*
+** This function searches the file-system for logs associated with the 
+** open database file specified by the first argument. For each file it
+** finds, the xLog() callback is invoked. The first argument passed is 
+** a copy of the pCtx argument passed to this function. The second is the
+** full path to the log file on disk.
+**
+** If any xLog() callback returns other than SQLITE_OK, this value is
+** immediately returned to the caller. No further callbacks are made in
+** this case.
+*/
 int sqlite3HctFileFindLogs(
   HctFile *pFile, 
   void *pCtx,

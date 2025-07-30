@@ -319,6 +319,7 @@ static u8 *hctJrnlComposeRecord(
 static int hctJrnlWriteRecord(
   HctJournal *pJrnl,
   int bNotid,
+  int bDel,
   u64 iCid,
   const void *pData, int nData,
   u64 iSnapshot,
@@ -331,21 +332,25 @@ static int hctJrnlWriteRecord(
   u8 *pRec = 0;
   int nRec = 0;
 
-  pRec = hctJrnlComposeRecord(iCid, pData, nData, iSnapshot, nPtr, aPtr, &nRec);
+  if( bDel==0 ){
+    pRec = hctJrnlComposeRecord(
+        iCid, pData, nData, iSnapshot, nPtr, aPtr, &nRec
+    );
+  }
 
+  assert( bDel==0 || bNotid==0 );
   do {
     nRetry = 0;
     if( bNotid==0 ){
-      rc = sqlite3HctDbInsert(pDb, iR, 0, iCid, 0, nRec, pRec, &nRetry);
+      rc = sqlite3HctDbInsert(pDb, iR, 0, iCid, bDel, nRec, pRec, &nRetry);
     }else{
       rc = sqlite3HctDbJrnlWrite(pDb, iR, iCid, nRec, pRec, &nRetry);
     }
-    if( rc!=SQLITE_OK ) break;
-    assert( nRetry==0 || nRetry==1 );
-    if( nRetry==0 ){
+    if( rc==SQLITE_OK && nRetry==0 ){
       rc = sqlite3HctDbInsertFlush(pDb, &nRetry);
-      if( rc!=SQLITE_OK ) break;
     }
+    assert( nRetry==0 || nRetry==1 );
+    assert( nRetry==0 || rc==SQLITE_OK );
   }while( nRetry );
 
   sqlite3_free(pRec);
@@ -376,7 +381,7 @@ int sqlite3HctJrnlLog(
       HctJrnlServer *pServer = pJrnl->pServer;
       if( pServer->eMode==SQLITE_HCT_FOLLOWER ){
         assert( iCid==pJrnl->iJrnlCid );
-        rc = hctJrnlWriteRecord(pJrnl, 0, iCid, 
+        rc = hctJrnlWriteRecord(pJrnl, 0, 0, iCid, 
             pJrnl->pJrnlData, pJrnl->nJrnlData, pJrnl->iJrnlSnapshot, nPtr, aPtr
         );
 
@@ -386,13 +391,13 @@ int sqlite3HctJrnlLog(
 
       }else{
         assert( pServer->eMode==SQLITE_HCT_LEADER );
-        rc = hctJrnlWriteRecord(pJrnl, 0, iCid,
+        rc = hctJrnlWriteRecord(pJrnl, 0, 0, iCid,
             pJrnl->pJrnlData, pJrnl->nJrnlData, iSnapshot, nPtr, aPtr
         );
         pJrnl->iJrnlSnapshot = iSnapshot;
       }
     }else{
-      hctJrnlWriteRecord(pJrnl, 1, iCid, 0, 0, 0, 0, 0);
+      hctJrnlWriteRecord(pJrnl, 1, 0, iCid, 0, 0, 0, 0, 0);
       pJrnl->iJrnlSnapshot = 0;
     }
     pJrnl->iJrnlCid = iCid;
@@ -474,21 +479,7 @@ int sqlite3HctJournalIsNosnap(HctJournal *pJrnl, i64 iTable){
 ** Called during log file recovery to remove the entry with cid value iCid.
 */
 int sqlite3HctJrnlRollbackEntry(HctJournal *pJrnl, i64 iCid){
-  int rc = SQLITE_OK;
-  int nRetry = 0;
-  i64 iJrnlRoot = pJrnl->pServer->iJrnlRoot;
-
-  rc = sqlite3HctDbInsert(pJrnl->pDb, iJrnlRoot, 0, iCid, 1, 0, 0, &nRetry);
-
-  /* This is part of recovery, so this client should have exclusive access
-  ** to the db. Therefore there is no chance of requiring retries. */
-  assert( nRetry==0 );
-  if( rc==SQLITE_OK ){
-    rc = sqlite3HctDbInsertFlush(pJrnl->pDb, &nRetry);
-    assert( nRetry==0 );
-  }
-
-  return rc;
+  return hctJrnlWriteRecord(pJrnl, 0, 1, iCid, 0, 0, 0, 0, 0);
 }
 
 /*
@@ -789,37 +780,23 @@ int sqlite3HctJrnlRecoveryMode(sqlite3 *db, HctJournal *pJrnl, int *peMode){
   return rc;
 }
 
-/*
-** Parameter aInt points to a sorted list of nInt 64-bit integer values.
-** Return true if iVal appears in this list, or false otherwise.
-*/
-static int hctListContains(int nInt, i64 *aInt, i64 iVal){
-  int i1 = 0;
-  int i2 = nInt;
-  while( i2>i1 ){
-    int iTest = (i1 + i2) / 2;
-    if( aInt[iTest]==iVal ){
-      return 1;
-    }
-    if( aInt[iTest]<iVal ){
-      i1 = iTest+1;
-    }else{
-      i2 = iTest;
-    }
-  }
-  return 0;
-}
-
 int sqlite3HctJrnlFindLogs(
   sqlite3 *db,
   HctJournal *pJrnl, 
-  int nDel, i64 *aDel,
   void *pCtx,
   int (*xLog)(void*, i64, int, const u8*),
   int (*xMap)(void*, i64, i64)
 ){
   int rc = SQLITE_OK;
   if( pJrnl->pServer->iJrnlRoot ){
+    /* It is important to use an SQL query to scan the hct_journal table
+    ** here. When this function is called (during recovery), there may be log
+    ** files in the file-system that still need to be rolled back. And
+    ** these rollbacks may remove rows from the hct_journal table, changing
+    ** the callbacks made by this function. However, the TIDs corresponding
+    ** to all such transactions have already been marked as HCT_TID_ROLLBACK -
+    ** so the SQL query will ignore any such entries in hct_journal as if
+    ** they were already rolled back.  */
     const char *zSql = 
       "SELECT cid, logptr FROM hct_journal WHERE cid> ( "
       "  SELECT max(cid)-? FROM hct_journal"
@@ -834,14 +811,6 @@ int sqlite3HctJrnlFindLogs(
         i64 iCid = sqlite3_column_int64(pSql, 0);
         int nPtr = sqlite3_column_bytes(pSql, 1);
         const u8 *aPtr = (const u8*)sqlite3_column_blob(pSql, 1);
-
-        if( nPtr>=sizeof(i64) ){
-          i64 iVal;
-          memcpy(&iVal, aPtr, sizeof(i64));
-          if( hctListContains(nDel, aDel, iVal) ){
-            continue;
-          }
-        }
 
         if( nPtr==SIZEOF_FOLLOWER_LOGPTR && iPrev>=0 && iPrev!=iCid-1 ){
           rc = xLog(pCtx, iCid, nPtr, aPtr);
@@ -881,7 +850,7 @@ int sqlite3HctJrnlZeroEntries(HctJournal *pJrnl, int nEntry, i64 *aEntry){
   int ii;
   int rc = SQLITE_OK;
   for(ii=0; rc==SQLITE_OK && ii<nEntry; ii++){
-    rc = hctJrnlWriteRecord(pJrnl, 1, aEntry[ii], 0, 0, 0, 0, 0);
+    rc = hctJrnlWriteRecord(pJrnl, 1, 0, aEntry[ii], 0, 0, 0, 0, 0);
   }
 
   return rc;
