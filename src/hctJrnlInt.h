@@ -49,8 +49,6 @@ int sqlite3HctJrnlRollbackEntry(HctJournal *pJrnl, i64 iCid);
 
 u64 sqlite3HctJrnlSnapshot(HctJournal *pJrnl);
 
-void sqlite3HctJournalSchemaVersion(HctJournal *pJrnl, u32 *pSchemaVersion);
-
 int sqlite3HctJrnlCommitOk(HctJournal *pJrnl);
 
 int sqlite3HctJrnlFollowerModeCid(HctJournal *pJrnl, u64 *piCid);

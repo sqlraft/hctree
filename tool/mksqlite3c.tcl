@@ -206,6 +206,7 @@ foreach hdr {
    hctTMapInt.h
    hctJrnlInt.h
    hctLogInt.h
+   hctTreeInt.h
    btreeModules.h
    btreeDefine.h
    btreeUndef.h

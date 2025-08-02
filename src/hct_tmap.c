@@ -408,11 +408,10 @@ int sqlite3HctTMapUpdate(HctTMapClient *pClient, HctTMap **ppMap){
   return SQLITE_OK;
 }
 
-int sqlite3HctTMapBegin(
+HctTMap *sqlite3HctTMapBegin(
   HctTMapClient *pClient, 
   u64 iSnapshot, 
-  u64 iPeekTid,
-  HctTMap **ppMap
+  u64 iPeekTid
 ){
   HctTMapFull *pMap = pClient->pMap;
   u64 iEof = pMap->m.iFirstTid + pMap->m.nMap*HCT_TMAP_PAGESIZE;
@@ -455,8 +454,7 @@ int sqlite3HctTMapBegin(
     }
   }
 
-  *ppMap = (HctTMap*)pMap;
-  return SQLITE_OK;
+  return (HctTMap*)pMap;
 }
 
 u64 sqlite3HctTMapCommitedTID(HctTMapClient *pClient){

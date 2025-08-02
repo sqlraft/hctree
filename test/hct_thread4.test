@@ -220,6 +220,8 @@ for {set ii 0} {$ii<$nThread} {incr ii} {
   sqlthread spawn TH($ii) $prg1
 }
 
+sqlthread join
+
 do_test "1.1.(running $nThread threads for ${nMs} ms)" {
   for {set ii 0} {$ii<$nThread} {incr ii} {
     if {[info exists TH($ii)]==0} { vwait TH($ii) }

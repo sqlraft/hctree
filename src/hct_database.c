@@ -540,11 +540,18 @@ static void hctMemcpy(void *a, const void *b, size_t c){
 #define HCTDB_MAX_EXTRA_CELL_DATA (8+4+8+4)
 
 
+/*
+** Log message zMsg. If the connection was configured with "PRAGMA
+** hct_extra_logging=1", do this by sending it directly to sqlite3_log().
+** Or, if the connection is "PRAGMA hct_extra_logging=2", call
+** sqlite3HctExtraLog() to store the log message in memory until it
+** is retrieved using "PRAGMA hct_log".
+*/
 static void hctExtraLogging(
-  const char *zFunc, 
-  int iLine, 
-  HctDatabase *pHctDb,
-  char *zMsg
+  const char *zFunc,              /* The function from which this is logged */
+  int iLine,                      /* The line number to log */
+  HctDatabase *pHctDb,            /* Database connection */
+  char *zMsg                      /* Message to log */
 ){
   if( pHctDb->pConfig->bHctExtraLogging>1 ){
     sqlite3HctExtraLogging(pHctDb->pConfig, zFunc, iLine, zMsg);
@@ -597,7 +604,7 @@ static void hctBufferSet(HctBuffer *pBuf, const u8 *aData, int nData){
 }
 
 
-#if 0 && defined(SQLITE_DEBUG)
+#if 1 && defined(SQLITE_DEBUG)
 static int hctSqliteBusy(const char *zFile, int iLine){
   sqlite3_log(SQLITE_BUSY_SNAPSHOT, "HCT_SQLITE_BUSY at %s:%d", zFile, iLine);
   return SQLITE_BUSY_SNAPSHOT;
@@ -795,40 +802,38 @@ int sqlite3HctDbStartRead(HctDatabase *pDb, HctJournal *pJrnl){
   assert( (pDb->iSnapshotId==0)==(pDb->pTmap==0) );
   assert( pDb->iSnapshotId!=0 || hctDbIsConcurrent(pDb)==0 );
   if( pDb->iSnapshotId==0 && SQLITE_OK==(rc=sqlite3HctFileNewDb(pDb->pFile)) ){
+    u64 iSnapshot = 0;
+    u64 iPeekTid = sqlite3HctFilePeekTransid(pDb->pFile);
+    HctTMapClient *pTMapClient = sqlite3HctFileTMapClient(pDb->pFile);
+
     if( pDb->aTmp==0 ){
       pDb->pgsz = sqlite3HctFilePgsz(pDb->pFile);
-      pDb->aTmp = (u8*)sqlite3HctMallocRc(&rc, pDb->pgsz);
+      pDb->aTmp = (u8*)sqlite3HctMalloc(pDb->pgsz);
     }
-    if( rc==SQLITE_OK ){
-      u64 iSnapshot = 0;
-      u64 iPeekTid = sqlite3HctFilePeekTransid(pDb->pFile);
-      HctTMapClient *pTMapClient = sqlite3HctFileTMapClient(pDb->pFile);
 
-      iSnapshot = sqlite3HctJrnlSnapshot(pJrnl);
-      rc = sqlite3HctTMapBegin(pTMapClient, iSnapshot, iPeekTid, &pDb->pTmap);
-      assert( rc==SQLITE_OK );  /* todo */
+    iSnapshot = sqlite3HctJrnlSnapshot(pJrnl);
+    pDb->pTmap = sqlite3HctTMapBegin(pTMapClient, iSnapshot, iPeekTid);
 
-      if( iSnapshot==0 ){
-        iSnapshot = sqlite3HctFileGetSnapshotid(pDb->pFile);
-      }
-      pDb->iSnapshotId = iSnapshot;
-      pDb->iLocalMinTid = sqlite3HctTMapCommitedTID(pTMapClient);
-      assert( pDb->iSnapshotId>0 );
-
-      assert( pDb->iReqSnapshotId==0 );
-      pDb->iReqSnapshotId = 1;
-      if( pDb->iSnapshotId>(HCT_MAX_LEADING_WRITE/2) ){
-        pDb->iReqSnapshotId = pDb->iSnapshotId - (HCT_MAX_LEADING_WRITE/2);
-      }
-
-      pDb->iLocalMaxTid = sqlite3HctFilePeekTransid(pDb->pFile)+1;
-
-      HCT_EXTRA_WR_LOGGING(pDb, (
-            "starting read with snapshot=%lld, localmintid=%lld"
-            ", localmaxid=%lld",
-            pDb->iSnapshotId, pDb->iLocalMinTid, pDb->iLocalMaxTid
-      ));
+    if( iSnapshot==0 ){
+      iSnapshot = sqlite3HctFileGetSnapshotid(pDb->pFile);
     }
+    pDb->iSnapshotId = iSnapshot;
+    pDb->iLocalMinTid = sqlite3HctTMapCommitedTID(pTMapClient);
+    assert( pDb->iSnapshotId>0 );
+
+    assert( pDb->iReqSnapshotId==0 );
+    pDb->iReqSnapshotId = 1;
+    if( pDb->iSnapshotId>(HCT_MAX_LEADING_WRITE/2) ){
+      pDb->iReqSnapshotId = pDb->iSnapshotId - (HCT_MAX_LEADING_WRITE/2);
+    }
+
+    pDb->iLocalMaxTid = sqlite3HctFilePeekTransid(pDb->pFile)+1;
+
+    HCT_EXTRA_WR_LOGGING(pDb, (
+          "starting read with snapshot=%lld, localmintid=%lld"
+          ", localmaxid=%lld",
+          pDb->iSnapshotId, pDb->iLocalMinTid, pDb->iLocalMaxTid
+    ));
   }
 
   return rc;
@@ -882,12 +887,14 @@ static int hctDbTidIsVisible(HctDatabase *pDb, u64 iTid, int bNosnap){
       return 1;
     }
     assert( eState==HCT_TMAP_VALIDATING );
-    if( iCid>pDb->iSnapshotId || iTid==pDb->iTid ){
+    assert( iTid!=pDb->iTid || pDb->eMode==HCT_MODE_VALIDATE );
+    assert( iTid!=pDb->iTid || iCid>pDb->iSnapshotId );
+    if( iCid>pDb->iSnapshotId ){
       return 0;
     }
   }
 
-  assert( 0 );
+  assert( !"can't get here" );
   return 0;
 }
 
@@ -1005,7 +1012,6 @@ int sqlite3HctDbGetMeta(HctDatabase *pDb, u8 *aBuf, int nBuf){
      && 0==hctDbTidIsVisible(pDb, hctGetU64(&pg.aOld[iOff]), 0) 
     ){
       u32 iOld = hctGetU32(&pg.aOld[iOff+8+8]);
-      if( iOld==0 ) break;
       sqlite3HctFilePageRelease(&pg);
       rc = hctDbGetPhysical(pDb, iOld, &pg);
     }else{
@@ -1099,29 +1105,6 @@ static i64 hctDbGetIntkey(const u8 *aTarget, int iCell){
   }
   return ((HctDbIntkeyNode*)aTarget)->aEntry[iCell].iKey;
 }
-
-#if 0
-static i64 hctDbGetIntkeyFromPhys(
-  int *pRc, 
-  HctDatabase *pDb, 
-  u32 iPhys, 
-  int iCell
-){
-  i64 iRet = 0;
-  int rc = *pRc;
-  if( rc==SQLITE_OK ){
-    HctFilePage pg;
-    rc = sqlite3HctFilePageGetPhysical(pDb->pFile, iPhys, &pg);
-    if( rc==SQLITE_OK ){
-      iRet = hctDbGetIntkey(pg.aOld, iCell);
-      sqlite3HctFilePageRelease(&pg);
-    }
-  }
-  *pRc = rc;
-  return iRet;
-}
-#endif
-
 
 /*
 ** Buffer aPg contains an intkey leaf page.
@@ -6621,6 +6604,9 @@ static int hctDbDirectInsertAt(
   u32 iPg = pCsr->iRoot;          /* Logical page number */
   int rc = SQLITE_OK;             /* Return Code */
   int nLocal;                     /* Bytes of local payload */
+
+static int nCall = 0;
+nCall++;
 
   memset(&pg, 0, sizeof(pg));
 

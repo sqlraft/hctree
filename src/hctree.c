@@ -1420,34 +1420,19 @@ static int hctBtreeGetMeta(HBtree *p, int idx, u32 *pMeta){
     *pMeta = (u32)iSnapshot;
   }else{
     if( p->eMetaState==HCT_METASTATE_NONE && p->eTrans!=SQLITE_TXN_ERROR ){
-      if( p->eTrans==SQLITE_TXN_NONE ){
+
+      rc = sqlite3HctTreeGetMeta(
+          p->pHctTree, (u8*)p->aMeta, SQLITE_N_BTREE_META*4
+      );
+      if( rc==SQLITE_EMPTY ){
         rc = sqlite3HctDbGetMeta(
             p->pHctDb, (u8*)p->aMeta, SQLITE_N_BTREE_META*4
         );
-      }else{
-        int res = 0;
-        HBtCursor csr;
-        BtCursor *pCsr = (BtCursor*)&csr;
-        memset(&csr, 0, sizeof(csr));
-
-        rc = sqlite3HctBtreeCursor((Btree*)p, 2, 0, 0, pCsr);
-        if( rc==SQLITE_OK ){
-          sqlite3HctDbCsrNoscan(csr.pHctDbCsr, 1);
-          rc = sqlite3HctBtreeTableMoveto(pCsr, 0, 0, &res);
-        }
-        /* assert( rc==SQLITE_OK ); */
-        if( rc==SQLITE_OK && res==0 ){
-          const void *aMeta = 0;
-          u32 nMeta = 0;
-          aMeta = sqlite3HctBtreePayloadFetch(pCsr, &nMeta);
-          memcpy(p->aMeta, aMeta, MAX(nMeta, SQLITE_N_BTREE_META*4));
-          p->eMetaState = HCT_METASTATE_READ;
-        }
-        sqlite3HctBtreeCloseCursor(pCsr);
       }
-      sqlite3HctJournalSchemaVersion(
-          p->pHctJrnl, &p->aMeta[BTREE_SCHEMA_VERSION]
-      );
+
+      if( rc==SQLITE_OK ){
+        p->eMetaState = HCT_METASTATE_READ;
+      }
     }
     *pMeta = p->aMeta[idx];
   }
@@ -2416,8 +2401,29 @@ u32 sqlite3HctBtreePayloadSize(BtCursor *pCursor){
 ** database file.
 */
 sqlite3_int64 sqlite3HctBtreeMaxRecordSize(BtCursor *pCur){
-  assert( 0 );
   return 0x7FFFFFFF;
+}
+
+/*
+** Fetch the payload data for the cursor pCur. If successful, set output
+** variable (*paData) to point to the buffer containing the data, and (*pnData)
+** to the size of that buffer in bytes and return SQLITE_OK. Or, if an error
+** occurs, return an SQLite error code. The final values of the output
+** variables are undefined in this case.
+*/
+static int hctBtreePayloadData(
+  BtCursor *pCursor, 
+  int *pnData,
+  const u8 **paData
+){
+  HBtCursor *const pCur = (HBtCursor*)pCursor;
+  int rc = SQLITE_OK;
+  if( pCur->bUseTree ){
+    sqlite3HctTreeCsrData(pCur->pHctTreeCsr, pnData, paData);
+  }else{
+    rc = sqlite3HctDbCsrData(pCur->pHctDbCsr, pnData, paData);
+  }
+  return rc;
 }
 
 /*
@@ -2438,14 +2444,15 @@ sqlite3_int64 sqlite3HctBtreeMaxRecordSize(BtCursor *pCur){
 ** the available payload.
 */
 int sqlite3HctBtreePayload(BtCursor *pCur, u32 offset, u32 amt, void *pBuf){
-  u32 n = 0;
-  const u8 *p = 0;
+  int rc = SQLITE_OK;
+  int nData = 0;
+  const u8 *aData = 0;
 
-  p = (const u8*)sqlite3HctBtreePayloadFetch(pCur, &n);
-  assert( offset+amt<=n );
-  memcpy(pBuf, &p[offset], amt);
-
-  return SQLITE_OK;
+  rc = hctBtreePayloadData(pCur, &nData, &aData);
+  if( rc==SQLITE_OK ){
+    memcpy(pBuf, &aData[offset], amt);
+  }
+  return rc;
 }
 
 
@@ -2549,16 +2556,21 @@ int sqlite3HctBtreePayloadChecked(
 ** in the common case where no overflow pages are used.
 */
 const void *sqlite3HctBtreePayloadFetch(BtCursor *pCursor, u32 *pAmt){
-  HBtCursor *const pCur = (HBtCursor*)pCursor;
-  const u8 *aData;
-  int nData;
-  if( pCur->bUseTree ){
-    sqlite3HctTreeCsrData(pCur->pHctTreeCsr, &nData, &aData);
-  }else{
-    sqlite3HctDbCsrData(pCur->pHctDbCsr, &nData, &aData);
+  int rc = SQLITE_OK;
+  const u8 *aData = 0;
+  int nData = 0;
+
+  rc = hctBtreePayloadData(pCursor, &nData, &aData);
+  if( rc!=SQLITE_OK ){
+    /* An error has occured but this API provides no way to return an error
+    ** code. No matter, returning zero bytes of data will cause SQLite
+    ** to call sqlite3HctBtreePayload(), which can return the error code. */
+    *pAmt = 0;
+    return (const u8*)"\x7F";
   }
-  *pAmt = (u32)nData;
-  return aData;
+
+  *pAmt = nData;
+  return (const void*)aData;
 }
 
 /* Move the cursor to the first entry in the table.  Return SQLITE_OK
@@ -3407,7 +3419,7 @@ int sqlite3HctBtreePragma(Btree *pBt, char **aFnctl){
     if( iVal>=0 ){
       p->config.bHctExtraWriteLogging = iVal;
     }
-    zRet = hctDbMPrintf(&rc, "%d", p->config.bHctExtraLogging);
+    zRet = hctDbMPrintf(&rc, "%d", p->config.bHctExtraWriteLogging);
   }else if( 0==sqlite3_stricmp("hct_log", zLeft) ){
     zRet = hctGetLog(&p->config);
     hctFreeLog(&p->config);

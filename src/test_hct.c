@@ -255,6 +255,80 @@ static int test_hct_journal_local_commit(
   return TCL_OK;
 }
 
+
+/*
+** Usage:  sqlite3_hct_cas_failure NFAIL NRESET
+*/
+static int test_hct_cas_failure(
+  void * clientData,
+  Tcl_Interp *interp,
+  int objc,
+  Tcl_Obj *CONST objv[]
+){
+  int nFail;
+  int nReset;
+
+  if( objc!=3 ){
+    Tcl_WrongNumArgs(interp, 1, objv, "NFAIL NRESET");
+    return TCL_ERROR;
+  }
+
+  if( Tcl_GetIntFromObj(interp, objv[1], &nFail) ) return TCL_ERROR;
+  if( Tcl_GetIntFromObj(interp, objv[2], &nReset) ) return TCL_ERROR;
+
+  sqlite3_hct_cas_failure(nFail, nReset);
+  Tcl_ResetResult(interp);
+  return TCL_OK;
+}
+
+/*
+** Usage:  sqlite3_hct_io_failure NFAIL NRESET
+*/
+static int test_hct_io_failure(
+  void * clientData,
+  Tcl_Interp *interp,
+  int objc,
+  Tcl_Obj *CONST objv[]
+){
+  int nFail;
+  int nReset;
+
+  if( objc!=3 ){
+    Tcl_WrongNumArgs(interp, 1, objv, "NFAIL NRESET");
+    return TCL_ERROR;
+  }
+
+  if( Tcl_GetIntFromObj(interp, objv[1], &nFail) ) return TCL_ERROR;
+  if( Tcl_GetIntFromObj(interp, objv[2], &nReset) ) return TCL_ERROR;
+
+  nFail = sqlite3_hct_io_failure(nFail, nReset);
+  Tcl_SetObjResult(interp, Tcl_NewIntObj(nFail));
+  return TCL_OK;
+}
+
+/*
+** Usage:  sqlite3_hct_proc_failure NFAIL
+*/
+static int test_hct_proc_failure(
+  void * clientData,
+  Tcl_Interp *interp,
+  int objc,
+  Tcl_Obj *CONST objv[]
+){
+  int nFail;
+
+  if( objc!=2 ){
+    Tcl_WrongNumArgs(interp, 1, objv, "NFAIL");
+    return TCL_ERROR;
+  }
+
+  if( Tcl_GetIntFromObj(interp, objv[1], &nFail) ) return TCL_ERROR;
+
+  sqlite3_hct_proc_failure(nFail);
+  Tcl_ResetResult(interp);
+  return TCL_OK;
+}
+
 /*
 ** Register commands with the TCL interpreter.
 */
@@ -270,6 +344,9 @@ int SqliteHctTest_Init(Tcl_Interp *interp){
     { "sqlite3_hct_journal_leader_commit",   test_hct_journal_leader_commit },
     { "sqlite3_hct_journal_follower_commit", test_hct_journal_follower_commit },
     { "sqlite3_hct_journal_local_commit",    test_hct_journal_local_commit },
+    { "sqlite3_hct_cas_failure",             test_hct_cas_failure },
+    { "sqlite3_hct_proc_failure",            test_hct_proc_failure },
+    { "sqlite3_hct_io_failure",              test_hct_io_failure }
   };
   int ii = 0;
 

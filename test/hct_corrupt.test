@@ -1,0 +1,144 @@
+# 2025 July 30
+#
+# The author disclaims copyright to this source code.  In place of
+# a legal notice, here is a blessing:
+#
+#    May you do good and not evil.
+#    May you find forgiveness for yourself and forgive others.
+#    May you share freely, never taking more than you give.
+#
+#*************************************************************************
+#
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+source $testdir/hct_common.tcl
+set testprefix hct_corrupt
+
+hct_reset_db
+
+do_execsql_test 1.0 {
+  CREATE TABLE t1(x INTEGER PRIMARY KEY, y);
+  INSERT INTO t1 VALUES(1000, hex(randomblob(4000)));
+}
+
+# Given logical page number $lpgno, return the logical child page number
+# of the leftmost child. Or, if $lpgno is a leaf page, return an empty
+# string.
+#
+proc hct_leftmost_child {db lpgno} {
+ 
+  $db one {
+    SELECT hctentry.child 
+    FROM hctpgmap, hctdb, hctentry 
+    WHERE hctpgmap.slot=$root AND 
+      hctdb.pgno=hctpgmap.value AND 
+      hctentry.pgno=hctpgmap.value AND 
+      hctentry.entry=0
+  }
+  
+}
+
+# Given logical page number $lpgno, return the logical peer page number.
+# This is 0 if there is no peer.
+#
+proc hct_peer {db lpgno} {
+  $db one {
+    SELECT hctdb.peer 
+    FROM hctdb, hctpgmap
+    WHERE hctpgmap.slot=$lpgno AND hctdb.pgno=hctpgmap.value
+  }
+}
+
+
+# Parameter tname must be the name of an intkey table in hct database db.
+# This function returns the offset within the database of the overflow
+# page pointer of the row with integer key $ikey. Or, if there is no
+# such entry, throws an error.
+#
+proc hct_ovfl_offset {db tname ikey} {
+  set root [$db one {SELECT rootpage FROM sqlite_schema WHERE name=$tname}]
+  if {$root==""} { error "no such table: $tname" }
+
+  # Find the logical page number of the leftmost leaf in the table.
+  set leaf $root
+  while {[set child [hct_leftmost_child $db $leaf]]!=""} {
+    set leaf $child
+  }
+
+  # Set lLeaf to a list of logical page numbers that are leaves of this table
+  set peer $leaf
+  set lLeaf [list $peer]
+  while {[set peer [hct_peer $db $peer]]!=0} {
+    lappend lLeaf $peer
+  }
+
+  # Search each leaf page for the specified $ikey value.
+  $db eval "
+    SELECT 
+    hctentry.pgno AS pgno, 
+           hctentry.entry AS entry,
+           hctentry.tid AS tid,
+           hctentry.rangetid AS rangetid,
+           hctentry.rangeoldpg AS rangeoldpg,
+           hctentry.ovfl AS ovfl,
+           hctentry.offset AS offset
+    FROM hctpgmap, hctentry
+    WHERE hctpgmap.slot IN ([join $lLeaf ,]) AND 
+      hctentry.pgno=hctpgmap.value AND
+      hctentry.ikey=$ikey
+  " {
+    if {$ovfl==""} {
+      error "row $tname/$ikey does not have an overflow chain"
+    }
+    set ret $offset
+    if {$tid!=""} { incr ret 8 }
+    if {$rangetid!=""} { incr ret 8 }
+    if {$rangeoldpg!=""} { incr ret 4 }
+    return [expr ($pgno-1)*4096 + $ret]
+  }
+
+  error "row $tname/$ikey could not be found"
+}
+
+#execsql_pp { SELECT * FROM hctpgmap WHERE logical_in_use }
+##show_all_entries
+#show_all_pages
+
+do_execsql_test 1.1.1 {
+  SELECT value FROM hctpgmap WHERE slot=33
+} {9}
+do_execsql_test 1.1.2 {
+  SELECT offset, tid, ovfl FROM hctentry WHERE pgno=9
+} {168 2 8}
+do_execsql_test 1.1.3 {
+  PRAGMA page_size
+} {4096}
+do_execsql_test 1.1.4 {
+  SELECT length(+y) FROM t1;
+} {8000}
+
+hct_copy_db test.db test.db2
+sqlite3 db2 test.db2
+do_execsql_test -db db2 1.2 {
+  SELECT length(+y) FROM t1
+} 8000
+db2 close
+
+do_test 1.3 {
+  set ovfl [hct_ovfl_offset db t1 1000]
+  hct_copy_db test.db test.db2
+  hexio_write test.db2 $ovfl 00FFFF00
+  sqlite3 db2 test.db2
+  set res [catchsql { SELECT length(+y) FROM t1 } db2]
+  db2 close
+  set res
+} {1 {database disk image is malformed}}
+
+# if {$res=="0 8000" || $res=="0 {}"} { set res "1 {database disk image is malformed}" }
+
+finish_test
+
+
+finish_test
+

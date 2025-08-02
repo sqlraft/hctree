@@ -231,9 +231,7 @@ static int hct_tree_check(HctTreeRoot *pRoot){
 }
 #endif
 
-static HctTreeRoot *hctTreeFindRoot(HctTree *pTree, u32 iRoot){
-  HctTreeRoot *pNew = 0;
-
+static HctTreeRoot *hctTreeFindExistingRoot(HctTree *pTree, i64 iRoot){
   /* Search the hash table for an existing root. Return immediately if 
   ** one is found.  */
   HctTreeRoot *pRoot;
@@ -241,7 +239,19 @@ static HctTreeRoot *hctTreeFindRoot(HctTree *pTree, u32 iRoot){
       pRoot;
       pRoot=pRoot->pHashNext
   ){
-    if( pRoot->iRoot==iRoot ) return pRoot;
+    if( pRoot->iRoot==iRoot ) break;
+  }
+  return pRoot;
+}
+
+static HctTreeRoot *hctTreeFindRoot(HctTree *pTree, u32 iRoot){
+  HctTreeRoot *pNew = 0;
+
+  /* Search the hash table for an existing root. Return immediately if 
+  ** one is found.  */
+  pNew = hctTreeFindExistingRoot(pTree, iRoot);
+  if( pNew ){
+    return pNew;
   }
 
   /* If the hash table needs to grow, do that now */
@@ -686,6 +696,17 @@ int sqlite3HctTreeUpdateMeta(
   HctTreeNode *pNew = treeNewNode2(pTree, pRoot, 0, 0, nMeta, aMeta, 0);
   treeInsertNode(pTree, pTree->iStmt<=0, 0, 0, pNew);
   return SQLITE_OK;
+}
+
+int sqlite3HctTreeGetMeta(HctTree *pTree, u8 *aMeta, int nMeta){
+  int rc = SQLITE_EMPTY;
+  HctTreeRoot *pRoot = hctTreeFindExistingRoot(pTree, 2);
+  if( pRoot && pRoot->pNode ){
+    assert( pRoot->pNode->pLeft==0 && pRoot->pNode->pRight==0 );
+    memcpy(aMeta, pRoot->pNode->aData, nMeta);
+    rc = SQLITE_OK;
+  }
+  return rc;
 }
 
 /*

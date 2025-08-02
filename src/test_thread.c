@@ -59,6 +59,8 @@ static Tcl_ObjCmdProc blocking_prepare_v2_proc;
 #endif
 int Sqlitetest1_Init(Tcl_Interp *);
 int Sqlite3_Init(Tcl_Interp *);
+int SqlitetestThread_Init(Tcl_Interp *);
+int SqliteHctTest_Init(Tcl_Interp *);
 
 /* Functions from main.c */
 extern const char *sqlite3ErrName(int);
@@ -159,6 +161,24 @@ static Tcl_ThreadCreateType tclScriptThread(ClientData pSqlThread){
   TCL_THREAD_CREATE_RETURN;
 }
 
+typedef struct TclThreadIdArray TclThreadIdArray;
+struct TclThreadIdArray {
+  int nAlloc;
+  int nThread;
+  Tcl_ThreadId *aThread;
+};
+
+static void tclThreadArrayAppend(TclThreadIdArray *p, Tcl_ThreadId id){
+  if( p->nThread==p->nAlloc ){
+    int nNew = p->nAlloc ? p->nAlloc*2 : 16;
+
+    p->aThread = (Tcl_ThreadId*)ckrealloc(p->aThread,sizeof(Tcl_ThreadId)*nNew);
+    p->nAlloc = nNew;
+  }
+
+  p->aThread[p->nThread++] = id;
+}
+
 /*
 ** sqlthread spawn VARNAME SCRIPT
 **
@@ -175,6 +195,7 @@ static int SQLITE_TCLAPI sqlthread_spawn(
   int objc,
   Tcl_Obj *CONST objv[]
 ){
+  TclThreadIdArray *p = (TclThreadIdArray*)clientData;
   Tcl_ThreadId x;
   SqlThread *pNew;
   int rc;
@@ -184,10 +205,9 @@ static int SQLITE_TCLAPI sqlthread_spawn(
 
   /* Parameters for thread creation */
   const int nStack = TCL_THREAD_STACK_DEFAULT;
-  const int flags = TCL_THREAD_NOFLAGS;
+  const int flags = TCL_THREAD_JOINABLE;
 
   assert(objc==4);
-  UNUSED_PARAMETER(clientData);
   UNUSED_PARAMETER(objc);
 
   zVarname = Tcl_GetStringFromObj(objv[2], &nVarname);
@@ -206,8 +226,26 @@ static int SQLITE_TCLAPI sqlthread_spawn(
     Tcl_AppendResult(interp, "Error in Tcl_CreateThread()", NULL);
     ckfree((char *)pNew);
     return TCL_ERROR;
+  }else{
+    tclThreadArrayAppend(p, x);
   }
 
+  return TCL_OK;
+}
+
+static int SQLITE_TCLAPI sqlthread_join(
+  ClientData clientData,
+  Tcl_Interp *interp,
+  int objc,
+  Tcl_Obj *CONST objv[]
+){
+  TclThreadIdArray *p = (TclThreadIdArray*)clientData;
+  int ii;
+  for(ii=0; ii<p->nThread; ii++){
+    int x;
+    Tcl_JoinThread(p->aThread[ii], &x);
+  }
+  p->nThread = 0;
   return TCL_OK;
 }
 
@@ -315,6 +353,11 @@ static int SQLITE_TCLAPI sqlthread_id(
   return TCL_OK;
 }
 
+static void sqlthread_del(ClientData clientData){
+  TclThreadIdArray *p = (TclThreadIdArray*)clientData;
+  ckfree(p->aThread);
+  ckfree(p);
+}
 
 /*
 ** Dispatch routine for the sub-commands of [sqlthread].
@@ -335,6 +378,7 @@ static int SQLITE_TCLAPI sqlthread_proc(
     {"spawn",  sqlthread_spawn,  2, "VARNAME SCRIPT"},
     {"open",   sqlthread_open,   1, "DBNAME"},
     {"id",     sqlthread_id,     0, ""},
+    {"join",   sqlthread_join,   0, ""},
     {0, 0, 0}
   };
   struct SubCommand *pSub;
@@ -641,7 +685,6 @@ int SqlitetestThread_Init(Tcl_Interp *interp){
     const char *zName;
     int iCtx;
   } aCmd[] = {
-    { sqlthread_proc,           "sqlthread",                      0 },
     { clock_seconds_proc,       "clock_second",                   0 },
     { clock_milliseconds_proc,  "clock_milliseconds",             0 },
 #if SQLITE_OS_UNIX && defined(SQLITE_ENABLE_UNLOCK_NOTIFY)
@@ -651,6 +694,10 @@ int SqlitetestThread_Init(Tcl_Interp *interp){
 #endif
   };
   int ii;
+  TclThreadIdArray *pT = (TclThreadIdArray*)ckalloc(sizeof(TclThreadIdArray));
+
+  memset(pT, 0, sizeof(TclThreadIdArray));
+  Tcl_CreateObjCommand(interp, "sqlthread", sqlthread_proc, pT, sqlthread_del);
 
   for(ii=0; ii<sizeof(aCmd)/sizeof(aCmd[0]); ii++){
     void *p = SQLITE_INT_TO_PTR(aCmd[ii].iCtx);

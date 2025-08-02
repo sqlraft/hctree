@@ -643,14 +643,6 @@ int sqlite3_hct_journal_setmode(sqlite3 *db, int eMode){
   return rc;
 }
 
-void sqlite3HctJournalSchemaVersion(HctJournal *pJrnl, u32 *pSchemaVersion){
-#if 0
-  if( pJrnl && pJrnl->pServer ){
-    *pSchemaVersion += HctAtomicLoad(&pJrnl->pServer->nSchemaVersionIncr);
-  }
-#endif
-}
-
 u64 sqlite3HctJrnlSnapshot(HctJournal *pJrnl){
   u64 iRet = 0;
   if( pJrnl ){

@@ -101,6 +101,14 @@ set FAULTSIM(interrupt) [list                 \
   -injectuninstall interrupt_injectuninstall  \
 ]
 
+set FAULTSIM(hctio) [list                 \
+  -injectinstall   interrupt_injectinstall    \
+  -injectstart     hctio_injectstart      \
+  -injectstop      hctio_injectstop       \
+  -injecterrlist   {{1 {disk I/O error}}} \
+  -injectuninstall interrupt_injectuninstall  \
+]
+
 
 
 #--------------------------------------------------------------------------
@@ -282,6 +290,15 @@ proc interrupt_injectstop {} {
   set res [expr $::sqlite_interrupt_count<=0]
   set ::sqlite_interrupt_count 0
   set res
+}
+
+proc hctio_injectstart {iFail} {
+  sqlite3_hct_io_failure $iFail 0
+  set iFail
+}
+proc hctio_injectstop {} {
+  set val [sqlite3_hct_io_failure 0 0]
+  expr $val<=0 
 }
 
 # This command is not called directly. It is used by the 

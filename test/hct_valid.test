@@ -284,8 +284,34 @@ do_execsql_test 4.3 {
 }
 
 # execsql_pp { SELECT * FROM hctvalid }
-
 db2 close
+
+#----------------------------------------------------------------------
+hct_reset_db
+
+do_execsql_test 5.0 {
+  CREATE TABLE t1(x INTEGER PRIMARY KEY, y TEXT);
+  INSERT INTO t1 VALUES(1, 'one');
+  INSERT INTO t1 VALUES(2, 'two');
+  INSERT INTO t1 VALUES(3, 'three');
+  INSERT INTO t1 VALUES(4, 'four');
+  INSERT INTO t1 VALUES(5, 'five');
+}
+
+sqlite3 db2 test.db
+do_execsql_test 5.1 {
+  BEGIN CONCURRENT;
+    SELECT * FROM t1 WHERE x>=2 AND x<=4;
+    INSERT INTO t1 VALUES(6, 'six');
+} {2 two 3 three 4 four}
+
+do_execsql_test -db db2 5.2 {
+  UPDATE t1 SET y='TWO' WHERE x=2;
+}
+
+do_catchsql_test 5.3 {
+  COMMIT;
+} {1 {database is locked}}
 
 finish_test
 
