@@ -600,6 +600,7 @@ void sqlite3HctBufferFree(HctBuffer *pBuf){
 
 static void hctBufferSet(HctBuffer *pBuf, const u8 *aData, int nData){
   sqlite3HctBufferGrow(pBuf, nData);
+  pBuf->nBuf = nData;
   hctMemcpy(pBuf->aBuf, aData, nData);
 }
 
@@ -1347,6 +1348,7 @@ static int hctDbLoadRecord(
             sqlite3HctFilePageRelease(&ovfl);
           }
         }
+        pBuf->nBuf = p->nSize;
       }
     }else{
       int iOff = hctDbOffset(p->iOff, p->flags);
@@ -2505,12 +2507,26 @@ static int hctDbCopyKey(HctDbKey *p1, HctDbKey *p2){
       bNew = 1;
       p1->pKey->default_rc = 0;
     }
-    for(ii=0; ii<p2->pKey->nField; ii++){
-      Mem *pFrom = &p2->pKey->aMem[ii];
-      Mem *pTo = &p1->pKey->aMem[ii];
-      if( bNew ) sqlite3VdbeMemInit(pTo, pFrom->db, 0);
-      sqlite3VdbeMemShallowCopy(pTo, pFrom, MEM_Static);
+
+    /* Some HctDbKey.pKey keys contain pointers directly into the 
+    ** memory-mapped database pages that they were read from. In this case, 
+    ** use MemShallowCopy to copy each cell individually. Others refer to
+    ** memory in HctDbKey.buf. In this case, copy the buffer and then
+    ** deserialize the key anew.  */
+    hctBufferSet(&p1->buf, p2->buf.aBuf, p2->buf.nBuf);
+    if( p1->buf.nBuf==0 ){
+      /* Memory is a memory-mapped page. */
+      for(ii=0; ii<p2->pKey->nField; ii++){
+        Mem *pFrom = &p2->pKey->aMem[ii];
+        Mem *pTo = &p1->pKey->aMem[ii];
+        if( bNew ) sqlite3VdbeMemInit(pTo, pFrom->db, 0);
+        sqlite3VdbeMemShallowCopy(pTo, pFrom, MEM_Static);
+      }
+    }else{
+      /* Memory is in HctDbKey.buf. */
+      sqlite3VdbeRecordUnpack(p1->buf.nBuf, p1->buf.aBuf, p1->pKey);
     }
+
     p1->pKey->nField = p2->pKey->nField;
     p1->pKey->default_rc = p2->pKey->default_rc;
   }else{
@@ -7696,9 +7712,11 @@ static void hctDbValidateOpWarning(
   }
 
   sqlite3_log(SQLITE_WARNING, 
-      "slow validation op: %lldms root=%lld nstep=%d first=%z last=%z",
+      "slow validation op: %lldms root=%lld nstep=%d first=%s last=%s",
       nMs, iRoot, nStep, zFirst, zLast
   );
+  sqlite3_free(zFirst);
+  sqlite3_free(zLast);
 }
 
 #endif /* HCT_VALIDATE_TIMERS */

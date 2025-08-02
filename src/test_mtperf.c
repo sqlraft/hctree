@@ -716,6 +716,7 @@ struct Migration {
 static void migration_del(ClientData clientData){
   Migration *p = (Migration*)clientData;
   int ii;
+  sqlite3_mutex_free(p->mutex);
   for(ii=0; ii<p->nJob; ii++){
     sqlite3_close(p->aJob[ii].db);
   }
