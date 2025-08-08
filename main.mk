@@ -2530,6 +2530,7 @@ help:
 #
 #
 tidy:
+	rm -f *.gcda *.gcno
 	rm -f *.o *.c *.da *.bb *.bbg gmon.* *.rws sqlite3$(T.exe)
 	rm -f fts5.h keywordhash.h opcodes.h sqlite3.h sqlite3ext.h sqlite3session.h
 	rm -rf .libs .deps tsrc .target_source

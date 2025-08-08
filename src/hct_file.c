@@ -1247,7 +1247,7 @@ static u64 hctFilePageToChunk(HctMapping *pMapping, i64 iPg){
 ** object. Do not create a new mapping.
 */
 static int hctFileUpdateMappingForSlot(HctFile *pFile, i64 iSlot){
-  int iChunk = hctFilePageToChunk(pFile->pMapping, iSlot);
+  u64 iChunk = hctFilePageToChunk(pFile->pMapping, iSlot);
   if( iChunk>=pFile->pMapping->nChunk ){
     HctMapping *pOld = pFile->pMapping;
     hctFileEnterServerMutex(pFile);

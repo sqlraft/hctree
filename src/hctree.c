@@ -1897,18 +1897,19 @@ static int hctBtreeDirectInsert(
 ** iSavepoint==0 means rollback the entire transaction. iSavepoint=1 means
 ** roll back the outermost savepoint, etc.
 */
-static void hctreeRollbackSchema(HBtree *p, int iSavepoint){
+static int hctreeRollbackSchema(HBtree *p, int iSavepoint){
   int ii;
+  int rc = SQLITE_OK;
   assert( p->eTrans>=SQLITE_TXN_WRITE );
 
-  for(ii=p->nSchemaOp-1; ii>=0; ii--){
+  for(ii=p->nSchemaOp-1; ii>=0 && rc==SQLITE_OK; ii--){
     BtSchemaOp *pOp = &p->aSchemaOp[ii];
 
     if( iSavepoint>pOp->iSavepoint ) break;
     p->nSchemaOp = ii;
 
     if( pOp->eSchemaOp==HCT_SCHEMAOP_POPULATE ){
-      sqlite3HctDbDirectClear(p->pHctDb, pOp->pgnoRoot);
+      rc = sqlite3HctDbDirectClear(p->pHctDb, pOp->pgnoRoot);
     }
 
     if( pOp->eSchemaOp==HCT_SCHEMAOP_CREATE_INTKEY
@@ -1918,6 +1919,8 @@ static void hctreeRollbackSchema(HBtree *p, int iSavepoint){
       sqlite3HctFileTreeFree(pFile, pOp->pgnoRoot, 1);
     }
   }
+
+  return rc;
 }
 
 /*
@@ -2131,7 +2134,7 @@ int sqlite3HctBtreeSavepoint(Btree *pBt, int op, int iSavepoint){
       sqlite3HctTreeRelease(p->pHctTree, iSavepoint+1);
     }else{
       sqlite3HctTreeRollbackTo(p->pHctTree, iSavepoint+2);
-      hctreeRollbackSchema(p, iSavepoint+1);
+      rc = hctreeRollbackSchema(p, iSavepoint+1);
       p->eMetaState = HCT_METASTATE_NONE;
     }
   }
