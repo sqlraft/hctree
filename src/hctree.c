@@ -2690,6 +2690,9 @@ static int hctBtreeMovetoUnpacked(
   if( rc==SQLITE_OK && pCur->pHctDbCsr ){
     rc = sqlite3HctDbCsrSeek(pCur->pHctDbCsr, pIdxKey, intKey, &res2);
   }
+  if( rc!=SQLITE_OK ){
+    return rc;
+  }
 
   if( pCur->eDir==BTREE_DIR_NONE ){
     assert( pIdxKey==0 || pIdxKey->nField==pCur->pKeyInfo->nUniqField );
