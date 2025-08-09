@@ -41,6 +41,76 @@ do_faultsim_test 2 -faults hctpage -prep {
   faultsim_test_result {0 {2 two}} 
 }
 
+hct_reset_db
+do_execsql_test 3.0 {
+  BEGIN;
+  CREATE TABLE t1(a INTEGER PRIMARY KEY, b TEXT) WITHOUT ROWID;
+  INSERT INTO t1 VALUES(1, hex(randomblob(500)) );
+  INSERT INTO t1 VALUES(2, hex(randomblob(500)) );
+  INSERT INTO t1 VALUES(3, hex(randomblob(500)) );
+  INSERT INTO t1 VALUES(4, hex(randomblob(500)) );
+  INSERT INTO t1 VALUES(5, hex(randomblob(500)) );
+  INSERT INTO t1 VALUES(6, hex(randomblob(500)) );
+  INSERT INTO t1 VALUES(7, hex(randomblob(500)) );
+  INSERT INTO t1 VALUES(8, hex(randomblob(500)) );
+  COMMIT;
+}
+
+faultsim_save_and_close
+
+do_faultsim_test 3 -faults hctpage -prep {
+  faultsim_restore_and_reopen
+} -body {
+  execsql { 
+    SELECT a FROM t1 WHERE a=3;
+    SELECT a FROM t1 WHERE a=4;
+    SELECT a FROM t1 WHERE a=5;
+    SELECT a FROM t1 WHERE a=6;
+    SELECT a FROM t1 WHERE a=7;
+  }
+} -test {
+  faultsim_test_result {0 {3 4 5 6 7}}
+}
+
+#-------------------------------------------------------------------------
+# Cause page-errors during rollback.
+#
+hct_reset_db
+do_execsql_test 4.0 {
+  BEGIN;
+    CREATE TABLE t1(a INTEGER PRIMARY KEY, b TEXT);
+    INSERT INTO t1 VALUES(1, 'one');
+    INSERT INTO t1 VALUES(2, 'two');
+    INSERT INTO t1 VALUES(3, 'three');
+    INSERT INTO t1 VALUES(4, 'four');
+    INSERT INTO t1 VALUES(5, 'five');
+    INSERT INTO t1 VALUES(6, 'six');
+    INSERT INTO t1 VALUES(7, 'seven');
+    INSERT INTO t1 VALUES(8, 'eight');
+    CREATE TABLE t2(x);
+  COMMIT;
+}
+
+faultsim_save_and_close
+
+do_faultsim_test 4 -faults hctpage -prep {
+  faultsim_restore_and_reopen
+  sqlite3 db2 test.db
+  db eval {
+    BEGIN;
+      SELECT * FROM t2;
+      DELETE FROM t1 WHERE a IN (3, 5, 7);
+  }
+  db2 eval {
+    INSERT INTO t2 VALUES('value');
+  }
+} -body {
+  execsql { 
+    COMMIT
+  }
+} -test {
+  faultsim_test_result {1 {database is locked}}
+}
 
 finish_test
 

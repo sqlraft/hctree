@@ -575,15 +575,20 @@ static void hctExtraWriteLogging(
   }
 }
 
-#define HCT_EXTRA_LOGGING(pDb, x)                                \
+#ifdef SQLITE_COVERAGE_TEST
+# define HCT_EXTRA_LOGGING(pDb, x)
+# define HCT_EXTRA_WR_LOGGING(pDb, x)
+#else
+# define HCT_EXTRA_LOGGING(pDb, x)                                \
   if( pDb->pConfig->bHctExtraLogging ) {                         \
     hctExtraLogging(__func__, __LINE__, pDb, sqlite3_mprintf x); \
   }
 
-#define HCT_EXTRA_WR_LOGGING(pDb, x)                                  \
+# define HCT_EXTRA_WR_LOGGING(pDb, x)                                  \
   if( pDb->pConfig->bHctExtraWriteLogging ) {                         \
     hctExtraWriteLogging(__func__, __LINE__, pDb, sqlite3_mprintf x); \
   }
+#endif /* ifndef SQLITE_COVERAGE_TEST */
 
 
 void sqlite3HctBufferGrow(HctBuffer *pBuf, int nSize){
@@ -2400,7 +2405,7 @@ static int hctDbFollowRangeOld(
   return bRet;
 }
 
-static int hctDbCsrExtendRange(HctDbCsr *pCsr){
+static void hctDbCsrExtendRange(HctDbCsr *pCsr){
   if( pCsr->nRange==pCsr->nRangeAlloc ){
     i64 nNew = pCsr->nRangeAlloc ? pCsr->nRangeAlloc*2 : 16;
     HctDbRangeCsr *aNew = 0;
@@ -2414,9 +2419,16 @@ static int hctDbCsrExtendRange(HctDbCsr *pCsr){
 
   memset(&pCsr->aRange[pCsr->nRange], 0, sizeof(HctDbRangeCsr));
   pCsr->nRange++;
-  return SQLITE_OK;
 }
 
+/*
+** Compare key1 (pKey1 if pKeyInfo!=0, otherwise iKey1) with key p2. Return:
+**
+**     (key1) - *p2
+**
+** i.e. less than, equal to or greater than 0 if key1 is less than, equal to
+** or greater than p2.
+*/
 static int hctDbCompareKey2(
   KeyInfo *pKeyInfo, 
   UnpackedRecord *pKey1,
@@ -2425,35 +2437,32 @@ static int hctDbCompareKey2(
 ){
   int ret = 0;
   if( pKeyInfo ){
+    UnpackedRecord *pKey2 = p2->pKey;
     int ii = 0;
     int n1, n2;
 
     n1 = pKey1->nField;
-    n2 = p2->pKey->nField;
+    n2 = pKey2->nField;
 
     for(ii=0; ret==0 && ii<MIN(n1, n2); ii++){
       CollSeq *pColl = pKeyInfo->aColl[ii];
-      ret = sqlite3MemCompare(&pKey1->aMem[ii], &p2->pKey->aMem[ii], pColl);
+      ret = sqlite3MemCompare(&pKey1->aMem[ii], &pKey2->aMem[ii], pColl);
       if( pKeyInfo->aSortFlags[ii] & KEYINFO_ORDER_DESC ) ret = -ret;
     }
     if( ret==0 ){
       assert( pKey1->default_rc>=-1 && pKey1->default_rc<=1 );
-      assert( p2->pKey->default_rc>=-1 && p2->pKey->default_rc<=1 );
+      assert( pKey2->default_rc>=-1 && pKey2->default_rc<=1 );
 
       if( n2<n1 ){
-        ret = p2->pKey->default_rc;
+        ret = pKey2->default_rc;
       }else if( n1<n2 ){
         ret = (pKey1->default_rc * -1);
       }else{
-        ret = p2->pKey->default_rc - pKey1->default_rc;
+        ret = pKey2->default_rc - pKey1->default_rc;
       }
     }
     if( ret==0 ){
-      if( n1<n2 ){
-        ret = -1;
-      }else if( n1>n2 ){
-        ret = +1;
-      }
+      ret = n1-n2;
     }
   }else{
     if( iKey1<p2->iKey ){
@@ -2489,11 +2498,10 @@ static int hctDbCopyKey(HctDbKey *p1, HctDbKey *p2){
   if( p2->pKey ){
     int ii;
     int bNew = 0;
-    if( p1->pKey==0 || p1->pKey->nField<p2->pKey->nField ){
-      int rc = SQLITE_OK;
+
+    if( p1->pKey==0 ){
       hctDbFreeUnpacked(p1->pKey);
       p1->pKey = hctDbAllocateUnpacked(p2->pKey->pKeyInfo);
-      if( rc!=SQLITE_OK ) return rc;
       bNew = 1;
       p1->pKey->default_rc = 0;
     }
@@ -2528,7 +2536,8 @@ static int hctDbCopyKey(HctDbKey *p1, HctDbKey *p2){
 static void hctDbDecrementKey(HctDbKey *pKey){
   if( pKey->pKey ){
     pKey->pKey->default_rc = +1;
-  }else if( pKey->iKey!=SMALLEST_INT64 ){
+  }else{
+    assert( pKey->iKey!=SMALLEST_INT64 );
     pKey->iKey--;
   }
 }
@@ -2536,121 +2545,134 @@ static void hctDbDecrementKey(HctDbKey *pKey){
 static void hctDbIncrementKey(HctDbKey *pKey){
   if( pKey->pKey ){
     pKey->pKey->default_rc = -1;
-  }else if( pKey->iKey!=LARGEST_INT64 ){
+  }else{
+    assert( pKey->iKey!=LARGEST_INT64 );
     pKey->iKey++;
   }
 }
 
-static void hctDbCsrDescendRange(
-  int *pRc, 
+static int hctDbCsrDescendRange(
   HctDbCsr *pCsr,
   u64 iRangeTid,
   u32 iRangeOld,
   int bMerge
 ){
-  int rc = *pRc;
+  int rc = SQLITE_OK;
+  HctDbRangeCsr *pNew = 0;
 
+  assert( bMerge==HCT_RANGE_FOLLOW || bMerge==HCT_RANGE_MERGE );
+
+  hctDbCsrExtendRange(pCsr);
+  pNew = &pCsr->aRange[pCsr->nRange-1];
+  pNew->eRange = bMerge;
+  pNew->iRangeTid = iRangeTid;
+  pNew->bDoNotAscend = 0;
+
+  rc = hctDbGetPhysical(pCsr->pDb, iRangeOld, &pNew->pg);
   if( rc==SQLITE_OK ){
-    rc = hctDbCsrExtendRange(pCsr);
-  }
+    int iPar = pCsr->nRange-2;
+    int iPCell = 0;
+    const u8 *aParent = hctDbCsrPageAndCellIdx(pCsr, iPar, &iPCell);
+    const HctDbPageHdr *pPar = (HctDbPageHdr*)aParent;
+    int bSeen = 0;
 
-  if( rc==SQLITE_OK ){
-    HctDbRangeCsr *pNew = &pCsr->aRange[pCsr->nRange-1];
-    assert( bMerge==HCT_RANGE_FOLLOW || bMerge==HCT_RANGE_MERGE );
-
-    pNew->eRange = bMerge;
-    pNew->iRangeTid = iRangeTid;
-    pNew->bDoNotAscend = 0;
-    rc = hctDbGetPhysical(pCsr->pDb, iRangeOld, &pNew->pg);
-
-    if( rc==SQLITE_OK ){
-      int iPar = pCsr->nRange-2;
-      int iPCell = 0;
-      const u8 *aParent = hctDbCsrPageAndCellIdx(pCsr, iPar, &iPCell);
-      const HctDbPageHdr *pPar = (HctDbPageHdr*)aParent;
-      int bSeen = 0;
-
-      /* Figure out the upper limit key for the scan of this page */ 
-      if( hctPagetype(aParent)==HCT_PAGETYPE_HISTORY ){
-        if( iPCell==0 && pPar->nEntry>1 ){
-          const HctDbHistoryFan *pFan = (const HctDbHistoryFan*)aParent;
+    /* Figure out the upper limit key for the scan of this page */ 
+    if( hctPagetype(aParent)==HCT_PAGETYPE_HISTORY ){
+      if( iPCell==0 && pPar->nEntry>1 ){
+        const HctDbHistoryFan *pFan = (const HctDbHistoryFan*)aParent;
+        rc = hctDbGetKeyFromPage(pCsr->pDb, pCsr->pKeyInfo, 
+            0, pFan->aPgOld1[0], pFan->iSplit0, &pNew->highkey
+        );
+        bSeen = 1;
+      }
+    }else{
+      if( iPCell==(pPar->nEntry-1) ){
+        if( pPar->iPeerPg ){
           rc = hctDbGetKeyFromPage(pCsr->pDb, pCsr->pKeyInfo, 
-              0, pFan->aPgOld1[0], pFan->iSplit0, &pNew->highkey
+              1, pPar->iPeerPg, 0, &pNew->highkey
           );
           bSeen = 1;
         }
       }else{
-        if( iPCell==(pPar->nEntry-1) ){
-          if( pPar->iPeerPg ){
-            rc = hctDbGetKeyFromPage(pCsr->pDb, pCsr->pKeyInfo, 
-                1, pPar->iPeerPg, 0, &pNew->highkey
-            );
-            bSeen = 1;
-          }
-        }else{
-          rc = hctDbGetKey(
-              pCsr->pDb, pCsr->pKeyInfo, 0, aParent, iPCell+1, &pNew->highkey
+        rc = hctDbGetKey(
+            pCsr->pDb, pCsr->pKeyInfo, 0, aParent, iPCell+1, &pNew->highkey
+        );
+        bSeen = 1;
+      }
+    }
+
+    if( bSeen==0 ){
+      if( iPar>=0 ){
+        hctDbCopyKey(&pNew->highkey, &pNew[-1].highkey);
+      }else{
+        pNew->highkey.iKey = LARGEST_INT64;
+        assert( pNew->highkey.pKey==0 );
+      }
+    }else if( iPar>=0 ){
+      /* The 'highkey' should be the minimum of pNew->highkey and the
+      ** parent highkey.  highkey = MIN(highkey, parent.highkey); */
+      HctDbKey *pPKey = &pNew[-1].highkey;
+      if( hctDbCompareKey(pCsr->pKeyInfo, &pNew->highkey, pPKey, 1)>0 ){
+        hctDbCopyKey(&pNew->highkey, pPKey);
+      }
+    }
+
+    /* Figure the lower limit key for the scan of this page */
+    if( rc==SQLITE_OK ){
+      pNew->lowkey.iKey = SMALLEST_INT64;
+      if( hctPagetype(aParent)==HCT_PAGETYPE_HISTORY ){
+        if( iPCell>0 ){
+          const HctDbHistoryFan *pFan = (const HctDbHistoryFan*)aParent;
+          rc = hctDbGetKeyFromPage(pCsr->pDb, pCsr->pKeyInfo, 
+              0, pFan->aPgOld1[0], pFan->iSplit0, &pNew->lowkey
           );
-          bSeen = 1;
-        }
-      }
-
-      if( bSeen==0 ){
-        if( iPar>=0 ){
-          hctDbCopyKey(&pNew->highkey, &pNew[-1].highkey);
+          // hctDbDecrementKey(&pNew->lowkey);
         }else{
-          pNew->highkey.iKey = LARGEST_INT64;
-          assert( pNew->highkey.pKey==0 );
+          hctDbCopyKey(&pNew->lowkey, &pNew[-1].lowkey);
         }
-      }else if( iPar>=0 ){
-        /* The 'highkey' should be the minimum of pNew->highkey and the
-        ** parent highkey.  highkey = MIN(highkey, parent.highkey); */
-        HctDbKey *pPKey = &pNew[-1].highkey;
-        if( hctDbCompareKey(pCsr->pKeyInfo, &pNew->highkey, pPKey, 1)>0 ){
-          hctDbCopyKey(&pNew->highkey, pPKey);
+      }else{
+        HctDbCell pcell;
+        rc = hctDbGetKey(
+            pCsr->pDb, pCsr->pKeyInfo, 0, aParent, iPCell, &pNew->lowkey
+        );
+        hctDbCellGetByIdx(pCsr->pDb, aParent, iPCell, &pcell);
+        if( hctDbTidIsVisible(pCsr->pDb, pcell.iTid, 0) ){
+          hctDbIncrementKey(&pNew->lowkey);
         }
       }
+      if( iPar>=0 ){
+        /* The 'lowkey' should be the maximum of pNew->lowkey and the
+        ** parent lowkey.  lowkey = MAX(lowkey, parent.lowkey); */
+        HctDbKey *pPKey = &pNew[-1].lowkey;
+        if( hctDbCompareKey(pCsr->pKeyInfo, &pNew->lowkey, pPKey, 0)<0 ){
+          hctDbCopyKey(&pNew->lowkey, pPKey);
+        }
+      }
+    }
 
-      /* Figure the lower limit key for the scan of this page */
-      if( rc==SQLITE_OK ){
-        pNew->lowkey.iKey = SMALLEST_INT64;
-        if( hctPagetype(aParent)==HCT_PAGETYPE_HISTORY ){
-          if( iPCell>0 ){
-            const HctDbHistoryFan *pFan = (const HctDbHistoryFan*)aParent;
-            rc = hctDbGetKeyFromPage(pCsr->pDb, pCsr->pKeyInfo, 
-                0, pFan->aPgOld1[0], pFan->iSplit0, &pNew->lowkey
-            );
-            // hctDbDecrementKey(&pNew->lowkey);
-          }else{
-            hctDbCopyKey(&pNew->lowkey, &pNew[-1].lowkey);
-          }
-        }else{
-          HctDbCell pcell;
-          rc = hctDbGetKey(
-              pCsr->pDb, pCsr->pKeyInfo, 0, aParent, iPCell, &pNew->lowkey
-          );
-          hctDbCellGetByIdx(pCsr->pDb, aParent, iPCell, &pcell);
-          if( hctDbTidIsVisible(pCsr->pDb, pcell.iTid, 0) ){
-            hctDbIncrementKey(&pNew->lowkey);
-          }
-        }
-        if( iPar>=0 ){
-          /* The 'lowkey' should be the maximum of pNew->lowkey and the
-          ** parent lowkey.  lowkey = MAX(lowkey, parent.lowkey); */
-          HctDbKey *pPKey = &pNew[-1].lowkey;
-          if( hctDbCompareKey(pCsr->pKeyInfo, &pNew->lowkey, pPKey, 0)<0 ){
-            hctDbCopyKey(&pNew->lowkey, pPKey);
-          }
-        }
-      }
-
-      if( rc==SQLITE_OK && hctPagetype(pNew->pg.aOld)==HCT_PAGETYPE_HISTORY){
-        pNew->eRange = HCT_RANGE_FAN;
-      }
+    if( rc==SQLITE_OK && hctPagetype(pNew->pg.aOld)==HCT_PAGETYPE_HISTORY){
+      pNew->eRange = HCT_RANGE_FAN;
     }
   }
 
-  *pRc = rc;
+
+  assert( rc!=SQLITE_OK 
+      || pNew->lowkey.pKey==0 
+      || pNew->lowkey.pKey->nField==pCsr->pKeyInfo->nUniqField 
+      || pNew->lowkey.pKey->nField==pCsr->pKeyInfo->nAllField 
+  );
+  assert( rc!=SQLITE_OK 
+      || pNew->highkey.pKey==0 
+      || pNew->highkey.pKey->nField==pCsr->pKeyInfo->nUniqField 
+      || pNew->highkey.pKey->nField==pCsr->pKeyInfo->nAllField 
+  );
+  assert( rc!=SQLITE_OK 
+      || pNew->lowkey.pKey==0 
+      || pNew->highkey.pKey==0 
+      || pNew->highkey.pKey->nField==pNew->lowkey.pKey->nField 
+  );
+
+  return rc;
 }
 
 static void hctDbGetRange(
@@ -2702,14 +2724,17 @@ static int hctDbCurrentIsVisible(HctDbCsr *pCsr){
   const u8 *aPg = hctDbCsrPageAndCell(pCsr, &iCell);
   u64 iTid = 0;
 
+  assert( pCsr->pDb->iTid==0 || pCsr->pDb->eMode==HCT_MODE_VALIDATE );
+
   if( pCsr->pKeyInfo ){
     p = &((HctDbIndexLeaf*)aPg)->aEntry[iCell];
   }else{
     p = (HctDbIndexEntry*)&((HctDbIntkeyLeaf*)aPg)->aEntry[iCell];
   }
+
   if( (p->flags & HCTDB_HAS_TID)==0 ) return 1;
   hctMemcpy(&iTid, &aPg[p->iOff], sizeof(u64));
-  if( pCsr->pDb->iTid==iTid && pCsr->pDb->eMode==HCT_MODE_VALIDATE ) return 1;
+  if( pCsr->pDb->iTid==iTid ) return 1;
 
   return hctDbTidIsVisible(pCsr->pDb, iTid, pCsr->bNosnap);
 }
@@ -2736,20 +2761,14 @@ static int hctDbLeafSearch(
   int *piPos,
   int *pbExact
 ){
-  if( hctPagetype(aPg)==HCT_PAGETYPE_INDEX ){
-    if( pKey==0 ){
-      assert( 0 );
-      *piPos = hctPagenentry(aPg);
-      *piPos = 0;
-      *pbExact = 0;
-    }else{
-      int rc = hctDbIndexSearch(pDb, aPg, 0, pKey, piPos, pbExact);
-      if( rc ) return rc;
-    }
+  int rc = SQLITE_OK;
+  if( pKey ){
+    assert( hctPagetype(aPg)==HCT_PAGETYPE_INDEX );
+    rc = hctDbIndexSearch(pDb, aPg, 0, pKey, piPos, pbExact);
   }else{
     *piPos = hctDbIntkeyLeafSearch(aPg, iKey, pbExact);
   }
-  return SQLITE_OK;
+  return rc;
 }
 
 static int hctDbCsrRollbackDescend(
@@ -2764,7 +2783,7 @@ static int hctDbCsrRollbackDescend(
   *pbExact = 0;
 
   assert( pDb->eMode==HCT_MODE_ROLLBACK );
-  while( 1 ){
+  while( rc==SQLITE_OK ){
     HctRangePtr ptr;
     HctDbRangeCsr *p = 0;
 
@@ -2772,11 +2791,9 @@ static int hctDbCsrRollbackDescend(
 
     if( (ptr.iFollowTid & HCT_TID_MASK)<pDb->iTid ) break;
 
-    rc = hctDbCsrExtendRange(pCsr);
-    if( rc==SQLITE_OK ){
-      p = &pCsr->aRange[pCsr->nRange-1];
-      rc = hctDbGetPhysical(pDb, ptr.iOld, &p->pg);
-    }
+    hctDbCsrExtendRange(pCsr);
+    p = &pCsr->aRange[pCsr->nRange-1];
+    rc = hctDbGetPhysical(pDb, ptr.iOld, &p->pg);
     if( rc==SQLITE_OK ){
       p->iRangeTid = ptr.iRangeTid & HCT_TID_MASK;
       if( hctPagetype(p->pg.aOld)==HCT_PAGETYPE_HISTORY ){
@@ -2973,7 +2990,7 @@ static int hctDbCsrSeekAndDescend(
     /* Check if there is a range pointer that we should follow */
     hctDbCsrGetRange(pCsr, &ptr);
     if( hctDbFollowRangeOld(pDb, &ptr, &bMerge) ){
-      hctDbCsrDescendRange(&rc, pCsr, ptr.iRangeTid, ptr.iOld, bMerge);
+      rc = hctDbCsrDescendRange(pCsr, ptr.iRangeTid, ptr.iOld, bMerge);
       if( rc==SQLITE_OK ){
         HctDbRangeCsr *p = &pCsr->aRange[pCsr->nRange-1];
 
@@ -7229,7 +7246,7 @@ static int hctDbCsrNext(HctDbCsr *pCsr){
       hctDbCsrGetRange(pCsr, &ptr);
       if( hctDbFollowRangeOld(pDb, &ptr, &bMerge) ){
         HctDbRangeCsr *p = 0;
-        hctDbCsrDescendRange(&rc, pCsr, ptr.iRangeTid, ptr.iOld, bMerge);
+        rc = hctDbCsrDescendRange(pCsr, ptr.iRangeTid, ptr.iOld, bMerge);
         if( rc!=SQLITE_OK ) return rc;
         p = &pCsr->aRange[pCsr->nRange-1];
         if( hctDbCheckForOverlap(pCsr->pKeyInfo, &p->lowkey, &p->highkey) ){
@@ -7422,7 +7439,7 @@ static int hctDbCsrPrev(HctDbCsr *pCsr){
 
       hctDbCsrGetRange(pCsr, &ptr);
       while( hctDbFollowRangeOld(pDb, &ptr, &bMerge) ){
-        hctDbCsrDescendRange(&rc, pCsr, ptr.iRangeTid, ptr.iOld, bMerge);
+        rc = hctDbCsrDescendRange(pCsr, ptr.iRangeTid, ptr.iOld, bMerge);
         memset(&ptr, 0, sizeof(ptr));
 
         if( rc==SQLITE_OK ){
