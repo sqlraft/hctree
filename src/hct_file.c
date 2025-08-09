@@ -113,17 +113,28 @@ static struct HctFileGlobalVars {
   int nIoFailCnt;
   int nIoFailReset;
 
+  int nPageFailCnt;
+  int nPageFailReset;
+
   int nProcFailCnt;
 } g;
 
-void sqlite3_hct_cas_failure(int nCASFailCnt, int nCASFailReset){
+int sqlite3_hct_cas_failure(int nCASFailCnt, int nCASFailReset){
+  int iOrig = g.nCASFailCnt;
   g.nCASFailCnt = nCASFailCnt;
   g.nCASFailReset = nCASFailReset;
+  return iOrig;
 }
 int sqlite3_hct_io_failure(int nIoFailCnt, int nIoFailReset){
   int iOrig = g.nIoFailCnt;
   g.nIoFailCnt = nIoFailCnt;
   g.nIoFailReset = nIoFailReset;
+  return iOrig;
+}
+int sqlite3_hct_page_failure(int nPageFailCnt, int nPageFailReset){
+  int iOrig = g.nPageFailCnt;
+  g.nPageFailCnt = nPageFailCnt;
+  g.nPageFailReset = nPageFailReset;
   return iOrig;
 }
 
@@ -158,6 +169,24 @@ static int inject_io_failure(void){
   if( g.nIoFailCnt>0 ){
     if( (--g.nIoFailCnt)==0 ){
       g.nIoFailCnt = g.nIoFailReset;
+      return 1;
+    }
+  }
+  return 0;
+}
+
+/*
+** This is called to check if a "page" error should be injected. It 
+** returns true if an error should be injected, or false otherwise.
+** Page errors are injected into calls to the following functions:
+**
+**     sqlite3HctFilePageGet()
+**     sqlite3HctFilePageGetPhysical()
+*/
+static int inject_page_failure(void){
+  if( g.nPageFailCnt>0 ){
+    if( (--g.nPageFailCnt)==0 ){
+      g.nPageFailCnt = g.nPageFailReset;
       return 1;
     }
   }
@@ -1613,19 +1642,23 @@ static int hctFilePagemapPtr(HctFile *pFile, u32 iPg, u8 **paData){
 }
 
 int sqlite3HctFilePageGet(HctFile *pFile, u32 iPg, HctFilePage *pPg){
-  int rc = hctFileUpdateMappingForSlot(pFile, iPg);
-  if( rc==SQLITE_OK ){
-    memset(pPg, 0, sizeof(*pPg));
-    pPg->pFile = pFile;
-    pPg->iPg = iPg;
-    pPg->iOldPg = hctFilePagemapGet(pFile->pMapping, iPg) & 0xFFFFFFFF;
-    rc = hctFileUpdateMappingForSlot(pFile, pPg->iOldPg);
+  int rc;
+  memset(pPg, 0, sizeof(*pPg));
+  if( inject_page_failure() ){
+    rc = SQLITE_IOERR_READ;
+  }else{
+    rc = hctFileUpdateMappingForSlot(pFile, iPg);
+    if( rc==SQLITE_OK ){
+      pPg->pFile = pFile;
+      pPg->iPg = iPg;
+      pPg->iOldPg = hctFilePagemapGet(pFile->pMapping, iPg) & 0xFFFFFFFF;
+      rc = hctFileUpdateMappingForSlot(pFile, pPg->iOldPg);
+    }
+    if( rc==SQLITE_OK ){
+      assert( pPg->iOldPg!=0 );
+      pPg->aOld = hctPagePtr(pFile->pMapping, pPg->iOldPg);
+    }
   }
-  if( rc==SQLITE_OK ){
-    assert( pPg->iOldPg!=0 );
-    pPg->aOld = hctPagePtr(pFile->pMapping, pPg->iOldPg);
-  }
-  assert( rc==SQLITE_OK );
   return rc;
 }
 
@@ -1639,11 +1672,16 @@ u32 sqlite3HctFilePageMapping(HctFile *pFile, u32 iLogical, int *pbEvicted){
 ** Obtain a reference to physical page iPg.
 */
 int sqlite3HctFilePageGetPhysical(HctFile *pFile, u32 iPg, HctFilePage *pPg){
-  int rc = hctFileUpdateMappingForSlot(pFile, iPg);
-  if( rc==SQLITE_OK ){
-    memset(pPg, 0, sizeof(*pPg));
-    pPg->iOldPg = iPg;
-    pPg->aOld = (u8*)hctPagePtr(pFile->pMapping, iPg);
+  int rc;
+  memset(pPg, 0, sizeof(*pPg));
+  if( inject_page_failure() ){
+    rc = SQLITE_IOERR_READ;
+  }else{
+    rc = hctFileUpdateMappingForSlot(pFile, iPg);
+    if( rc==SQLITE_OK ){
+      pPg->iOldPg = iPg;
+      pPg->aOld = (u8*)hctPagePtr(pFile->pMapping, iPg);
+    }
   }
   return rc;
 }

@@ -1460,7 +1460,7 @@ static int hctDbFanSearch(
     }
   }
   sqlite3HctBufferFree(&buf);
-  assert( i1==i2 );
+  assert( rc!=SQLITE_OK || i1==i2 );
 
   *pRc = rc;
   return i2;
@@ -1659,7 +1659,7 @@ static int hctDbIndexSearch(
     }
   }
 
-  assert( i1==i2 && i2>=0 );
+  assert( rc!=SQLITE_OK || (i1==i2 && i2>=0) );
   sqlite3HctBufferFree(&buf);
   *piPos = i2;
   return rc;
@@ -2208,11 +2208,13 @@ static int hctDbCsrFirst(HctDbCsr *pCsr){
     }
     sqlite3HctFilePageRelease(&pg);
   }
-  hctMemcpy(&pCsr->pg, &pg, sizeof(pg));
-  if( ((HctDbPageHdr*)pCsr->pg.aOld)->nEntry>0 ){
-    pCsr->iCell = 0;
-  }else{
-    pCsr->iCell = -1;
+  if( rc==SQLITE_OK ){
+    hctMemcpy(&pCsr->pg, &pg, sizeof(pg));
+    if( ((HctDbPageHdr*)pCsr->pg.aOld)->nEntry>0 ){
+      pCsr->iCell = 0;
+    }else{
+      pCsr->iCell = -1;
+    }
   }
   return rc;
 }

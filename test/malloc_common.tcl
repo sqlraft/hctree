@@ -108,6 +108,13 @@ set FAULTSIM(hctio) [list                 \
   -injecterrlist   {{1 {disk I/O error}}} \
   -injectuninstall interrupt_injectuninstall  \
 ]
+set FAULTSIM(hctpage) [list                 \
+  -injectinstall   interrupt_injectinstall    \
+  -injectstart     hctpage_injectstart      \
+  -injectstop      hctpage_injectstop       \
+  -injecterrlist   {{1 {disk I/O error}}} \
+  -injectuninstall interrupt_injectuninstall  \
+]
 
 
 
@@ -298,6 +305,15 @@ proc hctio_injectstart {iFail} {
 }
 proc hctio_injectstop {} {
   set val [sqlite3_hct_io_failure 0 0]
+  expr $val<=0 
+}
+
+proc hctpage_injectstart {iFail} {
+  sqlite3_hct_page_failure $iFail 0
+  set iFail
+}
+proc hctpage_injectstop {} {
+  set val [sqlite3_hct_page_failure 0 0]
   expr $val<=0 
 }
 

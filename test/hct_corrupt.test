@@ -580,14 +580,14 @@ foreach o $lOff {
   hexio_write test.db $o 00FFFF00
 }
 
-show_all_entries
+#show_all_entries
 
 do_execsql_test 7.1 {
   SELECT 123 FROM t1 ORDER BY y LIMIT 5;
 } {
   123 123 123 123 123
 }
-breakpoint
+
 do_execsql_test 7.2 {
   BEGIN CONCURRENT;
     SELECT 123 FROM t1 ORDER BY y LIMIT 5;

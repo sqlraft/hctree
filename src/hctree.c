@@ -1476,8 +1476,10 @@ int sqlite3HctBtreeBeginTrans(Btree *pBt, int wrflag, int *pSchemaVersion){
     rc = sqlite3HctDbStartRead(p->pHctDb, p->pHctJrnl);
   }
 
-  if( rc==SQLITE_OK && pSchemaVersion ){
-    rc = hctBtreeGetMeta(p, 1, (u32*)pSchemaVersion);
+  if( rc==SQLITE_OK ){
+    u32 val;
+    rc = hctBtreeGetMeta(p, 1, (u32*)&val);
+    if( pSchemaVersion ) *pSchemaVersion = val;
     sqlite3HctDbTransIsConcurrent(p->pHctDb, p->config.db->bConcurrent);
   }
 
@@ -1841,7 +1843,6 @@ static int btreeFlushToDisk(HBtree *p){
   if( rc==SQLITE_OK ){
     rc = sqlite3HctDbEndWrite(p->pHctDb, iCid, rcok!=SQLITE_OK);
   }
-  assert( rc==SQLITE_OK );
   sqlite3HctDbTMapScan(p->pHctDb);
 
   return (rc==SQLITE_OK ? rcok : rc);
