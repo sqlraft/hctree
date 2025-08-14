@@ -1,7 +1,6 @@
 
 
 set unused_apis {
-  i64 sqlite3BtreeOffset(BtCursor*);
   int sqlite3BtreeLockTable(Btree*, int, u8);
   int sqlite3BtreeSharable(Btree*);
   int sqlite3BtreeConnectionCount(Btree*);
@@ -44,6 +43,7 @@ set cursor_apis {
   int sqlite3BtreeTransferRow(BtCursor*, BtCursor*, i64);
   int sqlite3BtreeClearTableOfCursor(BtCursor*);
   int sqlite3BtreeCount(sqlite3*, BtCursor*, i64*);
+  i64 sqlite3BtreeOffset(BtCursor*);
 }
 
 set tree_apis {

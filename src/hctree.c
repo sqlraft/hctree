@@ -99,6 +99,8 @@ struct HBtree {
   BtCursor *pPreformatCsr;
   HctBuffer preformat;            /* Buffer containing preformat data */
 
+  i64 iFakeTreeOffset;            /* Used by sqlite3BtreeOffset() */
+
   HctMainStats stats;
 };
 
@@ -2360,16 +2362,22 @@ void sqlite3HctBtreeCursorUnpin(BtCursor *pCursor){
   sqlite3HctTreeCsrUnpin(pCur->pHctTreeCsr);
 }
 
-#ifdef SQLITE_ENABLE_OFFSET_SQL_FUNC
 /*
 ** Return the offset into the database file for the start of the
 ** payload to which the cursor is pointing.
 */
-i64 sqlite3HctBtreeOffset(BtCursor *pCur){
-  assert( 0 );
-  return 0;
+i64 sqlite3HctBtreeOffset(BtCursor *pCursor){
+  HBtCursor *const pCur = (HBtCursor*)pCursor;
+  i64 iRet = 0;
+
+  if( pCur->bUseTree ){
+    iRet = (++pCur->pBtree->iFakeTreeOffset);
+  }else{
+    iRet = sqlite3HctDbCsrOffset(pCur->pHctDbCsr);
+  }
+
+  return iRet;
 }
-#endif /* SQLITE_ENABLE_OFFSET_SQL_FUNC */
 
 /*
 ** Return the number of bytes of payload for the entry that pCur is
@@ -2560,10 +2568,21 @@ int sqlite3HctBtreePayloadChecked(
 ** in the common case where no overflow pages are used.
 */
 const void *sqlite3HctBtreePayloadFetch(BtCursor *pCursor, u32 *pAmt){
+  HBtCursor *pCur = (HBtCursor*)pCursor;
   int rc = SQLITE_OK;
   const u8 *aData = 0;
   int nData = 0;
 
+  if( pCur->bUseTree ){
+    sqlite3HctTreeCsrData(pCur->pHctTreeCsr, &nData, &aData);
+  }else{
+    sqlite3HctDbCsrPageData(pCur->pHctDbCsr, &nData, &aData);
+  }
+
+  *pAmt = nData;
+  return (const void*)aData;
+
+#if 0
   rc = hctBtreePayloadData(pCursor, &nData, &aData);
   if( rc!=SQLITE_OK ){
     /* An error has occured but this API provides no way to return an error
@@ -2575,6 +2594,7 @@ const void *sqlite3HctBtreePayloadFetch(BtCursor *pCursor, u32 *pAmt){
 
   *pAmt = nData;
   return (const void*)aData;
+#endif
 }
 
 /* Move the cursor to the first entry in the table.  Return SQLITE_OK

@@ -540,6 +540,8 @@ static void hctMemcpy(void *a, const void *b, size_t c){
 #define HCTDB_MAX_EXTRA_CELL_DATA (8+4+8+4)
 
 
+#ifndef SQLITE_COVERAGE_TEST
+
 /*
 ** Log message zMsg. If the connection was configured with "PRAGMA
 ** hct_extra_logging=1", do this by sending it directly to sqlite3_log().
@@ -575,10 +577,6 @@ static void hctExtraWriteLogging(
   }
 }
 
-#ifdef SQLITE_COVERAGE_TEST
-# define HCT_EXTRA_LOGGING(pDb, x)
-# define HCT_EXTRA_WR_LOGGING(pDb, x)
-#else
 # define HCT_EXTRA_LOGGING(pDb, x)                                \
   if( pDb->pConfig->bHctExtraLogging ) {                         \
     hctExtraLogging(__func__, __LINE__, pDb, sqlite3_mprintf x); \
@@ -588,6 +586,9 @@ static void hctExtraWriteLogging(
   if( pDb->pConfig->bHctExtraWriteLogging ) {                         \
     hctExtraWriteLogging(__func__, __LINE__, pDb, sqlite3_mprintf x); \
   }
+#else
+# define HCT_EXTRA_LOGGING(pDb, x)
+# define HCT_EXTRA_WR_LOGGING(pDb, x)
 #endif /* ifndef SQLITE_COVERAGE_TEST */
 
 
@@ -1670,6 +1671,7 @@ static int hctDbIndexSearch(
   return rc;
 }
 
+#ifndef SQLITE_COVERAGE_TEST
 static void hctDbDebugIndexSearch(
   const char *zFunc,
   int iLine,
@@ -1691,6 +1693,9 @@ static void hctDbDebugIndexSearch(
   if( a->pConfig->bHctExtraLogging ) { \
     hctDbDebugIndexSearch(__func__, __LINE__, a,b,c,d,e); \
   }
+#else
+# define HCT_EXTRA_LOGGING_INDEXSEARCH(a,b,c,d,e) 
+#endif
 
 /*
 ** The first argument is a pointer to an intkey internal node page.
@@ -2644,8 +2649,7 @@ static int hctDbCsrDescendRange(
         /* The 'lowkey' should be the maximum of pNew->lowkey and the
         ** parent lowkey.  lowkey = MAX(lowkey, parent.lowkey); */
         HctDbKey *pPKey = &pNew[-1].lowkey;
-        if( hctDbCompareKey(pCsr->pKeyInfo, &pNew->lowkey, pPKey, 0)<0 ){
-          hctDbCopyKey(&pNew->lowkey, pPKey);
+        if( hctDbCompareKey(pCsr->pKeyInfo, &pNew->lowkey, pPKey, 0)<0 ){ hctDbCopyKey(&pNew->lowkey, pPKey);
         }
       }
     }
@@ -2837,6 +2841,8 @@ static int hctDbKeyIsNull(KeyInfo *pKeyInfo, HctDbKey *pKey){
 }
 
 
+#ifndef SQLITE_COVERAGE_TEST
+
 static void hctExtraLoggingNewRangeCsr(
   const char *zFunc, 
   int iLine,
@@ -2878,17 +2884,22 @@ static void hctExtraLoggingNewRangeCsr(
   hctExtraLogging(zFunc, iLine, pCsr->pDb, zMsg);
 }
 
-#define HCT_EXTRA_LOGGING_NEWRANGECSR(pCsr)                  \
-  if( pCsr->pDb->pConfig->bHctExtraLogging ){                \
-    hctExtraLoggingNewRangeCsr(__func__, __LINE__, pCsr, 1); \
+# define HCT_EXTRA_LOGGING_NEWRANGECSR(pCsr)                  \
+  if( pCsr->pDb->pConfig->bHctExtraLogging ){                 \
+    hctExtraLoggingNewRangeCsr(__func__, __LINE__, pCsr, 1);  \
   }
 
-#define HCT_EXTRA_LOGGING_NO_NEWRANGECSR(pCsr)               \
-  if( pCsr->pDb->pConfig->bHctExtraLogging ){                \
-    hctExtraLoggingNewRangeCsr(__func__, __LINE__, pCsr, 0); \
+# define HCT_EXTRA_LOGGING_NO_NEWRANGECSR(pCsr)               \
+  if( pCsr->pDb->pConfig->bHctExtraLogging ){                 \
+    hctExtraLoggingNewRangeCsr(__func__, __LINE__, pCsr, 0);  \
   }
+#else
+# define HCT_EXTRA_LOGGING_NO_NEWRANGECSR(pCsr)
+# define HCT_EXTRA_LOGGING_NEWRANGECSR(pCsr)
+#endif
 
 
+#ifndef SQLITE_COVERAGE_TEST
 static char *hctDbDebugKey(UnpackedRecord *pRec, i64 iKey){
   char *zKey = 0;
   if( pRec ){
@@ -2950,7 +2961,10 @@ static char *hctDbCsrDebugCsrPos(HctDbCsr *pCsr){
 
   return zMsg;
 }
+#endif
 
+/* TODO: (14/08/2025) reorder functions in this file so that fwd 
+** declarations are not required.  */
 static int hctDbCompareCellKey(
   int *pRc,
   HctDatabase *pDb,
@@ -2960,12 +2974,18 @@ static int hctDbCompareCellKey(
   int iDefaultRet
 );
 static int hctDbCsrPrev(HctDbCsr *pCsr);
+static int hctDbCompareRangeCsrKey(
+  int *pRc, 
+  HctDatabase *pDb,
+  HctDbRangeCsr *pRangeCsr,
+  HctDbKey *pKey2,
+  int iNullKeyRet
+);
 
 static int hctDbCsrSeekAndDescend(
   HctDbCsr *pCsr,                 /* Cursor to seek */
   UnpackedRecord *pRec,           /* Key for index/without rowid tables */
   i64 iKey,                       /* Key for intkey tables */
-  int bStopOnExact,               /* Stop on exact match, even if not visible */
   int *pbExact
 ){
   int rc = SQLITE_OK;
@@ -2978,10 +2998,6 @@ static int hctDbCsrSeekAndDescend(
   assert( pDb->eMode==HCT_MODE_VALIDATE || pDb->iTid==0 );
 
   rc = hctDbCsrSeek(pCsr, 0, 0, pRec, iKey, &bExact);
-  if( bExact && bStopOnExact ){
-    *pbExact = 1;
-    return rc;
-  }
 
   while( rc==SQLITE_OK && (0==bExact || 0==hctDbCurrentIsVisible(pCsr)) ){
     HctRangePtr ptr;
@@ -3011,9 +3027,6 @@ static int hctDbCsrSeekAndDescend(
           if( rc!=SQLITE_OK ) break;
           if( bExact==0 ){
             p->iCell--;
-          }else if( bStopOnExact ){
-            *pbExact = 1;
-            return SQLITE_OK;
           }
           if( p->iCell<0 ) break;
           if( p->eRange==HCT_RANGE_FOLLOW ) bExact = 0;
@@ -3030,8 +3043,8 @@ static int hctDbCsrSeekAndDescend(
     HctDbRangeCsr *p = &pCsr->aRange[pCsr->nRange-1];
     if( p->iCell<0
      || p->eRange!=HCT_RANGE_MERGE 
-     || hctDbCompareCellKey(&rc, pDb, p->pg.aOld, p->iCell, &p->lowkey,1)<0
-     || hctDbCompareCellKey(&rc, pDb, p->pg.aOld, p->iCell, &p->highkey,-1)>0
+     || hctDbCompareRangeCsrKey(&rc, pDb, p, &p->lowkey, 1)<0
+     || hctDbCompareRangeCsrKey(&rc, pDb, p, &p->highkey, -1)>0
     ){
       rc = hctDbCsrPrev(pCsr);
       bExact = 0;
@@ -3083,7 +3096,7 @@ int sqlite3HctDbCsrSeek(
   hctDbCsrReset(pCsr);
 
   if( rc==SQLITE_OK ){
-    rc = hctDbCsrSeekAndDescend(pCsr, pRec, iKey, 0, &bExact);
+    rc = hctDbCsrSeekAndDescend(pCsr, pRec, iKey, &bExact);
     HCT_EXTRA_LOGGING(pCsr->pDb, ("SeekAndDescend for (%z) lands at (%z)",
         hctDbDebugKey(pRec, iKey), hctDbCsrDebugCsrPos(pCsr)
     ));
@@ -4559,6 +4572,8 @@ static int hctDbDirtyWriteArray(
   return rc;
 }
 
+#ifndef SQLITE_COVERAGE_TEST
+
 static void hctExtraWriteLoggingBalance1(
   const char *zFunc,
   int iLine,
@@ -4575,11 +4590,6 @@ static void hctExtraWriteLoggingBalance1(
 
   hctExtraWriteLogging(zFunc, iLine, pDb, zMsg);
 }
-
-#define HCT_EXTRA_WR_LOGGING_BALANCE1(pDb, aPgCopy, nIn) \
-  if( pDb->pConfig->bHctExtraWriteLogging ){                \
-    hctExtraWriteLoggingBalance1(__func__, __LINE__, pDb, aPgCopy, nIn); \
-  }
 
 static void hctExtraWriteLoggingBalance2(
   const char *zFunc,
@@ -4600,12 +4610,21 @@ static void hctExtraWriteLoggingBalance2(
   hctExtraWriteLogging(zFunc, iLine, pDb, zMsg);
 }
 
+#define HCT_EXTRA_WR_LOGGING_BALANCE1(pDb, aPgCopy, nIn) \
+  if( pDb->pConfig->bHctExtraWriteLogging ){                \
+    hctExtraWriteLoggingBalance1(__func__, __LINE__, pDb, aPgCopy, nIn); \
+  }
 #define HCT_EXTRA_WR_LOGGING_BALANCE2(pDb, p, iLeftPg, nOut) \
   if( pDb->pConfig->bHctExtraWriteLogging ){                             \
     hctExtraWriteLoggingBalance2(                                        \
         __func__, __LINE__, pDb, p, iLeftPg, nOut            \
     ); \
   }
+
+#else
+# define HCT_EXTRA_WR_LOGGING_BALANCE1(pDb, aPgCopy, nIn)
+# define HCT_EXTRA_WR_LOGGING_BALANCE2(pDb, p, iLeftPg, nOut)
+#endif
 
 /*
 ** Rebalance routine for pages with variably-sized records - intkey leaves,
@@ -6358,6 +6377,8 @@ int sqlite3HctDbJrnlWrite(
   return rc;
 }
 
+#ifndef SQLITE_COVERAGE_TEST
+
 static void hctDbDebugRollbackOp(
   const char *zFunc,
   int iLine,
@@ -6397,11 +6418,6 @@ static void hctDbDebugRollbackOp(
   sqlite3_free(zRes);
 }
 
-#define HCT_EXTRA_WR_LOGGING_ROLLBACK(a,b,c,d) \
-  if( a->pConfig->bHctExtraWriteLogging ) { \
-    hctDbDebugRollbackOp(__func__, __LINE__, a,b,c,d);  \
-  }
-
 static void hctDbDebugInsertOp(
   const char *zFunc,
   int iLine,
@@ -6437,6 +6453,16 @@ static void hctDbDebugInsertOp(
   if( a->pConfig->bHctExtraWriteLogging ) { \
     hctDbDebugInsertOp(__func__, __LINE__, a,b,c,d,e,f); \
   }
+#define HCT_EXTRA_WR_LOGGING_ROLLBACK(a,b,c,d) \
+  if( a->pConfig->bHctExtraWriteLogging ) { \
+    hctDbDebugRollbackOp(__func__, __LINE__, a,b,c,d);  \
+  }
+
+#else
+# define HCT_EXTRA_WR_LOGGING_INSERT(a,b,c,d,e,f)
+# define HCT_EXTRA_WR_LOGGING_ROLLBACK(a,b,c,d)
+#endif
+
 
 int sqlite3HctDbInsert(
   HctDatabase *pDb,               /* Database to insert into or delete from */
@@ -6586,7 +6612,20 @@ static int hctDbCompareCellKey(
     }
   }
 
+  assert( *pRc==SQLITE_OK || ret==0 );
   return ret;
+}
+
+static int hctDbCompareRangeCsrKey(
+  int *pRc, 
+  HctDatabase *pDb,
+  HctDbRangeCsr *pRangeCsr,       /* Range cursor to read key from */
+  HctDbKey *pKey2,                /* Key to compare against cursor key */
+  int iNullKeyRet                 /* Value to return if pKey is a NULL key */
+){
+  return hctDbCompareCellKey(
+    pRc, pDb, pRangeCsr->pg.aOld, pRangeCsr->iCell, pKey2, iNullKeyRet
+  );
 }
 
 /*
@@ -7314,11 +7353,11 @@ static int hctDbCsrNext(HctDbCsr *pCsr){
         ));
         if( p->iCell<hctPagenentry(p->pg.aOld) && (
             p->eRange==HCT_RANGE_FAN 
-         || hctDbCompareCellKey(&rc, pDb, p->pg.aOld, p->iCell, &p->highkey, -1)<0
+         || hctDbCompareRangeCsrKey(&rc, pDb, p, &p->highkey, -1)<0
         )){
 
           if( p->eRange==HCT_RANGE_MERGE 
-           && hctDbCompareCellKey(&rc,pDb,p->pg.aOld,p->iCell,&p->lowkey,1)<0
+           && hctDbCompareRangeCsrKey(&rc, pDb, p, &p->lowkey, 1)<0
           ){
             HCT_EXTRA_LOGGING(pDb, ("lowkey breaking..."));
             break;
@@ -7326,9 +7365,12 @@ static int hctDbCsrNext(HctDbCsr *pCsr){
 
           if( p->eRange==HCT_RANGE_MERGE ){
             HCT_EXTRA_LOGGING(pDb, ("returning..."));
-            return SQLITE_OK;
+            return rc;
           }
           break;
+        }
+        if( rc!=SQLITE_OK ){
+          return rc;
         }
         HCT_EXTRA_LOGGING(pDb, ("range cursor %d at EOF", pCsr->nRange-1));
         if( p->bDoNotAscend ){
@@ -7379,7 +7421,7 @@ static int hctDbCsrGoLeft(HctDbCsr *pCsr, int bFullSeek){
       if( bFullSeek ){
         int bExact = 0;
         hctDbCsrReset(pCsr);
-        rc = hctDbCsrSeekAndDescend(pCsr, k.pKey, k.iKey, 0, &bExact);
+        rc = hctDbCsrSeekAndDescend(pCsr, k.pKey, k.iKey, &bExact);
         assert( bExact==0 || k.pKey==0 );
         assert( pCsr->eDir==BTREE_DIR_REVERSE );
       }else{
@@ -7469,7 +7511,7 @@ static int hctDbCsrPrev(HctDbCsr *pCsr){
              && pCsr->eDir==BTREE_DIR_REVERSE
             ){
               HctDbKey *pL = &p->lowkey;
-              if( hctDbCompareCellKey(&rc,pDb,p->pg.aOld,p->iCell,pL,1)>=0 ){
+              if( hctDbCompareRangeCsrKey(&rc, pDb, p, pL, 1)>=0 ){
                 hctDbFreeKeyContents(pL);
                 pL->pKey = 0;
                 pL->iKey = SMALLEST_INT64;
@@ -7499,7 +7541,7 @@ static int hctDbCsrPrev(HctDbCsr *pCsr){
         HctDbRangeCsr *p = &pCsr->aRange[pCsr->nRange-1];
         if( p->iCell>=0 && (
             p->eRange==HCT_RANGE_FAN
-         || hctDbCompareCellKey(&rc, pDb, p->pg.aOld, p->iCell, &p->lowkey,1)>=0
+         || hctDbCompareRangeCsrKey(&rc, pDb, p, &p->lowkey, 1)>=0
         )){
           if( p->eRange==HCT_RANGE_MERGE ){
             return SQLITE_OK;
@@ -7528,6 +7570,10 @@ static int hctDbCsrPrev(HctDbCsr *pCsr){
   return rc;
 }
 
+#ifdef SQLITE_COVERAGE_TEST
+# define HCT_EXTRA_LOGGING_CSRPOS(pCsr)
+#else
+
 static void hctExtraLoggingLogCsrPos(
   const char *zFunc, 
   int iLine, 
@@ -7543,6 +7589,7 @@ static void hctExtraLoggingLogCsrPos(
   if( pCsr->pDb->pConfig->bHctExtraLogging ){           \
     hctExtraLoggingLogCsrPos(__func__, __LINE__, pCsr); \
   }
+#endif
 
 int sqlite3HctDbCsrNext(HctDbCsr *pCsr){
   int rc = SQLITE_OK;
@@ -7604,6 +7651,57 @@ int sqlite3HctDbCsrData(HctDbCsr *pCsr, int *pnData, const u8 **paData){
 #endif
   
   return hctDbLoadRecord(pCsr->pDb, &pCsr->rec, pPg, iCell, pnData, paData);
+}
+
+/*
+** This function is used to retrieve the portion of the payload associated with
+** the current cursor position that lies on the current leaf page. If the 
+** entire payload is present on the leaf page, the entire payload is returned.
+** Otherwise, if the payload spills over onto overflow pages, then only the
+** the part on the leaf page is returned.
+**
+** Before returning, (*pnData) is set to the number of bytes of payload
+** being returned. (*paData) is set to point to a buffer containing the 
+** payload data. In practice, (*paData) points into the middle of the memory 
+** mapped database page containing the record.
+**
+** This function cannot fail. So it returns void.
+*/
+void sqlite3HctDbCsrPageData(HctDbCsr *pCsr, int *pnData, const u8 **paData){
+  HctDbIndexEntry *p = 0;
+  const u8 *aPg = 0;
+  int iCell = 0;
+  int nData = 0;
+  int iOff = 0;
+
+  aPg = hctDbCsrPageAndCell(pCsr, &iCell);
+  p = hctDbEntryEntry(aPg, iCell);
+  nData = hctDbLocalsize(aPg, pCsr->pDb->pgsz, p->nSize);
+  iOff = hctDbOffset(p->iOff, p->flags);
+
+  *pnData = nData;
+  *paData = &aPg[iOff];
+}
+
+/*
+** Return the byte-offset of the record associated with the current position
+** of cursor pCsr within the database file. The returned offset is the first
+** byte of the SQLite record.
+*/
+i64 sqlite3HctDbCsrOffset(HctDbCsr *pCsr){
+  HctDbIndexEntry *p = 0;
+  i64 iPg = 0;
+  const u8 *aPg = 0;
+  int iCell = 0;
+
+  aPg = hctDbCsrPageAndCell(pCsr, &iCell);
+  p = hctDbEntryEntry(aPg, iCell);
+  if( pCsr->nRange ){
+    iPg = pCsr->aRange[pCsr->nRange-1].pg.iOldPg;
+  }else{
+    iPg = pCsr->pg.iOldPg;
+  }
+  return (iPg * pCsr->pDb->pgsz) + hctDbOffset(p->iOff, p->flags);
 }
 
 
@@ -7818,7 +7916,7 @@ static int hctDbValidateIntkey(HctDatabase *pDb, HctDbCsr *pCsr){
         }else{
           pCsr->eDir = BTREE_DIR_FORWARD;
         }
-        rc = hctDbCsrSeekAndDescend(pCsr, 0, pOp->iFirst, 0, &bDum);
+        rc = hctDbCsrSeekAndDescend(pCsr, 0, pOp->iFirst, &bDum);
       }
     }
 
@@ -7907,7 +8005,7 @@ static int hctDbValidateIndex(HctDatabase *pDb, HctDbCsr *pCsr){
       int bExact = 0;
       hctDbRecordUnpack(pCsr->pKeyInfo, pOp->nFirst, pOp->pFirst, pRec);
       pRec->default_rc = +1;
-      rc = hctDbCsrSeekAndDescend(pCsr, pRec, 0, 0, &bExact);
+      rc = hctDbCsrSeekAndDescend(pCsr, pRec, 0, &bExact);
       if( rc==SQLITE_OK && bExact==0 ){
         rc = hctDbCsrNext(pCsr);
       }

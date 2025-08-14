@@ -144,6 +144,8 @@ void sqlite3HctDbCsrClear(HctDbCsr*);
 
 void sqlite3HctDbCsrKey(HctDbCsr*, i64 *piKey);
 int sqlite3HctDbCsrData(HctDbCsr *pCsr, int *pnData, const u8 **paData);
+void sqlite3HctDbCsrPageData(HctDbCsr *pCsr, int *pnData, const u8 **paData);
+i64 sqlite3HctDbCsrOffset(HctDbCsr *pCsr);
 int sqlite3HctDbCsrLoadAndDecode(HctDbCsr *pCsr, UnpackedRecord **ppRec);
 
 int sqlite3HctDbStartRecovery(HctDatabase *pDb, int iStage);

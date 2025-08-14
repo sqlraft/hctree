@@ -31,6 +31,7 @@
 #define sqlite3BtreeTransferRow sqlite3StockBtreeTransferRow
 #define sqlite3BtreeClearTableOfCursor sqlite3StockBtreeClearTableOfCursor
 #define sqlite3BtreeCount sqlite3StockBtreeCount
+#define sqlite3BtreeOffset sqlite3StockBtreeOffset
 #define sqlite3BtreeCursor sqlite3StockBtreeCursor
 #ifdef SQLITE_DEBUG
 #define sqlite3BtreeSeekCount sqlite3StockBtreeSeekCount
