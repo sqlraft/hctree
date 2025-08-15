@@ -335,6 +335,30 @@ struct HctDatabaseStats {
 **   This is also set when a read-transaction is opened. The client may 
 **   assume that any TID greater than or equal to this one was first written
 **   *after* the transaction started.
+**
+** rcCommit:
+**   This is set to something other than SQLITE_OK if it is known that 
+**   attempting to commit the current transaction will fail. There are
+**   currently two cases in which this is used:
+**
+**     * When the transaction has already visited one or more keys or
+**       ranges that has been modified since the transaction began. In
+**       this case rcCommit is set to SQLITE_BUSY_SNAPSHOT.
+**
+**     * If an error occurs to do with saving scan ranges (in function
+**       hctDbCsrScanFinish()). In many cases this error cannot be
+**       reported to the upper layer because it occurs within a call to
+**       sqlite3BtreeCloseCursor().
+**
+**   rcCommit is set to SQLITE_OK at the start of each transaction. If 
+**   an attempt is made to commit a transaction after rcCommit is set to
+**   an error code, it fails with that error code.
+**
+** iRootCannotCommit:
+**   If rcCommit is set to SQLITE_BUSY_SNAPSHOT, this variable is set to
+**   the root page number of the table or index on which the old key or range
+**   was read. It is used for a log message if an attempt is made to commit
+**   the transaction.
 */
 struct HctDatabase {
   HctFile *pFile;
@@ -346,6 +370,8 @@ struct HctDatabase {
 
   HctDbCsr *pPrevScannerList;
   HctDbCsr *pScannerList;
+
+  int rcCommit;
   u64 iRootCannotCommit;
 
   /* These three are set at the start of each read transaction */
@@ -2117,7 +2143,6 @@ static int hctDbCsrScanStart(HctDbCsr *pCsr, UnpackedRecord *pRec, i64 iKey){
 }
 
 static int hctDbCsrScanFinish(HctDbCsr *pCsr){
-  int rc = SQLITE_OK;
   if( hctDbIsConcurrent(pCsr->pDb) && pCsr->bNoscan==0 ){
     if( pCsr->pKeyInfo==0 ){
       HctCsrIntkeyOp *pOp = pCsr->intkey.pCurrentOp;
@@ -2166,11 +2191,13 @@ static int hctDbCsrScanFinish(HctDbCsr *pCsr){
           u8 *aCopy = 0;
           if( !sqlite3HctDbCsrEof(pCsr) ){
             const u8 *aKey = 0;
-            rc = sqlite3HctDbCsrData(pCsr, &nKey, &aKey);
-            if( rc==SQLITE_OK ){
-              aCopy = sqlite3HctMalloc(nKey);
-              hctMemcpy(aCopy, aKey, nKey);
+            int rc = sqlite3HctDbCsrData(pCsr, &nKey, &aKey);
+            if( rc!=SQLITE_OK ){
+              pCsr->pDb->rcCommit = rc;
+              return rc;
             }
+            aCopy = sqlite3HctMalloc(nKey);
+            hctMemcpy(aCopy, aKey, nKey);
             if( pCsr->pg.iPg!=pOp->iLogical ){
               pOp->iLogical = pOp->iPhysical = 0;
             }
@@ -2192,8 +2219,7 @@ static int hctDbCsrScanFinish(HctDbCsr *pCsr){
       }
     }
   }
-
-  return rc;
+  return SQLITE_OK;
 }
 
 static int hctDbCsrFirst(HctDbCsr *pCsr){
@@ -2974,13 +3000,28 @@ static int hctDbCompareCellKey(
   int iDefaultRet
 );
 static int hctDbCsrPrev(HctDbCsr *pCsr);
+
+/*
+** Let K be the current key associated with range-cursor pRangeCsr. This
+** function returns less than, equal to or greater than zero if K is
+** less than, equal to or greater than pKey2, respectively. i.e.
+**
+**   ret = K - (*pKey2)
+**
+** If pRangeCsr is open on an index tree and pKey2 is the NULL key, then
+** iNullKeyRet is returned.
+*/
 static int hctDbCompareRangeCsrKey(
   int *pRc, 
   HctDatabase *pDb,
-  HctDbRangeCsr *pRangeCsr,
-  HctDbKey *pKey2,
-  int iNullKeyRet
-);
+  HctDbRangeCsr *pRangeCsr,       /* Range cursor to read key from */
+  HctDbKey *pKey2,                /* Key to compare against cursor key */
+  int iNullKeyRet                 /* Value to return if pKey is a NULL key */
+){
+  return hctDbCompareCellKey(
+    pRc, pDb, pRangeCsr->pg.aOld, pRangeCsr->iCell, pKey2, iNullKeyRet
+  );
+}
 
 static int hctDbCsrSeekAndDescend(
   HctDbCsr *pCsr,                 /* Cursor to seek */
@@ -3044,7 +3085,9 @@ static int hctDbCsrSeekAndDescend(
     if( p->iCell<0
      || p->eRange!=HCT_RANGE_MERGE 
      || hctDbCompareRangeCsrKey(&rc, pDb, p, &p->lowkey, 1)<0
+#if 0   /* TODO: (14/07/2025) remove this at some point */
      || hctDbCompareRangeCsrKey(&rc, pDb, p, &p->highkey, -1)>0
+#endif
     ){
       rc = hctDbCsrPrev(pCsr);
       bExact = 0;
@@ -3059,8 +3102,11 @@ static int hctDbCsrSeekAndDescend(
 ** If the cursor is currently pointing to a history entry, set the 
 ** HctDatabase.iRootCannotCommit variable.
 */
-#define hctDbSetCannotCommit(pCsr) {                                     \
-  if( (pCsr)->nRange>0 ) (pCsr)->pDb->iRootCannotCommit = pCsr->iRoot;   \
+#define hctDbSetCannotCommit(pCsr) {                          \
+  if( (pCsr)->nRange>0 && (pCsr)->pDb->rcCommit==SQLITE_OK ){ \
+    (pCsr)->pDb->iRootCannotCommit = pCsr->iRoot;             \
+    (pCsr)->pDb->rcCommit = SQLITE_BUSY_SNAPSHOT;             \
+  }                                                           \
 }
 
 /*
@@ -3166,6 +3212,8 @@ void sqlite3HctDbSetSavePhysical(
 }
 
 
+#ifndef SQLITE_COVERAGE_TEST
+
 /*
 ** This function is used while debugging hctree only. 
 **
@@ -3188,6 +3236,7 @@ static char *hctDbCsrDebugPosition(HctDbCsr *pCsr){
   zRet = sqlite3HctMprintf("(phys. page %lld, cell %d)", iPg, iCell);
   return zRet;
 }
+#endif
 
 int sqlite3HctDbCsrRollbackSeek(
   HctDbCsr *pCsr,                 /* Cursor to seek */
@@ -3282,24 +3331,28 @@ static void hctDbIrrevocablyEvictPage(HctDatabase *pDb, HctDbWriter *p);
 
 static int hctDbOverflowArrayFree(HctDatabase *pDb, HctDbOverflowArray *p){
   int ii = 0;
-  int rc = SQLITE_OK;
 
-  for(ii=0; rc==SQLITE_OK && ii<p->nEntry; ii++){
+  for(ii=0; ii<p->nEntry; ii++){
     u32 pgno = p->aOvfl[ii].pgno;
     int nRem = p->aOvfl[ii].nOvfl;
     while( 1 ){
       HctFilePage pg;
       sqlite3HctFileClearPhysInUse(pDb->pFile, pgno, 0);
       nRem--;
-      if( nRem==0 ) break;
-      rc = hctDbGetPhysical(pDb, pgno, &pg);
-      assert( rc==SQLITE_OK );
+      if( nRem==0 ){
+        break;
+      }else{
+        int rc = hctDbGetPhysical(pDb, pgno, &pg);
+        if( rc!=SQLITE_OK ){
+          return rc;
+        }
+      }
       pgno = ((HctDbPageHdr*)pg.aOld)->iPeerPg;
       sqlite3HctFilePageRelease(&pg);
     }
   }
 
-  return rc;
+  return SQLITE_OK;
 }
 
 #ifdef SQLITE_DEBUG
@@ -6616,18 +6669,6 @@ static int hctDbCompareCellKey(
   return ret;
 }
 
-static int hctDbCompareRangeCsrKey(
-  int *pRc, 
-  HctDatabase *pDb,
-  HctDbRangeCsr *pRangeCsr,       /* Range cursor to read key from */
-  HctDbKey *pKey2,                /* Key to compare against cursor key */
-  int iNullKeyRet                 /* Value to return if pKey is a NULL key */
-){
-  return hctDbCompareCellKey(
-    pRc, pDb, pRangeCsr->pg.aOld, pRangeCsr->iCell, pKey2, iNullKeyRet
-  );
-}
-
 /*
 ** Page pPg is currently the root page of a table being written by a 
 ** direct-write cursor.
@@ -6991,6 +7032,7 @@ int sqlite3HctDbEndRead(HctDatabase *pDb){
     pDb->pScannerList = 0;
   }
   pDb->iRootCannotCommit = 0;
+  pDb->rcCommit = SQLITE_OK;
   if( pDb->pTmap ){
     sqlite3HctTMapEnd(pTMapClient, pDb->iSnapshotId);
     pDb->pTmap = 0;
@@ -7250,10 +7292,7 @@ static int hctDbCsrGotoPeer(HctDbCsr *pCsr, int iCell){
   }
   iPeerPg = hctPagePeer(pPg->aOld);
 
-  if( iPeerPg==0 ){
-    /* Cursor is now at EOF */
-    hctDbCsrReset(pCsr);
-  }else{
+  if( iPeerPg ){
     sqlite3HctFilePageRelease(pPg);
     rc = sqlite3HctFilePageGet(pCsr->pDb->pFile, iPeerPg, pPg);
 
@@ -7263,6 +7302,10 @@ static int hctDbCsrGotoPeer(HctDbCsr *pCsr, int iCell){
     ));
   }
 
+  if( iPeerPg==0 || rc!=SQLITE_OK ){
+    /* Cursor is now at EOF */
+    hctDbCsrReset(pCsr);
+  }
   return rc;
 }
 
@@ -8091,15 +8134,14 @@ void sqlite3HctDbTMapScan(HctDatabase *pDb){
 ** the SQL for) the transaction.
 */
 int sqlite3HctDbPreValidate(HctDatabase *pDb){
-  int rc = SQLITE_OK;
+  assert( (pDb->rc==SQLITE_BUSY_SNAPSHOT)==(pDb->iRootCannotCommit!=0) );
   if( pDb->iRootCannotCommit ){
     sqlite3_log(SQLITE_BUSY_SNAPSHOT, 
         "read/write conflict (root=%lld) detected while preparing transaction",
         (i64)pDb->iRootCannotCommit
     );
-    rc = HCT_SQLITE_BUSY;
   }
-  return rc;
+  return pDb->rcCommit;
 }
 
 int 

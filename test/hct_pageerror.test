@@ -116,7 +116,6 @@ do_faultsim_test 4 -faults hctpage -prep {
 # Page-error while searching a historical index page.
 #
 hct_reset_db
-hct_reset_db
 do_execsql_test 5.0 {
   BEGIN;
     CREATE TABLE t1(a INTEGER PRIMARY KEY, b BLOB, c TEXT) WITHOUT ROWID;
@@ -133,7 +132,6 @@ do_execsql_test 5.0 {
 
 faultsim_save_and_close
 
-breakpoint
 do_faultsim_test 5 -faults hctpage -prep {
   faultsim_restore_and_reopen
   db eval { BEGIN; SELECT * FROM t1 WHERE a IN (3, 6); }
@@ -148,6 +146,67 @@ do_faultsim_test 5 -faults hctpage -prep {
 } -test {
   faultsim_test_result {0 {3 three 6 six}}
 }
+
+#-------------------------------------------------------------------------
+# Page-error while saving scan keys.
+#
+hct_reset_db
+do_execsql_test 6.0 {
+  BEGIN;
+    CREATE TABLE t1(a INTEGER PRIMARY KEY, b BLOB, c TEXT) WITHOUT ROWID;
+    INSERT INTO t1 VALUES(1, randomblob(5000), 'one');
+    INSERT INTO t1 VALUES(2, randomblob(5000), 'two');
+    INSERT INTO t1 VALUES(3, randomblob(5000), 'three');
+    INSERT INTO t1 VALUES(4, randomblob(5000), 'four');
+    INSERT INTO t1 VALUES(5, randomblob(5000), 'five');
+    INSERT INTO t1 VALUES(6, randomblob(5000), 'six');
+    INSERT INTO t1 VALUES(7, randomblob(5000), 'seven');
+    INSERT INTO t1 VALUES(8, randomblob(5000), 'eight');
+  COMMIT;
+}
+
+do_execsql_test 6.1 {
+  BEGIN CONCURRENT;
+    SELECT one.a FROM t1 one, t1 two WHERE two.a BETWEEN one.a AND one.a+1;
+  COMMIT;
+} {1 1 2 2 3 3 4 4 5 5 6 6 7 7 8}
+
+do_faultsim_test 6 -faults hctpage -prep {
+  catch {db close}
+  sqlite3 db test.db
+} -body {
+  execsql { 
+    BEGIN CONCURRENT;
+      SELECT one.a FROM t1 one, t1 two WHERE two.a BETWEEN one.a AND one.a+1;
+    COMMIT;
+  }
+} -test {
+  faultsim_test_result {0 {1 1 2 2 3 3 4 4 5 5 6 6 7 7 8}} 
+}
+
+#-------------------------------------------------------------------------
+# Page-error while marking overflow pages as free.
+#
+hct_reset_db
+do_execsql_test 7.0 {
+  BEGIN;
+    CREATE TABLE t1(a INTEGER PRIMARY KEY, b BLOB, c TEXT) WITHOUT ROWID;
+    INSERT INTO t1 VALUES(1, randomblob(15000), 'one');
+  COMMIT;
+}
+
+faultsim_save_and_close
+
+do_faultsim_test 7 -faults hctpage -prep {
+  faultsim_restore_and_reopen
+} -body {
+  execsql { 
+    DELETE FROM t1;
+  }
+} -test {
+  faultsim_test_result {0 {}}
+}
+
 
 
 finish_test
