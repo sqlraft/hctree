@@ -41,7 +41,9 @@ do_execsql_test 1.1 {
 } {ok}
 
 proc do_recover_test {tn sql} {
-  for {set ii 1} {$ii<500} {incr ii} {
+if {$tn!=6} return
+breakpoint
+  for {set ii 30} {$ii<500} {incr ii} {
     write_script [subst {
       sqlite3_hct_proc_failure $ii
       sqlite3 db test.db

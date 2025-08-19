@@ -91,7 +91,7 @@ void sqlite3HctTMapClientFree(HctTMapClient *pClient);
 /*
 ** Obtain, update or release a reference to a transaction map object.
 */
-int sqlite3HctTMapBegin(HctTMapClient *p, u64 iSnapshot, u64 iPeekTid, HctTMap **ppMap);
+HctTMap *sqlite3HctTMapBegin(HctTMapClient *p, u64 iSnapshot, u64 iPeekTid);
 int sqlite3HctTMapUpdate(HctTMapClient *p, HctTMap **ppMap);
 int sqlite3HctTMapEnd(HctTMapClient *p, u64 iCID);
 

@@ -75,25 +75,22 @@ struct HctJrnlServer {
 /*
 ** There is one instance of this structure for each database handle (HBtree*)
 ** open on a replication-enabled hctree database.
-**
-** eInWrite:
-**   Set to true while the database connection is in a call to
-**   sqlite3_hct_journal_write().
 */
 struct HctJournal {
   HctDatabase *pDb;
   HctJrnlServer *pServer;
 
-  int bInJrnlCommit;
+  int eJrnlCommit;
+
   const u8 *pJrnlData;
   int nJrnlData;
   i64 iJrnlCid;
   i64 iJrnlSnapshot;
 };
 
-#define HCT_JOURNAL_NONE          0
-#define HCT_JOURNAL_INWRITE       1
-#define HCT_JOURNAL_INROLLBACK    2
+#define HCT_JOURNAL_COMMIT_FOLLOWER 1
+#define HCT_JOURNAL_COMMIT_LEADER   2
+#define HCT_JOURNAL_COMMIT_LOCAL    3
 
 static void hctJournalSetDbError(
   sqlite3 *db,                    /* Database on which to set error */
@@ -101,19 +98,17 @@ static void hctJournalSetDbError(
   const char *zFormat, ...        /* Printf() error string and arguments */
 ){
   char *zErr = 0;
+  va_list ap;
+
+  assert( zFormat );
   sqlite3_mutex_enter( sqlite3_db_mutex(db) );
-  if( zFormat ){
-    va_list ap;
-    va_start(ap, zFormat);
-    zErr = sqlite3_vmprintf(zFormat, ap);
-    va_end(ap);
-  }
-  if( zErr ){
-    sqlite3ErrorWithMsg(db, rc, "%s", zErr);
-    sqlite3_free(zErr);
-  }else{
-    sqlite3ErrorWithMsg(db, rc, 0, 0);
-  }
+
+  va_start(ap, zFormat);
+  zErr = sqlite3HctVmprintf(zFormat, ap);
+  sqlite3ErrorWithMsg(db, rc, "%s", zErr);
+  sqlite3_free(zErr);
+  va_end(ap);
+
   sqlite3_mutex_leave( sqlite3_db_mutex(db) );
 }
 
@@ -146,7 +141,9 @@ int sqlite3_hct_journal_init(sqlite3 *db){
   /* HBtree *p = (HBtree*)db->aDb[0].pBt; */
   int rc = SQLITE_OK;
 
-  /* Test that there is not already an open transaction on this database. */
+  /* Test that there is not already an open transaction on this database. 
+  ** Return early if there is. Do not simply set rc and fall through, as
+  ** code at the bottom of this function might ROLLBACK the transaction. */
   if( sqlite3_get_autocommit(db)==0 ){
     hctJournalSetDbError(db, SQLITE_ERROR, "open transaction on database");
     return SQLITE_ERROR;
@@ -155,7 +152,7 @@ int sqlite3_hct_journal_init(sqlite3 *db){
   /* Test that the main db really is an hct database. Leave rc set to 
   ** something other than SQLITE_OK and an error message in the database
   ** handle if it is not. */
-  if( rc==SQLITE_OK ){
+  {
     i64 nDbFile = 0;
     rc = hctDbExecForInt(db, "PRAGMA hct_ndbfile", &nDbFile);
     if( rc==SQLITE_OK && nDbFile==0 ){
@@ -176,7 +173,7 @@ int sqlite3_hct_journal_init(sqlite3 *db){
   if( rc==SQLITE_OK ){
     i64 iMax;
     rc = hctDbExecForInt(db, "SELECT max(cid) FROM hct_journal", &iMax);
-    if( iMax==0 ){
+    if( rc==SQLITE_OK && iMax==0 ){
       rc = sqlite3_exec(db,
           "INSERT INTO hct_journal VALUES(1, '', 0, NULL)", 0, 0, 0
       );
@@ -210,25 +207,6 @@ int sqlite3_hct_journal_init(sqlite3 *db){
 }
 
 /*
-** Register a custom validation callback with the database handle.
-*/
-int sqlite3_hct_journal_hook(
-  sqlite3 *db,
-  void *pArg,
-  int(*xValidate)(
-    void *pCopyOfArg,
-    sqlite3_int64 iCid,
-    const char *zSchema,
-    const void *pData, int nData,
-    sqlite3_int64 iSchemaCid
-  )
-){
-  db->xValidate = xValidate;
-  db->pValidateArg = pArg;
-  return SQLITE_OK;
-}
-
-/*
 ** Value iVal is to be stored as an integer in an SQLite record. This 
 ** function returns the number of bytes that it will use for storage.
 */
@@ -258,13 +236,22 @@ static void hctJrnlIntPut(u8 *a, u64 iVal, int nByte){
 ** header for an nSize byte integer field.
 */
 static u8 hctJrnlIntHdr(int nSize){
-  if( nSize==8 ) return 6;
-  if( nSize==6 ) return 5;
-  return nSize;
+  u8 aRet[9] = { 0xFF, 1, 2, 3, 4, 0xFF, 5, 0xFF, 6 };
+  assert( nSize>=1 && nSize<=8 && nSize!=5 && nSize!=7 );
+  return aRet[nSize];
 }
 
 /*
-** Compose an SQLite record suitable for the sqlite_hct_journal table.
+** Compose an SQLite record suitable for the sqlite_hct_journal table. The
+** record consists of 4 fields, as follows:
+**
+**   cid:      integer value - parameter iCid.
+**   query:    blob value - parameters pData and nData.
+**   snapshot: integer value - parameter iSnapshot.
+**   logptr:   blob value - parameters pPtr and nPtr.
+**
+** Both iCid and iSnapshot are used exactly as they are - this function 
+** does *not* divide them by HCT_CID_INCREMENT. 
 */
 static u8 *hctJrnlComposeRecord(
   u64 iCid,
@@ -277,6 +264,8 @@ static u8 *hctJrnlComposeRecord(
   int nRec = 0;
   int nHdr = 0;
   int nBody = 0;
+  u8 *pHdr = 0;
+  u8 *pBody = 0;
   int nSnapshotByte = 0;
 
   nSnapshotByte = hctJrnlIntSize(iSnapshot);
@@ -294,38 +283,33 @@ static u8 *hctJrnlComposeRecord(
        + nPtr;                                 /* "logptr" - BLOB */
 
   nRec = nBody+nHdr;
-  pRec = (u8*)sqlite3_malloc(nRec);
-  if( pRec ){
-    u8 *pHdr = pRec;
-    u8 *pBody = &pRec[nHdr];
+  pHdr = pRec = (u8*)sqlite3HctMalloc(nRec);
+  pBody = &pRec[nHdr];
 
-    *pHdr++ = (u8)nHdr;           /* size-of-header varint */
-    *pHdr++ = 0x00;               /* "cid" - NULL */
+  *pHdr++ = (u8)nHdr;           /* size-of-header varint */
+  *pHdr++ = 0x00;               /* "cid" - NULL */
 
-    /* "query" field - BLOB */
-    pHdr += sqlite3PutVarint(pHdr, (nData*2) + 12);
-    if( nData>0 ){
-      memcpy(pBody, pData, nData);
-      pBody += nData;
-    }
-
-    /* "snapshot" field - INTEGER */
-    *pHdr++ = hctJrnlIntHdr(nSnapshotByte);
-    hctJrnlIntPut(pBody, iSnapshot, nSnapshotByte);
-    pBody += nSnapshotByte;
-
-    /* "logptr" field - BLOB or NULL */
-    pHdr += sqlite3PutVarint(pHdr, (nPtr ? ((nPtr*2) + 12): 0));
-    if( nPtr>0 ){
-      memcpy(pBody, aPtr, nPtr);
-      pBody += nPtr;
-    }
-
-    assert( pHdr==&pRec[nHdr] );
-    assert( pBody==&pRec[nRec] );
-  }else{
-    nRec = 0;
+  /* "query" field - BLOB */
+  pHdr += sqlite3PutVarint(pHdr, (nData*2) + 12);
+  if( nData>0 ){
+    memcpy(pBody, pData, nData);
+    pBody += nData;
   }
+
+  /* "snapshot" field - INTEGER */
+  *pHdr++ = hctJrnlIntHdr(nSnapshotByte);
+  hctJrnlIntPut(pBody, iSnapshot, nSnapshotByte);
+  pBody += nSnapshotByte;
+
+  /* "logptr" field - BLOB or NULL */
+  pHdr += sqlite3PutVarint(pHdr, (nPtr ? ((nPtr*2) + 12): 0));
+  if( nPtr>0 ){
+    memcpy(pBody, aPtr, nPtr);
+    pBody += nPtr;
+  }
+
+  assert( pHdr==&pRec[nHdr] );
+  assert( pBody==&pRec[nRec] );
 
   *pnRec = nRec;
   return pRec;
@@ -335,44 +319,48 @@ static u8 *hctJrnlComposeRecord(
 static int hctJrnlWriteRecord(
   HctJournal *pJrnl,
   int bNotid,
+  int bDel,
   u64 iCid,
   const void *pData, int nData,
   u64 iSnapshot,
   int nPtr, const u8 *aPtr
 ){
+  HctDatabase *pDb = pJrnl->pDb;
+  const u32 iR = (u32)pJrnl->pServer->iJrnlRoot;
+  int nRetry = 0;
   int rc = SQLITE_OK;
   u8 *pRec = 0;
   int nRec = 0;
 
-  pRec = hctJrnlComposeRecord(iCid, pData, nData, iSnapshot, nPtr, aPtr, &nRec);
-
-  if( pRec==0 ){
-    rc = SQLITE_NOMEM_BKPT;
-  }else{
-    HctDatabase *pDb = pJrnl->pDb;
-    int nRetry = 0;
-    u32 iR = (u32)pJrnl->pServer->iJrnlRoot;
-    do {
-      
-      nRetry = 0;
-      if( bNotid==0 ){
-        rc = sqlite3HctDbInsert(pDb, iR, 0, iCid, 0, nRec, pRec, &nRetry);
-      }else{
-        rc = sqlite3HctDbJrnlWrite(pDb, iR, iCid, nRec, pRec, &nRetry);
-      }
-      if( rc!=SQLITE_OK ) break;
-      assert( nRetry==0 || nRetry==1 );
-      if( nRetry==0 ){
-        rc = sqlite3HctDbInsertFlush(pDb, &nRetry);
-        if( rc!=SQLITE_OK ) break;
-      }
-    }while( nRetry );
+  if( bDel==0 ){
+    pRec = hctJrnlComposeRecord(
+        iCid, pData, nData, iSnapshot, nPtr, aPtr, &nRec
+    );
   }
-  sqlite3_free(pRec);
 
+  assert( bDel==0 || bNotid==0 );
+  do {
+    nRetry = 0;
+    if( bNotid==0 ){
+      rc = sqlite3HctDbInsert(pDb, iR, 0, iCid, bDel, nRec, pRec, &nRetry);
+    }else{
+      rc = sqlite3HctDbJrnlWrite(pDb, iR, iCid, nRec, pRec, &nRetry);
+    }
+    if( rc==SQLITE_OK && nRetry==0 ){
+      rc = sqlite3HctDbInsertFlush(pDb, &nRetry);
+    }
+    assert( nRetry==0 || nRetry==1 );
+    assert( nRetry==0 || rc==SQLITE_OK );
+  }while( nRetry );
+
+  sqlite3_free(pRec);
   return rc;
 }
 
+/*
+** This is called when committing a transaction to write the entry into
+** the hct_journal table.
+*/
 int sqlite3HctJrnlLog(
   HctJournal *pJrnl, 
   u64 iCid, 
@@ -383,11 +371,17 @@ int sqlite3HctJrnlLog(
 ){
   int rc = rcin;
   if( pJrnl->pJrnlData ){
+    assert( (iCid % HCT_CID_INCREMENT)==0 );
+
+    /* Scale the cid and snapshot values */
+    iCid = iCid / HCT_CID_INCREMENT;
+    iSnapshot = iSnapshot / HCT_CID_INCREMENT;
+
     if( rcin==SQLITE_OK ){
       HctJrnlServer *pServer = pJrnl->pServer;
       if( pServer->eMode==SQLITE_HCT_FOLLOWER ){
         assert( iCid==pJrnl->iJrnlCid );
-        rc = hctJrnlWriteRecord(pJrnl, 0, iCid, 
+        rc = hctJrnlWriteRecord(pJrnl, 0, 0, iCid, 
             pJrnl->pJrnlData, pJrnl->nJrnlData, pJrnl->iJrnlSnapshot, nPtr, aPtr
         );
 
@@ -397,13 +391,13 @@ int sqlite3HctJrnlLog(
 
       }else{
         assert( pServer->eMode==SQLITE_HCT_LEADER );
-        rc = hctJrnlWriteRecord(pJrnl, 0, iCid,
+        rc = hctJrnlWriteRecord(pJrnl, 0, 0, iCid,
             pJrnl->pJrnlData, pJrnl->nJrnlData, iSnapshot, nPtr, aPtr
         );
         pJrnl->iJrnlSnapshot = iSnapshot;
       }
     }else{
-      hctJrnlWriteRecord(pJrnl, 1, iCid, 0, 0, 0, 0, 0);
+      hctJrnlWriteRecord(pJrnl, 1, 0, iCid, 0, 0, 0, 0, 0);
       pJrnl->iJrnlSnapshot = 0;
     }
     pJrnl->iJrnlCid = iCid;
@@ -448,17 +442,15 @@ int sqlite3HctJournalNew(
   HctDatabase *pDb, 
   HctJournal **pp
 ){
+  HctFile *pFile = sqlite3HctDbFile(pDb);
   int rc = SQLITE_OK;
   HctJournal *pNew;
 
   assert( *pp==0 );
-  pNew = sqlite3HctMallocRc(&rc, sizeof(HctJournal));
-  if( pNew ){
-    HctFile *pFile = sqlite3HctDbFile(pDb);
-    pNew->pDb = pDb;
-    pNew->pServer = (HctJrnlServer*)sqlite3HctFileGetJrnlPtr(pFile);
-    *pp = pNew;
-  }
+  pNew = (HctJournal*)sqlite3HctMalloc(sizeof(HctJournal));
+  pNew->pDb = pDb;
+  pNew->pServer = (HctJrnlServer*)sqlite3HctFileGetJrnlPtr(pFile);
+  *pp = pNew;
 
   hctJrnlTryToFreeLog(pNew);
 
@@ -487,54 +479,8 @@ int sqlite3HctJournalIsNosnap(HctJournal *pJrnl, i64 iTable){
 ** Called during log file recovery to remove the entry with cid value iCid.
 */
 int sqlite3HctJrnlRollbackEntry(HctJournal *pJrnl, i64 iCid){
-  int rc = SQLITE_OK;
-  int nRetry = 0;
-  i64 iJrnlRoot = pJrnl->pServer->iJrnlRoot;
-
-  rc = sqlite3HctDbInsert(pJrnl->pDb, iJrnlRoot, 0, iCid, 1, 0, 0, &nRetry);
-
-  /* This is part of recovery, so this client should have exclusive access
-  ** to the db. Therefore there is no chance of requiring retries. */
-  assert( nRetry==0 );
-  if( rc==SQLITE_OK ){
-    rc = sqlite3HctDbInsertFlush(pJrnl->pDb, &nRetry);
-    assert( nRetry==0 );
-  }
-
-  return rc;
+  return hctJrnlWriteRecord(pJrnl, 0, 1, iCid, 0, 0, 0, 0, 0);
 }
-
-/*
-** Find the HctJournal object associated with the "main" database of the
-** connection passed as the only argument. If successful, set (*ppJrnl)
-** to point to said object and return SQLITE_OK. Or, if the database is
-** not a replication-enabled db, set (*ppJrnl) to NULL and return SQLITE_OK.
-** Or, if an error occurs, return an SQLite error code. The final value
-** of (*ppJrnl) is undefined in this case.
-*/
-static int hctJrnlFind(sqlite3 *db, HctJournal **ppJrnl){
-  int rc = SQLITE_OK;
-  HctJournal *pJrnl = sqlite3HctJrnlFind(db);
-
-  if( pJrnl==0 ){
-    /* If the journal was not found, it might be because the database is
-    ** not yet initialized. Run a query to ensure it is, then try to retrieve
-    ** the journal object again.  */
-    rc = sqlite3_exec(db, "SELECT 1 FROM sqlite_schema LIMIT 1", 0, 0, 0);
-    if( rc==SQLITE_OK ){
-      pJrnl = sqlite3HctJrnlFind(db);
-    }
-  }
-
-  if( rc==SQLITE_OK && pJrnl==0 ){
-    hctJournalSetDbError(db, SQLITE_ERROR, "not a journaled hct database");
-    rc = SQLITE_ERROR;
-  }
-
-  *ppJrnl = pJrnl;
-  return rc;
-}
-
 
 /*
 ** Return the current journal mode - SQLITE_HCT_JOURNAL_MODE_FOLLOWER or
@@ -607,19 +553,21 @@ int sqlite3_hct_journal_setmode(sqlite3 *db, int eMode){
     i64 iCidMax = 0;
     u64 *aCommit = 0;
 
-
     rc = hctDbExecForInt(db, "SELECT max(cid) FROM hct_journal", &iCidMax);
+    iCidMax = iCidMax * HCT_CID_INCREMENT;
     aCommit = (u64*)sqlite3HctMallocRc(&rc, HCT_MAX_LEADING_WRITE*sizeof(u64));
 
+#if 0
     if( rc==SQLITE_OK ){
       rc = hctDbExecForInt(db, 
           "SELECT rootpage FROM sqlite_schema WHERE name = 'hct_journal'", 
           &pServer->iJrnlRoot
       );
     }
+#endif
 
     /* Populate a new transaction-map. */
-    if( rc==SQLITE_OK ){
+    {
       HctTMapClient *pTClient = sqlite3HctFileTMapClient(pFile);
       i64 iLastTid = sqlite3HctFilePeekTransid(pFile);
       i64 iFirstTid = MAX(1, (iLastTid+1 - HCT_MAX_LEADING_WRITE));
@@ -649,18 +597,16 @@ int sqlite3_hct_journal_setmode(sqlite3 *db, int eMode){
 
       /* Check that the journal is contiguous. Set rc to SQLITE_ERROR and 
       ** leave an error message in the db handle if it is not. */
-      for(iTest=pServer->iSnapshot+1; 
-          iTest<pServer->iSnapshot+pServer->nCommit;
-          iTest++
-      ){
-        u64 iVal = HctAtomicLoad(&pServer->aCommit[iTest % pServer->nCommit]);
-        if( iVal==iTest ){
+      for(iTest=1; iTest<=pServer->nCommit; iTest++){
+        u64 iScaled = iTest + (pServer->iSnapshot / HCT_CID_INCREMENT);
+        u64 iVal = HctAtomicLoad(&pServer->aCommit[iScaled % pServer->nCommit]);
+        if( iVal==iScaled ){
           if( bSeenMiss ){
             rc = SQLITE_ERROR;
             hctJournalSetDbError(db, rc, "non-contiguous journal table");
             break;
           }
-          iSnap = iTest;
+          iSnap = (iScaled * HCT_CID_INCREMENT);
         }else{
           bSeenMiss = 1;
         }
@@ -697,14 +643,6 @@ int sqlite3_hct_journal_setmode(sqlite3 *db, int eMode){
   return rc;
 }
 
-void sqlite3HctJournalSchemaVersion(HctJournal *pJrnl, u32 *pSchemaVersion){
-#if 0
-  if( pJrnl && pJrnl->pServer ){
-    *pSchemaVersion += HctAtomicLoad(&pJrnl->pServer->nSchemaVersionIncr);
-  }
-#endif
-}
-
 u64 sqlite3HctJrnlSnapshot(HctJournal *pJrnl){
   u64 iRet = 0;
   if( pJrnl ){
@@ -712,16 +650,23 @@ u64 sqlite3HctJrnlSnapshot(HctJournal *pJrnl){
     if( pServer->eMode==SQLITE_HCT_FOLLOWER ){
       u64 iTest = 0;
 
+      /* Read the current server snapshot. This is an unscaled value, so
+      ** divide by HCT_CID_INCREMENT to get the external CID value.  */
       u64 iSnap = HctAtomicLoad(&pServer->iSnapshot);
-      iRet = iSnap;
+      iRet = (iSnap / HCT_CID_INCREMENT);
+
       for(iTest=iRet+1; 1; iTest++){
         u64 iVal = HctAtomicLoad(&pServer->aCommit[iTest % pServer->nCommit]);
         if( iVal!=iTest ) break;
         iRet = iTest;
       }
 
+      /* Scale the value for external use. */
+      iRet = iRet * HCT_CID_INCREMENT;
+      if( iRet<iSnap ) iRet = iSnap;
+
       /* Update HctJrnlServer.iSnapshot if required and if possible */
-      if( iRet>=iSnap+16 ){
+      if( iRet>=iSnap+(16 * HCT_CID_INCREMENT) ){
         (void)HctCASBool(&pServer->iSnapshot, iSnap, iRet);
       }
     }
@@ -735,15 +680,16 @@ u64 sqlite3HctJrnlSnapshot(HctJournal *pJrnl){
 ** error code if something goes wrong.
 */
 int sqlite3_hct_journal_snapshot(sqlite3 *db, sqlite3_int64 *piCid){
+  HctJournal *pJrnl = sqlite3HctJrnlFind(db);
   int rc = SQLITE_OK;
-  HctJournal *pJrnl = 0;
 
-  rc = hctJrnlFind(db, &pJrnl);
-  if( rc==SQLITE_OK ){
-    *piCid = (i64)sqlite3HctJrnlSnapshot(pJrnl);
+  if( pJrnl->pServer->eMode==SQLITE_HCT_FOLLOWER ){
+    *piCid = (i64)sqlite3HctJrnlSnapshot(pJrnl) / HCT_CID_INCREMENT;
   }else{
-    *piCid = 0;
+    rc = SQLITE_ERROR;
+    hctJournalSetDbError(db, SQLITE_ERROR, "not a FOLLOWER mode db");
   }
+
   return rc;
 }
 
@@ -765,97 +711,36 @@ void sqlite3HctJournalServerFree(void *pJrnlPtr){
   hctJrnlDelServer(pJrnlPtr);
 }
 
-int sqlite3_hct_journal_follower_commit(
-  sqlite3 *db,                    /* Commit transaction for this db handle */
-  const unsigned char *aData,     /* Data to write to "query" column */
-  int nData,                      /* Size of aData[] in bytes */
-  sqlite3_int64 iCid,             /* CID of committed transaction */
-  sqlite3_int64 iSnapshot         /* Value for hct_journal.snapshot field */
-){
-  HctJournal *pJrnl = sqlite3HctJrnlFind(db);
-  int rc = SQLITE_OK;
-
-  /* Check the db really is in FOLLOWER mode */
-  if( pJrnl->pServer->eMode!=SQLITE_HCT_FOLLOWER ){
-    hctJournalSetDbError(db, SQLITE_ERROR, "not a FOLLOWER mode db");
-    return SQLITE_ERROR;  
-  }
-
-  assert( pJrnl->iJrnlCid==0 );
-  assert( pJrnl->iJrnlSnapshot==0 );
-  assert( pJrnl->nJrnlData==0 );
-  assert( pJrnl->pJrnlData==0 );
-  assert( pJrnl->bInJrnlCommit==0 );
-
-  pJrnl->pJrnlData = aData;
-  pJrnl->nJrnlData = nData;
-  pJrnl->iJrnlCid = iCid;
-  pJrnl->iJrnlSnapshot = iSnapshot;
-
-  pJrnl->bInJrnlCommit = 1;
-  rc = sqlite3_exec(db, "COMMIT", 0, 0, 0);
-  pJrnl->bInJrnlCommit = 0;
-
-  pJrnl->pJrnlData = 0;
-  pJrnl->nJrnlData = 0;
-  pJrnl->iJrnlCid = 0;
-  pJrnl->iJrnlSnapshot = 0;
-
-  return rc;
-}
-
-/*
-** Commit a leader transaction.
-*/
-int sqlite3_hct_journal_leader_commit(
-  sqlite3 *db,                    /* Commit transaction for this db handle */
-  const unsigned char *aData,     /* Data to write to "query" column */
-  int nData,                      /* Size of aData[] in bytes */
-  sqlite3_int64 *piCid,           /* OUT: CID of committed transaction */
-  sqlite3_int64 *piSnapshot       /* OUT: Min. snapshot to recreate */
-){
-  HctJournal *pJrnl = sqlite3HctJrnlFind(db);
-  int rc = SQLITE_OK;
-
-  /* Check the db really is in LEADER mode */
-  if( pJrnl->pServer->eMode!=SQLITE_HCT_LEADER ){
-    hctJournalSetDbError(db, SQLITE_ERROR, "not a LEADER mode db");
-    return SQLITE_ERROR;  
-  }
-
-  assert( pJrnl->iJrnlCid==0 );
-  assert( pJrnl->iJrnlSnapshot==0 );
-  assert( pJrnl->nJrnlData==0 );
-  assert( pJrnl->pJrnlData==0 );
-
-  pJrnl->pJrnlData = aData;
-  pJrnl->nJrnlData = nData;
-
-  pJrnl->bInJrnlCommit = 1;
-  rc = sqlite3_exec(db, "COMMIT", 0, 0, 0);
-  pJrnl->bInJrnlCommit = 0;
-
-  *piCid = pJrnl->iJrnlCid;
-  *piSnapshot = pJrnl->iJrnlSnapshot;
-
-  pJrnl->pJrnlData = 0;
-  pJrnl->nJrnlData = 0;
-  pJrnl->iJrnlCid = 0;
-  pJrnl->iJrnlSnapshot = 0;
-
-  return rc;
-}
-
 int sqlite3HctJrnlCommitOk(HctJournal *pJrnl){
-  if( pJrnl->pServer->eMode!=SQLITE_HCT_NORMAL && pJrnl->bInJrnlCommit==0 ){
+  if( pJrnl->pServer->eMode!=SQLITE_HCT_NORMAL && pJrnl->eJrnlCommit==0 ){
     return 0;
   }
   return 1;
 }
 
-u64 sqlite3HctJrnlFollowerModeCid(HctJournal *pJrnl){
+int sqlite3HctJrnlFollowerModeCid(HctJournal *pJrnl, u64 *piCid){
+  if( pJrnl->eJrnlCommit==HCT_JOURNAL_COMMIT_LOCAL
+   && pJrnl->pServer->eMode==SQLITE_HCT_FOLLOWER
+  ){
+    u64 *piSnapshot = &pJrnl->pServer->iSnapshot;
+
+    while( 1 ){
+      u64 iOld = HctAtomicLoad(piSnapshot);
+      u64 iSnap = 0;
+      iSnap = sqlite3HctJrnlSnapshot(pJrnl);
+      if( ((iSnap+1) % HCT_CID_INCREMENT)==0 ){
+        return SQLITE_BUSY_SNAPSHOT;
+      }
+      if( HctCASBool(piSnapshot, iOld, iSnap+1) ){
+        *piCid = iSnap+1;
+        return SQLITE_OK;
+      }
+    }
+
+  }
   assert( (pJrnl->iJrnlCid!=0)==(pJrnl->pServer->eMode==SQLITE_HCT_FOLLOWER) );
-  return pJrnl->iJrnlCid;
+  *piCid = (pJrnl->iJrnlCid * HCT_CID_INCREMENT);
+  return SQLITE_OK;
 }
 
 void sqlite3HctJrnlSetRoot(HctJournal *pJrnl, Schema *pSchema){
@@ -887,37 +772,23 @@ int sqlite3HctJrnlRecoveryMode(sqlite3 *db, HctJournal *pJrnl, int *peMode){
   return rc;
 }
 
-/*
-** Parameter aInt points to a sorted list of nInt 64-bit integer values.
-** Return true if iVal appears in this list, or false otherwise.
-*/
-static int hctListContains(int nInt, i64 *aInt, i64 iVal){
-  int i1 = 0;
-  int i2 = nInt;
-  while( i2>i1 ){
-    int iTest = (i1 + i2) / 2;
-    if( aInt[iTest]==iVal ){
-      return 1;
-    }
-    if( aInt[iTest]<iVal ){
-      i1 = iTest+1;
-    }else{
-      i2 = iTest;
-    }
-  }
-  return 0;
-}
-
 int sqlite3HctJrnlFindLogs(
   sqlite3 *db,
   HctJournal *pJrnl, 
-  int nDel, i64 *aDel,
   void *pCtx,
   int (*xLog)(void*, i64, int, const u8*),
   int (*xMap)(void*, i64, i64)
 ){
   int rc = SQLITE_OK;
   if( pJrnl->pServer->iJrnlRoot ){
+    /* It is important to use an SQL query to scan the hct_journal table
+    ** here. When this function is called (during recovery), there may be log
+    ** files in the file-system that still need to be rolled back. And
+    ** these rollbacks may remove rows from the hct_journal table, changing
+    ** the callbacks made by this function. However, the TIDs corresponding
+    ** to all such transactions have already been marked as HCT_TID_ROLLBACK -
+    ** so the SQL query will ignore any such entries in hct_journal as if
+    ** they were already rolled back.  */
     const char *zSql = 
       "SELECT cid, logptr FROM hct_journal WHERE cid> ( "
       "  SELECT max(cid)-? FROM hct_journal"
@@ -932,14 +803,6 @@ int sqlite3HctJrnlFindLogs(
         i64 iCid = sqlite3_column_int64(pSql, 0);
         int nPtr = sqlite3_column_bytes(pSql, 1);
         const u8 *aPtr = (const u8*)sqlite3_column_blob(pSql, 1);
-
-        if( nPtr>=sizeof(i64) ){
-          i64 iVal;
-          memcpy(&iVal, aPtr, sizeof(i64));
-          if( hctListContains(nDel, aDel, iVal) ){
-            continue;
-          }
-        }
 
         if( nPtr==SIZEOF_FOLLOWER_LOGPTR && iPrev>=0 && iPrev!=iCid-1 ){
           rc = xLog(pCtx, iCid, nPtr, aPtr);
@@ -979,8 +842,124 @@ int sqlite3HctJrnlZeroEntries(HctJournal *pJrnl, int nEntry, i64 *aEntry){
   int ii;
   int rc = SQLITE_OK;
   for(ii=0; rc==SQLITE_OK && ii<nEntry; ii++){
-    rc = hctJrnlWriteRecord(pJrnl, 1, aEntry[ii], 0, 0, 0, 0, 0);
+    rc = hctJrnlWriteRecord(pJrnl, 1, 0, aEntry[ii], 0, 0, 0, 0, 0);
   }
+
+  return rc;
+}
+
+/*
+** Return true if currently inside a call to sqlite3_hct_journal_local_commit()
+*/
+int sqlite3HctJrnlIsLocalCommit(HctJournal *pJrnl){
+  return (pJrnl->eJrnlCommit==HCT_JOURNAL_COMMIT_LOCAL);
+}
+
+/*
+** Commit a leader transaction.
+*/
+int sqlite3_hct_journal_leader_commit(
+  sqlite3 *db,                    /* Commit transaction for this db handle */
+  const unsigned char *aData,     /* Data to write to "query" column */
+  int nData,                      /* Size of aData[] in bytes */
+  sqlite3_int64 *piCid,           /* OUT: CID of committed transaction */
+  sqlite3_int64 *piSnapshot       /* OUT: Min. snapshot to recreate */
+){
+  HctJournal *pJrnl = sqlite3HctJrnlFind(db);
+  int rc = SQLITE_OK;
+
+  /* Check the db really is in LEADER mode */
+  if( pJrnl->pServer->eMode!=SQLITE_HCT_LEADER ){
+    hctJournalSetDbError(db, SQLITE_ERROR, "not a LEADER mode db");
+    return SQLITE_ERROR;  
+  }
+
+  assert( pJrnl->iJrnlCid==0 );
+  assert( pJrnl->iJrnlSnapshot==0 );
+  assert( pJrnl->nJrnlData==0 );
+  assert( pJrnl->pJrnlData==0 );
+
+  pJrnl->pJrnlData = aData;
+  pJrnl->nJrnlData = nData;
+
+  pJrnl->eJrnlCommit = HCT_JOURNAL_COMMIT_LEADER;
+  rc = sqlite3_exec(db, "COMMIT", 0, 0, 0);
+  pJrnl->eJrnlCommit = 0;
+
+  *piCid = pJrnl->iJrnlCid;
+  *piSnapshot = pJrnl->iJrnlSnapshot;
+
+  pJrnl->pJrnlData = 0;
+  pJrnl->nJrnlData = 0;
+  pJrnl->iJrnlCid = 0;
+  pJrnl->iJrnlSnapshot = 0;
+
+  return rc;
+}
+
+
+int sqlite3_hct_journal_follower_commit(
+  sqlite3 *db,                    /* Commit transaction for this db handle */
+  const unsigned char *aData,     /* Data to write to "query" column */
+  int nData,                      /* Size of aData[] in bytes */
+  sqlite3_int64 iCid,             /* CID of committed transaction */
+  sqlite3_int64 iSnapshot         /* Value for hct_journal.snapshot field */
+){
+  HctJournal *pJrnl = sqlite3HctJrnlFind(db);
+  int rc = SQLITE_OK;
+
+  /* Check the db really is in FOLLOWER mode */
+  if( pJrnl->pServer->eMode!=SQLITE_HCT_FOLLOWER ){
+    hctJournalSetDbError(db, SQLITE_ERROR, "not a FOLLOWER mode db");
+    return SQLITE_ERROR;  
+  }
+
+  /* Check if the transaction was prepared against a snapshot new enough
+  ** for the transaction. Parameter iSnapshot is scaled, but the return
+  ** value of sqlite3HctDbSnapshotId() is not, so multiply iSnapshot by
+  ** HCT_CID_INCREMENT before doing the comparison.  */
+  if( sqlite3HctDbSnapshotId(pJrnl->pDb)<(iSnapshot*HCT_CID_INCREMENT) ){
+    hctJournalSetDbError(db, SQLITE_BUSY_SNAPSHOT, "snapshot too old");
+    return SQLITE_BUSY_SNAPSHOT;  
+  }
+
+  assert( pJrnl->iJrnlCid==0 );
+  assert( pJrnl->iJrnlSnapshot==0 );
+  assert( pJrnl->nJrnlData==0 );
+  assert( pJrnl->pJrnlData==0 );
+  assert( pJrnl->eJrnlCommit==0 );
+
+  pJrnl->pJrnlData = aData;
+  pJrnl->nJrnlData = nData;
+  pJrnl->iJrnlCid = iCid;
+  pJrnl->iJrnlSnapshot = iSnapshot;
+
+  pJrnl->eJrnlCommit = HCT_JOURNAL_COMMIT_FOLLOWER;
+  rc = sqlite3_exec(db, "COMMIT", 0, 0, 0);
+  pJrnl->eJrnlCommit = 0;
+
+  pJrnl->pJrnlData = 0;
+  pJrnl->nJrnlData = 0;
+  pJrnl->iJrnlCid = 0;
+  pJrnl->iJrnlSnapshot = 0;
+
+  return rc;
+}
+
+
+int sqlite3_hct_journal_local_commit(sqlite3 *db){
+  HctJournal *pJrnl = sqlite3HctJrnlFind(db);
+  int rc = SQLITE_OK;
+
+  /* Check the db really is in FOLLOWER or LEADER mode */
+  if( pJrnl->pServer->eMode==SQLITE_HCT_NORMAL ){
+    hctJournalSetDbError(db, SQLITE_ERROR, "not a FOLLOWER or LEADER mode db");
+    return SQLITE_ERROR;  
+  }
+
+  pJrnl->eJrnlCommit = HCT_JOURNAL_COMMIT_LOCAL;
+  rc = sqlite3_exec(db, "COMMIT", 0, 0, 0);
+  pJrnl->eJrnlCommit = 0;
 
   return rc;
 }

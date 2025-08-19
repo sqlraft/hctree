@@ -86,6 +86,16 @@ int sqlite3_hct_journal_snapshot(sqlite3 *db, sqlite3_int64 *piCid);
 */
 int sqlite3_hct_journal_local_commit(sqlite3 *db);
 
+
+/*
+** Testing APIs
+*/
+int sqlite3_hct_cas_failure(int nCASFailCnt, int nCASFailReset);
+int sqlite3_hct_io_failure(int nIoFailCnt, int nIoFailReset);
+int sqlite3_hct_page_failure(int nPageFailCnt, int nPageFailReset);
+void sqlite3_hct_proc_failure(int nProcFailCnt);
+
+
 #ifdef __cplusplus
 }
 #endif

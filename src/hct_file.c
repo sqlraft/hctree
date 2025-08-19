@@ -96,6 +96,13 @@ typedef struct HctMappingChunk HctMappingChunk;
 **   These are used to inject process failures (i.e. abort() calls) for
 **   testing purposes. Set by the sqlite3_hct_proc_failure() API. Not 
 **   threadsafe.
+**
+** nIoFailCnt/nIoFailReset:
+**   IO error countdown. This is decremented every IO call. When it reaches
+**   zero, an IO error is returned. Used by:
+**
+**      hctFileTruncate()
+**
 */
 static struct HctFileGlobalVars {
   HctFileServer *pServerList;
@@ -103,13 +110,34 @@ static struct HctFileGlobalVars {
   int nCASFailCnt;
   int nCASFailReset;
 
+  int nIoFailCnt;
+  int nIoFailReset;
+
+  int nPageFailCnt;
+  int nPageFailReset;
+
   int nProcFailCnt;
 } g;
 
-void sqlite3_hct_cas_failure(int nCASFailCnt, int nCASFailReset){
+int sqlite3_hct_cas_failure(int nCASFailCnt, int nCASFailReset){
+  int iOrig = g.nCASFailCnt;
   g.nCASFailCnt = nCASFailCnt;
   g.nCASFailReset = nCASFailReset;
+  return iOrig;
 }
+int sqlite3_hct_io_failure(int nIoFailCnt, int nIoFailReset){
+  int iOrig = g.nIoFailCnt;
+  g.nIoFailCnt = nIoFailCnt;
+  g.nIoFailReset = nIoFailReset;
+  return iOrig;
+}
+int sqlite3_hct_page_failure(int nPageFailCnt, int nPageFailReset){
+  int iOrig = g.nPageFailCnt;
+  g.nPageFailCnt = nPageFailCnt;
+  g.nPageFailReset = nPageFailReset;
+  return iOrig;
+}
+
 void sqlite3_hct_proc_failure(int nProcFailCnt){
   g.nProcFailCnt = nProcFailCnt;
 }
@@ -128,6 +156,38 @@ static int inject_cas_failure(void){
   if( g.nProcFailCnt>0 ){
     if( (--g.nProcFailCnt)==0 ){
       abort();
+    }
+  }
+  return 0;
+}
+
+/*
+** This is called to check if an IO fault should be injected. It returns
+** true if a fault should be injected, or false otherwise.
+*/
+static int inject_io_failure(void){
+  if( g.nIoFailCnt>0 ){
+    if( (--g.nIoFailCnt)==0 ){
+      g.nIoFailCnt = g.nIoFailReset;
+      return 1;
+    }
+  }
+  return 0;
+}
+
+/*
+** This is called to check if a "page" error should be injected. It 
+** returns true if an error should be injected, or false otherwise.
+** Page errors are injected into calls to the following functions:
+**
+**     sqlite3HctFilePageGet()
+**     sqlite3HctFilePageGetPhysical()
+*/
+static int inject_page_failure(void){
+  if( g.nPageFailCnt>0 ){
+    if( (--g.nPageFailCnt)==0 ){
+      g.nPageFailCnt = g.nPageFailReset;
+      return 1;
     }
   }
   return 0;
@@ -609,9 +669,13 @@ static i64 hctFileSize(int *pRc, int fd){
 
 static int hctFileTruncate(int *pRc, int fd, i64 sz){
   if( *pRc==SQLITE_OK ){
-    int res = ftruncate(fd, (off_t)sz);
-    if( res ){
-      *pRc = sqlite3HctIoerr(SQLITE_IOERR_TRUNCATE);
+    if( inject_io_failure() ){
+      *pRc = SQLITE_IOERR_TRUNCATE;
+    }else{
+      int res = ftruncate(fd, (off_t)sz);
+      if( res ){
+        *pRc = sqlite3HctIoerr(SQLITE_IOERR_TRUNCATE);
+      }
     }
   }
   return *pRc;
@@ -1161,6 +1225,7 @@ int sqlite3HctFileNewDb(HctFile *pFile){
       if( rc!=SQLITE_OK ){
         hctMappingUnref(p->pMapping);
         p->pMapping = 0;
+        p->szPage = 0;
       }
     }
 
@@ -1192,6 +1257,39 @@ static void hctFileEnterServerMutex(HctFile *pFile){
     pFile->stats.nMutexBlock++;
     sqlite3_mutex_enter(pMutex);
   }
+}
+
+static void hctFileLeaveServerMutex(HctFile *pFile){
+  sqlite3_mutex_leave(pFile->pServer->pMutex);
+}
+
+
+/*
+** Return the index of the chunk that page iPg belongs to.
+*/
+static u64 hctFilePageToChunk(HctMapping *pMapping, i64 iPg){
+  return (u64)((iPg-1) >> pMapping->mapShift);
+}
+
+/*
+** Update the HctFile.pMapping to match the latest held by the HctFileServer
+** object. Do not create a new mapping.
+*/
+static int hctFileUpdateMappingForSlot(HctFile *pFile, i64 iSlot){
+  u64 iChunk = hctFilePageToChunk(pFile->pMapping, iSlot);
+  if( iChunk>=pFile->pMapping->nChunk ){
+    HctMapping *pOld = pFile->pMapping;
+    hctFileEnterServerMutex(pFile);
+    pFile->pMapping = pFile->pServer->pMapping;
+    pFile->pMapping->nRef++;
+    hctFileLeaveServerMutex(pFile);
+    hctMappingUnref(pOld);
+    if( iChunk>=pFile->pMapping->nChunk ){
+      return SQLITE_CORRUPT_BKPT;
+    }
+  }
+
+  return SQLITE_OK;
 }
 
 /*
@@ -1242,7 +1340,7 @@ static int hctFileGrowMapping(HctFile *pFile, int nChunk){
     }
     pFile->pMapping = p->pMapping;
     pFile->pMapping->nRef++;
-    sqlite3_mutex_leave(p->pMutex);
+    hctFileLeaveServerMutex(pFile);
   }
   return rc;
 }
@@ -1544,20 +1642,24 @@ static int hctFilePagemapPtr(HctFile *pFile, u32 iPg, u8 **paData){
 }
 
 int sqlite3HctFilePageGet(HctFile *pFile, u32 iPg, HctFilePage *pPg){
-  HctMapping *pMapping = pFile->pMapping;
-
-  assert( iPg!=0 );
+  int rc;
   memset(pPg, 0, sizeof(*pPg));
-  pPg->pFile = pFile;
-  pPg->iPg = iPg;
-  HCT_GROW_MAPPING(iPg);
-  pPg->iOldPg = hctFilePagemapGet(pMapping, iPg) & 0xFFFFFFFF;
-
-  HCT_GROW_MAPPING(pPg->iOldPg);
-  assert( pPg->iOldPg!=0 );
-  pPg->aOld = hctPagePtr(pMapping, pPg->iOldPg);
-
-  return SQLITE_OK;
+  if( inject_page_failure() ){
+    rc = SQLITE_IOERR_READ;
+  }else{
+    rc = hctFileUpdateMappingForSlot(pFile, iPg);
+    if( rc==SQLITE_OK ){
+      pPg->pFile = pFile;
+      pPg->iPg = iPg;
+      pPg->iOldPg = hctFilePagemapGet(pFile->pMapping, iPg) & 0xFFFFFFFF;
+      rc = hctFileUpdateMappingForSlot(pFile, pPg->iOldPg);
+    }
+    if( rc==SQLITE_OK ){
+      assert( pPg->iOldPg!=0 );
+      pPg->aOld = hctPagePtr(pFile->pMapping, pPg->iOldPg);
+    }
+  }
+  return rc;
 }
 
 u32 sqlite3HctFilePageMapping(HctFile *pFile, u32 iLogical, int *pbEvicted){
@@ -1570,14 +1672,16 @@ u32 sqlite3HctFilePageMapping(HctFile *pFile, u32 iLogical, int *pbEvicted){
 ** Obtain a reference to physical page iPg.
 */
 int sqlite3HctFilePageGetPhysical(HctFile *pFile, u32 iPg, HctFilePage *pPg){
-  u32 iVal;
   int rc;
-  assert( iPg!=0 );
   memset(pPg, 0, sizeof(*pPg));
-  rc = hctFilePagemapGetGrow32(pFile, iPg, &iVal);
-  if( rc==SQLITE_OK ){
-    pPg->iOldPg = iPg;
-    pPg->aOld = (u8*)hctPagePtr(pFile->pMapping, iPg);
+  if( inject_page_failure() ){
+    rc = SQLITE_IOERR_READ;
+  }else{
+    rc = hctFileUpdateMappingForSlot(pFile, iPg);
+    if( rc==SQLITE_OK ){
+      pPg->iOldPg = iPg;
+      pPg->aOld = (u8*)hctPagePtr(pFile->pMapping, iPg);
+    }
   }
   return rc;
 }
@@ -1845,9 +1949,14 @@ int sqlite3HctFilePageNewTransfer(
 ** number obtained by an earlier call to sqlite3HctFileRootPgno().
 */
 int sqlite3HctFilePageNew(HctFile *pFile, HctFilePage *pPg){
-  int rc = sqlite3HctFilePageNewLogical(pFile, pPg);
-  if( rc==SQLITE_OK ){
-    hctFilePageMakeWritable(&rc, pPg);
+  int rc = SQLITE_OK;
+  if( inject_page_failure() ){
+    rc = SQLITE_IOERR_READ;
+  }else{
+    rc = sqlite3HctFilePageNewLogical(pFile, pPg);
+    if( rc==SQLITE_OK ){
+      hctFilePageMakeWritable(&rc, pPg);
+    }
   }
   return rc;
 }
@@ -1932,9 +2041,41 @@ u64 sqlite3HctFileAllocateTransid(HctFile *pFile){
   pFile->iCurrentTid = (iVal & HCT_TID_MASK);
   return pFile->iCurrentTid;
 }
-u64 sqlite3HctFileAllocateCID(HctFile *pFile, int nWrite){
-  assert( nWrite>0 );
-  return hctFileAtomicIncr(pFile, &pFile->pServer->iCommitId, nWrite);
+
+/*
+** Allocate and return a new CID value. The CID will be used to commit a
+** transaction prepared against snapshot iSnapshot. If this means that
+** no validation is required, set output parameter (*pbValidate) to 0.
+** Or, if validation will be required, set (*pbValidate) to 1.
+*/
+u64 sqlite3HctFileAllocateCID(
+  HctFile *pFile, 
+  i64 iSnapshot, 
+  int bLocal, 
+  int *pbValidate
+){
+  u64 *piCID = &pFile->pServer->iCommitId;
+  u64 iRet = 0;
+
+  while( 1 ){
+    u64 iOld = *piCID;
+    if( bLocal ){
+      iRet = iOld+1;
+      if( (iRet % HCT_CID_INCREMENT)==0 ){
+        iRet = 0;
+        break;
+      }
+    }else{
+      iRet = ((iOld+HCT_CID_INCREMENT) / HCT_CID_INCREMENT) * HCT_CID_INCREMENT;
+    }
+
+    if( hctBoolCompareAndSwap64(piCID, iOld, iRet) ){
+      *pbValidate = (iOld!=iSnapshot);
+      break;
+    }
+  }
+
+  return iRet;
 }
 
 void sqlite3HctFileSetCID(HctFile *pFile, u64 iVal){
@@ -2001,8 +2142,6 @@ int sqlite3HctFileClearInUse(HctFilePage *pPg, int bReuseNow){
     u32 iPhysPg = pPg->iOldPg;
 
     assert( pPg->iPg>0 );
-    assert( pPg->iOldPg>0 );
-
 #ifdef SQLITE_DEBUG
     if( bReuseNow==0 ){
       u64 iVal = hctFilePagemapGet(pPg->pFile->pMapping, pPg->iPg);
@@ -2011,9 +2150,12 @@ int sqlite3HctFileClearInUse(HctFilePage *pPg, int bReuseNow){
 #endif
 
     hctFileClearFlag(pPg->pFile, pPg->iPg, HCT_PMF_LOGICAL_IN_USE);
-    hctFileClearFlag(pPg->pFile, iPhysPg, HCT_PMF_PHYSICAL_IN_USE);
     hctFileFreePg(&rc, pPg->pFile, iTid, pPg->iPg, 1);
-    hctFileFreePg(&rc, pPg->pFile, iTid, iPhysPg, 0);
+
+    if( iPhysPg!=0 ){
+      hctFileClearFlag(pPg->pFile, iPhysPg, HCT_PMF_PHYSICAL_IN_USE);
+      hctFileFreePg(&rc, pPg->pFile, iTid, iPhysPg, 0);
+    }
   }
 
   return rc;
@@ -2128,6 +2270,17 @@ int sqlite3HctFileRecoverFreelists(
   return rc;
 }
 
+/*
+** This function searches the file-system for logs associated with the 
+** open database file specified by the first argument. For each file it
+** finds, the xLog() callback is invoked. The first argument passed is 
+** a copy of the pCtx argument passed to this function. The second is the
+** full path to the log file on disk.
+**
+** If any xLog() callback returns other than SQLITE_OK, this value is
+** immediately returned to the caller. No further callbacks are made in
+** this case.
+*/
 int sqlite3HctFileFindLogs(
   HctFile *pFile, 
   void *pCtx,

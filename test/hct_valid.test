@@ -1,0 +1,317 @@
+# 2020 October 8
+#
+# The author disclaims copyright to this source code.  In place of
+# a legal notice, here is a blessing:
+#
+#    May you do good and not evil.
+#    May you find forgiveness for yourself and forgive others.
+#    May you share freely, never taking more than you give.
+#
+#*************************************************************************
+# This file implements regression tests for SQLite library.
+#
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+set testprefix hct_valid
+
+hct_reset_db
+
+do_execsql_test 1.1 { 
+  CREATE TABLE jobs(name, jobid, data, chatid);
+  CREATE INDEX j1 ON jobs(jobid);
+  CREATE TABLE chats(cid INTEGER, stuff TEXT);
+  CREATE INDEX c1 ON chats(cid);
+  WITH s(i) AS (
+    SELECT 2 UNION ALL SELECT i+2 FROM s WHERE i<500
+  )
+  INSERT INTO jobs SELECT
+    hex(randomblob(5)), i, hex(randomblob(10)), i
+    FROM s;
+
+  WITH s(i) AS (
+    SELECT 1 UNION ALL SELECT i+1 FROM s WHERE i<1000
+  )
+  INSERT INTO chats SELECT i, hex(randomblob(7)) FROM s;
+}
+
+execsql_pp {
+  SELECT * FROM hctvalid;
+}
+
+do_test 1.2 {
+  execsql {
+    BEGIN CONCURRENT;
+      SELECT * FROM jobs j, chats c 
+          WHERE j.jobid>3 AND j.jobid<2000 AND j.chatid=c.cid;
+      SELECT * FROM chats WHERE cid=999;
+    COMMIT;
+  }
+  set {} {}
+} {}
+
+# execsql_pp { SELECT * FROM hctvalid; }
+
+do_execsql_test 1.3 {
+  BEGIN CONCURRENT;
+    INSERT INTO chats(rowid, cid, stuff) VALUES(10000, 10000, 'stuff');
+  COMMIT;
+}
+do_execsql_test 1.4 {
+  BEGIN CONCURRENT;
+    PRAGMA user_version = 10;
+  COMMIT;
+}
+do_execsql_test 1.5 {
+  PRAGMA user_version;
+  SELECT * FROM hctvalid;
+} {10}
+
+#-------------------------------------------------------------------------
+hct_reset_db
+
+do_execsql_test 2.0 {
+  CREATE TABLE chats (  
+    chatID INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,  
+    accountID INTEGER NOT NULL,  
+    stateID INTEGER NOT NULL,   
+    channel TEXT NOT NULL,   
+    created TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, 
+    details TEXT DEFAULT '{}'
+  );
+  CREATE INDEX chatsAccountID ON chats (accountID);
+  CREATE INDEX chatsStateID ON chats (stateID);
+  CREATE INDEX chatsChannel ON chats (channel);
+}
+
+do_execsql_test 2.1 {
+  CREATE TABLE jobs ( 
+      created     TIMESTAMP NOT NULL, 
+      jobID       INTEGER NOT NULL PRIMARY KEY, 
+      state       TEXT NOT NULL, 
+      name        TEXT NOT NULL, 
+      nextRun     TIMESTAMP NOT NULL, 
+      lastRun     TIMESTAMP, 
+      repeat      TEXT NOT NULL, 
+      data        TEXT NOT NULL, 
+      priority    INTEGER NOT NULL DEFAULT 500,
+      parentJobID INTEGER NOT NULL DEFAULT 0, 
+      retryAfter  TEXT NOT NULL DEFAULT ''
+  );
+
+  CREATE INDEX jobsName ON jobs( name );
+  CREATE INDEX jobsParentJobIDState ON jobs( parentJobID, state ) WHERE parentJobID != 0;
+  CREATE INDEX jobsStatePriorityNextRunName ON jobs( state, priority, nextRun, name );
+  CREATE INDEX jobsPriorityNextRunManualSmartScanMerchantAndCategory ON jobs(
+      priority, nextRun
+  ) WHERE state IN ('QUEUED', 'RUNQUEUED') AND name GLOB 'manual/SmartScanMerchantAndCategory*';
+  CREATE INDEX jobsPriorityNextRunManualSmartScanAmountAndCurrency ON jobs(
+      priority, nextRun
+  ) WHERE state IN ('QUEUED', 'RUNQUEUED') AND name GLOB 'manual/SmartScanAmountAndCurrency*';
+  CREATE INDEX jobsPriorityNextRunManualSmartScanCreated ON jobs(
+      priority, nextRun
+  ) WHERE state IN ('QUEUED', 'RUNQUEUED') AND name GLOB 'manual/SmartScanCreated*';
+  CREATE INDEX jobsPriorityNextRunManualSmartScanIsCash ON jobs(
+      priority, nextRun
+  ) WHERE state IN ('QUEUED', 'RUNQUEUED') AND name GLOB 'manual/SmartScanIsCash*';
+  CREATE INDEX jobsPriorityNextRunManualSmartScan ON jobs(
+      priority, nextRun
+  ) WHERE state IN ('QUEUED', 'RUNQUEUED') AND name GLOB 'manual/SmartScan*';
+  CREATE INDEX jobsManualSmartscanReceiptID ON jobs( 
+      JSON_EXTRACT(data, '$.receiptID') 
+  ) WHERE JSON_VALID(data) AND name GLOB 'manual/SmartScan*';
+  CREATE INDEX jobsPriorityNextRunWWWProd ON jobs(
+      priority, nextRun
+  ) WHERE state IN ('QUEUED', 'RUNQUEUED') AND name GLOB 'www-prod/*';
+  CREATE INDEX jobsPriorityNextRunWWWStag ON jobs(
+      priority, nextRun
+  ) WHERE state IN ('QUEUED', 'RUNQUEUED') AND name GLOB 'www-stag/*';
+}
+
+if 0 {
+
+execsql_pp {
+  EXPLAIN QUERY PLAN
+
+  SELECT name, jobID, nextRun, data 
+  FROM jobs 
+  WHERE name GLOB ('manual/ChatbotUnprocessedInput?queue=*&accountID=12345') 
+  AND state = 'RUNQUEUED' 
+  AND nextRun > DATETIME('now') 
+  AND jobID NOT IN ( ?, ?, ?, ? )
+  ORDER BY priority DESC, nextRun 
+  LIMIT 1;
+}
+
+execsql_pp {
+  EXPLAIN QUERY PLAN
+
+  SELECT name, jobID, data, priority 
+  FROM jobs 
+  JOIN chats ON json_extract(data, '$.chatID') = chats.chatID 
+  WHERE name IN ( ?, ?, ?, ? )
+  AND state IN ('QUEUED', 'RUNQUEUED') 
+  AND nextRun <= DATETIME('now') 
+  ORDER BY CASE WHEN chats.channel GLOB 'ChatQA::*' THEN 0 ELSE 1 END DESC, 
+  priority DESC, nextRun 
+  LIMIT 1;
+}
+
+execsql_pp {
+  EXPLAIN QUERY PLAN
+
+  SELECT name, jobID, data 
+  FROM jobs 
+  JOIN chats ON json_extract(data, '$.chatID') = chats.chatID 
+  WHERE name GLOB ('manual/ChatbotUnprocessedInput?queue=*&accountID= + SQ(accountID) + ') 
+  AND state IN ('QUEUED', 'RUNQUEUED') 
+  AND nextRun <= DATETIME('now') 
+  ORDER BY CASE WHEN chats.channel GLOB 'ChatQA::*' THEN 0 ELSE 1 END DESC, 
+  priority DESC, nextRun 
+  LIMIT 1;
+}
+
+execsql_pp {
+  EXPLAIN QUERY PLAN UPDATE jobs set name = ? where jobID = ?;
+}
+
+}
+
+do_execsql_test 2.2 {
+  INSERT INTO jobs(created, jobID, state, name, nextRun, repeat, data) VALUES
+      ('2025-04-01',  990, 'RUNNING', 
+       'manual/ChatbotUnprocessedInput?queue=xyz&accountID=12345',
+       '2026-04-01',
+       '', '<json to come>'
+      ),
+      ('2025-04-01', 1000, 'RUNQUEUED', 
+       'manual/ChatbotUnprocessedInput?queue=xyz&accountID=12345',
+       '2026-04-02',
+       '', '<json to come>'
+      ),
+      ('2025-04-01', 1010, 'RUNQUEUED', 
+       'manual/ChatbotUnprocessedInput?queue=xyz&accountID=12345',
+       '2026-04-03',
+       '', '<json to come>'
+      ),
+      ('2025-04-01', 1020, 'RUNQUEUED', 
+       'manual/ChatbotUnprocessedInput?queue=xyz&accountID=12345',
+       '2026-04-04',
+       '', '<json to come>'
+      );
+
+}
+
+do_execsql_test 2.3 {
+  BEGIN CONCURRENT;
+    SELECT name, jobID, nextRun, data 
+    FROM jobs 
+    WHERE name GLOB ('manual/ChatbotUnprocessedInput?queue=*&accountID=12345') 
+    AND state = 'RUNQUEUED' 
+    AND nextRun > DATETIME('now') 
+    AND jobID NOT IN ( 1, 2, 3, 4, 5 )
+    ORDER BY priority DESC, nextRun 
+    LIMIT 1;
+  COMMIT
+} {
+  manual/ChatbotUnprocessedInput?queue=xyz&accountID=12345
+  1000 2026-04-02 {<json to come>}
+}
+
+#-------------------------------------------------------------------------
+hct_reset_db
+
+set maxi64 [expr 0x7fffffffffffffff]
+
+do_execsql_test 3.0 {
+  CREATE TABLE t1(a INTEGER PRIMARY KEY, b);
+  INSERT INTO t1 VALUES(1, 'one');
+  INSERT INTO t1 VALUES(2, 'one');
+  INSERT INTO t1 VALUES(1000000, 'one million');
+
+  CREATE TABLE t2(a INT PRIMARY KEY, b);
+  INSERT INTO t2(rowid) VALUES($maxi64);
+  INSERT INTO t2 VALUES(1, 'one');
+  INSERT INTO t2 VALUES(2, 'one');
+  INSERT INTO t2 VALUES(1000000, 'one million');
+}
+
+sqlite3 db2 test.db
+do_execsql_test 3.1.1 {
+  BEGIN CONCURRENT;
+    INSERT INTO t1 VALUES(500, 'five hundred');
+}
+do_execsql_test -db db2 3.1.2 {
+  INSERT INTO t1 VALUES(400, 'four hundred');
+}
+do_execsql_test 3.1.3 {
+  COMMIT;
+}
+
+do_execsql_test 3.2.1 {
+  BEGIN CONCURRENT;
+    INSERT INTO t2 VALUES(500, 'five hundred');
+}
+do_execsql_test -db db2 3.2.2 {
+  INSERT INTO t2 VALUES(400, 'four hundred');
+}
+do_execsql_test 3.2.3 {
+  COMMIT;
+}
+
+db2 close
+
+#----------------------------------------------------------------------
+
+hct_reset_db
+
+do_execsql_test 4.0 {
+  CREATE TABLE x1(a INTEGER PRIMARY KEY, b UNIQUE, c);
+  INSERT INTO x1 VALUES(1, NULL, 'one');
+  INSERT INTO x1 VALUES(2, NULL, 'two');
+}
+
+sqlite3 db2 test.db
+do_execsql_test 4.1 {
+  BEGIN CONCURRENT;
+    INSERT INTO x1 VALUES(500, NULL, 'five hundred');
+}
+do_execsql_test -db db2 4.2 {
+  INSERT INTO x1 VALUES(400, NULL, 'four hundred');
+}
+do_execsql_test 4.3 {
+  COMMIT;
+}
+
+# execsql_pp { SELECT * FROM hctvalid }
+db2 close
+
+#----------------------------------------------------------------------
+hct_reset_db
+
+do_execsql_test 5.0 {
+  CREATE TABLE t1(x INTEGER PRIMARY KEY, y TEXT);
+  INSERT INTO t1 VALUES(1, 'one');
+  INSERT INTO t1 VALUES(2, 'two');
+  INSERT INTO t1 VALUES(3, 'three');
+  INSERT INTO t1 VALUES(4, 'four');
+  INSERT INTO t1 VALUES(5, 'five');
+}
+
+sqlite3 db2 test.db
+do_execsql_test 5.1 {
+  BEGIN CONCURRENT;
+    SELECT * FROM t1 WHERE x>=2 AND x<=4;
+    INSERT INTO t1 VALUES(6, 'six');
+} {2 two 3 three 4 four}
+
+do_execsql_test -db db2 5.2 {
+  UPDATE t1 SET y='TWO' WHERE x=2;
+}
+
+do_catchsql_test 5.3 {
+  COMMIT;
+} {1 {database is locked}}
+
+finish_test
+

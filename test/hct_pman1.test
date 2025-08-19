@@ -200,6 +200,7 @@ dumpdb
 
 set nStep 1000
 for {set ii 1} {$ii <= $nStep} {incr ii} {
+if {$ii==12} breakpoint
   sqlite3_hct_cas_failure [expr ($ii%10)+1] 0
   do_execsql_test 2.$ii {
     REPLACE INTO t1 VALUES($ii%500, randomblob(100));

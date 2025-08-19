@@ -15,6 +15,8 @@
 typedef struct HctFileServer HctFileServer;
 typedef struct HctFile HctFile;
 
+#define HCT_CID_INCREMENT 16
+
 HctFile *sqlite3HctFileOpen(
   int *pRc,
   const char *zFile, 
@@ -121,7 +123,7 @@ int sqlite3HctFilePageGetPhysical(HctFile *pFile, u32 iPg, HctFilePage *pPg);
 int sqlite3HctFilePageNewPhysical(HctFile *pFile, HctFilePage *pPg);
 
 u64 sqlite3HctFileAllocateTransid(HctFile *pFile);
-u64 sqlite3HctFileAllocateCID(HctFile *pFile, int);
+u64 sqlite3HctFileAllocateCID(HctFile *pFile, i64, int, int *pbValidate);
 u64 sqlite3HctFileGetSnapshotid(HctFile *pFile);
 
 u64 sqlite3HctFilePeekTransid(HctFile *pFile);
@@ -154,6 +156,9 @@ int sqlite3HctFileRecoverFreelists(
   int nPhys, i64 *aPhys           /* Sorted array of phys. pages to preserve */
 );
 
+/*
+** Find all log files on disk.
+*/
 int sqlite3HctFileFindLogs(HctFile*, void*, int(*)(void*, const char*));
 
 u32 sqlite3HctFilePageMapping(HctFile *pFile, u32 iLogical, int *pbEvicted);

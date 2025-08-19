@@ -344,7 +344,7 @@ CONCURRENT" commands, but must be committed using the following API:
 
 Local transactions are subject to the following caveats:
 
-  *  In both LEADER and FOLLOWER modes, at most 255 local transactions may
+  *  In both LEADER and FOLLOWER modes, at most 15 local transactions may
      be committed between commits of distributed transactions.
 
   *  In FOLLOWER mode, only write/write conflicts may be detected, read/write

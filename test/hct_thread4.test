@@ -15,11 +15,6 @@ set testdir [file dirname $argv0]
 source $testdir/tester.tcl
 set testprefix hct_thread4
 
-# Setup for logging 
-db close
-#sqlite3_shutdown
-#sqlite_log_to_stdout
-
 expr srand(0)
 #set hct_extra_write_logging 1
 
@@ -224,6 +219,8 @@ for {set ii 0} {$ii<$nThread} {incr ii} {
   set prg1 [program $nMs $ii]
   sqlthread spawn TH($ii) $prg1
 }
+
+sqlthread join
 
 do_test "1.1.(running $nThread threads for ${nMs} ms)" {
   for {set ii 0} {$ii<$nThread} {incr ii} {

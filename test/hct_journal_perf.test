@@ -1,0 +1,66 @@
+# 2023 December 18
+#
+# The author disclaims copyright to this source code.  In place of
+# a legal notice, here is a blessing:
+#
+#    May you do good and not evil.
+#    May you find forgiveness for yourself and forgive others.
+#    May you share freely, never taking more than you give.
+#
+#*************************************************************************
+#
+# 
+
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+set testprefix hct_journal_perf
+
+hct_reset_db
+catch_hct_journal_init db
+sqlite3_hct_journal_setmode db LEADER
+
+do_test 1.0 {
+  hct_write_leader db {
+    CREATE TABLE t1(a INTEGER PRIMARY KEY, b);
+    CREATE INDEX t1b ON t1(b);
+  }
+} {SQLITE_OK 2 1}
+do_test 1.1 {
+  set tm0 [time {hct_write_leader db {
+    WITH s(i) AS (
+      SELECT 1 UNION ALL SELECT i+1 FROM s WHERE i<10000
+    )
+    INSERT INTO t1(a) SELECT i FROM s;
+  }}]
+
+  set {} {}
+} {}
+
+forcedelete test.db2
+sqlite3 db2 file:test.db2?hctree=1 -uri 1
+
+do_execsql_test -db db2 1.2 {
+  CREATE TABLE t1(a INTEGER PRIMARY KEY, b);
+  CREATE INDEX t1b ON t1(b);
+}
+do_test 1.1 {
+  set tm1 [time {db2 eval {
+    WITH s(i) AS (
+      SELECT 1 UNION ALL SELECT i+1 FROM s WHERE i<10000
+    )
+    INSERT INTO t1(a) SELECT i FROM s;
+  }}]
+
+  set {} {}
+} {}
+
+puts $tm0
+puts $tm1
+
+
+
+
+
+finish_test
+

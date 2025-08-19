@@ -49,11 +49,9 @@ int sqlite3HctJrnlRollbackEntry(HctJournal *pJrnl, i64 iCid);
 
 u64 sqlite3HctJrnlSnapshot(HctJournal *pJrnl);
 
-void sqlite3HctJournalSchemaVersion(HctJournal *pJrnl, u32 *pSchemaVersion);
-
 int sqlite3HctJrnlCommitOk(HctJournal *pJrnl);
 
-u64 sqlite3HctJrnlFollowerModeCid(HctJournal *pJrnl);
+int sqlite3HctJrnlFollowerModeCid(HctJournal *pJrnl, u64 *piCid);
 
 void sqlite3HctJrnlSetRoot(HctJournal *pJrnl, Schema *pSchema);
 
@@ -66,7 +64,6 @@ int sqlite3HctJrnlMode(HctJournal *pJrnl);
 int sqlite3HctJrnlFindLogs(
     sqlite3 *db, 
     HctJournal*, 
-    int nDel, i64 *aDel,
     void*, 
     int(*)(void*,i64,int,const u8*),
     int (*xMap)(void*, i64, i64)
@@ -78,4 +75,9 @@ void sqlite3HctJrnlLogPtrPtrRelease(HctJournal *pJrnl);
 int sqlite3HctJrnlZeroEntries(HctJournal *pJrnl, int nEntry, i64 *aEntry);
 
 int sqlite3HctJrnlRecoveryMode(sqlite3 *db, HctJournal *pJrnl, int *peMode);
+
+/*
+** True if currently inside a call to sqlite3_hct_journal_local_commit()
+*/
+int sqlite3HctJrnlIsLocalCommit(HctJournal *pJrnl);
 

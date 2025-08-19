@@ -1,0 +1,565 @@
+# 2025 July 30
+#
+# The author disclaims copyright to this source code.  In place of
+# a legal notice, here is a blessing:
+#
+#    May you do good and not evil.
+#    May you find forgiveness for yourself and forgive others.
+#    May you share freely, never taking more than you give.
+#
+#*************************************************************************
+#
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+source $testdir/hct_common.tcl
+set testprefix hct_corrupt
+
+database_may_be_corrupt
+
+hct_reset_db
+
+# eField must be one of "overflow" or "history".
+#
+proc hct_offset {db eField tname ikey} {
+
+  if {$eField!="overflow" && $eField!="history"} {
+    error "unexpected: $eField"
+  }
+
+  # Set lLeaf to a list of logical page numbers that are leaves of this table
+  set lLeaf [hct_leaf_list $db $tname]
+
+  # Search each leaf page for the specified $ikey value.
+  $db eval "
+    SELECT 
+    hctentry.pgno AS pgno, 
+           hctentry.entry AS entry,
+           hctentry.tid AS tid,
+           hctentry.rangetid AS rangetid,
+           hctentry.rangeoldpg AS rangeoldpg,
+           hctentry.ovfl AS ovfl,
+           hctentry.offset AS offset
+    FROM hctpgmap, hctentry
+    WHERE hctpgmap.slot IN ([join $lLeaf ,]) AND 
+      hctentry.pgno=hctpgmap.value AND
+      (hctentry.ikey=:ikey OR (hctentry.ikey IS NULL AND hctentry.record GLOB :ikey))
+  " {
+    if {$ovfl==""} {
+      error "row $tname/$ikey does not have an overflow chain"
+    }
+    set ret $offset
+    if {$tid!=""} { incr ret 8 }
+    if {$rangetid!=""} { incr ret 8 }
+    if {$rangeoldpg!="" && $eField=="overflow"} { incr ret 4 }
+    return [expr ($pgno-1)*4096 + $ret]
+  }
+
+  error "row $tname/$ikey could not be found"
+}
+
+# Parameter tname must be the name of an intkey table in hct database db.
+# This function returns the offset within the database of the overflow
+# page pointer of the row with integer key $ikey. Or, if there is no
+# such entry, throws an error.
+#
+proc hct_ovfl_offset {db tname ikey} {
+  hct_offset $db "overflow" $tname $ikey
+}
+
+proc hct_history_offset {db tname ikey} {
+  hct_offset $db "history" $tname $ikey
+}
+
+proc hct_set_mapping {fname iLogical iPhysical} {
+  set mapfile "$fname-pagemap"
+  set offset [expr ($iLogical-1)*8] 
+  set bin [binary decode hex [hexio_read $mapfile $offset 8]]
+  binary scan $bin m val
+
+  set val [expr ($val & (255<<56)) | $iPhysical]
+  set hex [binary encode hex [binary format m $val]]
+  hexio_write $mapfile $offset $hex
+}
+
+proc hct_trash_ptr {fname ptrtype tname ikey} {
+  sqlite3 dbTrash $fname
+  set offset [hct_offset dbTrash $ptrtype $tname $ikey]
+  dbTrash close
+  hexio_write $fname $offset 00FFFF00
+}
+
+proc hct_trash_history_ptr {fname tname ikey} {
+  hct_trash_ptr $fname "overflow" $tname $ikey
+}
+
+proc hct_trash_overflow_ptr {fname tname ikey} {
+  hct_trash_ptr $fname "history" $tname $ikey
+}
+
+#-------------------------------------------------------------------------
+# Test a bad overflow page number.
+#
+do_execsql_test 1.0 {
+  CREATE TABLE t1(x INTEGER PRIMARY KEY, y);
+  INSERT INTO t1 VALUES(1000, hex(randomblob(4000)));
+}
+
+do_execsql_test 1.1.1 {
+  SELECT value FROM hctpgmap WHERE slot=33
+} {9}
+do_execsql_test 1.1.2 {
+  SELECT offset, tid, ovfl FROM hctentry WHERE pgno=9
+} {168 2 8}
+do_execsql_test 1.1.3 {
+  PRAGMA page_size
+} {4096}
+do_execsql_test 1.1.4 {
+  SELECT length(+y) FROM t1;
+} {8000}
+
+hct_copy_db test.db test.db2
+sqlite3 db2 test.db2
+do_execsql_test -db db2 1.2 {
+  SELECT length(+y) FROM t1
+} 8000
+db2 close
+
+do_test 1.3 {
+  set ovfl [hct_ovfl_offset db t1 1000]
+  hct_copy_db test.db test.db2
+  hexio_write test.db2 $ovfl 00FFFF00
+  sqlite3 db2 test.db2
+  set res [catchsql { SELECT length(+y) FROM t1 } db2]
+  db2 close
+  set res
+} {1 {database disk image is malformed}}
+
+#-------------------------------------------------------------------------
+# Map logical page 2 (the meta-data table) to an out-of-range physical 
+# page.
+#
+hct_reset_db
+do_execsql_test 2.0 {
+  CREATE TABLE t1(x INTEGER PRIMARY KEY, y);
+  INSERT INTO t1 VALUES(1000, hex(randomblob(4000)));
+}
+
+foreach {tn val} {1 0   2 1234   3 10000000   4 0   5 -1} {
+  hct_set_mapping test.db 2 $val
+  do_test 2.1.$tn {
+    catchsql { SELECT * FROM t1 }
+  } {1 {database disk image is malformed}}
+}
+
+hct_reset_db
+do_execsql_test 2.2.0 {
+  CREATE TABLE t1(x INTEGER PRIMARY KEY, y);
+  INSERT INTO t1 VALUES(1000, hex(randomblob(4000)));
+}
+
+do_execsql_test 2.2.1 {
+  BEGIN CONCURRENT;
+    INSERT INTO t1 VALUES(2000, 'heyheyhey');
+}
+
+sqlite3 db2 test.db
+do_execsql_test -db db2 2.2.2 {
+  INSERT INTO t1 VALUES(0, 'zero');
+}
+hct_set_mapping test.db 2 4523
+
+do_catchsql_test 2.2.3 {
+  COMMIT
+} {1 {database disk image is malformed}}
+
+#-------------------------------------------------------------------------
+# Cause an error when clearing a direct-write table.
+#
+hct_reset_db
+do_execsql_test 3.0 {
+  CREATE TABLE t1(a);
+  BEGIN;
+    CREATE TABLE t2(b);
+    SAVEPOINT abc;
+      INSERT INTO t2 VALUES( hex(randomblob(400)) );
+      INSERT INTO t2 VALUES( hex(randomblob(400)) );
+      INSERT INTO t2 VALUES( hex(randomblob(400)) );
+      INSERT INTO t2 VALUES( hex(randomblob(400)) );
+  SELECT rootpage FROM sqlite_schema WHERE name='t2';
+} {34}
+
+hct_set_mapping test.db 34 45235
+
+do_catchsql_test 3.1 {
+  ROLLBACK TO abc;
+} {1 {database disk image is malformed}}
+
+db close
+sqlite3 db test.db
+
+do_execsql_test 3.2 {
+  SELECT * FROM sqlite_schema;
+} {
+  table t1 t1 33 {CREATE TABLE t1(a)}
+}
+
+#-------------------------------------------------------------------------
+# Cause an error when clearing a direct-write table.
+#
+hct_reset_db
+do_execsql_test 3.0 {
+  CREATE TABLE t1(a);
+  BEGIN;
+    CREATE TABLE t2(a INTEGER PRIMARY KEY, b) WITHOUT ROWID;
+    INSERT INTO t2 VALUES(10, hex(randomblob(2500)) );
+    INSERT INTO t2 VALUES(20, hex(randomblob(2500)) );
+    INSERT INTO t2 VALUES(30, hex(randomblob(2500)) );
+    INSERT INTO t2 VALUES(40, hex(randomblob(2500)) );
+    INSERT INTO t2 VALUES(50, hex(randomblob(2500)) );
+  COMMIT;
+} {}
+
+#show_pagemap
+#show_all_entries
+
+do_test 3.1 {
+  set ovfl [hct_ovfl_offset db t2 (50,*]
+  hct_copy_db test.db test.db2
+  hexio_write test.db2 $ovfl 00FFFF00
+  sqlite3 db2 test.db2
+
+  catchsql {
+    INSERT INTO t2 VALUES(5, 'hello world');
+  } db2
+} {1 {database disk image is malformed}}
+
+#-------------------------------------------------------------------------
+# Cause an error when searching a fan-page.
+#
+hct_reset_db
+
+do_execsql_test 4.0 {
+  CREATE TABLE t1(a);
+  BEGIN;
+    CREATE TABLE t2(a INTEGER PRIMARY KEY, b) WITHOUT ROWID;
+    INSERT INTO t2 VALUES(10, hex(randomblob(2500)) );
+    INSERT INTO t2 VALUES(20, hex(randomblob(2500)) );
+    INSERT INTO t2 VALUES(30, hex(randomblob(2500)) );
+    INSERT INTO t2 VALUES(40, hex(randomblob(2500)) );
+    INSERT INTO t2 VALUES(50, hex(randomblob(2500)) );
+    INSERT INTO t2 VALUES(60, hex(randomblob(2500)) );
+    INSERT INTO t2 VALUES(70, hex(randomblob(2500)) );
+    INSERT INTO t2 VALUES(80, hex(randomblob(2500)) );
+    INSERT INTO t2 VALUES(90, hex(randomblob(2500)) );
+    INSERT INTO t2 VALUES(100, hex(randomblob(2500)) );
+    INSERT INTO t2 VALUES(110, hex(randomblob(2500)) );
+  COMMIT;
+} {}
+
+sqlite3 db2 test.db
+
+do_execsql_test -db db2 4.1 {
+  BEGIN;
+    SELECT a FROM t2
+} {10 20 30 40 50 60 70 80 90 100 110}
+
+for {set ii 0} {1} {incr ii} {
+  do_test 4.2.$ii.1 {
+    hct_copy_db test.db test.db2
+    sqlite3 db2 test.db2
+    db2 eval {
+      BEGIN;
+        SELECT a FROM t2;
+    }
+  } {10 20 30 40 50 60 70 80 90 100 110}
+
+  sqlite3 db3 test.db2
+  db3 eval {
+    DELETE FROM t2 WHERE a>10
+  }
+  db3 eval {SELECT pgno, nentry FROM hctdb WHERE pgtype='history'} { }
+
+  do_test 4.2.$ii.2 {execsql {SELECT length(b) FROM t2 WHERE a=110} db2} {5000}
+  do_test 4.2.$ii.3 {execsql {SELECT length(b) FROM t2 WHERE a=60} db2} {5000}
+  do_test 4.2.$ii.4 {execsql {SELECT length(b) FROM t2 WHERE a=90} db2} {5000}
+  do_test 4.2.$ii.5 {execsql {SELECT length(b) FROM t2 WHERE a=80} db2} {5000}
+  do_test 4.2.$ii.6 {execsql {SELECT length(b) FROM t2 WHERE a=70} db2} {5000}
+  do_test 4.2.$ii.7 {execsql {SELECT length(b) FROM t2 WHERE a=60} db2} {5000}
+  do_test 4.2.$ii.8 {execsql {SELECT length(b) FROM t2 WHERE a=50} db2} {5000}
+  do_test 4.2.$ii.9 {execsql {SELECT length(b) FROM t2 WHERE a=40} db2} {5000}
+  do_test 4.2.$ii.10 {execsql {SELECT length(b) FROM t2 WHERE a=30} db2} {5000}
+  do_test 4.2.$ii.11 {execsql {SELECT length(b) FROM t2 WHERE a=20} db2} {5000}
+  do_test 4.2.$ii.12 {execsql {SELECT length(b) FROM t2 WHERE a=10} db2} {5000}
+
+  if {$ii>=($nentry-1)} break
+
+  # pgno is the physical page number of the fan page. Trash the ($ii+1)th
+  # pointer on that page.
+  if {$ii==0} {
+    # The first page-number on the history page
+    set offset [expr ($pgno-1)*4096 + 8 + 8+8]
+  } else {
+    # Second and subsequent page numbers.
+    set offset [expr ($pgno-1)*4096 + 8 + 32 + ($ii-1)*4]
+  }
+  hexio_write test.db2 $offset 00FFFF00
+  # if {$ii==0} { execsql_pp { SELECT * FROM hctentry } db2 }
+
+  do_test 4.2.$ii.13 {
+    catchsql {
+      SELECT * FROM t2 WHERE a=10;
+      SELECT * FROM t2 WHERE a=20;
+      SELECT * FROM t2 WHERE a=30;
+      SELECT * FROM t2 WHERE a=40;
+      SELECT * FROM t2 WHERE a=50;
+      SELECT * FROM t2 WHERE a=60;
+      SELECT * FROM t2 WHERE a=70;
+      SELECT * FROM t2 WHERE a=80;
+      SELECT * FROM t2 WHERE a=90;
+      SELECT * FROM t2 WHERE a=100;
+      SELECT * FROM t2 WHERE a=110;
+    } db2
+  } {1 {database disk image is malformed}}
+
+  do_test 4.2.$ii.14 {
+    catchsql {
+      SELECT * FROM t2;
+    } db2
+  } {1 {database disk image is malformed}}
+
+  db2 close
+  db3 close
+}
+
+hct_copy_db test.db test.db2
+sqlite3 db2 test.db2
+sqlite3 db3 test.db2
+
+do_test 4.3.1 {
+  db2 eval {
+    BEGIN;
+      SELECT a FROM t2;
+  }
+} {10 20 30 40 50 60 70 80 90 100 110}
+
+do_test 4.3.2 {
+  db3 eval {
+    DELETE FROM t2 WHERE a>10
+  }
+} {}
+
+do_test 4.3.2 {
+
+  # Trash the overflow pointers that might be required by the fan-search.
+  #
+  foreach k [db eval {SELECT a FROM t2}] {
+    set ovfl [hct_ovfl_offset db t2 ($k,*]
+    hexio_write test.db2 $ovfl 00FFFF00
+  }
+
+  catchsql {
+    SELECT * FROM t2 WHERE a=110
+  } db2
+} {1 {database disk image is malformed}}
+
+#-------------------------------------------------------------------------
+#
+hct_reset_db
+do_execsql_test 5.0 {
+  BEGIN;
+    CREATE TABLE t1(a INTEGER PRIMARY KEY, b) WITHOUT ROWID;
+    INSERT INTO t1 VALUES(10, hex(randomblob(2500)) );
+    INSERT INTO t1 VALUES(20, hex(randomblob(2500)) );
+    INSERT INTO t1 VALUES(30, hex(randomblob(2500)) );
+    INSERT INTO t1 VALUES(40, hex(randomblob(2500)) );
+    INSERT INTO t1 VALUES(50, hex(randomblob(2500)) );
+    INSERT INTO t1 VALUES(60, hex(randomblob(2500)) );
+    INSERT INTO t1 VALUES(70, hex(randomblob(2500)) );
+    INSERT INTO t1 VALUES(80, hex(randomblob(2500)) );
+    INSERT INTO t1 VALUES(90, hex(randomblob(2500)) );
+    INSERT INTO t1 VALUES(100, hex(randomblob(2500)) );
+    INSERT INTO t1 VALUES(110, hex(randomblob(2500)) );
+  COMMIT;
+} {}
+
+do_execsql_test 5.1 {
+  SELECT a FROM t1 ORDER BY a DESC, b DESC;
+} {
+  110 100 90 80 70 60 50 40 30 20 10
+}
+
+foreach k [db eval {SELECT a FROM t1}] {
+  hct_copy_db test.db test.db2
+  sqlite3 db2 test.db2
+  do_test 5.2.$k {
+    set res [list [catch {
+      db2 eval { SELECT a FROM t1 ORDER BY a DESC } {
+        if {$a==$k} {
+          set ovfl [hct_ovfl_offset db2 t1 ($k,*]
+          hexio_write test.db2 $ovfl 00FFFF00
+        }
+      }
+    } msg] $msg]
+    
+    if {$res=="0 {}"} {
+      set res {1 {database disk image is malformed}}
+    }
+    set res
+  } {1 {database disk image is malformed}}
+
+  db2 close 
+}
+
+
+hct_copy_db test.db test.db2
+foreach k [db eval {SELECT a FROM t1}] {
+  lappend lOvfl [hct_ovfl_offset db t1 ($k,*]
+}
+foreach ovfl $lOvfl {
+  hexio_write test.db2 $ovfl 00FFFF00
+}
+sqlite3 db2 test.db2
+do_test 5.3 {
+  catchsql { SELECT a FROM t1 ORDER BY a DESC, b DESC } db2
+} {1 {database disk image is malformed}}
+db2 close
+
+
+foreach k {10 30 50 70 90} {
+  hct_copy_db test.db test.db2
+  sqlite3 db2 test.db2
+
+  do_execsql_test -db db2 5.4.$k.1 {
+    BEGIN;
+    SELECT a FROM t1 ORDER BY a;
+  } {10 20 30 40 50 60 70 80 90 100 110}
+
+  sqlite3 db3 test.db2
+  do_execsql_test -db db3 5.4.$k.2 {
+    DELETE FROM t1 WHERE a IN (20, 40, 60, 80, 100);
+  }
+
+  do_test 5.4.$k.3 {
+    hct_trash_history_ptr test.db2 t1 ($k,*
+    catchsql {
+      SELECT a FROM t1 ORDER BY a;
+    } db2
+  } {1 {database disk image is malformed}}
+
+  db2 close
+  db3 close
+}
+
+#-------------------------------------------------------------------------
+#
+hct_reset_db
+do_execsql_test 6.0 {
+  BEGIN;
+    CREATE TABLE t1(a INTEGER PRIMARY KEY, b) WITHOUT ROWID;
+    INSERT INTO t1 VALUES(10, hex(randomblob(2500)) );
+    INSERT INTO t1 VALUES(20, hex(randomblob(2500)) );
+    INSERT INTO t1 VALUES(30, hex(randomblob(2500)) );
+    INSERT INTO t1 VALUES(40, hex(randomblob(2500)) );
+    INSERT INTO t1 VALUES(50, hex(randomblob(2500)) );
+    INSERT INTO t1 VALUES(60, hex(randomblob(2500)) );
+    INSERT INTO t1 VALUES(70, hex(randomblob(2500)) );
+    INSERT INTO t1 VALUES(80, hex(randomblob(2500)) );
+    INSERT INTO t1 VALUES(90, hex(randomblob(2500)) );
+    INSERT INTO t1 VALUES(100, hex(randomblob(2500)) );
+    INSERT INTO t1 VALUES(110, hex(randomblob(2500)) );
+  COMMIT;
+} {}
+
+foreach k [db eval {SELECT a FROM t1}] {
+  hct_copy_db test.db test.db2
+  hct_trash_overflow_ptr test.db2 t1 ($k,*
+  do_test 6.1.$k {
+    sqlite3 db2 test.db2
+    catchsql {
+      SELECT * FROM t1 WHERE a=10;
+      SELECT * FROM t1 WHERE a=20;
+      SELECT * FROM t1 WHERE a=30;
+      SELECT * FROM t1 WHERE a=40;
+      SELECT * FROM t1 WHERE a=50;
+      SELECT * FROM t1 WHERE a=60;
+      SELECT * FROM t1 WHERE a=70;
+      SELECT * FROM t1 WHERE a=80;
+      SELECT * FROM t1 WHERE a=90;
+      SELECT * FROM t1 WHERE a=100;
+      SELECT * FROM t1 WHERE a=110;
+    } db2
+  } {1 {database disk image is malformed}}
+  db2 close
+}
+
+#-------------------------------------------------------------------------
+#
+hct_reset_db
+do_execsql_test 7.0 {
+  CREATE TABLE t1(x INTEGER PRIMARY KEY, y TEXT);
+  INSERT INTO t1 VALUES(1, 'one');
+  INSERT INTO t1 VALUES(2, 'two');
+  INSERT INTO t1 VALUES(3, 'three');
+}
+
+sqlite3 db2 test.db
+do_execsql_test -db db2 7.1 {
+  PRAGMA writable_schema = 1;
+  UPDATE sqlite_schema SET rootpage=1234567 WHERE name='t1'
+}
+
+db close
+sqlite3 db test.db
+
+do_catchsql_test 7.2 {
+  SELECT * FROM t1 WHERE x=2;
+} {1 {database disk image is malformed}}
+
+db2 close
+
+#-------------------------------------------------------------------------
+#
+hct_reset_db
+do_execsql_test 7.0 {
+  BEGIN;
+    CREATE TABLE t1(x INTEGER PRIMARY KEY, y TEXT);
+    CREATE INDEX i1 ON t1(y);
+    WITH s(i) AS (
+      SELECT 1 UNION ALL SELECT i+1 FROM s WHERE i<10
+    )
+    INSERT INTO t1 SELECT NULL, hex(randomblob(1000)) FROM s;
+  COMMIT;
+}
+
+set lOff [list]
+foreach r [db eval {SELECT record FROM hctentry WHERE ovfl>0}] {
+  lappend lOff [hct_ovfl_offset db i1 $r]
+}
+
+foreach o $lOff {
+  hexio_write test.db $o 00FFFF00
+}
+
+#show_all_entries
+
+do_execsql_test 7.1 {
+  SELECT 123 FROM t1 ORDER BY y LIMIT 5;
+} {
+  123 123 123 123 123
+}
+
+do_execsql_test 7.2 {
+  BEGIN CONCURRENT;
+    SELECT 123 FROM t1 ORDER BY y LIMIT 5;
+} {
+  123 123 123 123 123
+}
+
+
+
+
+
+
+finish_test
+

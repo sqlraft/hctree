@@ -18,13 +18,15 @@ hct_reset_db
 catch_hct_journal_init db
 sqlite3_hct_journal_setmode db LEADER
 
-do_execsql_test 1.0 {
-  CREATE TABLE t1(b TEXT, a INTEGER PRIMARY KEY);
-}
+do_test 1.0 {
+  hct_write_leader db {
+    CREATE TABLE t1(b TEXT, a INTEGER PRIMARY KEY);
+  }
+} {SQLITE_OK 2 1}
 
 do_test 1.1 {
   for {set ii 1} {$ii <= 20} {incr ii} {
-    execsql {
+    hct_write_leader db {
       INSERT INTO t1 VALUES(hex(randomblob(16)), $ii)
     }
   }
@@ -34,24 +36,28 @@ do_test 1.1 {
 db close
 sqlite3 db test.db
 
-set maxcid [db one {SELECT max(cid) FROM sqlite_hct_journal}]
+set maxcid [db one {SELECT max(cid) FROM hct_journal}]
 
-do_test 1.2 {
-  sqlite3_hct_journal_truncate db 15
-} {SQLITE_OK}
+# Still in NORMAL mode. So the hct_journal table can be truncated
+# directly.
+do_execsql_test 1.2 {
+  DELETE FROM hct_journal WHERE cid<15
+} {}
 
 do_execsql_test 1.3 {
-  SELECT min(cid), max(cid) FROM sqlite_hct_journal
+  SELECT min(cid), max(cid) FROM hct_journal
 } [list 15 $maxcid]
 
 sqlite3_hct_journal_setmode db LEADER
 
 do_test 1.4 {
-  sqlite3_hct_journal_truncate db 20
-} {SQLITE_OK}
+  hct_write_local db {
+    DELETE FROM hct_journal WHERE cid<20
+  }
+} {}
 
 do_execsql_test 1.5 {
-  SELECT min(cid), max(cid) FROM sqlite_hct_journal
+  SELECT min(cid), max(cid) FROM hct_journal
 } [list 20 $maxcid]
 
 db close

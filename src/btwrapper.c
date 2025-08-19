@@ -111,6 +111,7 @@ struct BtCursorMethods {
   int(*xBtreeTransferRow)(BtCursor*, BtCursor*, i64);
   int(*xBtreeClearTableOfCursor)(BtCursor*);
   int(*xBtreeCount)(sqlite3*, BtCursor*, i64*);
+  i64(*xBtreeOffset)(BtCursor*);
 };
 struct BtreeMethods {
   BtCursorMethods const *pCsrMethods;
@@ -251,6 +252,9 @@ int sqlite3BtreeClearTableOfCursor(BtCursor *p){
 }
 int sqlite3BtreeCount(sqlite3 *a, BtCursor *p, i64 *b){
   return p->pMethods->xBtreeCount(a, p, b);
+}
+i64 sqlite3BtreeOffset(BtCursor *p){
+  return p->pMethods->xBtreeOffset(p);
 }
 Pgno sqlite3BtreeLastPage(Btree *p){
   return p->pMethods->xBtreeLastPage(p);
@@ -418,6 +422,7 @@ static const BtCursorMethods hct_btcursor_methods = {
   .xBtreeTransferRow = sqlite3HctBtreeTransferRow,
   .xBtreeClearTableOfCursor = sqlite3HctBtreeClearTableOfCursor,
   .xBtreeCount = sqlite3HctBtreeCount,
+  .xBtreeOffset = sqlite3HctBtreeOffset,
 };
 static const BtreeMethods hct_btree_methods = {
   .pCsrMethods = &hct_btcursor_methods,
@@ -501,6 +506,7 @@ static const BtCursorMethods stock_btcursor_methods = {
   .xBtreeTransferRow = sqlite3StockBtreeTransferRow,
   .xBtreeClearTableOfCursor = sqlite3StockBtreeClearTableOfCursor,
   .xBtreeCount = sqlite3StockBtreeCount,
+  .xBtreeOffset = sqlite3StockBtreeOffset,
 };
 static const BtreeMethods stock_btree_methods = {
   .pCsrMethods = &stock_btcursor_methods,

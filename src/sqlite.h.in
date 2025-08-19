@@ -11178,9 +11178,6 @@ int sqlite3_commit_status(
 # undef double
 #endif
 
-void sqlite3_hct_cas_failure(int nCASFailCnt, int nCASFailReset);
-void sqlite3_hct_proc_failure(int nProcFailCnt);
-
 #if defined(__wasi__)
 # undef SQLITE_WASI
 # define SQLITE_WASI 1

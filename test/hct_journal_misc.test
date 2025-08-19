@@ -1,0 +1,364 @@
+# 2025 July 26
+#
+# The author disclaims copyright to this source code.  In place of
+# a legal notice, here is a blessing:
+#
+#    May you do good and not evil.
+#    May you find forgiveness for yourself and forgive others.
+#    May you share freely, never taking more than you give.
+#
+#*************************************************************************
+#
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+source $testdir/hct_common.tcl
+set testprefix hct_journal_misc
+
+#-------------------------------------------------------------------------
+# Test some misc. cases in sqlite3_hct_journal_init():
+#
+#   1.1: sqlite3_hct_journal_init() where the hct_journal table exists but
+#        has the wrong schema.
+#
+#   1.2: Multiple calls to sqlite3_hct_journal_init() on the same db.
+#
+#   1.3: The invocation of "PRAGMA hct_ndbfile" used by hct_journal_init() to
+#        determine whether or not the db is an hct db is SQLITE_DENY by the
+#        authorizer callback.
+#
+hct_reset_db
+
+do_execsql_test 1.0 {
+  CREATE TABLE hct_journal(a, b, c);
+}
+do_test 1.1 {
+  catch_hct_journal_init db
+} {1 {no such column: cid}}
+
+hct_reset_db
+
+do_test 1.2 {
+  catch_hct_journal_init db
+  catch_hct_journal_init db
+  catch_hct_journal_init db
+} {0 {}}
+
+proc myauth {a b c d e} {
+  if {$a=="SQLITE_PRAGMA" && $b=="hct_ndbfile"} {
+    return "SQLITE_DENY"
+  }
+  return "SQLITE_OK"
+}
+
+hct_reset_db
+db auth myauth
+
+do_test 1.3 {
+  catch_hct_journal_init db
+} {1 {not authorized}}
+
+#-------------------------------------------------------------------------
+hct_reset_db
+catch_hct_journal_init db
+sqlite3_hct_journal_setmode db LEADER
+do_test 2.0 {
+  hct_write_leader db { CREATE TABLE t1(a INTEGER PRIMARY KEY, b) }
+  hct_write_leader db { INSERT INTO t1 VALUES(1, 'one') }
+  hct_write_leader db { INSERT INTO t1 VALUES(2, 'two') }
+  hct_write_leader db { INSERT INTO t1 VALUES(3, 'three') }
+  hct_write_leader db { INSERT INTO t1 VALUES(5, 'five') }
+  hct_write_leader db { INSERT INTO t1 VALUES(7, 'seven') }
+} {SQLITE_OK 7 2}
+
+sqlite3_hct_journal_setmode db NORMAL
+do_execsql_test 2.1.1 {
+  UPDATE hct_journal SET cid = cid + 10_000_000;
+}
+sqlite3_hct_journal_setmode db LEADER
+do_test 2.1.2 {
+  hct_write_leader db { INSERT INTO t1 VALUES(11, 'eleven') }
+} {SQLITE_OK 10000008 10000007}
+
+sqlite3_hct_journal_setmode db NORMAL
+do_execsql_test 2.2.1 {
+  UPDATE hct_journal SET cid = cid + 3_000_000_000;
+}
+sqlite3_hct_journal_setmode db LEADER
+do_test 2.2.2 {
+  hct_write_leader db { INSERT INTO t1 VALUES(13, 'thirteen') }
+} {SQLITE_OK 3010000009 3010000008}
+
+sqlite3_hct_journal_setmode db NORMAL
+do_execsql_test 2.2.1 {
+  UPDATE hct_journal SET cid = cid + 300_000_000_000_000;
+}
+sqlite3_hct_journal_setmode db LEADER
+do_test 2.2.2 {
+  hct_write_leader db { INSERT INTO t1 VALUES(17, 'seventeen') }
+} {SQLITE_OK 300003010000010 300003010000009}
+
+# execsql_pp { SELECT cid, snapshot, query FROM hct_journal }
+
+#-------------------------------------------------------------------------
+hct_reset_db
+
+do_execsql_test 3.0 {
+  CREATE TABLE y1(x);
+}
+
+do_test 3.1 {
+  list [catch { sqlite3_hct_journal_snapshot db } msg] $msg
+} {1 {SQLITE_ERROR - not a FOLLOWER mode db}}
+
+reset_db
+do_test 3.2 {
+  sqlite3_hct_journal_mode db
+} {-1}
+
+#-------------------------------------------------------------------------
+hct_reset_db
+catch_hct_journal_init db
+
+do_execsql_test 4.0 { 
+  CREATE TABLE t1(a, b); 
+}
+
+set ::myauth_deny ""
+proc myauth {a b c d e} {
+  if {$::myauth_deny!="" && $::myauth_deny==$b} {
+    return "SQLITE_DENY"
+  }
+  return "SQLITE_OK"
+}
+db auth myauth
+
+do_test 4.1 {
+  set ::myauth_deny sqlite_schema
+  sqlite3_hct_journal_setmode db LEADER
+} {SQLITE_AUTH}
+
+do_test 4.2 {
+  set ::myauth_deny hct_journal
+  sqlite3_hct_journal_setmode db LEADER
+} {SQLITE_AUTH}
+
+#-------------------------------------------------------------------------
+hct_reset_db
+catch_hct_journal_init db
+sqlite3_hct_journal_setmode db LEADER
+do_test 5.0 {
+  hct_write_leader db { CREATE TABLE t1(a INTEGER PRIMARY KEY, b) }
+  hct_write_leader db { INSERT INTO t1 VALUES(1, 'one') }
+  hct_write_leader db { INSERT INTO t1 VALUES(2, 'two') }
+  hct_write_leader db { INSERT INTO t1 VALUES(3, 'three') }
+  hct_write_leader db { INSERT INTO t1 VALUES(5, 'five') }
+  hct_write_leader db { INSERT INTO t1 VALUES(7, 'seven') }
+} {SQLITE_OK 7 2}
+
+proc myauth {a b c d e} {
+  if {$::myauth_deny>0} {
+    incr ::myauth_deny -1
+    if {$::myauth_deny==0} { 
+      return "SQLITE_DENY" 
+    }
+  }
+  return "SQLITE_OK"
+}
+
+
+set ::myauth_deny 0
+for {set ii 1} {$::myauth_deny==0} {incr ii} {
+  db close
+  sqlite3 db test.db
+  db auth myauth
+
+  set ::myauth_deny $ii
+  set res [catchsql { SELECT sum(a) FROM t1 }]
+  if {$::myauth_deny>0} {
+    do_test 5.1.$ii.a { set res } {0 18}
+  } else {
+    do_test 5.1.$ii.b { lindex $res 0 } {1}
+  }
+}
+
+#-------------------------------------------------------------------------
+#
+hct_reset_db
+catch_hct_journal_init db
+sqlite3_hct_journal_setmode db LEADER
+do_test 6.0 {
+  hct_write_leader db { CREATE TABLE t1(a INTEGER PRIMARY KEY, b) }
+  hct_write_leader db { INSERT INTO t1 VALUES(1, 'one') }
+  hct_write_leader db { INSERT INTO t1 VALUES(2, 'two') }
+  hct_write_leader db { INSERT INTO t1 VALUES(3, 'three') }
+  hct_write_leader db { INSERT INTO t1 VALUES(5, 'five') }
+  hct_write_leader db { INSERT INTO t1 VALUES(7, 'seven') }
+} {SQLITE_OK 7 2}
+
+execsql_pp {
+  SELECT cid, snapshot, query FROM hct_journal
+}
+
+forcedelete test.db2
+sqlite3 db2 file:test.db2?hctree=1 -uri 1
+catch_hct_journal_init db2
+sqlite3_hct_journal_setmode db2 FOLLOWER
+do_test 6.1 {
+  db eval {
+      SELECT cid, snapshot, query 
+      FROM hct_journal 
+      WHERE cid IN (2, 4, 5, 6, 7) 
+      ORDER BY 1
+  } {
+    db2 eval BEGIN 
+    db2 eval $query 
+    sqlite3_hct_journal_follower_commit db2 $query $cid $snapshot
+  }
+} {}
+
+do_execsql_test -db db2 6.2 {
+  SELECT * FROM t1
+}
+
+db2 close
+
+proc truncate_file_to {filename size} {
+  # Read full contents of the file as binary
+  set f [open $filename "rb"]
+  fconfigure $f -translation binary
+  set data [read $f]
+  close $f
+
+  # Delete the file
+  file delete $filename
+
+  # Get only the first $size bytes (handle case if file is shorter)
+  set truncatedData [string range $data 0 [expr {$size - 1}]]
+
+  # Recreate and write truncated data
+  set f [open $filename "wb"]
+  fconfigure $f -translation binary
+  puts -nonewline $f $truncatedData
+  close $f
+}
+
+do_test 6.3 {
+  foreach log [glob test.db2-log-*] {
+    truncate_file_to $log 16
+  }
+} {}
+
+sqlite3 db2 test.db2
+do_test 6.4.1 {
+  catchsql { SELECT * FROM t1 } db2
+} {1 {disk I/O error}}
+do_test 6.4.2 {
+  catchsql { SELECT * FROM t1 } db2
+} {1 {disk I/O error}}
+
+#-------------------------------------------------------------------------
+#
+
+# The argument to this function is a 16-byte blob read from the logptr
+# column of the hct_journal table. It consists of:
+#
+#   * 8-byte TID value,
+#   * 4-byte journal file id,
+#   * 4-byte journal file offset.
+#
+# In machine byte order. This command combines the 1st and 3rd field into
+# a 12-byte blob and writes it to the start of the identified log file.
+#
+proc fix_log_file {dbname jrnlptr} {
+  if {3!=[binary scan $jrnlptr mnn tid id off]} {
+    error "bad parse"
+  }
+  set filename "$dbname-log-$id"
+
+  set fd [open $filename r+b]
+  fconfigure $fd -translation binary
+  fconfigure $fd -encoding binary
+  puts -nonewline $fd [string range $jrnlptr 0 7]
+  puts -nonewline $fd [string range $jrnlptr 12 15]
+  close $fd
+}
+
+hct_reset_db
+catch_hct_journal_init db
+sqlite3_hct_journal_setmode db LEADER
+do_test 7.0 {
+  hct_write_leader db { CREATE TABLE t1(a INTEGER PRIMARY KEY, b) }
+  hct_write_leader db { INSERT INTO t1 VALUES(1, 'one') }
+  hct_write_leader db { INSERT INTO t1 VALUES(2, 'two') }
+  hct_write_leader db { INSERT INTO t1 VALUES(3, 'three') }
+  hct_write_leader db { INSERT INTO t1 VALUES(5, 'five') }
+  hct_write_leader db { INSERT INTO t1 VALUES(7, 'seven') }
+} {SQLITE_OK 7 2}
+
+proc tid {logptr} {
+  if { [binary scan $logptr m tid] } {
+    return $tid
+  }
+  return ""
+}
+
+db func tid tid
+execsql_pp {
+  SELECT cid, snapshot, query, tid(logptr) FROM hct_journal
+}
+
+forcedelete test.db2
+sqlite3 db2 file:test.db2?hctree=1 -uri 1
+catch_hct_journal_init db2
+sqlite3_hct_journal_setmode db2 FOLLOWER
+
+do_test 7.1 {
+  db eval { 
+    SELECT cid, snapshot, query 
+    FROM hct_journal 
+    WHERE cid IN (2, 4, 5, 6, 7)
+    ORDER BY 1
+  } {
+    db2 eval BEGIN 
+    db2 eval $query 
+    sqlite3_hct_journal_follower_commit db2 $query $cid $snapshot
+  }
+} {}
+
+sqlite3 db3 test.db2
+
+do_test 7.2 {
+  db eval { 
+    SELECT cid, snapshot, query FROM hct_journal WHERE cid=3
+  } {
+    db3 eval BEGIN 
+    db3 eval $query 
+    sqlite3_hct_journal_follower_commit db3 $query $cid $snapshot
+  }
+} {}
+
+
+db2 func tid tid
+execsql_pp {
+  SELECT cid, snapshot, query, tid(logptr) from hct_journal
+} db2
+
+hct_copy_db test.db2 test.db3
+db3 close
+do_test 7.3 {
+  db2 eval {
+    SELECT logptr FROM hct_journal WHERE cid=3
+  } {
+    fix_log_file "test.db3" $logptr
+  }
+} {}
+
+breakpoint
+sqlite3 db3 test.db3
+do_execsql_test -db db3 7.4 {
+  SELECT * FROM t1
+}
+
+finish_test
+

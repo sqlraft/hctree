@@ -201,24 +201,32 @@ void *sqlite3HctRealloc(void *pIn, i64 nByte){
   return pRet;
 }
 
-/*
-** Wrapper around sqlite3_mprintf(). Except that this version abort()s if
-** a memory allocation fails.
-*/
-char *sqlite3HctMprintf(char *zFmt, ...){
+char *sqlite3HctVmprintf(const char *zFmt, va_list ap){
   char *zRet = 0;
-  va_list ap;
 
-  va_start(ap, zFmt);
   zRet = sqlite3_vmprintf(zFmt, ap);
-  va_end(ap);
-
   if( !zRet ){
     sqlite3_log(SQLITE_ABORT,
         "FATAL: attempt to sqlite3_vmprintf() failed, exiting..."
     );
     abort();
   }
+
+  return zRet;
+}
+
+/*
+** Wrapper around sqlite3_mprintf(). Except that this version abort()s if
+** a memory allocation fails.
+*/
+char *sqlite3HctMprintf(const char *zFmt, ...){
+  char *zRet = 0;
+  va_list ap;
+
+  va_start(ap, zFmt);
+  zRet = sqlite3HctVmprintf(zFmt, ap);
+  va_end(ap);
+
   return zRet;
 }
 

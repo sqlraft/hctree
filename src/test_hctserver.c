@@ -457,7 +457,7 @@ static void *hctServerJobThread(void *pCtx){
   ** never be invoked for the read-only connections used on follower nodes. */
   if( rc==TCL_OK ){
     getDbPointer(interp, "db", &db);
-    sqlite3_hct_journal_hook(db, pCtx, hctServerJournalHook);
+    /* sqlite3_hct_journal_hook(db, pCtx, hctServerJournalHook); */
   }
 
   /* Evaluate the job script and delete the intepreter */

@@ -156,6 +156,29 @@ do_execsql_test 2.2.4 {
   SELECT * FROM t1
 } {1 one 2 two 3 thirteen 4 four 5 five}
 
+#-------------------------------------------------------------------------
+#
+hct_reset_db
+do_execsql_test 3.0 {
+  CREATE TABLE t1(a INTEGER PRIMARY KEY, b);
+  CREATE TABLE t2(a INTEGER PRIMARY KEY, b);
+}
+
+do_execsql_test 3.1 {
+  BEGIN CONCURRENT;
+    INSERT INTO t1 VALUES(1, 2);
+    DELETE FROM t1;
+    SELECT * FROM t2;
+}
+
+sqlite3 db2 test.db
+db2 eval { INSERT INTO t2 VALUES(1, 2) }
+
+do_catchsql_test 3.2 {
+  COMMIT;
+} {1 {database is locked}}
+execsql ROLLBACK
+
 finish_test
 
 

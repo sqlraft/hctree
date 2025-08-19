@@ -1,0 +1,360 @@
+# 2025 July 31 
+#
+# The author disclaims copyright to this source code.  In place of
+# a legal notice, here is a blessing:
+#
+#    May you do good and not evil.
+#    May you find forgiveness for yourself and forgive others.
+#    May you share freely, never taking more than you give.
+#
+#*************************************************************************
+# This file implements regression tests for SQLite library.
+#
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+set testprefix hct_pageerror
+
+hct_reset_db
+do_execsql_test 1.0 {
+  CREATE TABLE t1(a INTEGER PRIMARY KEY, b TEXT);
+  INSERT INTO t1 VALUES(1, 'one');
+  INSERT INTO t1 VALUES(2, 'two');
+  INSERT INTO t1 VALUES(3, 'three');
+}
+
+faultsim_save_and_close
+
+do_faultsim_test 1 -faults hctpage -prep {
+  faultsim_restore_and_reopen
+} -body {
+  execsql { SELECT * FROM t1 }
+} -test {
+  faultsim_test_result {0 {1 one 2 two 3 three}} 
+}
+
+do_faultsim_test 2 -faults hctpage -prep {
+  faultsim_restore_and_reopen
+} -body {
+  execsql { SELECT * FROM t1 WHERE a=2 }
+} -test {
+  faultsim_test_result {0 {2 two}} 
+}
+
+hct_reset_db
+do_execsql_test 3.0 {
+  BEGIN;
+  CREATE TABLE t1(a INTEGER PRIMARY KEY, b TEXT) WITHOUT ROWID;
+  INSERT INTO t1 VALUES(1, hex(randomblob(500)) );
+  INSERT INTO t1 VALUES(2, hex(randomblob(500)) );
+  INSERT INTO t1 VALUES(3, hex(randomblob(500)) );
+  INSERT INTO t1 VALUES(4, hex(randomblob(500)) );
+  INSERT INTO t1 VALUES(5, hex(randomblob(500)) );
+  INSERT INTO t1 VALUES(6, hex(randomblob(500)) );
+  INSERT INTO t1 VALUES(7, hex(randomblob(500)) );
+  INSERT INTO t1 VALUES(8, hex(randomblob(500)) );
+  COMMIT;
+}
+
+faultsim_save_and_close
+
+do_faultsim_test 3 -faults hctpage -prep {
+  faultsim_restore_and_reopen
+} -body {
+  execsql { 
+    SELECT a FROM t1 WHERE a=3;
+    SELECT a FROM t1 WHERE a=4;
+    SELECT a FROM t1 WHERE a=5;
+    SELECT a FROM t1 WHERE a=6;
+    SELECT a FROM t1 WHERE a=7;
+  }
+} -test {
+  faultsim_test_result {0 {3 4 5 6 7}}
+}
+
+#-------------------------------------------------------------------------
+# Cause page-errors during rollback.
+#
+hct_reset_db
+do_execsql_test 4.0 {
+  BEGIN;
+    CREATE TABLE t1(a INTEGER PRIMARY KEY, b TEXT);
+    INSERT INTO t1 VALUES(1, 'one');
+    INSERT INTO t1 VALUES(2, 'two');
+    INSERT INTO t1 VALUES(3, 'three');
+    INSERT INTO t1 VALUES(4, 'four');
+    INSERT INTO t1 VALUES(5, 'five');
+    INSERT INTO t1 VALUES(6, 'six');
+    INSERT INTO t1 VALUES(7, 'seven');
+    INSERT INTO t1 VALUES(8, 'eight');
+    CREATE TABLE t2(x);
+  COMMIT;
+}
+
+faultsim_save_and_close
+
+do_faultsim_test 4 -faults hctpage -prep {
+  faultsim_restore_and_reopen
+  sqlite3 db2 test.db
+  db eval {
+    BEGIN;
+      SELECT * FROM t2;
+      DELETE FROM t1 WHERE a IN (3, 5, 7);
+  }
+  db2 eval {
+    INSERT INTO t2 VALUES('value');
+  }
+} -body {
+  execsql { 
+    COMMIT
+  }
+} -test {
+  faultsim_test_result {1 {database is locked}}
+}
+
+#-------------------------------------------------------------------------
+# Page-error while searching a historical index page.
+#
+hct_reset_db
+do_execsql_test 5.0 {
+  BEGIN;
+    CREATE TABLE t1(a INTEGER PRIMARY KEY, b BLOB, c TEXT) WITHOUT ROWID;
+    INSERT INTO t1 VALUES(1, randomblob(5000), 'one');
+    INSERT INTO t1 VALUES(2, randomblob(5000), 'two');
+    INSERT INTO t1 VALUES(3, randomblob(5000), 'three');
+    INSERT INTO t1 VALUES(4, randomblob(5000), 'four');
+    INSERT INTO t1 VALUES(5, randomblob(5000), 'five');
+    INSERT INTO t1 VALUES(6, randomblob(5000), 'six');
+    INSERT INTO t1 VALUES(7, randomblob(5000), 'seven');
+    INSERT INTO t1 VALUES(8, randomblob(5000), 'eight');
+  COMMIT;
+}
+
+faultsim_save_and_close
+
+do_faultsim_test 5 -faults hctpage -prep {
+  faultsim_restore_and_reopen
+  db eval { BEGIN; SELECT * FROM t1 WHERE a IN (3, 6); }
+
+  sqlite3 db2 test.db
+  db2 eval { DELETE FROM t1; }
+  db2 close
+} -body {
+  execsql { 
+    SELECT a, c FROM t1 WHERE a IN (3, 6);
+  }
+} -test {
+  faultsim_test_result {0 {3 three 6 six}}
+}
+
+#-------------------------------------------------------------------------
+# Page-error while saving scan keys.
+#
+hct_reset_db
+do_execsql_test 6.0 {
+  BEGIN;
+    CREATE TABLE t1(a INTEGER PRIMARY KEY, b BLOB, c TEXT) WITHOUT ROWID;
+    INSERT INTO t1 VALUES(1, randomblob(5000), 'one');
+    INSERT INTO t1 VALUES(2, randomblob(5000), 'two');
+    INSERT INTO t1 VALUES(3, randomblob(5000), 'three');
+    INSERT INTO t1 VALUES(4, randomblob(5000), 'four');
+    INSERT INTO t1 VALUES(5, randomblob(5000), 'five');
+    INSERT INTO t1 VALUES(6, randomblob(5000), 'six');
+    INSERT INTO t1 VALUES(7, randomblob(5000), 'seven');
+    INSERT INTO t1 VALUES(8, randomblob(5000), 'eight');
+  COMMIT;
+}
+
+do_execsql_test 6.1 {
+  BEGIN CONCURRENT;
+    SELECT one.a FROM t1 one, t1 two WHERE two.a BETWEEN one.a AND one.a+1;
+  COMMIT;
+} {1 1 2 2 3 3 4 4 5 5 6 6 7 7 8}
+
+do_faultsim_test 6 -faults hctpage -prep {
+  catch {db close}
+  sqlite3 db test.db
+} -body {
+  execsql { 
+    BEGIN CONCURRENT;
+      SELECT one.a FROM t1 one, t1 two WHERE two.a BETWEEN one.a AND one.a+1;
+    COMMIT;
+  }
+} -test {
+  faultsim_test_result {0 {1 1 2 2 3 3 4 4 5 5 6 6 7 7 8}} 
+}
+
+#-------------------------------------------------------------------------
+# Page-error while marking overflow pages as free.
+#
+hct_reset_db
+do_execsql_test 7.0 {
+  BEGIN;
+    CREATE TABLE t1(a INTEGER PRIMARY KEY, b BLOB, c TEXT) WITHOUT ROWID;
+    INSERT INTO t1 VALUES(1, randomblob(15000), 'one');
+  COMMIT;
+}
+
+faultsim_save_and_close
+
+do_faultsim_test 7 -faults hctpage -prep {
+  faultsim_restore_and_reopen
+} -body {
+  execsql { 
+    DELETE FROM t1;
+  }
+} -test {
+  faultsim_test_result {0 {}}
+}
+
+#-------------------------------------------------------------------------
+# Page-error while sorting index pages in order to write keys to the 
+# upper level.
+#
+hct_reset_db
+do_execsql_test 8.0 {
+  BEGIN;
+    CREATE TABLE t1(a INTEGER PRIMARY KEY, b BLOB, c TEXT) WITHOUT ROWID;
+    INSERT INTO t1 VALUES(10, randomblob(5000), 'one');
+    INSERT INTO t1 VALUES(20, randomblob(5000), 'two');
+    INSERT INTO t1 VALUES(30, randomblob(5000), 'three');
+    INSERT INTO t1 VALUES(40, randomblob(5000), 'four');
+    INSERT INTO t1 VALUES(50, randomblob(5000), 'five');
+    INSERT INTO t1 VALUES(60, randomblob(5000), 'six');
+    INSERT INTO t1 VALUES(70, randomblob(5000), 'seven');
+    INSERT INTO t1 VALUES(80, randomblob(5000), 'eight');
+  COMMIT;
+}
+
+faultsim_save_and_close
+
+do_faultsim_test 8.1 -faults hctpage -prep {
+  faultsim_restore_and_reopen
+  execsql { SELECT * FROM t1 }
+} -body {
+  execsql { 
+    BEGIN;
+      INSERT INTO t1 VALUES(11, randomblob(5000), 'w');
+      INSERT INTO t1 VALUES(12, randomblob(5000), 'x');
+      INSERT INTO t1 VALUES(13, randomblob(5000), 'y');
+      INSERT INTO t1 VALUES(14, randomblob(5000), 'z');
+    COMMIT;
+  }
+} -test {
+  faultsim_test_result {0 {}}
+}
+
+do_faultsim_test 8.2 -faults hctpage -prep {
+  faultsim_restore_and_reopen
+  execsql { SELECT * FROM t1 }
+} -body {
+  execsql { 
+    BEGIN;
+      INSERT INTO t1 VALUES(71, randomblob(5000), 'w');
+      INSERT INTO t1 VALUES(72, randomblob(5000), 'x');
+      INSERT INTO t1 VALUES(73, randomblob(5000), 'y');
+      INSERT INTO t1 VALUES(74, randomblob(5000), 'z');
+    COMMIT;
+  }
+} -test {
+  faultsim_test_result {0 {}}
+}
+
+#-------------------------------------------------------------------------
+# Page-error while splitting root page.
+#
+hct_reset_db
+do_execsql_test 9.0 {
+  BEGIN;
+    CREATE TABLE x1(a, b, c);
+    WITH s(i) AS (
+      SELECT 1 UNION ALL SELECT i+1 FROM s WHERE i<20
+    )
+    INSERT INTO x1 SELECT randomblob(60), randomblob(60), randomblob(60) FROM s;
+  COMMIT;
+}
+
+faultsim_save_and_close
+
+do_faultsim_test 9 -faults hctpage -prep {
+  faultsim_restore_and_reopen
+  execsql { SELECT * FROM x1 }
+} -body {
+  execsql { 
+    BEGIN CONCURRENT;
+      INSERT INTO x1 VALUES(randomblob(60), randomblob(60), randomblob(60));
+      INSERT INTO x1 VALUES(randomblob(60), randomblob(60), randomblob(60));
+      INSERT INTO x1 VALUES(randomblob(60), randomblob(60), randomblob(60));
+      INSERT INTO x1 VALUES(randomblob(60), randomblob(60), randomblob(60));
+      INSERT INTO x1 VALUES(randomblob(60), randomblob(60), randomblob(60));
+      INSERT INTO x1 VALUES(randomblob(60), randomblob(60), randomblob(60));
+      INSERT INTO x1 VALUES(randomblob(60), randomblob(60), randomblob(60));
+      INSERT INTO x1 VALUES(randomblob(60), randomblob(60), randomblob(60));
+      INSERT INTO x1 VALUES(randomblob(60), randomblob(60), randomblob(60));
+      INSERT INTO x1 VALUES(randomblob(60), randomblob(60), randomblob(60));
+    COMMIT;
+  }
+} -test {
+  faultsim_test_result {0 {}}
+}
+
+#-------------------------------------------------------------------------
+# Page-error while splitting root page.
+#
+hct_reset_db
+do_execsql_test 10.0 {
+  CREATE TABLE t1(a PRIMARY KEY, b) WITHOUT ROWID;
+  INSERT INTO t1 VALUES(100, randomblob(6000));
+}
+
+faultsim_save_and_close
+
+do_faultsim_test 10 -faults hctpage -prep {
+  faultsim_restore_and_reopen
+} -body {
+  execsql { 
+    BEGIN CONCURRENT;
+      UPDATE t1 SET b=randomblob(6001) WHERE a=100;
+      SELECT b=4 FROM t1 WHERE a=100;
+    COMMIT;
+  }
+} -test {
+  faultsim_test_result {0 0}
+}
+
+#-------------------------------------------------------------------------
+# Page-error in irrevocable eviction.
+#
+hct_reset_db
+
+do_execsql_test 11.0 {
+  CREATE TABLE t1(a PRIMARY KEY, b) WITHOUT ROWID;
+  WITH x(i) AS (
+    SELECT 1 UNION ALL SELECT i+1 FROM x WHERE i<20
+  )
+  INSERT INTO t1 SELECT i, hex(randomblob(200)) FROM x;
+}
+
+foreach leaf [lrange [hct_leaf_list db t1] 1 end] {
+  execsql {
+    UPDATE hctpgmap SET logical_evicted=1 WHERE slot = $leaf
+  }
+}
+faultsim_save_and_close
+
+do_faultsim_test 11 -faults hctpage -prep {
+  faultsim_restore_and_reopen
+} -body {
+  execsql { 
+    BEGIN CONCURRENT;
+      INSERT INTO t1 VALUES(500, hex(randomblob(200)));
+    COMMIT;
+  }
+} -test {
+  faultsim_test_result {0 {}}
+}
+
+finish_test
+
+
+

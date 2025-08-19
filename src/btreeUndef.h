@@ -31,6 +31,7 @@
 #undef sqlite3BtreeTransferRow
 #undef sqlite3BtreeClearTableOfCursor
 #undef sqlite3BtreeCount
+#undef sqlite3BtreeOffset
 #undef sqlite3BtreeCursor
 #ifdef SQLITE_DEBUG
 #undef sqlite3BtreeSeekCount

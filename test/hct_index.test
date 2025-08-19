@@ -154,4 +154,21 @@ do_execsql_test -db db2 2.4 {
     SELECT * FROM t1 ORDER BY rowid DESC
 } {4 four}
 
+#-------------------------------------------------------------------------
+hct_reset_db
+do_execsql_test 3.0 {
+  CREATE TABLE t1(a INTEGER PRIMARY KEY, b TEXT);
+  CREATE INDEX i1 ON t1(b);
+  WITH s(i) AS (
+    SELECT 1 UNION ALL SELECT i+1 FROM s WHERE i<1000
+  )
+  INSERT INTO t1 SELECT NULL, hex(randomblob(100)) FROM s;
+}
+
+do_execsql_test 3.1 {
+  PRAGMA hct_extra_logging = 2;
+  SELECT * FROM t1 WHERE b=hex(randomblob(10));
+  PRAGMA hct_extra_logging = 0;
+} {2 0}
+
 finish_test

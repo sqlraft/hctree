@@ -99,6 +99,8 @@ struct HBtree {
   BtCursor *pPreformatCsr;
   HctBuffer preformat;            /* Buffer containing preformat data */
 
+  i64 iFakeTreeOffset;            /* Used by sqlite3BtreeOffset() */
+
   HctMainStats stats;
 };
 
@@ -1069,9 +1071,9 @@ static int hctCacheJrnlLog(
   if( (p->nJrnlLog & (p->nJrnlLog-1))==0 ){
     int nNew = p->nJrnlLog ? p->nJrnlLog*2 : 1;
     HctJrnlLog *aNew = 0;
-    aNew = (HctJrnlLog*)sqlite3Realloc(p->aJrnlLog, nNew*sizeof(HctJrnlLog));
-    if( !aNew ) return SQLITE_NOMEM_BKPT;
+    aNew = (HctJrnlLog*)sqlite3HctRealloc(p->aJrnlLog, nNew*sizeof(HctJrnlLog));
     p->aJrnlLog = aNew;
+    memset(&aNew[p->nJrnlLog], 0, sizeof(HctJrnlLog)*(nNew-p->nJrnlLog));
   }
   pLog = &p->aJrnlLog[p->nJrnlLog++];
   pLog->iCid = iCid;
@@ -1079,7 +1081,6 @@ static int hctCacheJrnlLog(
   rc = sqlite3HctLogLoadData(
       p->pHctLog, nData, aData, &pLog->iTid, &pLog->nLogData, &pLog->aLogData
   );
-  assert( rc==SQLITE_OK );
 
   return rc;
 }
@@ -1098,7 +1099,7 @@ static int hctCacheJrnlMap(
    || (p->nJrnlMap>=1024 && (p->nJrnlMap & (p->nJrnlMap-1))==0) ){
     int nNew = p->nJrnlMap ? p->nJrnlMap*2 : 1024;
     HctJrnlMap *aNew = 0;
-    aNew = (HctJrnlMap*)sqlite3Realloc(p->aJrnlLog, nNew*sizeof(HctJrnlMap));
+    aNew = (HctJrnlMap*)sqlite3Realloc(p->aJrnlMap, nNew*sizeof(HctJrnlMap));
     if( !aNew ) return SQLITE_NOMEM_BKPT;
     p->aJrnlMap = aNew;
   }
@@ -1250,6 +1251,16 @@ static int hctMapMerge(HctJrnlMap *aB, HctJrnlMap *aA, int n1, int n2){
   int i2 = n1;
   int out;
 
+#ifdef SQLITE_DEBUG
+  /* If assert() is enabled, run through the input arrays and assert()
+  ** that they are in sorted order.  */
+  {
+    int ii;
+    for(ii=1; ii<n1; ii++){ assert( aA[ii].iTid>aA[ii-1].iTid ); }
+    for(ii=n1+1; ii<n2; ii++){ assert( aA[ii].iTid>aA[ii-1].iTid ); }
+  }
+#endif
+
   for(out=0; i1<n1 || i2<n2; out++){
     if( i1<n1 && (i2>=n2 || aA[i1].iTid<aA[i2].iTid) ){
       aB[out] = aA[i1];
@@ -1259,6 +1270,17 @@ static int hctMapMerge(HctJrnlMap *aB, HctJrnlMap *aA, int n1, int n2){
       i2++;
     }
   }
+
+#ifdef SQLITE_DEBUG
+  /* If assert() is enabled, run through the output array and assert()
+  ** that it is now in sorted order.  */
+  {
+    int ii;
+    for(ii=1; ii<out; ii++){
+      assert( aB[ii].iTid>aB[ii-1].iTid );
+    }
+  }
+#endif
 
   return out;
 }
@@ -1272,7 +1294,7 @@ static void hctMapSplitMerge(HctJrnlMap *aB, int nElem, HctJrnlMap *aA){
     int iMid = nElem/2;
     hctMapSplitMerge(aA, iMid, aB);
     hctMapSplitMerge(&aA[iMid], nElem-iMid, &aB[iMid]);
-    hctMapMerge(aB, aA, iMid, nElem-iMid);
+    hctMapMerge(aB, aA, iMid, nElem);
   }
 }
 
@@ -1304,34 +1326,6 @@ static int hctUnlinkLog(void *pCtx, const char *zFile){
   return ((unlink(zFile)==0) ? SQLITE_OK : SQLITE_IOERR_DELETE);
 }
 
-/*
-** This is an sqlite3HctFileFindLogs() callback. The context argument is
-** actually a pointer to an object of type HctIntList. This callback reads
-** the first 8 bytes from each log file, and if it is a valid TID, adds
-** it to the pCtx list.
-*/
-static int hctRecordTid(void *pCtx, const char *zFile){
-  HctIntList *p = (HctIntList*)pCtx;
-  int fd = 0;
-  struct stat sStat;
-
-  fd = open(zFile, O_RDONLY);
-  if( fd<0 ) return SQLITE_CANTOPEN_BKPT;
-
-  memset(&sStat, 0, sizeof(sStat));
-  fstat(fd, &sStat);
-  if( sStat.st_size>=sizeof(i64) ){
-    i64 iTid;
-    read(fd, &iTid, sizeof(iTid));
-    if( iTid!=0 && hctIntListAppend(p, iTid)!=SQLITE_OK ){
-      return SQLITE_NOMEM;
-    }
-  }
-
-  close(fd);
-  return SQLITE_OK;
-}
-
 static int hctAttemptRecovery(HBtree *p){
   int rc = SQLITE_OK;
   HctFile *pFile = sqlite3HctDbFile(p->pHctDb);
@@ -1340,7 +1334,6 @@ static int hctAttemptRecovery(HBtree *p){
   if( p->pHctDb && sqlite3HctDbStartRecovery(p->pHctDb, 0) ){
     int eMode = SQLITE_HCT_NORMAL;
     int ii;
-    HctIntList lRb = {0,0,0};
     HctIntList lZero = {0,0,0};
 
     p->bRecoveryDone = 1;
@@ -1349,20 +1342,15 @@ static int hctAttemptRecovery(HBtree *p){
     ** the previous user exited. */
     rc = sqlite3HctJrnlRecoveryMode(p->config.db, p->pHctJrnl, &eMode);
 
-    /* Find the list of TIDs that will be rolled back due to live journals
-    ** in the file-system. We need this list before analyzing the current
-    ** hct_journal table. */
-    if( rc==SQLITE_OK ){
-      rc = sqlite3HctFileFindLogs(pFile, &lRb, hctRecordTid);
-    }
-    hctIntListSort(&rc, &lRb);
-
     /* Find any non-contiguous journal entries written in follower mode.
-    ** Store these in an in-memory cache at HBtree.aJrnlLog[]. */
+    ** Store these in an in-memory cache at HBtree.aJrnlLog[]. Note
+    ** that the sqlite3HctJrnlFindLogs() function does not invoke callbacks
+    ** for entries that will be removed by log file rollback, because
+    ** the tmap entries for such transactions have already been set to
+    ** HCT_TID_ROLLBACK.  */
     if( rc==SQLITE_OK ){
       rc = sqlite3HctJrnlFindLogs(
           p->config.db, p->pHctJrnl, 
-          lRb.nInt, lRb.aInt,
           (void*)p, hctCacheJrnlLog, hctCacheJrnlMap
       );
       if( eMode==SQLITE_HCT_LEADER ){
@@ -1410,7 +1398,6 @@ static int hctAttemptRecovery(HBtree *p){
     p->nJrnlLog = 0;
     p->nJrnlMap = 0;
 
-    hctIntListZero(&lRb);
     hctIntListZero(&lZero);
   }
 
@@ -1435,34 +1422,19 @@ static int hctBtreeGetMeta(HBtree *p, int idx, u32 *pMeta){
     *pMeta = (u32)iSnapshot;
   }else{
     if( p->eMetaState==HCT_METASTATE_NONE && p->eTrans!=SQLITE_TXN_ERROR ){
-      if( p->eTrans==SQLITE_TXN_NONE ){
+
+      rc = sqlite3HctTreeGetMeta(
+          p->pHctTree, (u8*)p->aMeta, SQLITE_N_BTREE_META*4
+      );
+      if( rc==SQLITE_EMPTY ){
         rc = sqlite3HctDbGetMeta(
             p->pHctDb, (u8*)p->aMeta, SQLITE_N_BTREE_META*4
         );
-      }else{
-        int res = 0;
-        HBtCursor csr;
-        BtCursor *pCsr = (BtCursor*)&csr;
-        memset(&csr, 0, sizeof(csr));
-
-        rc = sqlite3HctBtreeCursor((Btree*)p, 2, 0, 0, pCsr);
-        if( rc==SQLITE_OK ){
-          sqlite3HctDbCsrNoscan(csr.pHctDbCsr, 1);
-          rc = sqlite3HctBtreeTableMoveto(pCsr, 0, 0, &res);
-        }
-        /* assert( rc==SQLITE_OK ); */
-        if( rc==SQLITE_OK && res==0 ){
-          const void *aMeta = 0;
-          u32 nMeta = 0;
-          aMeta = sqlite3HctBtreePayloadFetch(pCsr, &nMeta);
-          memcpy(p->aMeta, aMeta, MAX(nMeta, SQLITE_N_BTREE_META*4));
-          p->eMetaState = HCT_METASTATE_READ;
-        }
-        sqlite3HctBtreeCloseCursor(pCsr);
       }
-      sqlite3HctJournalSchemaVersion(
-          p->pHctJrnl, &p->aMeta[BTREE_SCHEMA_VERSION]
-      );
+
+      if( rc==SQLITE_OK ){
+        p->eMetaState = HCT_METASTATE_READ;
+      }
     }
     *pMeta = p->aMeta[idx];
   }
@@ -1506,8 +1478,10 @@ int sqlite3HctBtreeBeginTrans(Btree *pBt, int wrflag, int *pSchemaVersion){
     rc = sqlite3HctDbStartRead(p->pHctDb, p->pHctJrnl);
   }
 
-  if( rc==SQLITE_OK && pSchemaVersion ){
-    rc = hctBtreeGetMeta(p, 1, (u32*)pSchemaVersion);
+  if( rc==SQLITE_OK ){
+    u32 val;
+    rc = hctBtreeGetMeta(p, 1, (u32*)&val);
+    if( pSchemaVersion ) *pSchemaVersion = val;
     sqlite3HctDbTransIsConcurrent(p->pHctDb, p->config.db->eConcurrent);
   }
 
@@ -1814,9 +1788,11 @@ static int btreeFlushToDisk(HBtree *p){
     ** object. Also if in FOLLOWER mode, there is no validation step. 
     **
     ** Otherwise, if not in FOLLOWER mode - validate the transaction.  */
-    iCid = sqlite3HctJrnlFollowerModeCid(p->pHctJrnl);
-    if( iCid==0 ){
-      rc = sqlite3HctDbValidate(p->config.db, p->pHctDb, &iCid);
+    rc = sqlite3HctJrnlFollowerModeCid(p->pHctJrnl, &iCid);
+    if( rc==SQLITE_OK && iCid==0 ){
+      rc = sqlite3HctDbValidate(p->config.db, p->pHctDb, &iCid,
+          sqlite3HctJrnlIsLocalCommit(p->pHctJrnl)
+      );
     }
     if( iReqSnapshot>iCid ){
       iReqSnapshot = iCid-1;
@@ -1869,7 +1845,6 @@ static int btreeFlushToDisk(HBtree *p){
   if( rc==SQLITE_OK ){
     rc = sqlite3HctDbEndWrite(p->pHctDb, iCid, rcok!=SQLITE_OK);
   }
-  assert( rc==SQLITE_OK );
   sqlite3HctDbTMapScan(p->pHctDb);
 
   return (rc==SQLITE_OK ? rcok : rc);
@@ -1925,18 +1900,19 @@ static int hctBtreeDirectInsert(
 ** iSavepoint==0 means rollback the entire transaction. iSavepoint=1 means
 ** roll back the outermost savepoint, etc.
 */
-static void hctreeRollbackSchema(HBtree *p, int iSavepoint){
+static int hctreeRollbackSchema(HBtree *p, int iSavepoint){
   int ii;
+  int rc = SQLITE_OK;
   assert( p->eTrans>=SQLITE_TXN_WRITE );
 
-  for(ii=p->nSchemaOp-1; ii>=0; ii--){
+  for(ii=p->nSchemaOp-1; ii>=0 && rc==SQLITE_OK; ii--){
     BtSchemaOp *pOp = &p->aSchemaOp[ii];
 
     if( iSavepoint>pOp->iSavepoint ) break;
     p->nSchemaOp = ii;
 
     if( pOp->eSchemaOp==HCT_SCHEMAOP_POPULATE ){
-      sqlite3HctDbDirectClear(p->pHctDb, pOp->pgnoRoot);
+      rc = sqlite3HctDbDirectClear(p->pHctDb, pOp->pgnoRoot);
     }
 
     if( pOp->eSchemaOp==HCT_SCHEMAOP_CREATE_INTKEY
@@ -1946,6 +1922,8 @@ static void hctreeRollbackSchema(HBtree *p, int iSavepoint){
       sqlite3HctFileTreeFree(pFile, pOp->pgnoRoot, 1);
     }
   }
+
+  return rc;
 }
 
 /*
@@ -1988,7 +1966,9 @@ int sqlite3HctBtreeCommitPhaseTwo(Btree *pBt, int bCleanup){
       return SQLITE_ERROR;
     }
 
-    rc = sqlite3HctDbPreValidate(p->pHctDb);
+    if( sqlite3HctJrnlMode(p->pHctJrnl)!=SQLITE_HCT_FOLLOWER ){
+      rc = sqlite3HctDbPreValidate(p->pHctDb);
+    }
     if( rc==SQLITE_OK ){
 
       if( p->pCsrList ){
@@ -2157,7 +2137,7 @@ int sqlite3HctBtreeSavepoint(Btree *pBt, int op, int iSavepoint){
       sqlite3HctTreeRelease(p->pHctTree, iSavepoint+1);
     }else{
       sqlite3HctTreeRollbackTo(p->pHctTree, iSavepoint+2);
-      hctreeRollbackSchema(p, iSavepoint+1);
+      rc = hctreeRollbackSchema(p, iSavepoint+1);
       p->eMetaState = HCT_METASTATE_NONE;
     }
   }
@@ -2382,16 +2362,22 @@ void sqlite3HctBtreeCursorUnpin(BtCursor *pCursor){
   sqlite3HctTreeCsrUnpin(pCur->pHctTreeCsr);
 }
 
-#ifdef SQLITE_ENABLE_OFFSET_SQL_FUNC
 /*
 ** Return the offset into the database file for the start of the
 ** payload to which the cursor is pointing.
 */
-i64 sqlite3HctBtreeOffset(BtCursor *pCur){
-  assert( 0 );
-  return 0;
+i64 sqlite3HctBtreeOffset(BtCursor *pCursor){
+  HBtCursor *const pCur = (HBtCursor*)pCursor;
+  i64 iRet = 0;
+
+  if( pCur->bUseTree ){
+    iRet = (++pCur->pBtree->iFakeTreeOffset);
+  }else{
+    iRet = sqlite3HctDbCsrOffset(pCur->pHctDbCsr);
+  }
+
+  return iRet;
 }
-#endif /* SQLITE_ENABLE_OFFSET_SQL_FUNC */
 
 /*
 ** Return the number of bytes of payload for the entry that pCur is
@@ -2427,8 +2413,29 @@ u32 sqlite3HctBtreePayloadSize(BtCursor *pCursor){
 ** database file.
 */
 sqlite3_int64 sqlite3HctBtreeMaxRecordSize(BtCursor *pCur){
-  assert( 0 );
   return 0x7FFFFFFF;
+}
+
+/*
+** Fetch the payload data for the cursor pCur. If successful, set output
+** variable (*paData) to point to the buffer containing the data, and (*pnData)
+** to the size of that buffer in bytes and return SQLITE_OK. Or, if an error
+** occurs, return an SQLite error code. The final values of the output
+** variables are undefined in this case.
+*/
+static int hctBtreePayloadData(
+  BtCursor *pCursor, 
+  int *pnData,
+  const u8 **paData
+){
+  HBtCursor *const pCur = (HBtCursor*)pCursor;
+  int rc = SQLITE_OK;
+  if( pCur->bUseTree ){
+    sqlite3HctTreeCsrData(pCur->pHctTreeCsr, pnData, paData);
+  }else{
+    rc = sqlite3HctDbCsrData(pCur->pHctDbCsr, pnData, paData);
+  }
+  return rc;
 }
 
 /*
@@ -2449,14 +2456,15 @@ sqlite3_int64 sqlite3HctBtreeMaxRecordSize(BtCursor *pCur){
 ** the available payload.
 */
 int sqlite3HctBtreePayload(BtCursor *pCur, u32 offset, u32 amt, void *pBuf){
-  u32 n = 0;
-  const u8 *p = 0;
+  int rc = SQLITE_OK;
+  int nData = 0;
+  const u8 *aData = 0;
 
-  p = (const u8*)sqlite3HctBtreePayloadFetch(pCur, &n);
-  assert( offset+amt<=n );
-  memcpy(pBuf, &p[offset], amt);
-
-  return SQLITE_OK;
+  rc = hctBtreePayloadData(pCur, &nData, &aData);
+  if( rc==SQLITE_OK ){
+    memcpy(pBuf, &aData[offset], amt);
+  }
+  return rc;
 }
 
 
@@ -2560,16 +2568,33 @@ int sqlite3HctBtreePayloadChecked(
 ** in the common case where no overflow pages are used.
 */
 const void *sqlite3HctBtreePayloadFetch(BtCursor *pCursor, u32 *pAmt){
-  HBtCursor *const pCur = (HBtCursor*)pCursor;
-  const u8 *aData;
-  int nData;
+  HBtCursor *pCur = (HBtCursor*)pCursor;
+  int rc = SQLITE_OK;
+  const u8 *aData = 0;
+  int nData = 0;
+
   if( pCur->bUseTree ){
     sqlite3HctTreeCsrData(pCur->pHctTreeCsr, &nData, &aData);
   }else{
-    sqlite3HctDbCsrData(pCur->pHctDbCsr, &nData, &aData);
+    sqlite3HctDbCsrPageData(pCur->pHctDbCsr, &nData, &aData);
   }
-  *pAmt = (u32)nData;
-  return aData;
+
+  *pAmt = nData;
+  return (const void*)aData;
+
+#if 0
+  rc = hctBtreePayloadData(pCursor, &nData, &aData);
+  if( rc!=SQLITE_OK ){
+    /* An error has occured but this API provides no way to return an error
+    ** code. No matter, returning zero bytes of data will cause SQLite
+    ** to call sqlite3HctBtreePayload(), which can return the error code. */
+    *pAmt = 0;
+    return (const u8*)"\x7F";
+  }
+
+  *pAmt = nData;
+  return (const void*)aData;
+#endif
 }
 
 /* Move the cursor to the first entry in the table.  Return SQLITE_OK
@@ -2685,6 +2710,9 @@ static int hctBtreeMovetoUnpacked(
   rc = sqlite3HctTreeCsrSeek(pCur->pHctTreeCsr, pIdxKey, intKey, &res1);
   if( rc==SQLITE_OK && pCur->pHctDbCsr ){
     rc = sqlite3HctDbCsrSeek(pCur->pHctDbCsr, pIdxKey, intKey, &res2);
+  }
+  if( rc!=SQLITE_OK ){
+    return rc;
   }
 
   if( pCur->eDir==BTREE_DIR_NONE ){
@@ -3204,6 +3232,8 @@ int sqlite3HctBtreeClearTable(Btree *pBt, int iTable, i64 *pnChange){
     HctTreeCsr *pTreeCsr = 0;
     UnpackedRecord *pRec = 0;
 
+    HctBuffer buf = {0,0,0};
+
     if( pKeyInfo ){
       pRec = sqlite3VdbeAllocUnpackedRecord(pKeyInfo);
       if( pRec==0 ) rc = SQLITE_NOMEM_BKPT;
@@ -3223,9 +3253,17 @@ int sqlite3HctBtreeClearTable(Btree *pBt, int iTable, i64 *pnChange){
         while( rc==SQLITE_OK ){
           nChange++;
           if( pKeyInfo ){
+            u32 nReq = sqlite3HctBtreePayloadSize(pCsr);
             const u8 *aData = 0;
             u32 nData = 0;
             aData = (const u8*)sqlite3HctBtreePayloadFetch(pCsr, &nData);
+            if( nReq>nData ){
+              sqlite3HctBufferGrow(&buf, nReq);
+              rc = sqlite3HctBtreePayload(pCsr, 0, nReq, buf.aBuf);
+              if( rc!=SQLITE_OK ) break;
+              aData = buf.aBuf;
+              nData = nReq;
+            }
             assert( pKeyInfo==pRec->pKeyInfo );
             sqlite3VdbeRecordUnpack(nData, aData, pRec);
             rc = sqlite3HctTreeDeleteKey(pTreeCsr, pRec, 0, nData, aData);
@@ -3418,7 +3456,7 @@ int sqlite3HctBtreePragma(Btree *pBt, char **aFnctl){
     if( iVal>=0 ){
       p->config.bHctExtraWriteLogging = iVal;
     }
-    zRet = hctDbMPrintf(&rc, "%d", p->config.bHctExtraLogging);
+    zRet = hctDbMPrintf(&rc, "%d", p->config.bHctExtraWriteLogging);
   }else if( 0==sqlite3_stricmp("hct_log", zLeft) ){
     zRet = hctGetLog(&p->config);
     hctFreeLog(&p->config);
