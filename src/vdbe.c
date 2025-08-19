@@ -4226,6 +4226,7 @@ case OP_SetCookie: {
 #ifndef SQLITE_OMIT_CONCURRENT
   if( db->eConcurrent 
    && (pOp->p2==BTREE_USER_VERSION || pOp->p2==BTREE_APPLICATION_ID)
+   && !sqlite3IsHct(pDb->pBt)
   ){
     rc = SQLITE_ERROR;
     sqlite3VdbeError(p, "cannot modify %s within CONCURRENT transaction",

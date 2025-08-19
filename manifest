@@ -1,5 +1,5 @@
-C Merge\slatest\schanges\sfrom\shctree\sbranch\sinto\sthis\sone.
-D 2025-08-19T19:42:44.944
+C Allow\s"PRAGMA\suser_version"\sinside\sa\sBEGIN\sCONCURRENT\stransaction\son\shctree\sdatabases.
+D 2025-08-19T19:49:22.372
 F .fossil-settings/binary-glob 61195414528fb3ea9693577e1980230d78a1f8b0a54c78cf1b9b24d0a409ed6a x
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
@@ -909,7 +909,7 @@ F src/upsert.c 215328c3f91623c520ec8672c44323553f12caeb4f01b1090ebdca99fdf7b4f1
 F src/utf.c 7267c3fb9e2467020507601af3354c2446c61f444387e094c779dccd5ca62165
 F src/util.c 36fb1150062957280777655976f3f9a75db236cb8207a0770ceae8d5ec17fcd3
 F src/vacuum.c 8d0292b8f4d8484a401d136db756795927d96649ddb1710aa98b732c47a677ee
-F src/vdbe.c 0a7df1ede3dbfd73194aad98abbda52d8171d5d7a02f414c55d8dbd9ae7f5425
+F src/vdbe.c 8080492191ff14c8af65107220a57992a7f3701fd655b12d8b6fd84293eb77b2
 F src/vdbe.h 93761ed7c6b8bc19524912fd9b9b587d41bf4f1d0ade650a00dadc10518d8958
 F src/vdbeInt.h 0bc581a9763be385e3af715e8c0a503ba8422c2b7074922faf4bb0d6ae31b15e
 F src/vdbeapi.c 613a6f29efacd6ed83e886b6e52db0fe52ba80a596b0a137608db1948bad90a9
@@ -2377,8 +2377,8 @@ F tool/version-info.c 3b36468a90faf1bbd59c65fd0eb66522d9f941eedd364fabccd7227350
 F tool/warnings-clang.sh bbf6a1e685e534c92ec2bfba5b1745f34fb6f0bc2a362850723a9ee87c1b31a7
 F tool/warnings.sh 1ad0169b022b280bcaaf94a7fa231591be96b514230ab5c98fbf15cd7df842dd
 F tool/win/sqlite.vsix deb315d026cc8400325c5863eef847784a219a2f
-P 12a56af9758903ae73faad8d9a530efa3924a5d6edc73968c51f6ea8d2ae96eb a4a838c2e52fe6900c6667b6f4cfdf71304378238119dbcda409d3156b74777b
-R a0e76638bb81120f7c867c6c998b7eef
+P 6ad28291093d5b4852c4e4af65490021b258b54e5e06336003d08f982e0c6f2e
+R 042e2c1ee104a62e1f2261b8486b5f05
 U dan
-Z 17a35d64e72658aed66c054554fbe40c
+Z 679181da414daafd3ee365b1e06b3869
 # Remove this line to create a well-formed Fossil manifest.
