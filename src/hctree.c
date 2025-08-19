@@ -2379,6 +2379,18 @@ i64 sqlite3HctBtreeOffset(BtCursor *pCursor){
   return iRet;
 }
 
+/* 
+** Set *pRes to 1 (true) if the BTree pointed to by cursor pCur contains zero
+** rows of content.  Set *pRes to 0 (false) if the table contains content.
+** Return SQLITE_OK on success or some error code (ex: SQLITE_NOMEM) if
+** something goes wrong.
+*/
+int sqlite3HctBtreeIsEmpty(BtCursor *pCur, int *pRes){
+  *pRes = 0;
+  return SQLITE_OK;
+}
+
+
 /*
 ** Return the number of bytes of payload for the entry that pCur is
 ** currently pointing to.  For table btrees, this will be the amount
@@ -2569,7 +2581,6 @@ int sqlite3HctBtreePayloadChecked(
 */
 const void *sqlite3HctBtreePayloadFetch(BtCursor *pCursor, u32 *pAmt){
   HBtCursor *pCur = (HBtCursor*)pCursor;
-  int rc = SQLITE_OK;
   const u8 *aData = 0;
   int nData = 0;
 
@@ -2581,20 +2592,6 @@ const void *sqlite3HctBtreePayloadFetch(BtCursor *pCursor, u32 *pAmt){
 
   *pAmt = nData;
   return (const void*)aData;
-
-#if 0
-  rc = hctBtreePayloadData(pCursor, &nData, &aData);
-  if( rc!=SQLITE_OK ){
-    /* An error has occured but this API provides no way to return an error
-    ** code. No matter, returning zero bytes of data will cause SQLite
-    ** to call sqlite3HctBtreePayload(), which can return the error code. */
-    *pAmt = 0;
-    return (const u8*)"\x7F";
-  }
-
-  *pAmt = nData;
-  return (const void*)aData;
-#endif
 }
 
 /* Move the cursor to the first entry in the table.  Return SQLITE_OK

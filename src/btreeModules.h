@@ -75,6 +75,7 @@ int sqlite3HctBtreeTransferRow(BtCursor*, BtCursor*, i64);
 int sqlite3HctBtreeClearTableOfCursor(BtCursor*);
 int sqlite3HctBtreeCount(sqlite3*, BtCursor*, i64*);
 i64 sqlite3HctBtreeOffset(BtCursor*);
+int sqlite3HctBtreeIsEmpty(BtCursor*, int*);
 int sqlite3StockBtreeCursor(Btree*, Pgno, int, struct KeyInfo*, BtCursor*);
 sqlite3_uint64 sqlite3StockBtreeSeekCount(Btree*);
 Pgno sqlite3StockBtreeLastPage(Btree*);
@@ -152,5 +153,6 @@ int sqlite3StockBtreeTransferRow(BtCursor*, BtCursor*, i64);
 int sqlite3StockBtreeClearTableOfCursor(BtCursor*);
 int sqlite3StockBtreeCount(sqlite3*, BtCursor*, i64*);
 i64 sqlite3StockBtreeOffset(BtCursor*);
+int sqlite3StockBtreeIsEmpty(BtCursor*, int*);
 BtCursor *sqlite3StockBtreeFakeValidCursor(void);
 
