@@ -3232,6 +3232,8 @@ int sqlite3HctBtreeClearTable(Btree *pBt, int iTable, i64 *pnChange){
     HctTreeCsr *pTreeCsr = 0;
     UnpackedRecord *pRec = 0;
 
+    HctBuffer buf = {0,0,0};
+
     if( pKeyInfo ){
       pRec = sqlite3VdbeAllocUnpackedRecord(pKeyInfo);
       if( pRec==0 ) rc = SQLITE_NOMEM_BKPT;
@@ -3251,9 +3253,17 @@ int sqlite3HctBtreeClearTable(Btree *pBt, int iTable, i64 *pnChange){
         while( rc==SQLITE_OK ){
           nChange++;
           if( pKeyInfo ){
+            u32 nReq = sqlite3HctBtreePayloadSize(pCsr);
             const u8 *aData = 0;
             u32 nData = 0;
             aData = (const u8*)sqlite3HctBtreePayloadFetch(pCsr, &nData);
+            if( nReq>nData ){
+              sqlite3HctBufferGrow(&buf, nReq);
+              rc = sqlite3HctBtreePayload(pCsr, 0, nReq, buf.aBuf);
+              if( rc!=SQLITE_OK ) break;
+              aData = buf.aBuf;
+              nData = nReq;
+            }
             assert( pKeyInfo==pRec->pKeyInfo );
             sqlite3VdbeRecordUnpack(nData, aData, pRec);
             rc = sqlite3HctTreeDeleteKey(pTreeCsr, pRec, 0, nData, aData);

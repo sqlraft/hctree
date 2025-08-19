@@ -1949,9 +1949,14 @@ int sqlite3HctFilePageNewTransfer(
 ** number obtained by an earlier call to sqlite3HctFileRootPgno().
 */
 int sqlite3HctFilePageNew(HctFile *pFile, HctFilePage *pPg){
-  int rc = sqlite3HctFilePageNewLogical(pFile, pPg);
-  if( rc==SQLITE_OK ){
-    hctFilePageMakeWritable(&rc, pPg);
+  int rc = SQLITE_OK;
+  if( inject_page_failure() ){
+    rc = SQLITE_IOERR_READ;
+  }else{
+    rc = sqlite3HctFilePageNewLogical(pFile, pPg);
+    if( rc==SQLITE_OK ){
+      hctFilePageMakeWritable(&rc, pPg);
+    }
   }
   return rc;
 }
@@ -2137,8 +2142,6 @@ int sqlite3HctFileClearInUse(HctFilePage *pPg, int bReuseNow){
     u32 iPhysPg = pPg->iOldPg;
 
     assert( pPg->iPg>0 );
-    assert( pPg->iOldPg>0 );
-
 #ifdef SQLITE_DEBUG
     if( bReuseNow==0 ){
       u64 iVal = hctFilePagemapGet(pPg->pFile->pMapping, pPg->iPg);
@@ -2147,9 +2150,12 @@ int sqlite3HctFileClearInUse(HctFilePage *pPg, int bReuseNow){
 #endif
 
     hctFileClearFlag(pPg->pFile, pPg->iPg, HCT_PMF_LOGICAL_IN_USE);
-    hctFileClearFlag(pPg->pFile, iPhysPg, HCT_PMF_PHYSICAL_IN_USE);
     hctFileFreePg(&rc, pPg->pFile, iTid, pPg->iPg, 1);
-    hctFileFreePg(&rc, pPg->pFile, iTid, iPhysPg, 0);
+
+    if( iPhysPg!=0 ){
+      hctFileClearFlag(pPg->pFile, iPhysPg, HCT_PMF_PHYSICAL_IN_USE);
+      hctFileFreePg(&rc, pPg->pFile, iTid, iPhysPg, 0);
+    }
   }
 
   return rc;

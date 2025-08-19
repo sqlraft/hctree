@@ -207,7 +207,152 @@ do_faultsim_test 7 -faults hctpage -prep {
   faultsim_test_result {0 {}}
 }
 
+#-------------------------------------------------------------------------
+# Page-error while sorting index pages in order to write keys to the 
+# upper level.
+#
+hct_reset_db
+do_execsql_test 8.0 {
+  BEGIN;
+    CREATE TABLE t1(a INTEGER PRIMARY KEY, b BLOB, c TEXT) WITHOUT ROWID;
+    INSERT INTO t1 VALUES(10, randomblob(5000), 'one');
+    INSERT INTO t1 VALUES(20, randomblob(5000), 'two');
+    INSERT INTO t1 VALUES(30, randomblob(5000), 'three');
+    INSERT INTO t1 VALUES(40, randomblob(5000), 'four');
+    INSERT INTO t1 VALUES(50, randomblob(5000), 'five');
+    INSERT INTO t1 VALUES(60, randomblob(5000), 'six');
+    INSERT INTO t1 VALUES(70, randomblob(5000), 'seven');
+    INSERT INTO t1 VALUES(80, randomblob(5000), 'eight');
+  COMMIT;
+}
 
+faultsim_save_and_close
+
+do_faultsim_test 8.1 -faults hctpage -prep {
+  faultsim_restore_and_reopen
+  execsql { SELECT * FROM t1 }
+} -body {
+  execsql { 
+    BEGIN;
+      INSERT INTO t1 VALUES(11, randomblob(5000), 'w');
+      INSERT INTO t1 VALUES(12, randomblob(5000), 'x');
+      INSERT INTO t1 VALUES(13, randomblob(5000), 'y');
+      INSERT INTO t1 VALUES(14, randomblob(5000), 'z');
+    COMMIT;
+  }
+} -test {
+  faultsim_test_result {0 {}}
+}
+
+do_faultsim_test 8.2 -faults hctpage -prep {
+  faultsim_restore_and_reopen
+  execsql { SELECT * FROM t1 }
+} -body {
+  execsql { 
+    BEGIN;
+      INSERT INTO t1 VALUES(71, randomblob(5000), 'w');
+      INSERT INTO t1 VALUES(72, randomblob(5000), 'x');
+      INSERT INTO t1 VALUES(73, randomblob(5000), 'y');
+      INSERT INTO t1 VALUES(74, randomblob(5000), 'z');
+    COMMIT;
+  }
+} -test {
+  faultsim_test_result {0 {}}
+}
+
+#-------------------------------------------------------------------------
+# Page-error while splitting root page.
+#
+hct_reset_db
+do_execsql_test 9.0 {
+  BEGIN;
+    CREATE TABLE x1(a, b, c);
+    WITH s(i) AS (
+      SELECT 1 UNION ALL SELECT i+1 FROM s WHERE i<20
+    )
+    INSERT INTO x1 SELECT randomblob(60), randomblob(60), randomblob(60) FROM s;
+  COMMIT;
+}
+
+faultsim_save_and_close
+
+do_faultsim_test 9 -faults hctpage -prep {
+  faultsim_restore_and_reopen
+  execsql { SELECT * FROM x1 }
+} -body {
+  execsql { 
+    BEGIN CONCURRENT;
+      INSERT INTO x1 VALUES(randomblob(60), randomblob(60), randomblob(60));
+      INSERT INTO x1 VALUES(randomblob(60), randomblob(60), randomblob(60));
+      INSERT INTO x1 VALUES(randomblob(60), randomblob(60), randomblob(60));
+      INSERT INTO x1 VALUES(randomblob(60), randomblob(60), randomblob(60));
+      INSERT INTO x1 VALUES(randomblob(60), randomblob(60), randomblob(60));
+      INSERT INTO x1 VALUES(randomblob(60), randomblob(60), randomblob(60));
+      INSERT INTO x1 VALUES(randomblob(60), randomblob(60), randomblob(60));
+      INSERT INTO x1 VALUES(randomblob(60), randomblob(60), randomblob(60));
+      INSERT INTO x1 VALUES(randomblob(60), randomblob(60), randomblob(60));
+      INSERT INTO x1 VALUES(randomblob(60), randomblob(60), randomblob(60));
+    COMMIT;
+  }
+} -test {
+  faultsim_test_result {0 {}}
+}
+
+#-------------------------------------------------------------------------
+# Page-error while splitting root page.
+#
+hct_reset_db
+do_execsql_test 10.0 {
+  CREATE TABLE t1(a PRIMARY KEY, b) WITHOUT ROWID;
+  INSERT INTO t1 VALUES(100, randomblob(6000));
+}
+
+faultsim_save_and_close
+
+do_faultsim_test 10 -faults hctpage -prep {
+  faultsim_restore_and_reopen
+} -body {
+  execsql { 
+    BEGIN CONCURRENT;
+      UPDATE t1 SET b=randomblob(6001) WHERE a=100;
+      SELECT b=4 FROM t1 WHERE a=100;
+    COMMIT;
+  }
+} -test {
+  faultsim_test_result {0 0}
+}
+
+#-------------------------------------------------------------------------
+# Page-error in irrevocable eviction.
+#
+hct_reset_db
+
+do_execsql_test 11.0 {
+  CREATE TABLE t1(a PRIMARY KEY, b) WITHOUT ROWID;
+  WITH x(i) AS (
+    SELECT 1 UNION ALL SELECT i+1 FROM x WHERE i<20
+  )
+  INSERT INTO t1 SELECT i, hex(randomblob(200)) FROM x;
+}
+
+foreach leaf [lrange [hct_leaf_list db t1] 1 end] {
+  execsql {
+    UPDATE hctpgmap SET logical_evicted=1 WHERE slot = $leaf
+  }
+}
+faultsim_save_and_close
+
+do_faultsim_test 11 -faults hctpage -prep {
+  faultsim_restore_and_reopen
+} -body {
+  execsql { 
+    BEGIN CONCURRENT;
+      INSERT INTO t1 VALUES(500, hex(randomblob(200)));
+    COMMIT;
+  }
+} -test {
+  faultsim_test_result {0 {}}
+}
 
 finish_test
 

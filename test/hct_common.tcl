@@ -1,6 +1,59 @@
 
 
 
+# Given logical page number $lpgno, return the logical child page number
+# of the leftmost child. Or, if $lpgno is a leaf page, return an empty
+# string.
+#
+proc hct_leftmost_child {db lpgno} {
+ 
+  $db one {
+    SELECT hctentry.child 
+    FROM hctpgmap, hctdb, hctentry 
+    WHERE hctpgmap.slot=$lpgno AND 
+      hctdb.pgno=hctpgmap.value AND 
+      hctentry.pgno=hctpgmap.value AND 
+      hctentry.entry=0
+  }
+  
+}
+
+# Given logical page number $lpgno, return the logical peer page number.
+# This is 0 if there is no peer.
+#
+proc hct_peer {db lpgno} {
+  $db one {
+    SELECT hctdb.peer 
+    FROM hctdb, hctpgmap
+    WHERE hctpgmap.slot=$lpgno AND hctdb.pgno=hctpgmap.value
+  }
+}
+
+# Parameter $db must be a database handle. $name is the name of a table
+# or index in the open hct database. This command returns a list containing
+# the logical page numbers of the leaves of the corresponding tree structure,
+# from left to right.
+#
+proc hct_leaf_list {db name} {
+  set root [$db one {SELECT rootpage FROM sqlite_schema WHERE name=$name}]
+  if {$root==""} { error "no such table: $name" }
+
+  # Find the logical page number of the leftmost leaf in the table.
+  set leaf $root
+  while {[set child [hct_leftmost_child $db $leaf]]!=""} {
+    set leaf $child
+  }
+
+  # Set lLeaf to a list of logical page numbers that are leaves of this table
+  set peer $leaf
+  set lLeaf [list $peer]
+  while {[set peer [hct_peer $db $peer]]!=0} {
+    lappend lLeaf $peer
+  }
+
+  return $lLeaf
+}
+
 
 proc show_db_entries {} {
   execsql_pp {

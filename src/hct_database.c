@@ -2021,12 +2021,10 @@ static u64 hctDbCsrTid(HctDbCsr *pCsr){
 ** structure is allocated. Return SQLITE_NOMEM if an OOM is encountered
 ** while attempting to allocate said structure, or SQLITE_OK otherwise.
 */
-static int hctDbCsrAllocateUnpacked(HctDbCsr *pCsr){
-  int rc = SQLITE_OK;
+static void hctDbCsrAllocateUnpacked(HctDbCsr *pCsr){
   if( pCsr->pKeyInfo && pCsr->pRec==0 ){
     pCsr->pRec = hctDbAllocateUnpacked(pCsr->pKeyInfo);
   }
-  return rc;
 }
 
 static const u8 *hctDbCsrPageAndCellIdx(
@@ -3327,7 +3325,7 @@ static int hctDbMinCellsPerIntkeyNode(int pgsz){
   return (pgsz - sizeof(HctDbIntkeyNode)) / (3*sizeof(HctDbIntkeyNodeEntry));
 }
 
-static void hctDbIrrevocablyEvictPage(HctDatabase *pDb, HctDbWriter *p);
+static int hctDbIrrevocablyEvictPage(HctDatabase *pDb, HctDbWriter *p);
 
 static int hctDbOverflowArrayFree(HctDatabase *pDb, HctDbOverflowArray *p){
   int ii = 0;
@@ -3400,8 +3398,13 @@ static void assert_writer_is_ok(HctDatabase *pDb, HctDbWriter *p){
 /*
 ** Cleanup the writer object passed as the first argument.
 */
-static void hctDbWriterCleanup(HctDatabase *pDb, HctDbWriter *p, int bRevert){
-
+static void hctDbWriterCleanup(
+  int *pRc, 
+  HctDatabase *pDb, 
+  HctDbWriter *p, 
+  int bRevert
+){
+  assert( p->iEvictLockedPgno==0 || bRevert );
   if( p->bDoCleanup ){
     int ii;
 
@@ -3442,7 +3445,7 @@ static void hctDbWriterCleanup(HctDatabase *pDb, HctDbWriter *p, int bRevert){
     hctDbPageArrayReset(&p->writepg);
 
     for(ii=0; ii<p->discardpg.nPg; ii++){
-      if( bRevert && pDb->pConfig->nTryBeforeUnevict>1 ){
+      if( bRevert ){
         sqlite3HctFilePageUnevict(&p->discardpg.aPg[ii]);
       }
       sqlite3HctFilePageRelease(&p->discardpg.aPg[ii]);
@@ -3454,11 +3457,16 @@ static void hctDbWriterCleanup(HctDatabase *pDb, HctDbWriter *p, int bRevert){
 
     if( p->iEvictLockedPgno ){
       assert( p->writecsr.iRoot );
+      assert( bRevert );
       p->nEvictLocked++;
       if( p->nEvictLocked>=pDb->pConfig->nTryBeforeUnevict ){
+        int rc = SQLITE_OK;
         p->nEvictLocked = -1;
-        hctDbIrrevocablyEvictPage(pDb, p);
+        rc = hctDbIrrevocablyEvictPage(pDb, p);
         p->nEvictLocked = 0;
+        if( rc!=SQLITE_OK && (*pRc==SQLITE_OK || *pRc==SQLITE_LOCKED) ){
+           *pRc = rc;
+        }
       }
     }else{
       p->nEvictLocked = 0;
@@ -3486,7 +3494,7 @@ static int hctDbInsert(
 typedef struct HctDbWriterOrigin HctDbWriterOrigin;
 struct HctDbWriterOrigin {
   u8 bDiscard;                    /* 1 for aDiscard[], 0 for aWritePg[] */
-  i16 iPg;                        /* Index of page in array*/
+  i16 iPg;                        /* Page index in aDiscard[] or aWritePg[] */
 };
 
 static int hctdbWriterSortFPKeys(
@@ -3594,7 +3602,7 @@ static int hctDbInsertFlushWrite(HctDatabase *pDb, HctDbWriter *p){
   assert( p->writepg.aPg[0].aNew || p->writepg.nPg==1 );
 #ifdef SQLITE_DEBUG
   if( p->writepg.aPg[0].aNew ){
-    for(ii=1; rc==SQLITE_OK && ii<p->writepg.nPg; ii++){
+    for(ii=1; ii<p->writepg.nPg; ii++){
       u32 iPeer = ((HctDbPageHdr*)p->writepg.aPg[ii-1].aNew)->iPeerPg;
       assert( p->writepg.aPg[ii].iPg==iPeer );
     }
@@ -3602,8 +3610,7 @@ static int hctDbInsertFlushWrite(HctDatabase *pDb, HctDbWriter *p){
 #endif
 
   /* Test if this is a split of a root page of the tree. */
-  if( rc==SQLITE_OK 
-   && p->writepg.nPg>1 
+  if( p->writepg.nPg>1 
    && p->writepg.aPg[0].iPg==p->writecsr.iRoot 
   ){
     HctFilePage *pPg0 = &p->writepg.aPg[0];
@@ -3660,18 +3667,13 @@ static int hctDbInsertFlushWrite(HctDatabase *pDb, HctDbWriter *p){
 
     if( nOrig>ArraySize(aStatic) ){
       int nByte = sizeof(HctDbWriterOrigin) * nOrig;
-      aOrig = aDyn = (HctDbWriterOrigin*)sqlite3HctMallocRc(&rc, nByte);
+      aOrig = aDyn = (HctDbWriterOrigin*)sqlite3HctMalloc(nByte);
     }
 
-    if( rc==SQLITE_OK ){
-      wr.iHeight = p->iHeight + 1;
-      rc = hctDbCsrAllocateUnpacked(&p->writecsr);
-    }
+    wr.iHeight = p->iHeight + 1;
+    hctDbCsrAllocateUnpacked(&p->writecsr);
 
-    if( rc==SQLITE_OK ){
-      rc = hctdbWriterSortFPKeys(pDb, eType, p, aOrig);
-    }
-
+    rc = hctdbWriterSortFPKeys(pDb, eType, p, aOrig);
     if( rc==SQLITE_OK ){
       do {
         assert( rc==SQLITE_OK || rc==SQLITE_LOCKED );
@@ -3710,7 +3712,7 @@ static int hctDbInsertFlushWrite(HctDatabase *pDb, HctDbWriter *p){
           iOrig -= wr.nWriteKey;
           pDb->stats.nInternalRetry++;
         }
-        hctDbWriterCleanup(pDb, &wr, (rc!=SQLITE_OK));
+        hctDbWriterCleanup(&rc, pDb, &wr, (rc!=SQLITE_OK));
         wr.nWriteKey = 0;
 
       }while( rc==SQLITE_LOCKED );
@@ -3729,7 +3731,7 @@ static int hctDbInsertFlushWrite(HctDatabase *pDb, HctDbWriter *p){
   HCT_EXTRA_WR_LOGGING(pDb, ("flush done rc=%d iHeight=%d", rc, p->iHeight));
 
   /* Clean up the Writer object */
-  hctDbWriterCleanup(pDb, p, bUnevict);
+  hctDbWriterCleanup(&rc, pDb, p, rc!=SQLITE_OK);
   return rc;
 }
 
@@ -4096,7 +4098,7 @@ static int hctDbExtendWriteArray(
   }
 
   /* Remove pages that are not required */
-  for(ii=nPg; ii<0; ii++){
+  for(ii=nPg; rc==SQLITE_OK && ii<0; ii++){
     HctDbPageHdr *pPrev = (HctDbPageHdr*)(p->writepg.aPg[iPg-1].aNew);
     HctDbPageHdr *pRem = (HctDbPageHdr*)(p->writepg.aPg[iPg].aNew);
     pPrev->iPeerPg = pRem->iPeerPg;
@@ -4136,11 +4138,9 @@ int sqlite3HctDbCsrLoadAndDecode(HctDbCsr *pCsr, UnpackedRecord **ppRec){
   aPg = hctDbCsrPageAndCell(pCsr, &iCell);
 
   rc = hctDbLoadRecord(pCsr->pDb, &pCsr->rec, aPg, iCell, &nData, &aData);
-  if( rc==SQLITE_OK ){
-    rc = hctDbCsrAllocateUnpacked(pCsr);
-  }
 
   if( rc==SQLITE_OK ){
+    hctDbCsrAllocateUnpacked(pCsr);
     *ppRec = pCsr->pRec;
     sqlite3VdbeRecordUnpack(nData, aData, pCsr->pRec);
     assert( pCsr->pRec->nField>0 );
@@ -4177,35 +4177,65 @@ static int hctDbFindLhsPeer(
     memset(&buf, 0, sizeof(buf));
     rc = hctDbLoadRecord(pDb, &buf, aLeft, 0, &nData, &aData);
     if( rc==SQLITE_OK ){
-      rc = hctDbCsrAllocateUnpacked(&p->writecsr);
-    }
-    if( rc==SQLITE_OK ){
+      hctDbCsrAllocateUnpacked(&p->writecsr);
       pRec = p->writecsr.pRec;
       sqlite3VdbeRecordUnpack(nData, aData, pRec);
       sqlite3HctDbRecordTrim(pRec);
       pRec->default_rc = 1;
       rc = hctDbCsrSeek(&csr, 0, p->iHeight, pRec, 0, 0);
       pRec->default_rc = 0;
-
-      assert( csr.pg.iPg!=pPg->iPg );
+      assert( rc!=SQLITE_OK || csr.pg.iPg!=pPg->iPg );
     }
     sqlite3HctBufferFree(&buf);
   }
 
-  if( rc==SQLITE_OK 
-   && ((HctDbPageHdr*)csr.pg.aOld)->iPeerPg==pPg->iPg
-  ){
-    *pOut = csr.pg;
-  }else{
+  if( rc==SQLITE_OK ){
+    if( ((HctDbPageHdr*)csr.pg.aOld)->iPeerPg==pPg->iPg ){
+      *pOut = csr.pg;
+    }else{
+      rc = SQLITE_LOCKED_ERR(pPg->iPg, "peer");
+    }
+  }
+
+  if( rc!=SQLITE_OK ){
     memset(pOut, 0, sizeof(HctFilePage));
-    rc = SQLITE_LOCKED_ERR(pPg->iPg, "peer");
   }
   hctDbCsrCleanup(&csr);
 
   return rc;
 }
 
-static void hctDbIrrevocablyEvictPage(HctDatabase *pDb, HctDbWriter *p){
+/*
+** When writing to the database, if the writer finds that the leaf page
+** being written has already been evicted, the writer abandons the current
+** write and retries it - just as if a CAS operation to write the leaf failed.
+** But, if a crash and recovery have occurred, it is possible that the leaf
+** was marked as evicted before the crash and there is no writer thread that
+** will ever update the tree to finish removing the page from it. In this
+** case our writer could end up in an infinite loop.
+**
+** To avoid this, if a writer hits this condition HctConfig.nTryBeforeUnevict 
+** times in a row, it fixes the tree itself. Assuming the page marked evicted
+** is page E, it:
+**
+**    1. Loads the LHS peer of page E, page L.
+**
+**    2. Marks page E as "irrevocably evicted". This means that even if the
+**       writer thread that marked it as evicted is still floating around,
+**       it cannot unevict page E.
+**
+**    3. Copies the contents of page E to a new logical page.
+**
+**    4. Updates page L so that its peer pointer points to the new page.
+**
+**    5. Updates the parent list to remove the pointer to page E and add
+**       the pointer to page L.
+**
+** In step 1, it may turn out that page L has also already been evicted. In
+** this case the algorithm above is run recursively, with E=L until page E
+** and all evicted pages immediately to its left have been replaced.
+*/
+static int hctDbIrrevocablyEvictPage(HctDatabase *pDb, HctDbWriter *p){
   int rc = SQLITE_OK;
   u32 iLocked = p->iEvictLockedPgno;
   int bDone = 0;
@@ -4214,17 +4244,17 @@ static void hctDbIrrevocablyEvictPage(HctDatabase *pDb, HctDbWriter *p){
   u32 iRoot = p->writecsr.iRoot;
 
   sqlite3HctFileDebugPrint(pDb->pFile,"BEGIN forced eviction of %d\n", iLocked);
-  
+
+  p->iEvictLockedPgno = 0;
   do {
     HctFilePage pg1;
     HctFilePage pg0;
-    memset(&pg1, 0, sizeof(pg1));
+    memset(&pg0, 0, sizeof(pg0));
     if( p->writecsr.iRoot==0 ){
       hctDbCsrInit(pDb, iRoot, pKeyInfo, &p->writecsr);
     }
     rc = sqlite3HctFilePageGet(pDb->pFile, iLocked, &pg1);
     while( rc==SQLITE_OK ){
-      memset(&pg0, 0, sizeof(pg0));
       rc = hctDbFindLhsPeer(pDb, p, &pg1, &pg0);
       if( rc ) break;
       if( 0==sqlite3HctFilePageIsEvicted(pg0.pFile, pg0.iPg) ) break;
@@ -4245,23 +4275,19 @@ static void hctDbIrrevocablyEvictPage(HctDatabase *pDb, HctDbWriter *p){
       }
       if( rc==SQLITE_OK ){
         hctMemcpy(pg0.aNew, pg0.aOld, pDb->pgsz);
-      }
-      if( rc==SQLITE_OK ){
         p->writepg.aPg[0] = pg0;
         p->writepg.nPg = 1;
         rc = hctDbExtendWriteArray(pDb, p, 1, 1);
       }
+
+      p->bDoCleanup = 1;
       if( rc==SQLITE_OK ){
         hctMemcpy(p->writepg.aPg[1].aNew, pg1.aOld, pDb->pgsz);
         p->discardpg.aPg[0] = pg1;
         p->discardpg.nPg = 1;
-      }
-
-      p->bDoCleanup = 1;
-      if( rc==SQLITE_OK ){
         rc = hctDbInsertFlushWrite(pDb, p);
       }else{
-        hctDbWriterCleanup(pDb, p, 1);
+        hctDbWriterCleanup(&rc, pDb, p, 1);
       }
 
     }else{
@@ -4272,6 +4298,8 @@ static void hctDbIrrevocablyEvictPage(HctDatabase *pDb, HctDbWriter *p){
 
   sqlite3KeyInfoUnref(pKeyInfo);
   sqlite3HctFileDebugPrint(pDb->pFile,"END forced eviction of %d\n", iLocked);
+
+  return rc;
 }
 
 /*
@@ -4336,9 +4364,12 @@ static int hctDbLoadPeers(HctDatabase *pDb, HctDbWriter *p, int *piPg){
       if( rc==SQLITE_OK ){
         HctFilePage *pTo = &p->writepg.aPg[p->writepg.nPg];
         rc = sqlite3HctFilePageNewTransfer(pDb->pFile, pTo, pCopy);
-        p->writepg.nPg++;
       }
-      rc = hctDbSetWriteFpKey(pDb, p);
+      if( rc==SQLITE_OK ){
+        p->writepg.nPg++;
+        rc = hctDbSetWriteFpKey(pDb, p);
+      }
+      assert( p->writepg.aPg[p->writepg.nPg-1].aOld );
     }
   }
 
@@ -4883,7 +4914,7 @@ static int hctDbBalance(
   }
 
   /* Populate the output pages */
-  for(ii=0; ii<nOut; ii++){
+  for(ii=0; rc==SQLITE_OK && ii<nOut; ii++){
     int iIdx = ii+iLeftPg;
     u8 *aTarget = p->writepg.aPg[iIdx].aNew;
     HctDbIndexLeaf *pLeaf = (HctDbIndexLeaf*)aTarget;
@@ -6399,7 +6430,7 @@ static int hctDbInsertWithRetry(
 
   rc = hctDbInsert(pDb, &pDb->pa, iRoot, pRec, iKey, 0, bDel, nData, aData);
   if( rc!=SQLITE_OK ){
-    hctDbWriterCleanup(pDb, &pDb->pa, 1);
+    hctDbWriterCleanup(&rc, pDb, &pDb->pa, 1);
   }
   if( rc==SQLITE_LOCKED || (rc&0xFF)==SQLITE_BUSY ){
     if( rc==SQLITE_LOCKED ){
@@ -6601,7 +6632,7 @@ int sqlite3HctDbInsert(
   if( rc==SQLITE_OK ){
     rc = hctDbInsertWithRetry(pDb,iRoot,pRec,iKey, bDel, nData, aData, pnRetry);
     if( rc!=SQLITE_OK ){
-      hctDbWriterCleanup(pDb, &pDb->pa, 1);
+      hctDbWriterCleanup(&rc, pDb, &pDb->pa, 1);
     }
   }
 
@@ -8014,7 +8045,7 @@ static int hctDbValidateIndex(HctDatabase *pDb, HctDbCsr *pCsr){
 
   pCsr->index.pOpList = 0;
   assert( pCsr->index.pCurrentOp==0 );
-  rc = hctDbCsrAllocateUnpacked(pCsr);
+  hctDbCsrAllocateUnpacked(pCsr);
   for(pOp=pOpList; pOp && rc==SQLITE_OK; pOp=pOp->pNextOp){
     int nStep = 0;
 #ifdef HCT_VALIDATE_TIMERS
@@ -8134,7 +8165,7 @@ void sqlite3HctDbTMapScan(HctDatabase *pDb){
 ** the SQL for) the transaction.
 */
 int sqlite3HctDbPreValidate(HctDatabase *pDb){
-  assert( (pDb->rc==SQLITE_BUSY_SNAPSHOT)==(pDb->iRootCannotCommit!=0) );
+  assert( (pDb->rcCommit==SQLITE_BUSY_SNAPSHOT)==(pDb->iRootCannotCommit!=0) );
   if( pDb->iRootCannotCommit ){
     sqlite3_log(SQLITE_BUSY_SNAPSHOT, 
         "read/write conflict (root=%lld) detected while preparing transaction",
