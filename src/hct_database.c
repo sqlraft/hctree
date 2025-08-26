@@ -8262,6 +8262,9 @@ int sqlite3HctDbValidateTablename(
   HctDbCsr *pCsr = 0;
   int rc = SQLITE_OK;
 
+  assert( pDb->iTid==iTid );
+  pDb->iTid = 0;
+
   rc = sqlite3HctDbCsrOpen(pDb, 0, 1, &pCsr);
   if( rc==SQLITE_OK ){
     pCsr->eDir = BTREE_DIR_FORWARD;
@@ -8270,7 +8273,7 @@ int sqlite3HctDbValidateTablename(
         rc=hctDbCsrNext(pCsr)
     ){
       u64 iDbTid = hctDbCsrTid(pCsr);
-      if( iDbTid && iDbTid!=iTid ){
+      if( iDbTid && iDbTid!=iTid && !hctDbTidIsVisible(pCsr->pDb, iDbTid, 0) ){
         int nData = 0;
         const u8 *aData = 0;
         int nDbName = 0;
@@ -8288,6 +8291,8 @@ int sqlite3HctDbValidateTablename(
     }
   }
   sqlite3HctDbCsrClose(pCsr);
+
+  pDb->iTid = iTid;
   return rc;
 }
 

@@ -183,6 +183,18 @@ do_test 3.3 {
   catchsql { COMMIT } db2
 } {1 {database is locked}}
 
+#-------------------------------------------------------------------------
+hct_reset_db
+do_execsql_test 4.0 {
+  CREATE TABLE x1(x, y);
+}
+
+do_execsql_test 4.1 {
+  BEGIN;
+    DROP TABLE x1;
+    CREATE TABLE x1(a, b, c);
+  COMMIT;
+}
 
 finish_test
 
