@@ -3,15 +3,14 @@
 #
 # Intended to include'd by ./GNUmakefile.
 #
-# 'make dist' rules for creating a distribution archive of the WASM/JS
-# pieces, noting that we only build a dist of the built files, not the
-# numerous pieces required to build them.
+# 'make dist' rules for creating a distribution archive of the SQLite
+# WASM/JS deliverables.
 #
-# Use 'make snapshot' to create "snapshot" releases. They use a
-# distinctly different zip file and top directory name to distinguish
+# Use 'make snapshot' to create "snapshot" releases. They use
+# distinctly different zip file and top directory names to distinguish
 # them from release builds.
 #######################################################################
-MAKEFILE.dist := $(lastword $(MAKEFILE_LIST))
+MAKEFILE.dist = $(lastword $(MAKEFILE_LIST))
 
 ########################################################################
 # Chicken/egg situation: we need $(bin.version-info) to get the
@@ -20,35 +19,35 @@ MAKEFILE.dist := $(lastword $(MAKEFILE_LIST))
 # have to use a temporary name for the archive until we can get
 # that binary built.
 ifeq (1,$(SQLITE_C_IS_SEE))
-dist-name-extra := -see
+dist-name-extra = -see
 else
-dist-name-extra :=
+dist-name-extra =
 endif
 ifeq (,$(filter snapshot,$(MAKECMDGOALS)))
-dist-name-prefix := sqlite-wasm$(dist-name-extra)
+dist-name-prefix = sqlite-wasm$(dist-name-extra)
 else
-dist-name-prefix := sqlite-wasm$(dist-name-extra)-snapshot-$(shell /usr/bin/date +%Y%m%d)
+dist-name-prefix = sqlite-wasm$(dist-name-extra)-snapshot-$(shell /usr/bin/date +%Y%m%d)
 endif
-dist-name := $(dist-name-prefix)-TEMP
+dist-name = $(dist-name-prefix)-TEMP
 
 ########################################################################
-# dist.build must be the name of a target which triggers the build of
-# the files to be packed into the dist archive.  The intention is that
-# it be one of (o0, o1, o2, o3, os, oz), each of which uses like-named
-# -Ox optimization level flags. The o2 target provides the best
-# overall runtime speeds. The oz target provides slightly slower
-# speeds (roughly 10%) with significantly smaller WASM file
-# sizes. Note that -O2 (the o2 target) results in faster binaries than
-# both -O3 and -Os (the o3 and os targets) in all tests run to
-# date. Our general policy is that we want the smallest binaries for
-# dist zip files, so use the oz build unless there is a compelling
-# reason not to.
+# $(dist.build) must be the name of a target which triggers the build
+# of the files to be packed into the dist archive.  The intention is
+# that it be one of (o0, o1, o2, o3, os, oz), each of which uses
+# like-named -Ox optimization level flags. The o2 target provides the
+# best overall runtime speeds. The oz target provides slightly slower
+# speeds (roughly 10%) with significantly smaller WASM file sizes. -O2
+# (the o2 target) consistently results in faster binaries than both
+# -O3 and -Os (the o3 and os targets) in all tests run to date. Our
+# general policy is that we want the smallest binaries for dist zip
+# files, so use the oz build unless there is a compelling reason not
+# to.
 dist.build ?= oz
 
-dist-dir.top := $(dist-name)
-dist-dir.jswasm := $(dist-dir.top)/$(notdir $(dir.dout))
-dist-dir.common := $(dist-dir.top)/common
-dist.top.extras := \
+dist-dir.top = $(dist-name)
+dist-dir.jswasm = $(dist-dir.top)/$(notdir $(dir.dout))
+dist-dir.common = $(dist-dir.top)/common
+dist.top.extras = \
     demo-123.html demo-123-worker.html demo-123.js \
     tester1.html tester1-worker.html tester1-esm.html \
     tester1.js tester1.mjs \
@@ -56,16 +55,12 @@ dist.top.extras := \
     demo-worker1.html demo-worker1.js \
     demo-worker1-promiser.html demo-worker1-promiser.js \
     demo-worker1-promiser-esm.html demo-worker1-promiser.mjs
-dist.jswasm.extras := $(sqlite3.wasm) \
+dist.jswasm.extras = $(sqlite3.wasm) \
   $(sqlite3-api.ext.jses)
-dist.common.extras := \
+dist.common.extras = \
     $(wildcard $(dir.common)/*.css) \
     $(dir.common)/SqliteTestUtil.js
 
-#$(info sqlite3-worker1-promiser.mjs = $(sqlite3-worker1-promiser.mjs))
-#$(info sqlite3-worker1.js = $(sqlite3-worker1.js))
-#$(info sqlite3-api.ext.jses = $(sqlite3-api.ext.jses))
-#$(info dist.jswasm.extras = $(dist.jswasm.extras))
 .PHONY: dist snapshot
 # DIST_STRIP_COMMENTS $(call)able to be used in stripping C-style
 # from the dist copies of certain files.
@@ -77,12 +72,12 @@ $(bin.stripccomments) $(2) < $(1) > $(dist-dir.jswasm)/$(notdir $(1)) || exit;
 endef
 # STRIP_K1.js = list of JS files which need to be passed through
 # $(bin.stripcomments) with a single -k flag.
-STRIP_K1.js := $(sqlite3-worker1.js) $(sqlite3-worker1-promiser.js) \
+STRIP_K1.js = $(sqlite3-worker1.js) $(sqlite3-worker1-promiser.js) \
   $(sqlite3-worker1-bundler-friendly.js) \
   $(sqlite3-api.ext.jses)
 # STRIP_K2.js = list of JS files which need to be passed through
 # $(bin.stripcomments) with two -k flags.
-STRIP_K2.js := $(sqlite3.js) $(sqlite3.mjs) \
+STRIP_K2.js = $(sqlite3.js) $(sqlite3.mjs) \
   $(sqlite3-bundler-friendly.mjs) $(sqlite3-node.mjs)
 ########################################################################
 # dist: create the end-user deliverable archive.
@@ -94,9 +89,22 @@ STRIP_K2.js := $(sqlite3.js) $(sqlite3.mjs) \
 # dist's deps must be trimmed to non-generated files or
 # files which are _not_ cleaned up by the clean target.
 #
-# Note that we require $(bin.version-info) in order to figure out the
-# dist file's name, so cannot (without a recursive make) have the
-# target name equal to the archive name.
+# We require $(bin.version-info) in order to figure out the dist
+# file's name, so cannot (without a recursive make) have the target
+# name equal to the archive name.
+#
+# 2025-01-15: Emsdk 4.0.0 introduces, in its generated code, a regex
+# which contains the pattern /*. That, of course, confuses any C-style
+# comment-stripper which is not specifically JS-aware and smart enough
+# to know that it's in a regex or string literal. Because of that,
+# comment-stripping was briefly disabled, resulting in functionally
+# identical but significantly larger JS files. That issue with the
+# comment-stripper has been resolved, but $(apply_comment_stripper)
+# can be set to false to disable it if a similar problem arises.
+#
+#apply_comment_stripper = false
+apply_comment_stripper = true
+# ^^^ shell command true or false
 dist: \
     $(bin.stripccomments) $(bin.version-info) \
     $(dist.build) $(STRIP_K1.js) $(STRIP_K2.js) \
@@ -128,7 +136,7 @@ ifeq (,$(wasm.docs.found))
 snapshot: dist
 	@echo "To upload the snapshot build to the wasm docs server:"; \
 	echo "1) move $(dist-name-prefix)*.zip to the top of a wasm docs checkout."; \
-  echo "2) run 'make uv-sync'"
+	echo "2) From that checkout run 'make uv-sync'"
 else
 snapshot: dist
 	@echo "Moving snapshot to [$(wasm.docs.found)]..."; \
@@ -140,5 +148,5 @@ endif
 # copied into the new $(dist-name) dir.
 .PHONY: dist-clean
 clean: dist-clean
-dist-clean:
+dist-clean: # not to be confused with distclean
 	rm -fr $(dist-name) $(wildcard sqlite-wasm-*.zip)

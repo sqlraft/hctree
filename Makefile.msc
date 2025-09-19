@@ -1623,7 +1623,6 @@ TESTSRC = \
   $(TOP)\src\test_thread.c \
   $(TOP)\src\test_vdbecov.c \
   $(TOP)\src\test_vfs.c \
-  $(TOP)\src\test_windirent.c \
   $(TOP)\src\test_window.c \
   $(TOP)\src\test_wsd.c \
   $(TOP)\ext\fts3\fts3_term.c \
@@ -2396,12 +2395,11 @@ SHELL_DEP = \
     $(TOP)\ext\misc\sqlite3_stdio.h \
     $(TOP)\ext\misc\uint.c \
     $(TOP)\ext\misc\vfstrace.c \
+    $(TOP)\ext\misc\windirent.h \
     $(TOP)\ext\misc\zipfile.c \
     $(TOP)\ext\recover\dbdata.c \
     $(TOP)\ext\recover\sqlite3recover.c \
-    $(TOP)\ext\recover\sqlite3recover.h \
-    $(TOP)\src\test_windirent.c \
-    $(TOP)\src\test_windirent.h
+    $(TOP)\ext\recover\sqlite3recover.h
 
 # If use of zlib is enabled, add the "zipfile.c" source file.
 #
@@ -2488,24 +2486,6 @@ FTS5_SRC = \
    $(TOP)\ext\fts5\fts5_varint.c \
    $(TOP)\ext\fts5\fts5_vocab.c
 
-LSM1_SRC = \
-   $(TOP)\ext\lsm1\lsm.h \
-   $(TOP)\ext\lsm1\lsmInt.h \
-   $(TOP)\ext\lsm1\lsm_ckpt.c \
-   $(TOP)\ext\lsm1\lsm_file.c \
-   $(TOP)\ext\lsm1\lsm_log.c \
-   $(TOP)\ext\lsm1\lsm_main.c \
-   $(TOP)\ext\lsm1\lsm_mem.c \
-   $(TOP)\ext\lsm1\lsm_mutex.c \
-   $(TOP)\ext\lsm1\lsm_shared.c \
-   $(TOP)\ext\lsm1\lsm_sorted.c \
-   $(TOP)\ext\lsm1\lsm_str.c \
-   $(TOP)\ext\lsm1\lsm_tree.c \
-   $(TOP)\ext\lsm1\lsm_unix.c \
-   $(TOP)\ext\lsm1\lsm_varint.c \
-   $(TOP)\ext\lsm1\lsm_vtab.c \
-   $(TOP)\ext\lsm1\lsm_win32.c
-
 fts5parse.c:	$(TOP)\ext\fts5\fts5parse.y lemon.exe
 	copy /Y $(TOP)\ext\fts5\fts5parse.y .
 	copy /B fts5parse.y +,,
@@ -2518,11 +2498,6 @@ fts5.c:	$(FTS5_SRC) $(JIM_TCLSH)
 	$(JIM_TCLSH) $(TOP)\ext\fts5\tool\mkfts5c.tcl
 	copy /Y $(TOP)\ext\fts5\fts5.h .
 	copy /B fts5.h +,,
-
-lsm1.c:	$(LSM1_SRC) $(JIM_TCLSH)
-	$(JIM_TCLSH) $(TOP)\ext\lsm1\tool\mklsm1c.tcl
-	copy /Y $(TOP)\ext\lsm1\lsm.h .
-	copy /B lsm.h +,,
 
 fts5.lo:	fts5.c $(HDR) $(EXTHDR)
 	$(LTCOMPILE) $(CORE_COMPILE_OPTS) $(NO_WARN) -DSQLITE_CORE -c fts5.c
@@ -2586,7 +2561,7 @@ sqlite_tcl.h:
 
 testfixture.exe:	$(TESTFIXTURE_SRC) $(TESTFIXTURE_DEP) $(SQLITE3H) $(LIBRESOBJS) $(HDR) $(SQLITE_TCL_DEP)
 	$(LTLINK) -DSQLITE_NO_SYNC=1 $(TESTFIXTURE_FLAGS) \
-		-DBUILD_sqlite -I$(TCLINCDIR) \
+		-DBUILD_sqlite -I$(TCLINCDIR) -I$(TOP)\ext\misc \
 		$(TESTFIXTURE_SRC) \
 		/link $(LDFLAGS) $(LTLINKOPTS) $(TCLLIBPATHS) $(LTLIBPATHS) $(LIBRESOBJS) $(TCLLIBS) $(LTLIBS) $(TLIBS)
 
@@ -2599,8 +2574,11 @@ extensiontest:	testfixture.exe testloadext.dll
 	@set PATH=$(LIBTCLPATH);$(PATH)
 	.\testfixture.exe $(TOP)\test\loadext.test $(TESTOPTS)
 
-tool-zip:	testfixture.exe sqlite3.exe sqldiff.exe sqlite3_analyzer.exe sqlite3_rsync.exe $(TOP)\tool\mktoolzip.tcl
+tool-zip:	testfixture.exe sqlite3.exe sqldiff.exe sqlite3_analyzer.exe sqlite3_rsync.exe sqlite3.dll $(TOP)\tool\mktoolzip.tcl
 	.\testfixture.exe $(TOP)\tool\mktoolzip.tcl
+
+snapshot-zip:	testfixture.exe sqlite3.exe sqldiff.exe sqlite3_analyzer.exe sqlite3_rsync.exe sqlite3.dll $(TOP)\tool\mktoolzip.tcl
+	.\testfixture.exe $(TOP)\tool\mktoolzip.tcl --snapshot
 
 coretestprogs:	testfixture.exe sqlite3.exe
 
@@ -2827,9 +2805,6 @@ tcl-env:
 	@echo JIM_TCLSH = $(JIM_TCLSH)
 	@echo VISUALSTUDIOVERSION = $(VISUALSTUDIOVERSION)
 
-LSMDIR=$(TOP)\ext\lsm1
-!INCLUDE $(LSMDIR)\Makefile.msc
-
 moreclean:	clean
 	del /Q $(SQLITE3C) $(SQLITE3H) 2>NUL
 # <</mark>>
@@ -2871,7 +2846,6 @@ clean:
 	del /Q kvtest.exe ossshell.exe scrub.exe 2>NUL
 	del /Q showshm.exe sqlite3_checker.* sqlite3_expert.exe 2>NUL
 	del /Q fts5.* fts5parse.* 2>NUL
-	del /Q lsm.h lsm1.c 2>NUL
 	del /q src-verify.exe 2>NUL
 	del /q jimsh.exe jimsh0.exe 2>NUL
 # <</mark>>

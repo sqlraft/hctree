@@ -38,7 +38,7 @@ namespace eval trd {
   set tcltest(win.Windows-Win32Heap)      veryquick
   set tcltest(win.Windows-Sanitize)       veryquick
   set tcltest(win.Windows-WinRT)          veryquick
-  set tcltest(win.Default)                full
+  set tcltest(win.Default)                {full win_unc_locking}
 
   # Extra [make xyz] tests that should be run for various builds.
   #
@@ -393,7 +393,6 @@ proc trd_script_load {} {
       $testdir/../ext/rtree/*.test       \
       $testdir/../ext/fts5/test/*.test   \
       $testdir/../ext/expert/*.test      \
-      $testdir/../ext/lsm1/test/*.test   \
       $testdir/../ext/recover/*.test     \
       $testdir/../ext/rbu/*.test         \
     ] {
