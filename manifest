@@ -1,5 +1,5 @@
-C Merge\slatest\strunk\sinto\sthis\sbranch.
-D 2025-10-03T15:27:22.589
+C Fix\san\sassert()\sthat\smight\sfail\swith\san\shctree\sdatabase.
+D 2025-10-03T17:55:14.597
 F .fossil-settings/binary-glob 61195414528fb3ea9693577e1980230d78a1f8b0a54c78cf1b9b24d0a409ed6a x
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
@@ -669,7 +669,7 @@ F ext/wasm/sql/000-mandelbrot.sql 775337a4b80938ac8146aedf88808282f04d02d983d826
 F ext/wasm/sql/001-sudoku.sql 35b7cb7239ba5d5f193bc05ec379bcf66891bce6f2a5b3879f2f78d0917299b5
 F ext/wasm/test-opfs-vfs.html 1f2d672f3f3fce810dfd48a8d56914aba22e45c6834e262555e685bce3da8c3f
 F ext/wasm/test-opfs-vfs.js 1618670e466f424aa289859fe0ec8ded223e42e9e69b5c851f809baaaca1a00c
-F ext/wasm/tester1-worker.c-pp.html 883881eeac14eeeecc8ff22acf9fe0f18a97cacb48be08ebb0bae891ceded584 w ext/wasm/tester1-worker.html
+F ext/wasm/tester1-worker.c-pp.html 883881eeac14eeeecc8ff22acf9fe0f18a97cacb48be08ebb0bae891ceded584
 F ext/wasm/tester1.c-pp.html 949920126dcf477925d8d540093d9cc374d3ab4c4ddee920c1dcadcf37917306
 F ext/wasm/tester1.c-pp.js 23fc1223e75228f054148eeb8469ad114e9b2881b9f437fa291b8da06d021ce3
 F ext/wasm/tests/opfs/concurrency/index.html 657578a6e9ce1e9b8be951549ed93a6a471f4520a99e5b545928668f4285fb5e
@@ -855,7 +855,7 @@ F src/vdbe.c 8cb6e72da8fd1f7da4983f58aa3a2a390a238def357dd6b06fd7264db61d1173
 F src/vdbe.h ea1f1b52f0efe422f80d88da3c57e4eadc72856e29a22f1ff08e502ec6ba5f08
 F src/vdbeInt.h 52896dd4d5b62190c53db14b09fc2484434eb594c963df0fa66eb8a94527b02e
 F src/vdbeapi.c f9a4881a9674fec3fa13da35044a1484d3c4b95f9ec891cc8ffb02ef2b7a41df
-F src/vdbeaux.c c686775cbcd913463fb02c2d861fa08a771cad8fc3696b3871d04b05449b5a64
+F src/vdbeaux.c d96fbdbcf6f3633598cf2482fa9f69dae9003e7c2eb330f36066c9b8ab62fbb5
 F src/vdbeblob.c b3f0640db9642fbdc88bd6ebcc83d6009514cafc98f062f675f2c8d505d82692
 F src/vdbemem.c e67d9c6484d868c879d20c70d00bf4a9058082f1d4058607ca15d50eb3aebc21
 F src/vdbesort.c cb6f472e83ca12c46aa7de0ac0a9d11458b357986f2617a1c90dfb19a542ecbe
@@ -2300,8 +2300,8 @@ F tool/version-info.c 3b36468a90faf1bbd59c65fd0eb66522d9f941eedd364fabccd7227350
 F tool/warnings-clang.sh bbf6a1e685e534c92ec2bfba5b1745f34fb6f0bc2a362850723a9ee87c1b31a7
 F tool/warnings.sh 1ad0169b022b280bcaaf94a7fa231591be96b514230ab5c98fbf15cd7df842dd
 F tool/win/sqlite.vsix deb315d026cc8400325c5863eef847784a219a2f
-P c0a8a6bf4836ed8d60d583c1c87897a08ab5154d55af5a6aee42e91c5cb3d2f7 afb2feb38043fef3c286030f9d1238c132f338e54233f2e4655323b388455c72
-R 76e3fabbe122575ad9d3ad8dfc2d583a
+P ce15c55fc49bbdbc3bc9f81f03a5389f25d5d36439f7b44ca096759239e10ff6
+R ec0236e4f8b9f3cf779ce43f93dae664
 U dan
-Z 0e667d8fd29e9041faf31f5c29bb2599
+Z 339a35272c1eaf02c31ff50f9377b9e1
 # Remove this line to create a well-formed Fossil manifest.

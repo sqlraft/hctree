@@ -3012,7 +3012,7 @@ static int vdbeCommit(sqlite3 *db, Vdbe *p){
       Btree *pBt = db->aDb[i].pBt;
       int txn = sqlite3BtreeTxnState(pBt);
       if( txn!=SQLITE_TXN_NONE ){
-        assert( needXcommit || txn==SQLITE_TXN_READ );
+        assert( needXcommit || txn==SQLITE_TXN_READ || sqlite3IsHct(pBt) );
         rc = sqlite3BtreeCommitPhaseTwo(pBt, 0);
       }
     }
