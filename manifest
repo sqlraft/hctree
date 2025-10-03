@@ -1,5 +1,5 @@
-C Merge\schanges\sfrom\shctree\sbranch\sinto\sthis\sone.
-D 2025-10-03T17:46:42.202
+C Merge\san\sassert()\sfix\sfrom\sthe\shctree\sbranch\sinto\sthis\sone.
+D 2025-10-03T17:56:24.164
 F .fossil-settings/binary-glob 61195414528fb3ea9693577e1980230d78a1f8b0a54c78cf1b9b24d0a409ed6a x
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
@@ -869,7 +869,7 @@ F src/vdbe.c d9e14fbb7431a3ede1e3b30403dd4e5c38c87ec9c5a3d2bdbdec698144bbf975
 F src/vdbe.h ea1f1b52f0efe422f80d88da3c57e4eadc72856e29a22f1ff08e502ec6ba5f08
 F src/vdbeInt.h 52896dd4d5b62190c53db14b09fc2484434eb594c963df0fa66eb8a94527b02e
 F src/vdbeapi.c f9a4881a9674fec3fa13da35044a1484d3c4b95f9ec891cc8ffb02ef2b7a41df
-F src/vdbeaux.c b6dc66efd0c20f94ef828019d1cd761993fa287a31bba9e7d4d6c31da7285296
+F src/vdbeaux.c 35ab194d5ae66ee1e1ff1c37c087d259117b328c6cf91fb179f839ec58148134
 F src/vdbeblob.c b3f0640db9642fbdc88bd6ebcc83d6009514cafc98f062f675f2c8d505d82692
 F src/vdbemem.c e67d9c6484d868c879d20c70d00bf4a9058082f1d4058607ca15d50eb3aebc21
 F src/vdbesort.c cb6f472e83ca12c46aa7de0ac0a9d11458b357986f2617a1c90dfb19a542ecbe
@@ -2343,8 +2343,8 @@ F tool/version-info.c 3b36468a90faf1bbd59c65fd0eb66522d9f941eedd364fabccd7227350
 F tool/warnings-clang.sh bbf6a1e685e534c92ec2bfba5b1745f34fb6f0bc2a362850723a9ee87c1b31a7
 F tool/warnings.sh 1ad0169b022b280bcaaf94a7fa231591be96b514230ab5c98fbf15cd7df842dd
 F tool/win/sqlite.vsix deb315d026cc8400325c5863eef847784a219a2f
-P 53c3ccab5fa62237196491cdc22771a874beef5d4cd85ab2de4a1e045718a726 ce15c55fc49bbdbc3bc9f81f03a5389f25d5d36439f7b44ca096759239e10ff6
-R 9a7bcec43772d70052b84ec826da60a4
+P 4daf92e5df80d41b0f965c55e297a876775213fb9326955efc677cfe1e4c789d 02660c97c6b3b7439beab7c6c1d95111c6eb63463cd7a49ca910ebac8549729b
+R f30c3dd31b3d318567430f0dd63db5d2
 U dan
-Z 87caeb71603de203c885be62a529f66e
+Z fdf2e0a0dec43499771ce5cf0aefe3ae
 # Remove this line to create a well-formed Fossil manifest.
