@@ -917,6 +917,7 @@ TESTSRC2 = \
   $(TOP)/ext/session/sqlite3changebatch.c \
   $(TOP)/ext/session/test_session.c \
   $(TOP)/ext/session/sqlite3session.c \
+  $(TOP)/ext/misc/stmt.c \
   fts5.c
 
 # Header files used by all library source files.

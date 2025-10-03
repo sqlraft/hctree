@@ -241,6 +241,9 @@ BtCursor *sqlite3HctBtreeFakeValidCursor(void){
 */
 int sqlite3HctBtreeCursorRestore(BtCursor *pCursor, int *pDifferentRow){
   HBtCursor *const pCur = (HBtCursor*)pCursor;
+  if( pCur->errCode ){
+    return pCur->errCode;
+  }
   return sqlite3HctTreeCsrRestore(pCur->pHctTreeCsr, pDifferentRow);
 }
 
@@ -2046,6 +2049,7 @@ int sqlite3HctBtreeTripAllCursors(Btree *pBt, int errCode, int writeOnly){
       if( writeOnly==0 || pCur->wrFlag ){
         sqlite3HctTreeCsrClose(pCur->pHctTreeCsr);
         pCur->pHctTreeCsr = 0;
+        pCur->bUseTree = 0;
         pCur->errCode = errCode;
       }
     }
@@ -2072,6 +2076,7 @@ int sqlite3HctBtreeRollback(Btree *pBt, int tripCode, int writeOnly){
   assert( p->eTrans!=SQLITE_TXN_ERROR || p->pCsrList==0 );
 
   if( p->eTrans>=SQLITE_TXN_WRITE ){
+    sqlite3HctBtreeTripAllCursors(pBt, SQLITE_ABORT, 1);
     hctreeRollbackSchema(p, 0);
     sqlite3HctTreeRollbackTo(p->pHctTree, 0);
     if( p->pHctDb ){
@@ -2320,18 +2325,32 @@ int sqlite3HctBtreeCloseCursor(BtCursor *pCursor){
 */
 int sqlite3HctBtreeCursorIsValid(BtCursor *pCursor){
   HBtCursor *const pCur = (HBtCursor*)pCursor;
-  return pCur && (
+  return pCur && pCur->errCode==SQLITE_OK && (
       !sqlite3HctTreeCsrEof(pCur->pHctTreeCsr)
    || !sqlite3HctDbCsrEof(pCur->pHctDbCsr)
   );
 }
 int sqlite3HctBtreeCursorIsValidNN(BtCursor *pCursor){
   HBtCursor *const pCur = (HBtCursor*)pCursor;
-  return (
+  return pCur->errCode==SQLITE_OK && (
       !sqlite3HctTreeCsrEof(pCur->pHctTreeCsr)
    || !sqlite3HctDbCsrEof(pCur->pHctDbCsr)
   );
 }
+
+static int hctReseekBlobCsr(HBtCursor *pCsr){
+  int rc = SQLITE_OK;
+  assert( pCsr->pKeyInfo==0 );
+  if( pCsr->errCode ){
+    rc = pCsr->errCode;
+  }else if( sqlite3HctTreeCsrHasMoved(pCsr->pHctTreeCsr) ){
+    int res = 0;
+    rc = sqlite3HctTreeCsrReseek(pCsr->pHctTreeCsr, &res);
+    pCsr->bUseTree = (rc==SQLITE_OK && res==0);
+  }
+  return rc;
+}
+
 
 /*
 ** Return the value of the integer key or "rowid" for a table btree.
@@ -2342,6 +2361,7 @@ int sqlite3HctBtreeCursorIsValidNN(BtCursor *pCursor){
 i64 sqlite3HctBtreeIntegerKey(BtCursor *pCursor){
   HBtCursor *const pCur = (HBtCursor*)pCursor;
   i64 iKey;
+  // hctReseekBlobCsr(pCur);
   if( pCur->bUseTree ){
     sqlite3HctTreeCsrKey(pCur->pHctTreeCsr, &iKey);
   }else{
@@ -2378,6 +2398,18 @@ i64 sqlite3HctBtreeOffset(BtCursor *pCursor){
 
   return iRet;
 }
+
+/* 
+** Set *pRes to 1 (true) if the BTree pointed to by cursor pCur contains zero
+** rows of content.  Set *pRes to 0 (false) if the table contains content.
+** Return SQLITE_OK on success or some error code (ex: SQLITE_NOMEM) if
+** something goes wrong.
+*/
+int sqlite3HctBtreeIsEmpty(BtCursor *pCur, int *pRes){
+  *pRes = 0;
+  return SQLITE_OK;
+}
+
 
 /*
 ** Return the number of bytes of payload for the entry that pCur is
@@ -2518,19 +2550,6 @@ static int btreeSetUseTree(HBtCursor *pCur){
   return rc;
 }
 
-static int hctReseekBlobCsr(HBtCursor *pCsr){
-  int rc = SQLITE_OK;
-  assert( pCsr->pKeyInfo==0 );
-  if( sqlite3HctTreeCsrHasMoved(pCsr->pHctTreeCsr) ){
-    int res = 0;
-    rc = sqlite3HctTreeCsrReseek(pCsr->pHctTreeCsr, &res);
-    if( rc==SQLITE_OK && res==0 ){
-      pCsr->bUseTree = 1;
-    }
-  }
-  return rc;
-}
-
 /*
 ** This variant of sqlite3HctBtreePayload() works even if the cursor has not
 ** in the CURSOR_VALID state.  It is only used by the sqlite3_blob_read()
@@ -2569,7 +2588,6 @@ int sqlite3HctBtreePayloadChecked(
 */
 const void *sqlite3HctBtreePayloadFetch(BtCursor *pCursor, u32 *pAmt){
   HBtCursor *pCur = (HBtCursor*)pCursor;
-  int rc = SQLITE_OK;
   const u8 *aData = 0;
   int nData = 0;
 
@@ -2581,20 +2599,6 @@ const void *sqlite3HctBtreePayloadFetch(BtCursor *pCursor, u32 *pAmt){
 
   *pAmt = nData;
   return (const void*)aData;
-
-#if 0
-  rc = hctBtreePayloadData(pCursor, &nData, &aData);
-  if( rc!=SQLITE_OK ){
-    /* An error has occured but this API provides no way to return an error
-    ** code. No matter, returning zero bytes of data will cause SQLite
-    ** to call sqlite3HctBtreePayload(), which can return the error code. */
-    *pAmt = 0;
-    return (const u8*)"\x7F";
-  }
-
-  *pAmt = nData;
-  return (const void*)aData;
-#endif
 }
 
 /* Move the cursor to the first entry in the table.  Return SQLITE_OK
@@ -3707,31 +3711,31 @@ int sqlite3HctBtreePutData(BtCursor *pCur, u32 offset, u32 amt, void *z){
     rc = hctReseekBlobCsr(pCsr);
   }
   if( rc==SQLITE_OK ){
-    u32 nData = 0;
-    const void *aData = sqlite3HctBtreePayloadFetch(pCur, &nData);
+    u32 nData = sqlite3HctBtreePayloadSize(pCur);
+
     if( offset+amt>nData ){
       rc = SQLITE_CORRUPT_BKPT;
     }else{
-      u8 *aBuf = (u8*)sqlite3_malloc(nData+1);
-      if( aBuf ){
+      u8 *aData = (u8*)sqlite3HctMalloc(nData);
+      rc = sqlite3HctBtreePayload(pCur, 0, nData, aData);
+      if( rc==SQLITE_OK ){
         BtreePayload payload;
-        memcpy(aBuf, aData, nData);
-        memcpy(&aBuf[offset], z, amt);
-
+        memcpy(&aData[offset], z, amt);
         memset(&payload, 0, sizeof(payload));
         payload.nKey = sqlite3HctBtreeIntegerKey(pCur);
-        payload.pData = (const void*)aBuf;
+        payload.pData = (const void*)aData;
         payload.nData = nData;
         rc = sqlite3HctBtreeInsert(pCur, &payload, 0, 0);
         if( rc==SQLITE_OK ){
           int dummy = 0;
           rc = sqlite3HctBtreeTableMoveto(pCur, payload.nKey, 0, &dummy);
           assert( dummy==0 );
+          sqlite3HctDbCsrClear(pCsr->pHctDbCsr);
         }
-        sqlite3_free(aBuf);
       }else{
         rc = SQLITE_NOMEM;
       }
+      sqlite3_free(aData);
     }
   }
 

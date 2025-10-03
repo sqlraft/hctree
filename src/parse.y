@@ -194,6 +194,7 @@ transtype(A) ::= ID(X). {
      parserSyntaxError(pParse, p);
    }
 }
+transtype(A) ::= CONCURRENT(X). {A = @X; /*A-overwrites-X*/}
 cmd ::= COMMIT|END(X) trans_opt.   {sqlite3EndTransaction(pParse,@X);}
 cmd ::= ROLLBACK(X) trans_opt.     {sqlite3EndTransaction(pParse,@X);}
 

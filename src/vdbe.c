@@ -4050,9 +4050,10 @@ case OP_AutoCommit: {
       goto vdbe_return;
     }else{
       db->autoCommit = (u8)desiredAutoCommit;
+      db->eConcurrent = bConcurrent;
     }
     hrc = sqlite3VdbeHalt(p);
-    if( (hrc & 0xFF)==SQLITE_BUSY ){
+    if( (hrc&0xFF)==SQLITE_BUSY ){
       p->pc = (int)(pOp - aOp);
       db->autoCommit = (u8)(1-desiredAutoCommit);
       p->rc = hrc;
