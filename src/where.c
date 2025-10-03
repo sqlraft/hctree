@@ -4037,6 +4037,7 @@ static int whereLoopAddBtree(
     pNew->u.btree.nEq = 0;
     pNew->u.btree.nBtm = 0;
     pNew->u.btree.nTop = 0;
+    pNew->u.btree.nDistinctCol = 0;
     pNew->nSkip = 0;
     pNew->nLTerm = 0;
     pNew->iSortIdx = 0;
@@ -5103,10 +5104,12 @@ static i8 wherePathSatisfiesOrderBy(
        && ((wctrlFlags&(WHERE_DISTINCTBY|WHERE_SORTBYGROUP))!=WHERE_DISTINCTBY)
       ){
         obSat = obDone;
+      }else{
+        /* No further ORDER BY terms may be matched. So this call should
+        ** return >=0, not -1. Clear isOrderDistinct to ensure it does so. */
+        isOrderDistinct = 0;
       }
       break;
-    }else if( wctrlFlags & WHERE_DISTINCTBY ){
-      pLoop->u.btree.nDistinctCol = 0;
     }
     iCur = pWInfo->pTabList->a[pLoop->iTab].iCursor;
 
@@ -5850,8 +5853,15 @@ static int wherePathSolver(WhereInfo *pWInfo, LogEst nRowEst){
         ** mxChoice best-so-far paths.
         **
         ** First look for an existing path among best-so-far paths
-        ** that covers the same set of loops and has the same isOrdered
-        ** setting as the current path candidate.
+        ** that:
+        **     (1) covers the same set of loops, and
+        **     (2) has a compatible isOrdered value.
+        **
+        ** "Compatible isOrdered value" means either
+        **     (A) both have isOrdered==-1, or
+        **     (B) both have isOrder>=0, or
+        **     (C) ordering does not matter because this is the last round
+        **         of the solver.
         **
         ** The term "((pTo->isOrdered^isOrdered)&0x80)==0" is equivalent
         ** to (pTo->isOrdered==(-1))==(isOrdered==(-1))" for the range
@@ -5860,7 +5870,7 @@ static int wherePathSolver(WhereInfo *pWInfo, LogEst nRowEst){
         testcase( nTo==0 );
         for(jj=0, pTo=aTo; jj<nTo; jj++, pTo++){
           if( pTo->maskLoop==maskNew
-           && ((pTo->isOrdered^isOrdered)&0x80)==0
+           && ( ((pTo->isOrdered^isOrdered)&0x80)==0 || ii==nFrom-1 )
           ){
             testcase( jj==nTo-1 );
             break;
@@ -6015,11 +6025,10 @@ static int wherePathSolver(WhereInfo *pWInfo, LogEst nRowEst){
     return SQLITE_ERROR;
   }
  
-  /* Find the lowest cost path.  pFrom will be left pointing to that path */
+  /* Only one path is available, which is the best path */
+  assert( nFrom==1 );
   pFrom = aFrom;
-  for(ii=1; ii<nFrom; ii++){
-    if( pFrom->rCost>aFrom[ii].rCost ) pFrom = &aFrom[ii];
-  }
+
   assert( pWInfo->nLevel==nLoop );
   /* Load the lowest cost path into pWInfo */
   for(iLoop=0; iLoop<nLoop; iLoop++){
@@ -6152,7 +6161,10 @@ static SQLITE_NOINLINE void whereInterstageHeuristic(WhereInfo *pWInfo){
   for(i=0; i<pWInfo->nLevel; i++){
     WhereLoop *p = pWInfo->a[i].pWLoop;
     if( p==0 ) break;
-    if( (p->wsFlags & WHERE_VIRTUALTABLE)!=0 ) continue;
+    if( (p->wsFlags & WHERE_VIRTUALTABLE)!=0 ){
+      /* Treat a vtab scan as similar to a full-table scan */
+      break;
+    }
     if( (p->wsFlags & (WHERE_COLUMN_EQ|WHERE_COLUMN_NULL|WHERE_COLUMN_IN))!=0 ){
       u8 iTab = p->iTab;
       WhereLoop *pLoop;
