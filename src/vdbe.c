@@ -4041,7 +4041,6 @@ case OP_AutoCommit: {
       goto vdbe_return;
     }else{
       db->autoCommit = (u8)desiredAutoCommit;
-      db->bConcurrent = bConcurrent;
     }
     hrc = sqlite3VdbeHalt(p);
     if( (hrc&0xFF)==SQLITE_BUSY ){
@@ -4051,6 +4050,7 @@ case OP_AutoCommit: {
       rc = SQLITE_BUSY;
       goto vdbe_return;
     }
+    db->bConcurrent = bConcurrent;
     sqlite3CloseSavepoints(db);
     if( p->rc==SQLITE_OK ){
       rc = SQLITE_DONE;

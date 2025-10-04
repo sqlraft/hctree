@@ -1,5 +1,5 @@
-C Fix\san\sassert()\sthat\smight\sfail\swith\san\shctree\sdatabase.
-D 2025-10-03T17:55:14.597
+C Avoid\sclearing\ssqlite3.bConcurrent\swhen\sa\sCOMMIT\sfails\swith\sSQLITE_BUSY.
+D 2025-10-04T15:57:44.333
 F .fossil-settings/binary-glob 61195414528fb3ea9693577e1980230d78a1f8b0a54c78cf1b9b24d0a409ed6a x
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
@@ -851,7 +851,7 @@ F src/upsert.c 215328c3f91623c520ec8672c44323553f12caeb4f01b1090ebdca99fdf7b4f1
 F src/utf.c 7267c3fb9e2467020507601af3354c2446c61f444387e094c779dccd5ca62165
 F src/util.c 36fb1150062957280777655976f3f9a75db236cb8207a0770ceae8d5ec17fcd3
 F src/vacuum.c d8603e4fe3e30cfcc8f3627649b9d940d1f1f38169154ab2a2cd1177314704a7
-F src/vdbe.c 8cb6e72da8fd1f7da4983f58aa3a2a390a238def357dd6b06fd7264db61d1173
+F src/vdbe.c ff33f314264e01ebe56824f62b5ba07be2b31efd493a2aa338e43e237450d380
 F src/vdbe.h ea1f1b52f0efe422f80d88da3c57e4eadc72856e29a22f1ff08e502ec6ba5f08
 F src/vdbeInt.h 52896dd4d5b62190c53db14b09fc2484434eb594c963df0fa66eb8a94527b02e
 F src/vdbeapi.c f9a4881a9674fec3fa13da35044a1484d3c4b95f9ec891cc8ffb02ef2b7a41df
@@ -2300,8 +2300,8 @@ F tool/version-info.c 3b36468a90faf1bbd59c65fd0eb66522d9f941eedd364fabccd7227350
 F tool/warnings-clang.sh bbf6a1e685e534c92ec2bfba5b1745f34fb6f0bc2a362850723a9ee87c1b31a7
 F tool/warnings.sh 1ad0169b022b280bcaaf94a7fa231591be96b514230ab5c98fbf15cd7df842dd
 F tool/win/sqlite.vsix deb315d026cc8400325c5863eef847784a219a2f
-P ce15c55fc49bbdbc3bc9f81f03a5389f25d5d36439f7b44ca096759239e10ff6
-R ec0236e4f8b9f3cf779ce43f93dae664
+P 02660c97c6b3b7439beab7c6c1d95111c6eb63463cd7a49ca910ebac8549729b
+R 77c599a7d2969c347d7e5b22639ef4e5
 U dan
-Z 339a35272c1eaf02c31ff50f9377b9e1
+Z 5e5fd06fa504bb6f914c28e0d0f9eb4d
 # Remove this line to create a well-formed Fossil manifest.
