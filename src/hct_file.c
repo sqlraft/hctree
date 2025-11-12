@@ -1479,6 +1479,7 @@ void sqlite3HctFileClose(HctFile *pFile){
     HctFileServer *pDel = 0;
     HctFile **pp;
     HctFileServer *pServer = pFile->pServer;
+    int i;
 
     /* Release the page-manager client */
     sqlite3HctPManClientFree(pFile->pPManClient);
@@ -1506,6 +1507,18 @@ void sqlite3HctFileClose(HctFile *pFile){
       for(ppS=&g.pServerList; *ppS!=pServer; ppS=&(*ppS)->pServerNext);
       *ppS = pServer->pServerNext;
     }
+
+    /* If the HctFileServer was removed from the global list, close all
+    ** file handles. This must be done under cover of the mutex, as closing
+    ** aFdDb[0] drops the posix file lock. Dropping that lock after releasing
+    ** the mutex would create a race condition.  */
+    if( pDel ){
+      for(i=0; i<pDel->nFdDb; i++){ 
+        if( pDel->aFdDb[i]>0 ) close(pDel->aFdDb[i]); 
+      }
+      if( pDel->fdMap ) close(pDel->fdMap);
+    }
+
     sqlite3_mutex_leave( sqlite3_mutex_alloc(SQLITE_MUTEX_STATIC_VFS1) );
 
     /* It if was removed from the global list, clean up the HctFileServer
@@ -1513,7 +1526,6 @@ void sqlite3HctFileClose(HctFile *pFile){
     if( pDel ){
       int szChunkData = pDel->nPagePerChunk*pDel->szPage;
       int szChunkMap = pDel->nPagePerChunk*sizeof(u64);
-      int i;
       HctMapping *pMapping = pDel->pMapping;
 
       sqlite3HctTMapServerFree(pDel->pTMapServer);
@@ -1531,12 +1543,6 @@ void sqlite3HctFileClose(HctFile *pFile){
         }
         hctMappingUnref(pMapping);
       }
-
-      /* Close the data files and the mapping file. */
-      for(i=0; i<pDel->nFdDb; i++){ 
-        if( pDel->aFdDb[i]>0 ) close(pDel->aFdDb[i]); 
-      }
-      if( pDel->fdMap ) close(pDel->fdMap);
 
       sqlite3HctJournalServerFree(pDel->pJrnlPtr);
 

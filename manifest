@@ -1,5 +1,5 @@
-C Merge\slatest\strunk\sinto\sthis\sbranch.
-D 2025-11-12T16:07:32.437
+C When\sclosing\sthe\slast\sconnection\sto\san\shctree\sdatabase,\sclose\sfile-descriptors\sand\sdrop\sall\slocks\sbefore\scalling\sunmapping\sthe\sdatabase\sfiles.
+D 2025-11-12T16:35:19.503
 F .fossil-settings/binary-glob 61195414528fb3ea9693577e1980230d78a1f8b0a54c78cf1b9b24d0a409ed6a x
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
@@ -627,7 +627,7 @@ F ext/wasm/api/sqlite3-vtab-helper.c-pp.js 9097074724172e31e56ce20ccd7482259cf72
 F ext/wasm/api/sqlite3-wasm.c 2d1cbe498f7b0fb64b11451eda481f458df74d6258baea635513e637fcbb8b1a
 F ext/wasm/api/sqlite3-worker1-promiser.c-pp.js f10c3ecd9df06f6320073c2ce230a7ed7c56034d8b88c1e57095f2a97faf423a
 F ext/wasm/api/sqlite3-worker1.c-pp.js 77b3835192469e9da23926ec8f78fb0b114a51d048dc54388709ac22b5c5f0a0
-F ext/wasm/c-pp-lite.c 8fa0148e73782a86274db688c4730e2962cd675af329490493adddaf3322f16f w ext/wasm/c-pp.c
+F ext/wasm/c-pp-lite.c 8fa0148e73782a86274db688c4730e2962cd675af329490493adddaf3322f16f
 F ext/wasm/common/SqliteTestUtil.js 7adaeffef757d8708418dc9190f72df22367b531831775804b31598b44f6aa51
 F ext/wasm/common/emscripten.css 11bd104b6c0d597c67d40cc8ecc0a60dae2b965151e3b6a37fa5708bac3acd15
 F ext/wasm/common/testing.css e97549bab24126c24e0daabfe2de9bb478fb0a69fdb2ddd0a73a992c091aad6f
@@ -703,7 +703,7 @@ F src/btreeUndef.h 1024a26292e864079bc612d680780c8f7741861afab3216217bc38f5b614a
 F src/btwrapper.c 439264b2ae2369e1fdb6251fb5699211a14087615f512030747c7c6aecc76b4f
 F src/build.c bdb074782b72f45b692a965d99f6f089cb776c64c37a19248a093213751f3178
 F src/callback.c afa59adfaa483f668260ce69f740c8273dee3e6fee9106846e0499ebdd1ac076
-F src/carray.c ff6081a31878fc34df8fa1052a9cbf17ddc22652544dcb3e2326886ed1053b55 w ext/misc/carray.c
+F src/carray.c ff6081a31878fc34df8fa1052a9cbf17ddc22652544dcb3e2326886ed1053b55
 F src/complete.c a3634ab1e687055cd002e11b8f43eb75c17da23e
 F src/date.c e19e0cfff9a41bfdd884c655755f6f00bca4c1a22272b56e0dd6667b7ea893a2
 F src/dbpage.c c9ea81c11727f27e02874611e92773e68e2a90a875ef2404b084564c235fd91f
@@ -724,7 +724,7 @@ F src/hctPManInt.h 3936d01947aace587fd73c51246b7bd5cdbc79833248b839e7d9ffd737ded
 F src/hctTMapInt.h b66401c8c440aa415ce92036a4338dbe8e6fc61c05273fd3318e8089f2de1e70
 F src/hctTreeInt.h 2c51d2263f7429a2282effd0f7a2238eaa605c8e1c1fa689ab6be8ef6ba69e87
 F src/hct_database.c 0ff659a32c3820055d74f4be923bd15d5090d9fd14b64a77fb07f850ec9712c1
-F src/hct_file.c d4cf3426c935abed1c7cbd768130ff937808fc33e231401179a1ea64a9ba0a98
+F src/hct_file.c 64fd84ebbbe53dac203027ba92ab5bb00062a791569d6881d57fb1502482cbd2
 F src/hct_journal.c e58fbe85eaaf440dd647d433a978a703449ccd8c18b428784310dde97eedc082
 F src/hct_journalhash.c 5af4886fd8c126a96c78278f6e62a8e31de9b8e683b167c487b033a87fabb7a3
 F src/hct_log.c 41b6bff3f4f9753760fcd8c249b5fc6d1608c8166b81d0e2552132c0c83e59d5
@@ -2300,8 +2300,9 @@ F tool/version-info.c 3b36468a90faf1bbd59c65fd0eb66522d9f941eedd364fabccd7227350
 F tool/warnings-clang.sh bbf6a1e685e534c92ec2bfba5b1745f34fb6f0bc2a362850723a9ee87c1b31a7
 F tool/warnings.sh d924598cf2f55a4ecbc2aeb055c10bd5f48114793e7ba25f9585435da29e7e98
 F tool/win/sqlite.vsix deb315d026cc8400325c5863eef847784a219a2f
-P 5ddfa6c6626013574be86305f529a21570ec65be3ca8a369d0988bd8489703f8 2c31176607f02a73cf2626cda2dd0711ae74bdf0b4520d4c84ff299c860e419e
-R 841e234e6caadf880c2123cbb2ed4c05
+P 42b4d5c1a6de76b7deb38491f4b0eab2bd8ab52f9c175c4ee01bbf395ac2945f
+Q +4979dbd384a6862fe76193f9843b19404b19a2529652a179b9aaf1d5935c13bd
+R 3ce4406835d6ab9671be43251d47e93a
 U dan
-Z d9f98c4ec1b4e0bb9448cfee04b334c2
+Z 77e8e014e1efde0a31592915204ed88c
 # Remove this line to create a well-formed Fossil manifest.
