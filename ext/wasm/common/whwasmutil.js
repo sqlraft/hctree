@@ -185,6 +185,14 @@ globalThis.WhWasmUtilInstaller = function(target){
       all args with a space between each. */
   const toss = (...args)=>{throw new Error(args.join(' '))};
 
+  if( !target.pointerSize && !target.pointerIR
+      && target.alloc && target.dealloc ){
+    /* Try to determine the pointer size by allocating. */
+    const ptr = target.alloc(1);
+    target.pointerSize = ('bigint'===typeof ptr ? 8 : 4);
+    target.dealloc(ptr);
+  }
+
   if(!target.exports){
     Object.defineProperty(target, 'exports', {
       enumerable: true, configurable: true,
@@ -544,12 +552,14 @@ globalThis.WhWasmUtilInstaller = function(target){
     const ft = target.functionTable();
     const oldLen = ft.length;
     let ptr;
-    while(cache.freeFuncIndexes.length){
-      ptr = cache.freeFuncIndexes.pop();
-      if(ft.get(ptr)){ /* Table was modified via a different API */
+    while( (ptr = cache.freeFuncIndexes.pop()) ){
+      if(ft.get(ptr)){
+        /* freeFuncIndexes's entry is stale. Table was modified via a
+           different API */
         ptr = null;
         continue;
       }else{
+        /* This index is free. We'll re-use it. */
         break;
       }
     }
@@ -641,10 +651,9 @@ globalThis.WhWasmUtilInstaller = function(target){
      has no side effects and returns undefined.
   */
   target.uninstallFunction = function(ptr){
-    if(!ptr && 0!==ptr) return undefined;
-    const fi = cache.freeFuncIndexes;
+    if(!ptr && __NullPtr!==ptr) return undefined;
     const ft = target.functionTable();
-    fi.push(ptr);
+    cache.freeFuncIndexes.push(ptr);
     const rc = ft.get(ptr);
     ft.set(ptr, null);
     return rc;
@@ -867,7 +876,7 @@ globalThis.WhWasmUtilInstaller = function(target){
      target.heap8u().
   */
   target.cstrlen = function(ptr){
-    if(!ptr || !target.isPtr(ptr)) return null;
+    if(!ptr || !target.isPtr/*64*/(ptr)) return null;
     const h = heapWrappers().HEAP8U;
     let pos = ptr;
     for( ; h[pos] !== 0; ++pos ){}

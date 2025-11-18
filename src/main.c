@@ -1397,6 +1397,7 @@ void sqlite3LeaveMutexAndCloseZombie(sqlite3 *db){
   /* Clear the TEMP schema separately and last */
   if( db->aDb[1].pSchema ){
     sqlite3SchemaClear(db->aDb[1].pSchema);
+    assert( db->aDb[1].pSchema->trigHash.count==0 );
   }
   sqlite3VtabUnlockList(db);
 
@@ -2528,6 +2529,9 @@ void *sqlite3_wal_hook(
   sqlite3_mutex_leave(db->mutex);
   return pRet;
 #else
+  UNUSED_PARAMETER(db);
+  UNUSED_PARAMETER(xCallback);
+  UNUSED_PARAMETER(pArg);
   return 0;
 #endif
 }
@@ -2543,6 +2547,11 @@ int sqlite3_wal_checkpoint_v2(
   int *pnCkpt                     /* OUT: Total number of frames checkpointed */
 ){
 #ifdef SQLITE_OMIT_WAL
+  UNUSED_PARAMETER(db);
+  UNUSED_PARAMETER(zDb);
+  UNUSED_PARAMETER(eMode);
+  UNUSED_PARAMETER(pnLog);
+  UNUSED_PARAMETER(pnCkpt);
   return SQLITE_OK;
 #else
   int rc;                         /* Return code */
@@ -2725,7 +2734,7 @@ const char *sqlite3_errmsg(sqlite3 *db){
 */
 int sqlite3_set_errmsg(sqlite3 *db, int errcode, const char *zMsg){
   int rc = SQLITE_OK;
-  if( !sqlite3SafetyCheckSickOrOk(db) ){
+  if( !sqlite3SafetyCheckOk(db) ){
     return SQLITE_MISUSE_BKPT;
   }
   sqlite3_mutex_enter(db->mutex);
@@ -2924,6 +2933,7 @@ static const int aHardLimit[] = {
   SQLITE_MAX_VARIABLE_NUMBER,      /* IMP: R-38091-32352 */
   SQLITE_MAX_TRIGGER_DEPTH,
   SQLITE_MAX_WORKER_THREADS,
+  SQLITE_MAX_PARSER_DEPTH,
 };
 
 /*
@@ -2993,6 +3003,7 @@ int sqlite3_limit(sqlite3 *db, int limitId, int newLimit){
   assert( aHardLimit[SQLITE_LIMIT_SQL_LENGTH]==SQLITE_MAX_SQL_LENGTH );
   assert( aHardLimit[SQLITE_LIMIT_COLUMN]==SQLITE_MAX_COLUMN );
   assert( aHardLimit[SQLITE_LIMIT_EXPR_DEPTH]==SQLITE_MAX_EXPR_DEPTH );
+  assert( aHardLimit[SQLITE_LIMIT_PARSER_DEPTH]==SQLITE_MAX_PARSER_DEPTH );
   assert( aHardLimit[SQLITE_LIMIT_COMPOUND_SELECT]==SQLITE_MAX_COMPOUND_SELECT);
   assert( aHardLimit[SQLITE_LIMIT_VDBE_OP]==SQLITE_MAX_VDBE_OP );
   assert( aHardLimit[SQLITE_LIMIT_FUNCTION_ARG]==SQLITE_MAX_FUNCTION_ARG );
@@ -3002,7 +3013,7 @@ int sqlite3_limit(sqlite3 *db, int limitId, int newLimit){
   assert( aHardLimit[SQLITE_LIMIT_VARIABLE_NUMBER]==SQLITE_MAX_VARIABLE_NUMBER);
   assert( aHardLimit[SQLITE_LIMIT_TRIGGER_DEPTH]==SQLITE_MAX_TRIGGER_DEPTH );
   assert( aHardLimit[SQLITE_LIMIT_WORKER_THREADS]==SQLITE_MAX_WORKER_THREADS );
-  assert( SQLITE_LIMIT_WORKER_THREADS==(SQLITE_N_LIMIT-1) );
+  assert( SQLITE_LIMIT_PARSER_DEPTH==(SQLITE_N_LIMIT-1) );
 
 
   if( limitId<0 || limitId>=SQLITE_N_LIMIT ){
@@ -4920,6 +4931,7 @@ const char *sqlite3_filename_journal(const char *zFilename){
 }
 const char *sqlite3_filename_wal(const char *zFilename){
 #ifdef SQLITE_OMIT_WAL
+  UNUSED_PARAMETER(zFilename);
   return 0;
 #else
   zFilename = sqlite3_filename_journal(zFilename);
