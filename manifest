@@ -1,5 +1,5 @@
-C Merge\slatest\sbedrock\schanges\sinto\sthis\sbranch.
-D 2025-11-18T19:13:17.143
+C Avoid\sO(n^2)\sperformance\sin\svirtual\stable\shctvalid.
+D 2025-11-26T18:47:30.052
 F .fossil-settings/binary-glob 61195414528fb3ea9693577e1980230d78a1f8b0a54c78cf1b9b24d0a409ed6a x
 F .fossil-settings/empty-dirs dbb81e8fc0401ac46a1491ab34a7f2c7c0452f2f06b54ebb845d024ca8283ef1
 F .fossil-settings/ignore-glob 35175cdfcf539b2318cb04a9901442804be81cd677d8b889fcc9149c21f239ea
@@ -739,7 +739,7 @@ F src/hctLogInt.h 137465f9452e18bbebefaabe3ee5cd1a48649edc340c2f642ef707d8d323cc
 F src/hctPManInt.h 3936d01947aace587fd73c51246b7bd5cdbc79833248b839e7d9ffd737ded8b7
 F src/hctTMapInt.h b66401c8c440aa415ce92036a4338dbe8e6fc61c05273fd3318e8089f2de1e70
 F src/hctTreeInt.h 2c51d2263f7429a2282effd0f7a2238eaa605c8e1c1fa689ab6be8ef6ba69e87
-F src/hct_database.c 0ff659a32c3820055d74f4be923bd15d5090d9fd14b64a77fb07f850ec9712c1
+F src/hct_database.c c864848979e0b3302248fcc061d3f7652cfff85102a4d59d40fd6d5c110b7224
 F src/hct_file.c 64fd84ebbbe53dac203027ba92ab5bb00062a791569d6881d57fb1502482cbd2
 F src/hct_journal.c e58fbe85eaaf440dd647d433a978a703449ccd8c18b428784310dde97eedc082
 F src/hct_journalhash.c 5af4886fd8c126a96c78278f6e62a8e31de9b8e683b167c487b033a87fabb7a3
@@ -2351,8 +2351,9 @@ F tool/version-info.c 3b36468a90faf1bbd59c65fd0eb66522d9f941eedd364fabccd7227350
 F tool/warnings-clang.sh bbf6a1e685e534c92ec2bfba5b1745f34fb6f0bc2a362850723a9ee87c1b31a7
 F tool/warnings.sh d924598cf2f55a4ecbc2aeb055c10bd5f48114793e7ba25f9585435da29e7e98
 F tool/win/sqlite.vsix deb315d026cc8400325c5863eef847784a219a2f
-P 0465d7b1caf406d2823849db78c92d3ec564e2cc1e60070e4be147ea1d8fbbfe 352b363a5d727047e9d1d577f678464ef2df1997b19626e00dc68eb88a245816
-R 72725f3a4afbdd006470766af96189ae
+P 73bd4d0e0e843fdc1f008da7143096115dcaf99314dd7a9d26e4720bd0ecc024
+Q +066d7cdb37d5b1f78bbdef13a4ab35b45b8a80209cf532164a8124f6eefabd4e
+R b8e3ffb80b6fdfbddb4d48dc043efcdf
 U dan
-Z a41822f7c7a8a47c813e319284dc5b25
+Z 143b5dbc1c122bc66ad633f43c095e5a
 # Remove this line to create a well-formed Fossil manifest.

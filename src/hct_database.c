@@ -9401,21 +9401,40 @@ static int hctentryBestIndex(
 
 typedef struct hctvalid_vtab hctvalid_vtab;
 typedef struct hctvalid_cursor hctvalid_cursor;
+typedef struct HctValidRow HctValidRow;
+
 struct hctvalid_vtab {
   sqlite3_vtab base;              /* Base class - must be first */
   sqlite3 *db;
 };
 struct hctvalid_cursor {
   sqlite3_vtab_cursor base;  /* Base class - must be first */
-  HctDatabase *pDb;          /* Database to report on */
-  int iEntry;                /* Current entry (i.e. rowid) */
+  int iRow;                  /* Current entry (i.e. rowid) */
+  int nRow;
+  HctValidRow *aRow;
+};
 
+struct HctValidRow {
   u32 rootpgno;              /* Value of rootpgno column */
   char *zFirst;
   char *zLast;
   char *zPglist;
   i64 nUsOp;
 };
+
+static void hctValidCsrReset(hctvalid_cursor *pCsr){
+  int ii;
+  for(ii=0; ii<pCsr->nRow; ii++){
+    sqlite3_free(pCsr->aRow[ii].zFirst);
+    sqlite3_free(pCsr->aRow[ii].zLast);
+    sqlite3_free(pCsr->aRow[ii].zPglist);
+  }
+  sqlite3_free(pCsr->aRow);
+  pCsr->iRow = 0;
+  pCsr->nRow = 0;
+  pCsr->aRow = 0;
+}
+
 static int hctvalidConnect(
   sqlite3 *db,
   void *pAux,
@@ -9458,87 +9477,13 @@ static int hctvalidOpen(sqlite3_vtab *p, sqlite3_vtab_cursor **ppCursor){
 }
 static int hctvalidClose(sqlite3_vtab_cursor *cur){
   hctvalid_cursor *pCur = (hctvalid_cursor*)cur;
+  hctValidCsrReset(pCur);
   sqlite3_free(pCur);
   return SQLITE_OK;
 }
 static int hctvalidNext(sqlite3_vtab_cursor *cur){
   hctvalid_cursor *pCsr = (hctvalid_cursor*)cur;
-  int ii;
-  HctDbCsr *pDbCsr = 0;
-  HctCsrIntkeyOp *pIntkeyOp = 0;
-  HctCsrIndexOp *pIndexOp = 0;
-
-  sqlite3_free(pCsr->zFirst);
-  sqlite3_free(pCsr->zLast);
-  sqlite3_free(pCsr->zPglist);
-  pCsr->zFirst = 0;
-  pCsr->zLast = 0;
-  pCsr->zPglist = 0;
-  pCsr->rootpgno = 0;
-  pCsr->nUsOp = 0;
-  pCsr->iEntry++;
-  pDbCsr = pCsr->pDb->pScannerList;
-  if( pDbCsr==0 ){
-    pDbCsr = pCsr->pDb->pPrevScannerList;
-  }
-  if( pDbCsr ){
-    pIntkeyOp = pDbCsr->intkey.pOpList;
-    pIndexOp = pDbCsr->index.pOpList;
-    ii = 0;
-    if( pIntkeyOp==0 && pIndexOp==0 ) ii--;
-    for(/*noop*/; pDbCsr && ii<pCsr->iEntry; ii++){
-      if( pIntkeyOp ) pIntkeyOp = pIntkeyOp->pNextOp;
-      if( pIndexOp ) pIndexOp = pIndexOp->pNextOp;
-      if( pIntkeyOp==0 && pIndexOp==0 ){
-        pDbCsr = pDbCsr->pNextScanner;
-        if( pDbCsr ){
-          pIntkeyOp = pDbCsr->intkey.pOpList;
-          pIndexOp = pDbCsr->index.pOpList;
-          if( pIntkeyOp==0 && pIndexOp==0 ) ii--;
-        }
-      }
-    }
-  }
-
-  if( pDbCsr ){
-    pCsr->rootpgno = pDbCsr->iRoot;
-    if( pIntkeyOp ){
-      if( pIntkeyOp->iFirst!=SMALLEST_INT64 ){
-        pCsr->zFirst = sqlite3_mprintf("%lld", pIntkeyOp->iFirst);
-      }
-      if( pIntkeyOp->iFirst!=LARGEST_INT64 ){
-        pCsr->zLast = sqlite3_mprintf("%lld", pIntkeyOp->iLast);
-      }
-      if( pIntkeyOp->iLogical ){
-        pCsr->zPglist = sqlite3_mprintf(
-            "%lld/%lld", pIntkeyOp->iLogical, pIntkeyOp->iPhysical
-        );
-      }
-#ifdef HCT_VALIDATE_TIMERS
-      pCsr->nUsOp = pIntkeyOp->nUsOp;
-#endif
-    }else{
-      if( pIndexOp->pFirst ){
-        pCsr->zFirst = sqlite3HctDbRecordToText(
-            pIndexOp->pFirst, pIndexOp->nFirst
-        );
-      }
-      if( pIndexOp->pLast ){
-        pCsr->zLast = sqlite3HctDbRecordToText(
-            pIndexOp->pLast, pIndexOp->nLast
-        );
-      }
-      if( pIndexOp->iLogical ){
-        pCsr->zPglist = sqlite3_mprintf(
-            "%lld/%lld", pIndexOp->iLogical, pIndexOp->iPhysical
-        );
-      }
-#ifdef HCT_VALIDATE_TIMERS
-      pCsr->nUsOp = pIndexOp->nUsOp;
-#endif
-    }
-  }
-
+  pCsr->iRow++;
   return SQLITE_OK;
 }
 static int hctvalidFilter(
@@ -9548,14 +9493,77 @@ static int hctvalidFilter(
 ){
   hctvalid_cursor *pCsr = (hctvalid_cursor*)cur;
   hctvalid_vtab *pTab = (hctvalid_vtab*)(pCsr->base.pVtab);
- 
-  pCsr->pDb = sqlite3HctDbFind(pTab->db, 0);
-  pCsr->iEntry = -1;
+  HctDbCsr *pFirst = 0;
+  HctDbCsr *pIter = 0;
+  int nRow = 0;
+  int iRow = 0;
+  HctDatabase *pDb = sqlite3HctDbFind(pTab->db, 0);
+
+  hctValidCsrReset(pCsr);
+  pCsr->iRow = -1;
+
+  pFirst = pDb->pScannerList;
+  if( pFirst==0 ) pFirst = pDb->pPrevScannerList;
+
+  /* Count how many rows this scan will visit. */
+  for(pIter=pFirst; pIter; pIter=pIter->pNextScanner){
+    HctCsrIndexOp *pIdx = 0;
+    HctCsrIntkeyOp *pInt = 0;
+    for(pIdx=pIter->index.pOpList; pIdx; pIdx=pIdx->pNextOp) nRow++;
+    for(pInt=pIter->intkey.pOpList; pInt; pInt=pInt->pNextOp) nRow++;
+  }
+
+  /* Allocate space for all rows */
+  if( nRow>0 ){
+    pCsr->aRow = sqlite3HctMalloc(nRow * sizeof(HctValidRow));
+    pCsr->nRow = nRow;
+  }
+
+  /* Populate all rows */
+  for(pIter=pFirst; pIter; pIter=pIter->pNextScanner){
+    HctCsrIndexOp *pIdx = 0;
+    HctCsrIntkeyOp *pInt = 0;
+    for(pIdx=pIter->index.pOpList; pIdx; pIdx=pIdx->pNextOp){
+      HctValidRow *pRow = &pCsr->aRow[iRow++];
+      pRow->rootpgno = pIter->iRoot;
+      if( pIdx->pFirst ){
+        pRow->zFirst = sqlite3HctDbRecordToText(pIdx->pFirst, pIdx->nFirst);
+      }
+      if( pIdx->pLast ){
+        pRow->zLast = sqlite3HctDbRecordToText(pIdx->pLast, pIdx->nLast);
+      }
+      if( pIdx->iLogical ){
+        pRow->zPglist = 
+          sqlite3_mprintf("%lld/%lld", pIdx->iLogical, pIdx->iPhysical);
+      }
+#ifdef HCT_VALIDATE_TIMERS
+      pRow->nUsOp = pIdx->nUsOp;
+#endif
+    }
+    for(pInt=pIter->intkey.pOpList; pInt; pInt=pInt->pNextOp){
+      HctValidRow *pRow = &pCsr->aRow[iRow++];
+      pRow->rootpgno = pIter->iRoot;
+      if( pInt->iFirst!=SMALLEST_INT64 ){
+        pRow->zFirst = sqlite3_mprintf("%lld", pInt->iFirst);
+      }
+      if( pInt->iFirst!=LARGEST_INT64 ){
+        pRow->zLast = sqlite3_mprintf("%lld", pInt->iLast);
+      }
+      if( pInt->iLogical ){
+        pRow->zPglist = 
+          sqlite3_mprintf("%lld/%lld", pInt->iLogical, pInt->iPhysical);
+      }
+#ifdef HCT_VALIDATE_TIMERS
+      pRow->nUsOp = pInt->nUsOp;
+#endif
+    }
+  }
+
   return hctvalidNext(cur);
 }
 static int hctvalidEof(sqlite3_vtab_cursor *cur){
   hctvalid_cursor *pCsr = (hctvalid_cursor*)cur;
-  return (pCsr->rootpgno==0);
+  return (pCsr->iRow>=pCsr->nRow);
 }
 static int hctvalidColumn(
   sqlite3_vtab_cursor *cur,   /* The cursor */
@@ -9563,22 +9571,23 @@ static int hctvalidColumn(
   int i                       /* Which column to return */
 ){
   hctvalid_cursor *pCsr = (hctvalid_cursor*)cur;
+  HctValidRow *pRow = &pCsr->aRow[pCsr->iRow];
   switch( i ){
     case 0:
-      sqlite3_result_int64(ctx, (i64)pCsr->rootpgno);
+      sqlite3_result_int64(ctx, (i64)pRow->rootpgno);
       break;
     case 1:
-      sqlite3_result_text(ctx, pCsr->zFirst, -1, SQLITE_TRANSIENT);
+      sqlite3_result_text(ctx, pRow->zFirst, -1, SQLITE_TRANSIENT);
       break;
     case 2:
-      sqlite3_result_text(ctx, pCsr->zLast, -1, SQLITE_TRANSIENT);
+      sqlite3_result_text(ctx, pRow->zLast, -1, SQLITE_TRANSIENT);
       break;
     case 3:
-      sqlite3_result_text(ctx, pCsr->zPglist, -1, SQLITE_TRANSIENT);
+      sqlite3_result_text(ctx, pRow->zPglist, -1, SQLITE_TRANSIENT);
       break;
     case 4:
 #ifdef HCT_VALIDATE_TIMERS
-      sqlite3_result_int64(ctx, pCsr->nUsOp);
+      sqlite3_result_int64(ctx, pRow->nUsOp);
 #endif
       break;
   }
@@ -9586,7 +9595,7 @@ static int hctvalidColumn(
 }
 static int hctvalidRowid(sqlite3_vtab_cursor *cur, sqlite_int64 *pRowid){
   hctvalid_cursor *pCsr = (hctvalid_cursor*)cur;
-  *pRowid = pCsr->iEntry;
+  *pRowid = pCsr->iRow;
   return SQLITE_OK;
 }
 
